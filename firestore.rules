@@ -1,0 +1,210 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isUser(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function pairIdFor(a, b) {
+      return a + '_' + b;
+    }
+
+    function validPairDoc(id, a, b) {
+      return id == pairIdFor(a, b) || id == pairIdFor(b, a);
+    }
+
+    function userDoc(uid) {
+      return get(/databases/$(database)/documents/users/$(uid));
+    }
+
+    function userData(uid) {
+      return userDoc(uid).data;
+    }
+
+    function blockedEitherWay(a, b) {
+      return exists(/databases/$(database)/documents/blockedUsers/$(pairIdFor(a, b))) ||
+        exists(/databases/$(database)/documents/blockedUsers/$(pairIdFor(b, a)));
+    }
+
+    function areFriends(a, b) {
+      return exists(/databases/$(database)/documents/friends/$(pairIdFor(a, b))) ||
+        exists(/databases/$(database)/documents/friends/$(pairIdFor(b, a)));
+    }
+
+    function areFriendsAfter(a, b) {
+      return getAfter(/databases/$(database)/documents/friends/$(pairIdFor(a, b))).data.users is list ||
+        getAfter(/databases/$(database)/documents/friends/$(pairIdFor(b, a))).data.users is list;
+    }
+
+    function hasPendingFriendRequestFor(a, b) {
+      return exists(/databases/$(database)/documents/friendRequests/$(pairIdFor(a, b))) &&
+        get(/databases/$(database)/documents/friendRequests/$(pairIdFor(a, b))).data.status == 'pending';
+    }
+
+    function hasPendingMessageRequestFor(a, b) {
+      return exists(/databases/$(database)/documents/messageRequests/$(pairIdFor(a, b))) &&
+        get(/databases/$(database)/documents/messageRequests/$(pairIdFor(a, b))).data.status == 'pending';
+    }
+
+    function sameSchool(a, b) {
+      return userData(a).school != null &&
+        userData(a).school != '' &&
+        userData(a).school == userData(b).school;
+    }
+
+    function sameDepartment(a, b) {
+      return sameSchool(a, b) &&
+        userData(a).department != null &&
+        userData(a).department != '' &&
+        userData(a).department == userData(b).department;
+    }
+
+    function friendRequestAllowed(from, to) {
+      let privacy = userData(to).privacy.friendRequests;
+      return privacy == null ||
+        privacy == 'everyone' ||
+        (privacy == 'same_school' && sameSchool(from, to)) ||
+        (privacy == 'same_department' && sameDepartment(from, to));
+    }
+
+    function messageRequestAllowed(from, to) {
+      let privacy = userData(to).privacy.messageRequests;
+      return privacy == null ||
+        privacy == 'everyone' ||
+        (privacy == 'same_school' && sameSchool(from, to)) ||
+        (
+          privacy == 'friends_of_friends' &&
+          request.resource.data.sharedFriendIds is list &&
+          request.resource.data.sharedFriendIds.size() > 0 &&
+          areFriends(from, request.resource.data.sharedFriendIds[0]) &&
+          areFriends(to, request.resource.data.sharedFriendIds[0])
+        );
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create: if isUser(uid) && request.resource.data.uid == uid;
+      allow update: if isUser(uid);
+      allow delete: if false;
+
+      match /{subPath=**} {
+        allow read, write: if isUser(uid);
+      }
+    }
+
+    match /friendRequests/{requestId} {
+      allow read: if signedIn() && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
+      allow create: if signedIn() &&
+        request.resource.data.from == request.auth.uid &&
+        request.resource.data.to is string &&
+        request.resource.data.to != request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        validPairDoc(requestId, request.resource.data.from, request.resource.data.to) &&
+        !blockedEitherWay(request.resource.data.from, request.resource.data.to) &&
+        !areFriends(request.resource.data.from, request.resource.data.to) &&
+        friendRequestAllowed(request.resource.data.from, request.resource.data.to);
+      allow update: if signedIn() &&
+        resource.data.to == request.auth.uid &&
+        request.resource.data.from == resource.data.from &&
+        request.resource.data.to == resource.data.to &&
+        request.resource.data.status in ['accepted', 'declined'];
+      allow delete: if signedIn() && resource.data.from == request.auth.uid && resource.data.status == 'pending';
+    }
+
+    match /friends/{friendshipId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.users;
+      allow create: if signedIn() &&
+        request.resource.data.users is list &&
+        request.resource.data.users.size() == 2 &&
+        request.auth.uid in request.resource.data.users &&
+        validPairDoc(friendshipId, request.resource.data.users[0], request.resource.data.users[1]) &&
+        !blockedEitherWay(request.resource.data.users[0], request.resource.data.users[1]) &&
+        (
+          hasPendingFriendRequestFor(request.resource.data.users[0], request.resource.data.users[1]) ||
+          hasPendingFriendRequestFor(request.resource.data.users[1], request.resource.data.users[0]) ||
+          hasPendingMessageRequestFor(request.resource.data.users[0], request.resource.data.users[1]) ||
+          hasPendingMessageRequestFor(request.resource.data.users[1], request.resource.data.users[0])
+        );
+      allow update: if false;
+      allow delete: if signedIn() && request.auth.uid in resource.data.users;
+    }
+
+    match /messageRequests/{requestId} {
+      allow read: if signedIn() && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
+      allow create: if signedIn() &&
+        requestId == pairIdFor(request.resource.data.from, request.resource.data.to) &&
+        request.resource.data.from == request.auth.uid &&
+        request.resource.data.to != request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.message is string &&
+        request.resource.data.message.size() > 0 &&
+        request.resource.data.message.size() <= 500 &&
+        !blockedEitherWay(request.resource.data.from, request.resource.data.to) &&
+        !areFriends(request.resource.data.from, request.resource.data.to) &&
+        messageRequestAllowed(request.resource.data.from, request.resource.data.to);
+      allow update: if signedIn() &&
+        resource.data.to == request.auth.uid &&
+        request.resource.data.from == resource.data.from &&
+        request.resource.data.to == resource.data.to &&
+        request.resource.data.status in ['accepted', 'declined'];
+      allow delete: if false;
+    }
+
+    match /blockedUsers/{blockId} {
+      allow read: if signedIn() && (resource.data.blockerId == request.auth.uid || resource.data.blockedId == request.auth.uid);
+      allow create: if signedIn() &&
+        blockId == pairIdFor(request.resource.data.blockerId, request.resource.data.blockedId) &&
+        request.resource.data.blockerId == request.auth.uid &&
+        request.resource.data.blockedId != request.auth.uid;
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.blockerId == request.auth.uid;
+    }
+
+    match /conversations/{conversationId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.memberIds;
+      allow create, update: if signedIn() &&
+        request.auth.uid in request.resource.data.memberIds &&
+        request.resource.data.memberIds.size() == 2 &&
+        areFriendsAfter(request.resource.data.memberIds[0], request.resource.data.memberIds[1]) &&
+        !blockedEitherWay(request.resource.data.memberIds[0], request.resource.data.memberIds[1]);
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if signedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds;
+        allow create: if signedIn() &&
+          request.resource.data.senderId == request.auth.uid &&
+          request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds &&
+          areFriends(
+            get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds[0],
+            get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds[1]
+          ) &&
+          !blockedEitherWay(
+            get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds[0],
+            get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds[1]
+          );
+        allow update: if signedIn() &&
+          resource.data.senderId == request.auth.uid &&
+          request.resource.data.deleted == true;
+        allow delete: if false;
+      }
+    }
+
+    match /notifications/{uid}/items/{notificationId} {
+      allow read, update, delete: if isUser(uid);
+      allow create: if signedIn();
+    }
+
+    match /rateLimits/{uid} {
+      allow read, write: if isUser(uid);
+    }
+
+    match /{document=**} {
+      allow read, write: if signedIn();
+    }
+  }
+}

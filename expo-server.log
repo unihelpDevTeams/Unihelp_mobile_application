@@ -1,0 +1,7 @@
+env: load .env
+env: export NEWS_DATA_API_KEY GNEWS_API_KEY FREENEWS_API_KEY VITE_FLUTTERWAVE_PUBLIC_KEY FLW_SECRET_HASH VITE_API_URL VITE_GEMINI_API_KEY VITE_CLOUDINARY_CLOUD_NAME VITE_CLOUDINARY_UPLOAD_PRESET
+Starting project at C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile
+React Compiler enabled
+Starting Metro Bundler
+Waiting on http://localhost:8082
+Logs for your project will appear below.

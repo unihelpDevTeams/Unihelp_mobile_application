@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="180">
+<polygon points="40,140 180,140 110,40" fill="none" stroke="black" stroke-width="3"/>
+<text x="30" y="150">A</text>
+<text x="185" y="150">B</text>
+<text x="108" y="35">C</text>
+<text x="95" y="155">10cm</text>
+</svg>
