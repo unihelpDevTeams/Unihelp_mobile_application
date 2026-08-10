@@ -348,10 +348,10 @@ export default function HomeScreen() {
     fab: {
       position: 'absolute',
       zIndex: 1000,
-      maxWidth: 52,
+      minWidth: 80,
       height: 52,
       paddingHorizontal: s.lg,
-      borderRadius: 26,
+      borderRadius: '50%',
       overflow: 'hidden',
       elevation: 12,
       shadowColor: c.brand,
@@ -571,8 +571,7 @@ export default function HomeScreen() {
               ],
             },
           ]}
-          {...panResponder.panHandlers}
-        >
+          {...panResponder.panHandlers}>
           <Pressable style={{ flex: 1 }} onPress={() => router.push('/ai')}>
             <LinearGradient
               colors={['#6366F1', '#8B5CF6']}
@@ -584,8 +583,7 @@ export default function HomeScreen() {
             </LinearGradient>
           </Pressable>
         </Animated.View>
-      }
-    >
+      }>
       {/* AMBIENT FLOATING HEADER BAR */}
       <View style={styles.headerBar}>
         <Pressable style={styles.userPill} onPress={() => router.push('/profile')}>
@@ -612,9 +610,6 @@ export default function HomeScreen() {
           <Pressable style={styles.iconBadgeBtn} onPress={handleStreakPress}>
             <Ionicons name="flame" size={20} color={colors.orange} />
           </Pressable>
-          <Pressable style={styles.iconBadgeBtn} onPress={() => router.push('/announcements')}>
-            <Ionicons name="notifications-outline" size={20} color={colors.ink} />
-          </Pressable>
         </View>
       </View>
 
@@ -638,7 +633,7 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.focusBody}>
-              <Text style={styles.focusTitle}>Ready to crush today's goals?</Text>
+              <Text style={styles.focusTitle}>Ready to crush today&apos;s goals?</Text>
               <Text style={styles.focusSubtitle}>
                 You have {streakCount} consecutive study days logged. Keep the momentum going!
               </Text>
@@ -689,10 +684,7 @@ export default function HomeScreen() {
           <Pressable
             style={({ pressed }) => [
               styles.seeAllBtn,
-              pressed && { opacity: 0.75 },
-            ]}
-            onPress={() => router.push('/tools')}
-          >
+              pressed && { opacity: 0.75 },]} onPress={() => router.push('/toolScreen')}>
             <Text style={styles.seeAllText}>All Tools</Text>
             <Ionicons name="arrow-forward" size={14} color={colors.brandText} />
           </Pressable>
