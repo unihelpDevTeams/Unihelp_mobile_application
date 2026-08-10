@@ -14,6 +14,12 @@ import {
   sendDirectMessage,
   deleteDirectMessage,
 } from '../../src/shared/services/community';
+import {
+  RELATIONSHIP,
+  acceptFriendRequest,
+  listenRelationship,
+  sendFriendRequest,
+} from '../../src/shared/services/friendships';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
@@ -44,6 +50,8 @@ export default function ConversationPage() {
   const [activeMessage, setActiveMessage] = useState(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [relationship, setRelationship] = useState({ state: RELATIONSHIP.NONE });
+  const [relationshipBusy, setRelationshipBusy] = useState(false);
   const listRef = useRef(null);
 
   const styles = useThemeStyles((c, s, r) => ({
@@ -120,6 +128,25 @@ export default function ConversationPage() {
     confirmSubtitle: { fontSize: 13, color: c.textSecondary, textAlign: 'center', lineHeight: 18, marginBottom: 16, paddingHorizontal: 8 },
     confirmDeleteButton: { backgroundColor: c.error, borderRadius: 14, paddingVertical: 13, alignItems: 'center' },
     confirmDeleteText: { color: c.onBrand, fontWeight: '800', fontSize: 14 },
+    relationshipCard: {
+      flexDirection: 'row', alignItems: 'center', gap: 12,
+      backgroundColor: c.brandLight, borderWidth: 1, borderColor: c.borderDefault,
+      borderRadius: 18, padding: 14, marginBottom: 12,
+    },
+    relationshipIcon: {
+      width: 38, height: 38, borderRadius: 14, backgroundColor: c.surfacePrimary,
+      alignItems: 'center', justifyContent: 'center',
+    },
+    relationshipCopy: { flex: 1 },
+    relationshipTitle: { color: c.textPrimary, fontSize: 14, fontWeight: '800' },
+    relationshipText: { color: c.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: 3 },
+    relationshipButton: {
+      flexDirection: 'row', alignItems: 'center', gap: 6,
+      backgroundColor: c.brand, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9,
+    },
+    relationshipButtonMuted: { backgroundColor: c.skeleton },
+    relationshipButtonText: { color: c.onBrand, fontSize: 12, fontWeight: '800' },
+    relationshipButtonTextMuted: { color: c.textSecondary },
   }));
 
   const messagePreview = (message) => {
@@ -160,9 +187,106 @@ export default function ConversationPage() {
   const otherUser = conversation?.memberInfo?.[otherId] || {};
   const headerTitle = otherUser.name || 'Chat';
   const headerSubtitle = otherUser.email || 'Direct message';
+  const areFriends = relationship.state === RELATIONSHIP.FRIENDS;
+  const canChat = !otherId || areFriends;
+
+  useEffect(() => {
+    if (!profile?.uid || !otherId) {
+      setRelationship({ state: RELATIONSHIP.NONE });
+      return undefined;
+    }
+
+    return listenRelationship(profile.uid, otherId, setRelationship);
+  }, [profile?.uid, otherId]);
+
+  const handleAddFriend = async () => {
+    if (!profile?.uid || !otherId) return;
+    setRelationshipBusy(true);
+    try {
+      await sendFriendRequest({
+        currentUid: profile.uid,
+        targetUid: otherId,
+        currentProfile: profile,
+        targetProfile: { ...otherUser, uid: otherId },
+      });
+    } catch (error) {
+      Alert.alert('Friend request', error.message || 'Could not send friend request.');
+    } finally {
+      setRelationshipBusy(false);
+    }
+  };
+
+  const handleAcceptFriend = async () => {
+    if (!relationship.request || !profile?.uid) return;
+    setRelationshipBusy(true);
+    try {
+      await acceptFriendRequest({
+        request: relationship.request,
+        currentUid: profile.uid,
+        currentProfile: profile,
+      });
+    } catch (error) {
+      Alert.alert('Friend request', error.message || 'Could not accept friend request.');
+    } finally {
+      setRelationshipBusy(false);
+    }
+  };
+
+  const renderRelationshipPrompt = () => {
+    if (!otherId || relationship.state === RELATIONSHIP.FRIENDS) return null;
+
+    const isReceived = relationship.state === RELATIONSHIP.RECEIVED;
+    const isSent = relationship.state === RELATIONSHIP.SENT;
+    const isBlocked = relationship.state === RELATIONSHIP.BLOCKED;
+    const title = isReceived
+      ? 'Friend request waiting'
+      : isSent
+        ? 'Friend request sent'
+        : isBlocked
+          ? 'Chat unavailable'
+          : 'Add friend to keep chatting';
+    const text = isReceived
+      ? `${headerTitle} wants to connect. Accept the request to continue this chat freely.`
+      : isSent
+        ? 'You can continue chatting after the request is accepted.'
+        : isBlocked
+          ? 'Messaging is unavailable for this student.'
+          : 'You can only send one intro message before you become friends.';
+
+    return (
+      <View style={styles.relationshipCard}>
+        <View style={styles.relationshipIcon}>
+          <Ionicons
+            name={isBlocked ? 'ban-outline' : isReceived ? 'person-add-outline' : 'people-outline'}
+            size={19}
+            color={isBlocked ? colors.error : colors.brandText}
+          />
+        </View>
+        <View style={styles.relationshipCopy}>
+          <Text style={styles.relationshipTitle}>{title}</Text>
+          <Text style={styles.relationshipText}>{text}</Text>
+        </View>
+        {isReceived ? (
+          <Pressable style={styles.relationshipButton} onPress={handleAcceptFriend} disabled={relationshipBusy}>
+            {relationshipBusy ? <ActivityIndicator color={colors.onBrand} size="small" /> : <Ionicons name="checkmark" size={15} color={colors.onBrand} />}
+            <Text style={styles.relationshipButtonText}>Accept</Text>
+          </Pressable>
+        ) : isSent || isBlocked ? (
+          <View style={[styles.relationshipButton, styles.relationshipButtonMuted]}>
+            <Text style={[styles.relationshipButtonText, styles.relationshipButtonTextMuted]}>{isSent ? 'Pending' : 'Blocked'}</Text>
+          </View>
+        ) : (
+          <Pressable style={styles.relationshipButton} onPress={handleAddFriend} disabled={relationshipBusy}>
+            {relationshipBusy ? <ActivityIndicator color={colors.onBrand} size="small" /> : <Ionicons name="person-add-outline" size={15} color={colors.onBrand} />}
+            <Text style={styles.relationshipButtonText}>Add</Text>
+          </Pressable>
+        )}
+      </View>
+    );
+  };
 
   const send = async () => {
-    if (!draft.trim() || !conversation || !user) return;
+    if (!draft.trim() || !conversation || !user || !canChat) return;
     setSending(true);
     try {
       await sendDirectMessage(conversation, user, profile || {}, {
@@ -190,7 +314,7 @@ export default function ConversationPage() {
   };
 
   const sendVoiceMessage = useCallback(async (voiceResult) => {
-    if (!conversation || !user || !voiceResult?.audioUrl) return;
+    if (!conversation || !user || !voiceResult?.audioUrl || !canChat) return;
     try {
       await sendDirectMessage(conversation, user, profile || {}, {
         type: 'voice',
@@ -210,7 +334,7 @@ export default function ConversationPage() {
     } catch (err) {
       showSendError(err);
     }
-  }, [conversation, user, profile, replyTo]);
+  }, [canChat, conversation, user, profile, replyTo]);
 
   const closeSheet = () => {
     setActiveMessage(null);
@@ -332,44 +456,48 @@ export default function ConversationPage() {
         )}
       </View>
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}
-        style={styles.composerContainer}
-      >
-        {replyTo ? (
-          <View style={styles.replyPreview}>
-            <View style={styles.replyPreviewHeader}>
-              <Text style={styles.replyPreviewLabel}>Replying to {replyTo.senderName || 'Student'}</Text>
-              <Pressable onPress={() => setReplyTo(null)}>
-                <Text style={styles.replyCancel}>Cancel</Text>
-              </Pressable>
+      {renderRelationshipPrompt()}
+
+      {canChat ? (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}
+          style={styles.composerContainer}
+        >
+          {replyTo ? (
+            <View style={styles.replyPreview}>
+              <View style={styles.replyPreviewHeader}>
+                <Text style={styles.replyPreviewLabel}>Replying to {replyTo.senderName || 'Student'}</Text>
+                <Pressable onPress={() => setReplyTo(null)}>
+                  <Text style={styles.replyCancel}>Cancel</Text>
+                </Pressable>
+              </View>
+              <Text style={styles.replyPreviewText}>{messagePreview(replyTo)}</Text>
             </View>
-            <Text style={styles.replyPreviewText}>{messagePreview(replyTo)}</Text>
+          ) : null}
+          <View style={styles.composer}>
+            <VoiceRecorderBar
+              conversationId={conversationId}
+              onVoiceSent={sendVoiceMessage}
+            />
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Type a message..."
+              placeholderTextColor={colors.placeholder}
+              style={[styles.input, Platform.OS !== 'ios' && styles.inputAndroid]}
+              multiline
+            />
+            <Pressable
+              style={[styles.button, (!draft.trim() || sending) && styles.buttonDisabled]}
+              onPress={send}
+              disabled={sending || !draft.trim()}
+            >
+              {sending ? <ActivityIndicator color="#fff" /> : <Ionicons name="arrow-up" size={18} color={colors.onBrand} />}
+            </Pressable>
           </View>
-        ) : null}
-        <View style={styles.composer}>
-          <VoiceRecorderBar
-            conversationId={conversationId}
-            onVoiceSent={sendVoiceMessage}
-          />
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="Type a message..."
-            placeholderTextColor={colors.placeholder}
-            style={[styles.input, Platform.OS !== 'ios' && styles.inputAndroid]}
-            multiline
-          />
-          <Pressable
-            style={[styles.button, (!draft.trim() || sending) && styles.buttonDisabled]}
-            onPress={send}
-            disabled={sending || !draft.trim()}
-          >
-            {sending ? <ActivityIndicator color="#fff" /> : <Ionicons name="arrow-up" size={18} color={colors.onBrand} />}
-          </Pressable>
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      ) : null}
 
       <Modal visible={!!activeMessage} transparent animationType="fade" onRequestClose={closeSheet}>
         <Pressable style={styles.sheetBackdrop} onPress={closeSheet} />

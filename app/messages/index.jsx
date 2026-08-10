@@ -101,6 +101,14 @@ export default function MessagesPage() {
     chatTitle: { fontSize: 15, fontWeight: '800', color: c.textPrimary, flex: 1, marginRight: 8 },
     chatTime: { color: c.textSecondary, fontSize: 11 },
     chatMessage: { color: c.textSecondary, fontSize: 13, lineHeight: 18 },
+    relationshipPill: {
+      alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4,
+      marginTop: 7, paddingHorizontal: 8, paddingVertical: 4,
+      borderRadius: 999, backgroundColor: c.brandLight,
+    },
+    relationshipPillWarning: { backgroundColor: c.dangerLight },
+    relationshipPillText: { color: c.brandText, fontSize: 11, fontWeight: '800' },
+    relationshipPillTextWarning: { color: c.error },
     unreadBadge: {
       marginLeft: 12, minWidth: 26, paddingHorizontal: 8, backgroundColor: c.brand,
       borderRadius: 999, alignItems: 'center', justifyContent: 'center', height: 26,
@@ -317,11 +325,44 @@ export default function MessagesPage() {
   };
 
   const emptyMessage = useMemo(() => 'Search for a student and start a direct conversation.', []);
+  const friendIds = useMemo(() => {
+    const ids = new Set();
+    friends.forEach((friend) => {
+      friend.users?.forEach?.((id) => {
+        if (id !== profile?.uid) ids.add(id);
+      });
+    });
+    return ids;
+  }, [friends, profile?.uid]);
+
+  const incomingRequestByUser = useMemo(() => {
+    const map = new Map();
+    incomingRequests.forEach((request) => {
+      if (request.from) map.set(request.from, request);
+    });
+    return map;
+  }, [incomingRequests]);
+
+  const outgoingRequestByUser = useMemo(() => {
+    const map = new Map();
+    outgoingRequests.forEach((request) => {
+      if (request.to) map.set(request.to, request);
+    });
+    return map;
+  }, [outgoingRequests]);
+
+  const getConversationRelationshipLabel = (peerId) => {
+    if (!peerId || friendIds.has(peerId)) return null;
+    if (incomingRequestByUser.has(peerId)) return { text: 'Friend request received', icon: 'person-add-outline', tone: 'default' };
+    if (outgoingRequestByUser.has(peerId)) return { text: 'Friend request sent', icon: 'time-outline', tone: 'default' };
+    return { text: 'Not friends yet', icon: 'alert-circle-outline', tone: 'warning' };
+  };
 
   // --- Render: Chats Tab ---
   const renderConversation = ({ item }) => {
     const { peerId, peerInfo } = getPeerInfo(item, profile?.uid);
     const unread = item.unread?.[profile?.uid] || 0;
+    const relationshipLabel = getConversationRelationshipLabel(peerId);
 
     return (
       <Pressable style={styles.chatCard} onPress={() => router.push(`/messages/${item.id}`)}>
@@ -340,6 +381,24 @@ export default function MessagesPage() {
             <Text style={styles.chatTime}>{formatShortTime(item.updatedAt)}</Text>
           </View>
           <Text style={styles.chatMessage} numberOfLines={1}>{item.lastMessage || 'Start the conversation.'}</Text>
+          {relationshipLabel ? (
+            <View style={[
+              styles.relationshipPill,
+              relationshipLabel.tone === 'warning' && styles.relationshipPillWarning,
+            ]}>
+              <Ionicons
+                name={relationshipLabel.icon}
+                size={12}
+                color={relationshipLabel.tone === 'warning' ? colors.error : colors.brandText}
+              />
+              <Text style={[
+                styles.relationshipPillText,
+                relationshipLabel.tone === 'warning' && styles.relationshipPillTextWarning,
+              ]}>
+                {relationshipLabel.text}
+              </Text>
+            </View>
+          ) : null}
         </View>
         {unread > 0 ? (
           <View style={styles.unreadBadge}>
