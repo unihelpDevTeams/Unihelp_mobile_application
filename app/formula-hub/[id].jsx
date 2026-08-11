@@ -1,56 +1,30 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import Katex from 'react-native-katex';
+
+// Shared UI Components & Services
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { fetchRecord } from '../../services/firestoreSync';
 import { COLLECTIONS } from '../../src/shared/firestoreSchema';
+
+// Theme Context & Design System
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
+import { shadows, typography } from '../../src/shared/theme';
 
-const cardShadow = Platform.select({
-  ios: {
-    shadowColor: '#0F172A',
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 5 },
-  },
-  android: { elevation: 1 },
-  default: {},
-});
-
-// Inline HTML/CSS injected into the KaTeX WebView. Kept minimal and transparent
-// so the rendered math sits directly on top of the app's own card background.
-const KATEX_INLINE_STYLE = `
-  html, body {
-    margin: 0;
-    padding: 0;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    overflow-x: auto;
-    overflow-y: hidden;
-    background-color: transparent;
-  }
-  body {
-    padding: 0 16px;
-  }
-  .katex {
-    font-size: 2.2em;
-    font-weight: 700;
-    color: #1D4ED8;
-    white-space: nowrap;
-  }
-  .katex-display {
-    margin: 0;
-    display: flex;
-    justify-content: flex-start;
-  }
-`;
-
+// Helper to convert plain formula strings to KaTeX TeX format
 const toKatexSource = (raw) => {
   if (!raw) return '';
   return String(raw)
@@ -60,34 +34,87 @@ const toKatexSource = (raw) => {
     .replace(/([a-zA-Z0-9)\]])_(-?[a-zA-Z0-9]+)(?![a-zA-Z0-9{])/g, '$1_{$2}');
 };
 
-function FormulaMath({ source }) {
+// KaTeX Math Renderer sub-component with dynamic theme color support
+//
+// LEGIBILITY FIX: this component is shared between the large hero formula
+// and the small variable-symbol badges. It previously rendered both at an
+// identical fixed 2em font, which clipped/overflowed inside the tiny
+// badge and forced long hero formulas into constant horizontal scrolling.
+// `size="compact"` now renders smaller and centered for badges, and the
+// default "display" size shrinks itself based on expression length so
+// most formulas are fully visible without scrolling.
+function FormulaMath({ source, color, size = 'display' }) {
   const { colors } = useTheme();
   const [status, setStatus] = useState('loading');
   const expression = useMemo(() => toKatexSource(source), [source]);
-  const styles = useThemeStyles((c) => ({
-    katexShell: {
-      flex: 1,
-      justifyContent: 'center',
-    },
-    katex: {
-      flex: 1,
-    },
+  const isCompact = size === 'compact';
+
+  // BUG FIX: previously `status` never reset when a new formula's source
+  // came in on the same mounted instance, so the spinner/error state could
+  // go stale and show the *previous* formula's render state momentarily.
+  useEffect(() => {
+    setStatus('loading');
+  }, [expression]);
+
+  const fontSize = useMemo(() => {
+    if (isCompact) return '1.15em';
+    const len = expression.length;
+    if (len > 70) return '1.1em';
+    if (len > 45) return '1.4em';
+    if (len > 25) return '1.7em';
+    return '2em';
+  }, [isCompact, expression]);
+
+  // Dynamically inject color from design system into WebView KaTeX CSS
+  const katexInlineStyle = useMemo(() => {
+    const textColor = color || colors.brand;
+    const justify = isCompact ? 'center' : 'flex-start';
+    return `
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: ${justify};
+        overflow-x: ${isCompact ? 'hidden' : 'auto'};
+        overflow-y: hidden;
+        background-color: transparent;
+      }
+      body {
+        padding: ${isCompact ? '0' : '0 44px 0 12px'};
+      }
+      .katex {
+        font-size: ${fontSize};
+        font-weight: ${isCompact ? '700' : '600'};
+        color: ${textColor};
+        white-space: nowrap;
+      }
+      .katex-display {
+        margin: 0;
+        display: flex;
+        justify-content: ${justify};
+      }
+    `;
+  }, [color, colors.brand, fontSize, isCompact]);
+
+  const styles = useThemeStyles((c, s) => ({
+    katexShell: { flex: 1, justifyContent: 'center' },
+    katex: { flex: 1 },
     katexOverlay: {
       ...StyleSheet.absoluteFillObject,
-      alignItems: 'flex-start',
+      alignItems: isCompact ? 'center' : 'flex-start',
       justifyContent: 'center',
-      paddingHorizontal: 16,
-      backgroundColor: c.surface,
+      paddingHorizontal: isCompact ? 0 : s.md,
+      backgroundColor: 'transparent',
     },
-    katexFallbackScroll: {
-      maxWidth: '100%',
-    },
+    katexFallbackScroll: { maxWidth: '100%' },
     katexFallbackText: {
       width: '100%',
-      fontSize: 24,
-      fontWeight: '900',
+      textAlign: isCompact ? 'center' : 'left',
+      ...(isCompact ? typography.sm : typography.xl),
+      ...(isCompact ? typography.bold : typography.extrabold),
       color: c.brand,
-      lineHeight: 30,
     },
   }));
 
@@ -109,10 +136,9 @@ function FormulaMath({ source }) {
         <Katex
           expression={expression}
           style={styles.katex}
-          inlineStyle={KATEX_INLINE_STYLE}
+          inlineStyle={katexInlineStyle}
           displayMode
           throwOnError={false}
-          errorColor="#DC2626"
           onLoad={() => setStatus('ready')}
           onError={() => setStatus('error')}
         />
@@ -121,238 +147,173 @@ function FormulaMath({ source }) {
   );
 }
 
+// Card-shaped skeleton shown while the formula record loads — mirrors the
+// real hero/info card layout instead of a generic spinner, matching the
+// loading pattern used across the rest of the app.
+function FormulaSkeleton() {
+  const styles = useThemeStyles((c, s, r) => ({
+    wrap: { padding: s.xl, gap: s.lg },
+    heroSkeleton: {
+      height: 190, borderRadius: r['2xl'], backgroundColor: c.brandLight,
+      borderWidth: 1, borderColor: c.brandBorder, padding: s.xl, justifyContent: 'space-between',
+    },
+    lineWide: { height: 22, borderRadius: 6, backgroundColor: c.surfacePrimary, width: '55%' },
+    formulaBlock: { height: 90, borderRadius: r.xl, backgroundColor: c.surfacePrimary },
+    infoSkeleton: {
+      height: 96, borderRadius: r['2xl'], backgroundColor: c.surfacePrimary,
+      borderWidth: 1, borderColor: c.borderDefault, padding: s.xl, gap: s.sm,
+    },
+    lineNarrow: { height: 12, borderRadius: 6, backgroundColor: c.canvasLight, width: '30%' },
+    lineFull: { height: 12, borderRadius: 6, backgroundColor: c.canvasLight, width: '90%' },
+  }));
+  return (
+    <View style={styles.wrap}>
+      <View style={styles.heroSkeleton}>
+        <View style={styles.lineWide} />
+        <View style={styles.formulaBlock} />
+      </View>
+      <View style={styles.infoSkeleton}>
+        <View style={styles.lineNarrow} />
+        <View style={styles.lineFull} />
+      </View>
+      <View style={styles.infoSkeleton}>
+        <View style={styles.lineNarrow} />
+        <View style={styles.lineFull} />
+      </View>
+    </View>
+  );
+}
+
 export default function FormulaDetails() {
   const { id } = useLocalSearchParams();
   const { colors } = useTheme();
+
   const [formula, setFormula] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
-  const [reloadKey, setReloadKey] = useState(0);
   const [copied, setCopied] = useState(false);
-
-  const styles = useThemeStyles((c) => ({
-    container: {
-      gap: 12,
-      paddingBottom: 24,
-    },
-    heroCard: {
-      backgroundColor: c.brandLight,
-      borderRadius: 22,
-      borderWidth: 1,
-      borderColor: c.brandBorder,
-      padding: 18,
-      ...cardShadow,
-    },
-    heroTopRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: 12,
-    },
-    heroIconWrap: {
-      width: 38,
-      height: 38,
-      borderRadius: 13,
-      backgroundColor: c.brand,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    subjectPill: {
-      maxWidth: 160,
-      backgroundColor: c.surface,
-      borderRadius: 999,
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-    },
-    subjectPillText: {
-      fontSize: 11,
-      fontWeight: '800',
-      color: c.brand,
-    },
-    heroTitle: {
-      fontSize: 19,
-      fontWeight: '800',
-      color: c.ink,
-      letterSpacing: -0.3,
-    },
-    formulaBox: {
-      marginTop: 14,
-      backgroundColor: c.surface,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: c.brandBorder,
-      minHeight: 112,
-      paddingVertical: 14,
-      paddingHorizontal: 12,
-      position: 'relative',
-      overflow: 'hidden',
-    },
-    copyButton: {
-      position: 'absolute',
-      top: 8,
-      right: 8,
-      width: 30,
-      height: 30,
-      borderRadius: 10,
-      backgroundColor: c.brandLight,
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 2,
-    },
-    copyButtonPressed: {
-      opacity: 0.7,
-    },
-    copiedLabel: {
-      marginTop: 8,
-      fontSize: 11.5,
-      fontWeight: '700',
-      color: c.success,
-    },
-    infoCard: {
-      backgroundColor: c.surface,
-      borderRadius: 18,
-      borderWidth: 1,
-      borderColor: c.border,
-      padding: 16,
-      ...cardShadow,
-    },
-    infoHeaderRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      marginBottom: 10,
-    },
-    infoIconWrap: {
-      width: 26,
-      height: 26,
-      borderRadius: 9,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    infoTitle: {
-      fontSize: 13.5,
-      fontWeight: '800',
-      color: c.ink,
-    },
-    infoText: {
-      fontSize: 14,
-      lineHeight: 21,
-      color: c.inkSoft,
-    },
-    variableGrid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-    },
-    variableChip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      flexBasis: '48%',
-      flexGrow: 1,
-      backgroundColor: c.background,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: c.border,
-      paddingVertical: 8,
-      paddingHorizontal: 10,
-    },
-    variableSymbolBadge: {
-      width: 34,
-      height: 30,
-      borderRadius: 9,
-      backgroundColor: c.brandLight,
-      overflow: 'hidden',
-    },
-    variableMeaning: {
-      flex: 1,
-      fontSize: 12.5,
-      lineHeight: 17,
-      color: c.inkSoft,
-    },
-    errorBox: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      backgroundColor: c.dangerLight,
-      borderRadius: 16,
-      padding: 14,
-    },
-    errorText: {
-      flex: 1,
-      color: c.danger,
-      fontSize: 12.5,
-      fontWeight: '700',
-    },
-    retryButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 5,
-      backgroundColor: c.danger,
-      borderRadius: 12,
-      paddingHorizontal: 10,
-      paddingVertical: 7,
-    },
-    retryButtonPressed: {
-      opacity: 0.85,
-    },
-    retryText: {
-      color: c.onBrand,
-      fontSize: 12,
-      fontWeight: '800',
-    },
-    notFoundCard: {
-      backgroundColor: c.surface,
-      borderRadius: 20,
-      borderWidth: 1,
-      borderColor: c.border,
-      padding: 28,
-      alignItems: 'center',
-    },
-    notFoundIconWrap: {
-      width: 48,
-      height: 48,
-      borderRadius: 16,
-      backgroundColor: c.background,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: 12,
-    },
-    notFoundTitle: {
-      fontSize: 16,
-      fontWeight: '800',
-      color: c.ink,
-    },
-    notFoundText: {
-      marginTop: 6,
-      fontSize: 13,
-      lineHeight: 19,
-      color: c.inkSoft,
-      textAlign: 'center',
-    },
-  }));
+  const isMountedRef = useRef(true);
+  const copyTimerRef = useRef(null);
 
   useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setError('');
-
-    fetchRecord(COLLECTIONS.formulas, id)
-      .then((result) => {
-        if (active) setFormula(result || null);
-      })
-      .catch((fetchError) => {
-        if (active) setError(fetchError?.message || 'Could not load this formula.');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-
+    isMountedRef.current = true;
     return () => {
-      active = false;
+      isMountedRef.current = false;
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
     };
-  }, [id, reloadKey]);
+  }, []);
 
+  const styles = useThemeStyles((c, s, r) => ({
+    scrollContent: { padding: s.xl, gap: s.lg, paddingBottom: s['4xl'] },
+    heroCard: {
+      backgroundColor: c.brandLight, borderRadius: r['2xl'], borderWidth: 1, borderColor: c.brandBorder,
+      padding: s.xl, ...shadows.card,
+    },
+    heroTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: s.md, gap: s.sm },
+    heroIconWrap: { width: 40, height: 40, borderRadius: r.md, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center' },
+    heroTopRight: { flexDirection: 'row', alignItems: 'center', gap: s.sm, flexShrink: 1 },
+    subjectPill: {
+      maxWidth: 140, backgroundColor: c.surfacePrimary, borderRadius: r.full,
+      paddingHorizontal: s.md, paddingVertical: s.xs, borderWidth: 1, borderColor: c.brandBorder,
+    },
+    subjectPillText: { ...typography.xs, ...typography.extrabold, color: c.brandText },
+    shareButton: {
+      width: 32, height: 32, borderRadius: r.md, backgroundColor: c.surfacePrimary,
+      alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.brandBorder,
+    },
+    shareButtonPressed: { opacity: 0.7 },
+    heroTitle: { ...typography['3xl'], ...typography.extrabold, color: c.textPrimary, letterSpacing: -0.3 },
+    formulaBox: {
+      marginTop: s.lg, backgroundColor: c.surfacePrimary, borderRadius: r.xl, borderWidth: 1,
+      borderColor: c.brandBorder, minHeight: 130, paddingVertical: s.md, paddingHorizontal: s.md,
+      position: 'relative', overflow: 'hidden', ...shadows.sm,
+    },
+    formulaEmptyWrap: { flexDirection: 'row', alignItems: 'center', gap: s.sm, paddingVertical: s.sm },
+    formulaEmptyText: { flex: 1, ...typography.sm, ...typography.medium, color: c.textSecondary },
+    copyButton: {
+      position: 'absolute', top: s.sm, right: s.sm, width: 32, height: 32, borderRadius: r.md,
+      backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center', zIndex: 2,
+    },
+    copyButtonPressed: { opacity: 0.7 },
+    formulaHint: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: s.sm },
+    formulaHintText: { ...typography.xs, ...typography.medium, color: c.textSecondary },
+    copiedLabel: { ...typography.xs, ...typography.bold, color: c.green },
+
+    infoCard: {
+      backgroundColor: c.surfacePrimary, borderRadius: r['2xl'], borderWidth: 1, borderColor: c.borderDefault,
+      padding: s.xl, ...shadows.card,
+    },
+    infoHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: s.md, marginBottom: s.md },
+    infoIconWrap: { width: 32, height: 32, borderRadius: r.md, alignItems: 'center', justifyContent: 'center' },
+    infoTitle: { ...typography.lg, ...typography.bold, color: c.textPrimary },
+    infoText: { ...typography.md, ...typography.regular, lineHeight: 22, color: c.textSecondary },
+    exampleText: { ...typography.md, ...typography.regular, lineHeight: 22, color: c.textSecondary, fontStyle: 'italic' },
+
+    variableGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: s.md },
+    variableChip: {
+      flexDirection: 'row', alignItems: 'center', gap: s.md, flexBasis: '47%', flexGrow: 1,
+      backgroundColor: c.background, borderRadius: r.xl, borderWidth: 1, borderColor: c.borderDefault,
+      paddingVertical: s.sm, paddingHorizontal: s.md,
+    },
+    variableSymbolBadge: { width: 48, height: 42, borderRadius: r.md, backgroundColor: c.brandLight, overflow: 'hidden' },
+    variableMeaning: { flex: 1, ...typography.sm, ...typography.medium, color: c.textSecondary },
+
+    errorBox: {
+      flexDirection: 'row', alignItems: 'center', gap: s.sm, backgroundColor: c.dangerLight,
+      borderRadius: r.xl, borderWidth: 1, borderColor: c.dangerBorder, margin: s.xl, padding: s.lg,
+    },
+    errorText: { flex: 1, color: c.danger, ...typography.sm, ...typography.semibold },
+    retryButton: {
+      flexDirection: 'row', alignItems: 'center', gap: s.xs, backgroundColor: c.danger,
+      borderRadius: r.md, paddingHorizontal: s.md, paddingVertical: s.sm,
+    },
+    retryButtonPressed: { opacity: 0.85 },
+    retryButtonDisabled: { opacity: 0.6 },
+    retryText: { color: c.onBrand, ...typography.xs, ...typography.bold },
+
+    notFoundCard: {
+      backgroundColor: c.surfacePrimary, borderRadius: r['2xl'], borderWidth: 1, borderColor: c.borderDefault,
+      padding: s['3xl'], margin: s.xl, alignItems: 'center', ...shadows.card,
+    },
+    notFoundIconWrap: {
+      width: 52, height: 52, borderRadius: r.xl, backgroundColor: c.background,
+      alignItems: 'center', justifyContent: 'center', marginBottom: s.md,
+    },
+    notFoundTitle: { ...typography.xl, ...typography.bold, color: c.textPrimary },
+    notFoundText: { marginTop: s.xs, ...typography.md, ...typography.regular, color: c.textSecondary, textAlign: 'center', lineHeight: 20 },
+  }));
+
+  // Single source of truth for loading the record — used on mount, id change,
+  // retry, and pull-to-refresh, so all four stay in sync.
+  const loadFormula = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!id) return;
+      if (silent) setRefreshing(true);
+      else setLoading(true);
+      setError('');
+
+      try {
+        const result = await fetchRecord(COLLECTIONS.formulas, id);
+        if (!isMountedRef.current) return;
+        setFormula(result || null);
+      } catch (fetchError) {
+        if (isMountedRef.current) setError(fetchError?.message || 'Could not load this formula.');
+      } finally {
+        if (isMountedRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    },
+    [id]
+  );
+
+  useEffect(() => {
+    loadFormula();
+  }, [loadFormula]);
+
+  // Dynamically map sections
   const sections = useMemo(() => {
     if (!formula) return [];
 
@@ -361,133 +322,191 @@ export default function FormulaDetails() {
 
     const list = [
       { title: 'Explanation', text: explanationText },
-      { title: 'Subject', text: `${formula.subject || 'General'} • ${formula.category || 'Formula'}` },
+      { title: 'Subject & Category', text: `${formula.subject || 'General'} • ${formula.category || 'Formula'}` },
     ];
 
     if (exampleText) {
-      list.push({ title: 'Example', text: exampleText });
+      list.push({ title: 'Worked Example', text: exampleText });
     }
 
     return list;
   }, [formula]);
 
+  // LEGIBILITY FIX: when a record has no real `formula` string, the old code
+  // fell back to running the plain title (or "Untitled") through KaTeX, which
+  // renders ordinary words in italic math font with odd letter-spacing —
+  // illegible and confusing, not a graceful fallback. Now we only hand real
+  // expressions to KaTeX and show a plain message otherwise.
+  const hasFormulaExpression = !!formula?.formula;
   const formulaDisplay = formula?.formula || formula?.title || 'Untitled';
 
   const copyFormula = async () => {
     try {
       await Clipboard.setStringAsync(formulaDisplay);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => {
+        if (isMountedRef.current) setCopied(false);
+      }, 1600);
     } catch {
       // Fail silently
     }
   };
 
-  const SECTION_META = {
-    Explanation: { icon: 'book-outline', accent: colors.info, soft: colors.blueLight },
-    Subject: { icon: 'pricetag-outline', accent: colors.success, soft: colors.greenLight },
-    Example: { icon: 'flask-outline', accent: colors.warning, soft: colors.amberLight },
+  const shareFormula = async () => {
+    try {
+      await Share.share({
+        message: `${formula?.title || 'Formula'}\n${formulaDisplay}\n\nShared from UniHelp`,
+      });
+    } catch {
+      // user cancelled — nothing to do
+    }
   };
 
+  // FIX: colors.info / colors.success / colors.warning don't exist on the
+  // theme — they were silently falling back to hardcoded emerald/amber hex,
+  // which bypasses dark mode and the app's indigo-first palette. Mapped to
+  // real tokens already used elsewhere (blue / green / orange).
+  const SECTION_META = {
+    Explanation: { icon: 'book-outline', accent: colors.blue, soft: colors.blueLight },
+    'Subject & Category': { icon: 'pricetag-outline', accent: colors.green, soft: colors.greenLight },
+    'Worked Example': { icon: 'flask-outline', accent: colors.orange, soft: colors.orangeLight },
+  };
+
+  const showSkeleton = loading && !refreshing && !formula && !error;
+
   return (
-    <ScreenShell title="Formula Details" subtitle={formula?.title || 'Formula'} showBack loading={loading}>
-      {error ? (
+    <ScreenShell title="Formula Details" subtitle={formula?.title || 'Formula'} showBack>
+      {showSkeleton ? (
+        <FormulaSkeleton />
+      ) : error ? (
         <View style={styles.errorBox}>
           <Ionicons name="alert-circle-outline" size={18} color={colors.danger} />
           <Text style={styles.errorText}>{error}</Text>
           <Pressable
-            onPress={() => setReloadKey((key) => key + 1)}
-            style={({ pressed }) => [styles.retryButton, pressed && styles.retryButtonPressed]}
+            onPress={() => loadFormula()}
+            disabled={loading}
+            style={({ pressed }) => [styles.retryButton, loading && styles.retryButtonDisabled, pressed && !loading && styles.retryButtonPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading formula"
           >
-            <Ionicons name="refresh" size={14} color={colors.onBrand} />
+            {loading ? <ActivityIndicator size="small" color={colors.onBrand} /> : <Ionicons name="refresh" size={14} color={colors.onBrand} />}
             <Text style={styles.retryText}>Retry</Text>
           </Pressable>
         </View>
       ) : formula ? (
-        <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadFormula({ silent: true })} tintColor={colors.brand} />}
+        >
+          {/* Main Hero Card with KaTeX Display */}
           <View style={styles.heroCard}>
             <View style={styles.heroTopRow}>
               <View style={styles.heroIconWrap}>
-                <Ionicons name="calculator-outline" size={18} color={colors.onBrand} />
+                <Ionicons name="calculator-outline" size={20} color={colors.onBrand} />
               </View>
-              {formula.subject ? (
-                <View style={styles.subjectPill}>
-                  <Text style={styles.subjectPillText} numberOfLines={1}>
-                    {formula.subject}
-                  </Text>
-                </View>
-              ) : null}
+              <View style={styles.heroTopRight}>
+                {formula.subject ? (
+                  <View style={styles.subjectPill}>
+                    <Text style={styles.subjectPillText} numberOfLines={1}>{formula.subject}</Text>
+                  </View>
+                ) : null}
+                <Pressable
+                  onPress={shareFormula}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.shareButton, pressed && styles.shareButtonPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Share this formula"
+                >
+                  <Ionicons name="share-outline" size={15} color={colors.brand} />
+                </Pressable>
+              </View>
             </View>
 
             <Text style={styles.heroTitle}>{formula.title || 'Formula'}</Text>
 
+            {/* LaTeX Render Container */}
             <View style={styles.formulaBox}>
-              <FormulaMath source={formulaDisplay} />
-              <Pressable
-                onPress={copyFormula}
-                hitSlop={8}
-                style={({ pressed }) => [styles.copyButton, pressed && styles.copyButtonPressed]}
-              >
-                <Ionicons
-                  name={copied ? 'checkmark' : 'copy-outline'}
-                  size={15}
-                  color={copied ? colors.success : colors.brand}
-                />
-              </Pressable>
+              {hasFormulaExpression ? (
+                <>
+                  <FormulaMath source={formulaDisplay} color={colors.brand} />
+                  <Pressable
+                    onPress={copyFormula}
+                    hitSlop={8}
+                    style={({ pressed }) => [styles.copyButton, pressed && styles.copyButtonPressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Copy formula"
+                  >
+                    <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={16} color={copied ? colors.green : colors.brand} />
+                  </Pressable>
+                </>
+              ) : (
+                <View style={styles.formulaEmptyWrap}>
+                  <Ionicons name="alert-circle-outline" size={16} color={colors.textSecondary} />
+                  <Text style={styles.formulaEmptyText}>No formula expression was provided for this entry.</Text>
+                </View>
+              )}
             </View>
-            {copied ? <Text style={styles.copiedLabel}>Copied to clipboard</Text> : null}
+
+            {hasFormulaExpression ? (
+              <View style={styles.formulaHint}>
+                <Ionicons name={copied ? 'checkmark-circle' : 'information-circle-outline'} size={13} color={copied ? colors.green : colors.textSecondary} />
+                <Text style={copied ? styles.copiedLabel : styles.formulaHintText}>
+                  {copied ? 'Copied formula to clipboard' : 'Tap the icon above to copy this formula'}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
+          {/* Variables Grid */}
           {Array.isArray(formula.variables) && formula.variables.length ? (
             <View style={styles.infoCard}>
               <View style={styles.infoHeaderRow}>
                 <View style={[styles.infoIconWrap, { backgroundColor: colors.brandLight }]}>
-                  <Ionicons name="apps-outline" size={14} color={colors.brand} />
+                  <Ionicons name="apps-outline" size={16} color={colors.brand} />
                 </View>
                 <Text style={styles.infoTitle}>Variables</Text>
               </View>
+
               <View style={styles.variableGrid}>
                 {formula.variables.map((variable, index) => (
                   <View key={`${variable.symbol || 'var'}-${index}`} style={styles.variableChip}>
                     <View style={styles.variableSymbolBadge}>
-                      <FormulaMath source={variable.symbol || '?'} />
+                      <FormulaMath source={variable.symbol || '?'} color={colors.brand} size="compact" />
                     </View>
-                    <Text style={styles.variableMeaning} numberOfLines={2}>
-                      {variable.meaning || 'Meaning'}
-                    </Text>
+                    <Text style={styles.variableMeaning} numberOfLines={2}>{variable.meaning || 'Meaning'}</Text>
                   </View>
                 ))}
               </View>
             </View>
           ) : null}
 
+          {/* Details Sections (Explanation, Subject, Example) */}
           {sections.map((section) => {
-            const meta = SECTION_META[section.title] || {
-              icon: 'information-circle-outline',
-              accent: colors.brand,
-              soft: colors.brandLight,
-            };
+            const meta = SECTION_META[section.title] || { icon: 'information-circle-outline', accent: colors.brand, soft: colors.brandLight };
             return (
               <View key={section.title} style={styles.infoCard}>
                 <View style={styles.infoHeaderRow}>
                   <View style={[styles.infoIconWrap, { backgroundColor: meta.soft }]}>
-                    <Ionicons name={meta.icon} size={14} color={meta.accent} />
+                    <Ionicons name={meta.icon} size={16} color={meta.accent} />
                   </View>
                   <Text style={styles.infoTitle}>{section.title}</Text>
                 </View>
-                <Text style={styles.infoText}>{section.text}</Text>
+                <Text style={section.title === 'Worked Example' ? styles.exampleText : styles.infoText}>{section.text}</Text>
               </View>
             );
           })}
         </ScrollView>
       ) : (
+        /* Empty / Missing Record Card */
         <View style={styles.notFoundCard}>
           <View style={styles.notFoundIconWrap}>
-            <Ionicons name="search-outline" size={22} color={colors.grey} />
+            <Ionicons name="search-outline" size={24} color={colors.grey} />
           </View>
           <Text style={styles.notFoundTitle}>Formula not found</Text>
           <Text style={styles.notFoundText}>
-            This formula may have been moved or removed. Go back and try another one.
+            This formula may have been moved or removed. Go back and select another entry.
           </Text>
         </View>
       )}

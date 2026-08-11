@@ -1,20 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Platform,
   Pressable,
-  StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+
+// Shared UI & Services
 import CollectionListScreen from '../../../src/shared/screens/CollectionListScreen';
 import { fetchFormulas } from '../../../services/firestoreSync';
 import ScreenShell from '../../../src/shared/components/ScreenShell';
+
+// Theme Context & Design System
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../../src/shared/theme/createStyles';
+import { borderRadius, shadows, spacing, typography } from '../../../src/shared/theme';
 
 const SEARCH_DEBOUNCE_MS = 200;
 
@@ -26,21 +30,14 @@ const titleCase = (value) =>
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(' ');
 
-const cardShadow = Platform.select({
-  ios: {
-    shadowColor: '#0F172A',
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-  },
-  android: { elevation: 1 },
-  default: {},
-});
-
 export default function FormulaSubjectPage() {
   const { subject } = useLocalSearchParams();
   const { colors } = useTheme();
-  const subjectLabel = useMemo(() => titleCase(decodeURIComponent(String(subject || ''))), [subject]);
+
+  const subjectLabel = useMemo(
+    () => titleCase(decodeURIComponent(String(subject || 'Subject'))),
+    [subject]
+  );
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -49,135 +46,190 @@ export default function FormulaSubjectPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
 
+  // Subject-specific icon & theme resolution
+  const subjectConfig = useMemo(() => {
+    switch (subjectLabel) {
+      case 'Mathematics':
+        return {
+          icon: 'calculator-outline',
+          colors: [colors.brand || '#4F46E5', '#7C3AED'],
+        };
+      case 'Physics':
+        return {
+          icon: 'flash-outline',
+          colors: [colors.blue || '#0EA5E9', '#0284C7'],
+        };
+      case 'Chemistry':
+        return {
+          icon: 'flask-outline',
+          colors: [colors.green || '#10B981', '#059669'],
+        };
+      case 'Biology':
+        return {
+          icon: 'leaf-outline',
+          colors: [colors.orange || '#F97316', '#EA580C'],
+        };
+      case 'Economics':
+        return {
+          icon: 'cash-outline',
+          colors: [colors.purple || '#9333EA', '#7E22CE'],
+        };
+      case 'Thermodynamics':
+        return {
+          icon: 'thermometer-outline',
+          colors: [colors.red || '#DC2626', '#B91C1C'],
+        };
+      default:
+        return {
+          icon: 'library-outline',
+          colors: [colors.brand || '#4F46E5', '#7C3AED'],
+        };
+    }
+  }, [subjectLabel, colors]);
+
   const styles = useThemeStyles((c) => ({
     container: {
       flex: 1,
       backgroundColor: c.background,
     },
-    hero: {
+    contentContainer: {
+      flex: 1,
+      paddingHorizontal: spacing.xl,
+    },
+    heroBar: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 14,
-      borderRadius: 22,
-      backgroundColor: c.brandLight,
-      marginHorizontal: 16,
-      marginTop: 12,
-      padding: 16,
-      ...cardShadow,
+      justifyContent: 'space-between',
+      backgroundColor: c.surfacePrimary,
+      borderRadius: borderRadius['2xl'],
+      padding: spacing.lg,
+      marginTop: spacing.sm,
+      marginBottom: spacing.md,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      ...shadows.sm,
     },
-    iconWrap: {
-      width: 44,
-      height: 44,
-      borderRadius: 15,
-      backgroundColor: c.brand,
+    heroLeft: {
+      flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'center',
-    },
-    heroCopy: {
+      gap: spacing.md,
       flex: 1,
     },
-    heroTitle: {
-      fontSize: 17,
-      fontWeight: '800',
-      color: c.ink,
-      letterSpacing: -0.2,
-    },
-    heroSubtitle: {
-      marginTop: 3,
-      fontSize: 12.5,
-      lineHeight: 17,
-      color: c.inkSoft,
-    },
-    countPill: {
-      minWidth: 30,
-      height: 28,
-      paddingHorizontal: 9,
-      borderRadius: 14,
-      backgroundColor: c.surface,
+    iconContainer: {
+      width: 42,
+      height: 42,
+      borderRadius: borderRadius.md,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    countPillText: {
-      fontSize: 12,
-      fontWeight: '800',
-      color: c.brand,
+    heroMeta: {
+      flex: 1,
+    },
+    heroLabel: {
+      ...typography.xs,
+      ...typography.bold,
+      color: c.textTertiary,
+      letterSpacing: 0.5,
+      textTransform: 'uppercase',
+    },
+    heroSubject: {
+      ...typography['2xl'],
+      ...typography.extrabold,
+      color: c.textPrimary,
+    },
+    countBadge: {
+      backgroundColor: c.brandLight,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
+      borderRadius: borderRadius.full,
+      borderWidth: 1,
+      borderColor: c.brandBorder,
+    },
+    countBadgeText: {
+      ...typography.xs,
+      ...typography.extrabold,
+      color: c.brandText,
     },
     searchWrap: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 10,
-      backgroundColor: c.surface,
+      gap: spacing.md,
+      backgroundColor: c.inputBackground || c.surfacePrimary,
       borderWidth: 1,
-      borderColor: c.border,
-      borderRadius: 16,
-      marginHorizontal: 16,
-      marginTop: 12,
-      paddingHorizontal: 14,
-      paddingVertical: 11,
-      ...cardShadow,
+      borderColor: c.inputBorder || c.borderDefault,
+      borderRadius: borderRadius.xl,
+      marginBottom: spacing.lg,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.md,
+      ...shadows.sm,
     },
     input: {
       flex: 1,
-      color: c.ink,
-      fontSize: 14,
+      color: c.textPrimary,
+      ...typography.md,
       paddingVertical: 0,
     },
     errorBox: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
+      gap: spacing.sm,
       backgroundColor: c.dangerLight,
-      borderRadius: 16,
-      marginHorizontal: 16,
-      marginTop: 14,
-      padding: 14,
+      borderRadius: borderRadius.lg,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      padding: spacing.lg,
+      marginBottom: spacing.lg,
     },
     errorText: {
       flex: 1,
       color: c.danger,
-      fontSize: 12.5,
-      fontWeight: '700',
+      ...typography.sm,
+      ...typography.semibold,
     },
     retryButton: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 5,
+      gap: spacing.xs,
       backgroundColor: c.danger,
-      borderRadius: 12,
-      paddingHorizontal: 10,
-      paddingVertical: 7,
+      borderRadius: borderRadius.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
     },
     retryButtonPressed: {
       opacity: 0.85,
     },
     retryText: {
       color: c.onBrand,
-      fontSize: 12,
-      fontWeight: '800',
+      ...typography.xs,
+      ...typography.bold,
     },
-    loading: {
-      marginHorizontal: 16,
-      marginTop: 16,
-      backgroundColor: c.surface,
-      borderRadius: 18,
+    loadingCard: {
+      backgroundColor: c.surfacePrimary,
+      borderRadius: borderRadius.xl,
       borderWidth: 1,
-      borderColor: c.border,
-      paddingVertical: 26,
+      borderColor: c.borderDefault,
+      paddingVertical: spacing['3xl'],
       alignItems: 'center',
       justifyContent: 'center',
+      marginTop: spacing.md,
     },
     loadingText: {
-      marginTop: 10,
-      color: c.inkSoft,
-      fontSize: 13,
+      marginTop: spacing.md,
+      color: c.textSecondary,
+      ...typography.sm,
+    },
+    listWrapper: {
+      flex: 1,
     },
   }));
 
+  // Debounce search state
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [search]);
 
+  // Fetch formulas on load or retry
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -190,7 +242,10 @@ export default function FormulaSubjectPage() {
       })
       .catch((fetchError) => {
         if (!active) return;
-        setError(fetchError?.message || 'Could not load formulas. Check your connection and try again.');
+        setError(
+          fetchError?.message ||
+            'Could not load formulas. Check your connection and try again.'
+        );
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -201,12 +256,17 @@ export default function FormulaSubjectPage() {
     };
   }, [reloadKey]);
 
+  // Filter items by subject and query
   const filtered = useMemo(() => {
     const query = debouncedSearch.trim().toLowerCase();
     const normalizedSubject = String(subject || '').trim().toLowerCase();
 
     return items.filter((item) => {
-      const subjectMatch = !normalizedSubject || String(item.subject || '').toLowerCase().includes(normalizedSubject);
+      const subjectMatch =
+        !normalizedSubject ||
+        String(item.subject || '')
+          .toLowerCase()
+          .includes(normalizedSubject);
       if (!subjectMatch) return false;
 
       if (!query) return true;
@@ -232,81 +292,106 @@ export default function FormulaSubjectPage() {
 
   return (
     <View style={styles.container}>
-      <ScreenShell showBack title={subjectLabel || 'Subject'} subtitle="Browse full formulas, explanations, variables, and examples." >
+      <ScreenShell
+        showBack
+        title={subjectLabel}
+        subtitle="Full formulas, explanations, variables, and worked examples."
+      >
+        <View style={styles.contentContainer}>
+          {/* Subject Metric Bar */}
+          <View style={styles.heroBar}>
+            <View style={styles.heroLeft}>
+              <LinearGradient
+                colors={subjectConfig.colors}
+                style={styles.iconContainer}
+              >
+                <Ionicons
+                  name={subjectConfig.icon}
+                  size={20}
+                  color={colors.onBrand}
+                />
+              </LinearGradient>
 
-      
-      <View style={styles.hero}>
-        <View style={styles.iconWrap}>
-          <Ionicons name="calculator-outline" size={20} color={colors.onBrand} />
-        </View>
-        <View style={styles.heroCopy}>
-          <Text style={styles.heroTitle} numberOfLines={1}>
-            {subjectLabel || 'Subject'} formulas
-          </Text>
-          <Text style={styles.heroSubtitle} numberOfLines={2}>
-            Browse full formulas, explanations, variables, and examples.
-          </Text>
-        </View>
-        {!loading && !error ? (
-          <View style={styles.countPill}>
-            <Text style={styles.countPillText}>{filtered.length}</Text>
+              <View style={styles.heroMeta}>
+                <Text style={styles.heroLabel}>SUBJECT</Text>
+                <Text style={styles.heroSubject} numberOfLines={1}>
+                  {subjectLabel}
+                </Text>
+              </View>
+            </View>
+
+            {!loading && !error ? (
+              <View style={styles.countBadge}>
+                <Text style={styles.countBadgeText}>
+                  {filtered.length} {filtered.length === 1 ? 'Formula' : 'Formulas'}
+                </Text>
+              </View>
+            ) : null}
           </View>
-        ) : null}
-      </View>
 
-      <View style={styles.searchWrap}>
-        <Ionicons name="search" size={18} color={colors.grey} />
-        <TextInput
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Search formulas"
-          placeholderTextColor={colors.placeholder}
-          style={styles.input}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
-        />
-        {search ? (
-          <Pressable onPress={() => setSearch('')} hitSlop={8}>
-            <Ionicons name="close-circle" size={18} color={colors.greyLight} />
-          </Pressable>
-        ) : null}
-      </View>
+          {/* Search Input Bar */}
+          <View style={styles.searchWrap}>
+            <Ionicons name="search" size={18} color={colors.iconSecondary || colors.grey} />
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              placeholder={`Search ${subjectLabel.toLowerCase()} formulas...`}
+              placeholderTextColor={colors.placeholder}
+              style={styles.input}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+            {search ? (
+              <Pressable onPress={() => setSearch('')} hitSlop={8}>
+                <Ionicons name="close-circle" size={18} color={colors.greyLight} />
+              </Pressable>
+            ) : null}
+          </View>
 
-      {error ? (
-        <View style={styles.errorBox}>
-          <Ionicons name="alert-circle-outline" size={18} color={colors.danger} />
-          <Text style={styles.errorText}>{error}</Text>
-          <Pressable
-            onPress={retry}
-            style={({ pressed }) => [styles.retryButton, pressed && styles.retryButtonPressed]}
-          >
-            <Ionicons name="refresh" size={14} color={colors.onBrand} />
-            <Text style={styles.retryText}>Retry</Text>
-          </Pressable>
+          {/* Error Banner */}
+          {error ? (
+            <View style={styles.errorBox}>
+              <Ionicons name="alert-circle-outline" size={18} color={colors.danger} />
+              <Text style={styles.errorText}>{error}</Text>
+              <Pressable
+                onPress={retry}
+                style={({ pressed }) => [
+                  styles.retryButton,
+                  pressed && styles.retryButtonPressed,
+                ]}
+              >
+                <Ionicons name="refresh" size={14} color={colors.onBrand} />
+                <Text style={styles.retryText}>Retry</Text>
+              </Pressable>
+            </View>
+          ) : loading ? (
+            /* Loading State Card */
+            <View style={styles.loadingCard}>
+              <ActivityIndicator color={colors.brand} />
+              <Text style={styles.loadingText}>Loading formulas…</Text>
+            </View>
+          ) : (
+            /* Collection List View */
+            <View style={styles.listWrapper}>
+              <CollectionListScreen
+                items={filtered}
+                loading={false}
+                showBack={false}
+                emptyTitle={search ? 'No matching formulas' : 'No formulas yet'}
+                emptyDescription={
+                  search
+                    ? `Nothing matched "${search}". Try another keyword.`
+                    : `Formula entries for ${subjectLabel} will appear here.`
+                }
+                detailRoute="/formula-hub/[id]"
+                detailParams={(item) => ({ id: item.id })}
+                titleKey="title"
+                subtitleKey="explanation"
+              />
+            </View>
+          )}
         </View>
-      ) : loading ? (
-        <View style={styles.loading}>
-          <ActivityIndicator color={colors.brand} />
-          <Text style={styles.loadingText}>Loading formulas…</Text>
-        </View>
-      ) : (
-        <CollectionListScreen
-          items={filtered}
-          loading={false}
-          showBack
-          emptyTitle={search ? 'No matching formulas' : 'No formulas yet'}
-          emptyDescription={
-            search
-              ? `Nothing matched "${search}". Try another keyword.`
-              : 'Formula entries for this subject will appear here.'
-          }
-          detailRoute="/formula-hub/[id]"
-          detailParams={(item) => ({ id: item.id })}
-          titleKey="title"
-          subtitleKey="explanation"
-        />
-      )}
       </ScreenShell>
     </View>
   );
