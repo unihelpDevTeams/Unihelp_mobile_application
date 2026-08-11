@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Pressable, RefreshControl, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
 import { useAuth } from '../../context/AuthContext';
-import { colors, spacing, borderRadius, shadows } from '../../src/shared/theme';
+import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { useThemeStyles } from '../../src/shared/theme/createStyles';
+import { spacing, borderRadius, shadows } from '../../src/shared/theme';
 import {
   acceptFriendRequest,
   acceptMessageRequest,
@@ -75,6 +77,7 @@ function StudentCard({ person, subtitle, children, onPress }) {
 }
 
 function ActionButton({ label, icon, variant = 'primary', loading, onPress }) {
+  const { colors } = useTheme();
   return (
     <Pressable
       style={({ pressed }) => [styles.actionButton, styles[`${variant}Button`], pressed && styles.actionButtonPressed]} onPress={onPress} disabled={loading}>
@@ -87,6 +90,8 @@ function ActionButton({ label, icon, variant = 'primary', loading, onPress }) {
 export default function FriendsPage() {
   const router = useRouter();
   const { user, profile } = useAuth();
+  const { colors } = useTheme();
+  const styles = useThemeStyles(createStyles);
   const uid = user?.uid || profile?.uid;
   const [activeTab, setActiveTab] = useState('friends');
   const [friends, setFriends] = useState([]);
@@ -286,28 +291,28 @@ export default function FriendsPage() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c, s, r) => ({
   tabs: {
-    gap: spacing.sm,
-    paddingBottom: spacing.md,
+    gap: s.sm,
+    paddingBottom: s.md,
   },
   findButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    backgroundColor: colors.surface,
+    gap: s.md,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius['2xl'],
-    padding: spacing.md,
-    marginBottom: spacing.md,
+    borderColor: c.border,
+    borderRadius: r['2xl'],
+    padding: s.md,
+    marginBottom: s.md,
     ...shadows.card,
   },
   findIcon: {
     width: 42,
     height: 42,
     borderRadius: 14,
-    backgroundColor: colors.brandLight,
+    backgroundColor: c.brandLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -315,13 +320,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   findTitle: {
-    color: colors.ink,
+    color: c.ink,
     fontSize: 14,
     fontWeight: '900',
   },
   findText: {
     marginTop: 3,
-    color: colors.grey,
+    color: c.grey,
     fontSize: 12,
     lineHeight: 16,
   },
@@ -330,26 +335,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     height: 38,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.full,
-    backgroundColor: colors.surface,
+    paddingHorizontal: s.md,
+    borderRadius: r.full,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
   },
   tabActive: {
-    backgroundColor: colors.brand,
-    borderColor: colors.brand,
+    backgroundColor: c.brand,
+    borderColor: c.brand,
   },
   tabText: {
-    color: colors.grey,
+    color: c.grey,
     fontWeight: '800',
     fontSize: 12,
   },
   tabTextActive: {
-    color: colors.surface,
+    color: c.surface,
   },
   listContent: {
-    paddingBottom: spacing['3xl'],
+    paddingBottom: s['3xl'],
   },
   emptyContent: {
     flexGrow: 1,
@@ -358,28 +363,28 @@ const styles = StyleSheet.create({
   },
   card: {
     flexDirection: 'row',
-    gap: spacing.md,
-    backgroundColor: colors.surface,
+    gap: s.md,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius['2xl'],
-    padding: spacing.md,
-    marginBottom: spacing.sm,
+    borderColor: c.border,
+    borderRadius: r['2xl'],
+    padding: s.md,
+    marginBottom: s.sm,
     ...shadows.card,
   },
   cardPressed: {
-    backgroundColor: colors.canvasLight,
+    backgroundColor: c.canvasLight,
   },
   avatar: {
-    backgroundColor: colors.brandLight,
+    backgroundColor: c.brandLight,
   },
   avatarFallback: {
-    backgroundColor: colors.brandLight,
+    backgroundColor: c.brandLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitial: {
-    color: colors.brandDark,
+    color: c.brandDark,
     fontWeight: '900',
     fontSize: 18,
   },
@@ -393,7 +398,7 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     flex: 1,
-    color: colors.ink,
+    color: c.ink,
     fontWeight: '900',
     fontSize: 15,
   },
@@ -401,19 +406,19 @@ const styles = StyleSheet.create({
     width: 9,
     height: 9,
     borderRadius: 5,
-    backgroundColor: colors.green,
+    backgroundColor: c.green,
   },
   cardSubtitle: {
     marginTop: 4,
-    color: colors.grey,
+    color: c.grey,
     fontSize: 12.5,
     lineHeight: 18,
   },
   actionRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginTop: spacing.md,
+    gap: s.sm,
+    marginTop: s.md,
   },
   actionButton: {
     minHeight: 36,
@@ -421,47 +426,47 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.md,
+    borderRadius: r.full,
+    paddingHorizontal: s.md,
     borderWidth: 1,
   },
   primaryButton: {
-    backgroundColor: colors.brand,
-    borderColor: colors.brand,
+    backgroundColor: c.brand,
+    borderColor: c.brand,
   },
   secondaryButton: {
-    backgroundColor: colors.brandLight,
-    borderColor: colors.brandBorder,
+    backgroundColor: c.brandLight,
+    borderColor: c.brandBorder,
   },
   actionButtonPressed: {
     opacity: 0.8,
   },
   actionText: {
-    color: colors.surface,
+    color: c.surface,
     fontWeight: '900',
     fontSize: 12,
   },
   secondaryActionText: {
-    color: colors.brand,
+    color: c.brand,
   },
   skeletonAvatar: {
     width: 50,
     height: 50,
     borderRadius: 16,
-    backgroundColor: colors.skeleton,
+    backgroundColor: c.skeleton,
   },
   skeletonLineWide: {
     width: '72%',
     height: 13,
     borderRadius: 8,
-    backgroundColor: colors.skeleton,
+    backgroundColor: c.skeleton,
     marginTop: 6,
   },
   skeletonLine: {
     width: '48%',
     height: 11,
     borderRadius: 8,
-    backgroundColor: colors.skeletonLine,
+    backgroundColor: c.skeletonLine,
     marginTop: 10,
   },
 });

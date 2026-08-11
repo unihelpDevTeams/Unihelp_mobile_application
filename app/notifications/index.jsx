@@ -1,17 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, SectionList, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, borderRadius } from '../../src/shared/theme';
 import ScreenShell from '../../src/shared/components/ScreenShell';
+import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import EmptyState from '../../src/shared/components/EmptyState';
 import { fetchNotificationsPage, markNotificationRead } from '../../services/firestoreSync';
 
 const PAGE_SIZE = 30;
 
-const TYPE_META = {
+const getTypeMeta = (colors) => ({
   message: { icon: 'chatbubble', color: colors.blue, soft: colors.cardElevated },
-  direct_message: { icon: 'chatbubble', color: colors.blue, soft: colors.cardElevated, },
+  direct_message: { icon: 'chatbubble', color: colors.blue, soft: colors.cardElevated },
   group_message: { icon: 'chatbubbles', color: colors.purple, soft: colors.cardElevated },
   group: { icon: 'people', color: colors.purple, soft: colors.cardElevated },
   group_created: { icon: 'people', color: colors.purple, soft: colors.cardElevated },
@@ -28,7 +29,7 @@ const TYPE_META = {
   reminder: { icon: 'alarm', color: colors.green, soft: colors.greenLight },
   alert: { icon: 'alert-circle', color: colors.red, soft: colors.redLight },
   default: { icon: 'notifications', color: colors.brand, soft: colors.brandLight },
-};
+});
 
 const toDate = (value) => {
   if (!value) return null;
@@ -90,6 +91,9 @@ export default function NotificationsPage() {
   const [markingAll, setMarkingAll] = useState(false);
   const [cursor, setCursor] = useState(null);
   const [hasMore, setHasMore] = useState(false);
+  const { colors } = useTheme();
+  const styles = useThemeStyles(createStyles);
+  const typeMeta = useMemo(() => getTypeMeta(colors), [colors]);
 
   const load = useCallback(async ({ reset = false } = {}) => {
     if (reset) {
@@ -245,7 +249,7 @@ export default function NotificationsPage() {
               </View>
             )}
             renderItem={({ item }) => {
-              const meta = TYPE_META[item.type] || TYPE_META.default;
+              const meta = typeMeta[item.type] || typeMeta.default;
               return (
                 <Pressable
                   style={({ pressed }) => [ styles.row, !item.read && styles.rowUnread,
@@ -292,7 +296,7 @@ export default function NotificationsPage() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors, spacing, borderRadius) => ({
   topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -333,6 +337,23 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.brandText,
   },
+  row: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.xl,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  rowPressed: {
+    backgroundColor: colors.canvasLight,
+  },
+  rowUnread: {
+    backgroundColor: colors.brandLight,
+    borderColor: colors.brand,
+  },
   listContent: {
     paddingBottom: spacing['3xl'],
   },
@@ -353,23 +374,6 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 1,
     backgroundColor: colors.borderLight,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.xl,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  rowPressed: {
-    backgroundColor: colors.canvasLight,
-  },
-  rowUnread: {
-    backgroundColor: colors.brandLight,
-    borderColor: colors.border,
   },
   iconWrap: {
     width: 42,

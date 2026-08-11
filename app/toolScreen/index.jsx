@@ -41,25 +41,7 @@ const ALL_TOOLS = [
         bgColor: '#FFF7ED',
         route: '/gpa',
         badge: 'QUICK',
-      },
-      {
-        id: 'attendance',
-        title: 'Attendance Log',
-        sub: 'Keep track of class presence',
-        icon: 'checkmark-circle',
-        color: '#10B981',
-        bgColor: '#ECFDF5',
-        route: '/attendance',
-      },
-      {
-        id: 'transcript',
-        title: 'Grade History',
-        sub: 'View all past semester results',
-        icon: 'document-text',
-        color: '#0284C7',
-        bgColor: '#F0F9FF',
-        route: '/transcript',
-      },
+      }
     ],
   },
   {
@@ -74,6 +56,16 @@ const ALL_TOOLS = [
         bgColor: '#FEF2F2',
         route: '/smart-timetable',
         badge: 'LIVE',
+      },
+      {
+        id: 'cbt',
+        title: 'CBt practice',
+        sub: 'Live mock exams & quizzes',
+        icon: 'school',
+        color: '#DC2626',
+        bgColor: '#FEE2E2',
+        route: '/cbt',
+        badge: 'NEW',
       },
       {
         id: 'formula',
@@ -93,6 +85,15 @@ const ALL_TOOLS = [
         color: '#6366F1',
         bgColor: '#EEF2FF',
         route: '/(tabs)/studyMaterials',
+      },
+      {
+        id: 'challenge',
+        title: 'Daily Challenge',
+        sub: 'Sharpen your skills with daily quizzes',
+        icon: 'flame',
+        color: '#0284C7',
+        bgColor: '#F0F9FF',
+        route: '/challenge',
       },
       {
         id: 'flashcards',
@@ -125,7 +126,7 @@ const ALL_TOOLS = [
         icon: 'timer',
         color: '#F59E0B',
         bgColor: '#FEF3C7',
-        route: '/timer',
+        route: '/pomodoroScreen',
       },
       {
         id: 'ai-copilot',

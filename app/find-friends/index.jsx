@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
-import { colors, spacing, borderRadius, shadows } from '../../src/shared/theme';
+import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { useThemeStyles } from '../../src/shared/theme/createStyles';
+import { spacing, borderRadius, shadows } from '../../src/shared/theme';
 import { useAuth } from '../../context/AuthContext';
 import { searchUsers } from '../../src/shared/services/community';
 import {
@@ -25,7 +27,7 @@ const nameOf = (person = {}) => person.username || person.name || person.email |
 const schoolOf = (person = {}) => person.school || person.university || '';
 const metaOf = (person = {}) => [schoolOf(person), person.department, person.level].filter(Boolean).join(' | ');
 
-function Avatar({ person }) {
+function Avatar({ person, styles }) {
   const uri = person.photo || person.avatar || person.photoURL || '';
   return uri ? (
     <Image source={{ uri }} style={styles.avatar} />
@@ -36,7 +38,8 @@ function Avatar({ person }) {
   );
 }
 
-function RelationshipAction({ person, currentUid, currentProfile }) {
+function RelationshipAction({ person, currentUid, currentProfile, styles }) {
+  const { colors } = useTheme();
   const router = useRouter();
   const targetUid = person.id || person.uid;
   const [relationship, setRelationship] = useState({ state: RELATIONSHIP.NONE });
@@ -101,13 +104,13 @@ function RelationshipAction({ person, currentUid, currentProfile }) {
   );
 }
 
-function StudentRow({ person, currentUid, currentProfile }) {
+function StudentRow({ person, currentUid, currentProfile, colors, styles }) {
   const router = useRouter();
   const targetUid = person.id || person.uid;
 
   return (
     <Pressable style={({ pressed }) => [styles.card, pressed && styles.cardPressed]} onPress={() => router.push(`/view-user-profile/${targetUid}`)}>
-      <Avatar person={person} />
+      <Avatar person={person} styles={styles} />
       <View style={styles.cardBody}>
         <View style={styles.cardTop}>
           <Text style={styles.name} numberOfLines={1}>{nameOf(person)}</Text>
@@ -123,13 +126,15 @@ function StudentRow({ person, currentUid, currentProfile }) {
           <Text style={styles.interests} numberOfLines={1}>{person.interests.slice(0, 3).join(', ')}</Text>
         ) : null}
       </View>
-      <RelationshipAction person={person} currentUid={currentUid} currentProfile={currentProfile} />
+      <RelationshipAction person={person} currentUid={currentUid} currentProfile={currentProfile} colors={colors} styles={styles} />
     </Pressable>
   );
 }
 
 export default function FindFriendsPage() {
   const { user, profile } = useAuth();
+  const { colors } = useTheme();
+  const styles = useThemeStyles(createStyles);
   const uid = user?.uid || profile?.uid;
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
@@ -225,7 +230,7 @@ export default function FindFriendsPage() {
         data={visibleRows}
         keyExtractor={(item) => item.id || item.uid}
         renderItem={({ item }) => (
-          <StudentRow person={item} currentUid={uid} currentProfile={profile} />
+          <StudentRow person={item} currentUid={uid} currentProfile={profile} colors={colors} styles={styles} />
         )}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
         contentContainerStyle={visibleRows.length ? styles.listContent : styles.emptyContent}
@@ -244,59 +249,59 @@ export default function FindFriendsPage() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c, s, r) => ({
   searchCard: {
     minHeight: 50,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.card,
-    borderRadius: borderRadius['2xl'],
+    gap: s.sm,
+    backgroundColor: c.card,
+    borderRadius: r['2xl'],
     borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.md,
+    borderColor: c.border,
+    paddingHorizontal: s.md,
+    marginBottom: s.md,
     ...shadows.card,
   },
   searchInput: {
     flex: 1,
-    color: colors.ink,
+    color: c.ink,
     fontSize: 14,
     paddingVertical: 10,
   },
   filters: {
-    gap: spacing.sm,
-    paddingBottom: spacing.md,
+    gap: s.sm,
+    paddingBottom: s.md,
   },
   filterChip: {
     height: 36,
     justifyContent: 'center',
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.md,
-    backgroundColor: colors.surface,
+    borderRadius: r.full,
+    paddingHorizontal: s.md,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
   },
   filterChipActive: {
-    backgroundColor: colors.brand,
-    borderColor: colors.brand,
+    backgroundColor: c.brand,
+    borderColor: c.brand,
   },
   filterText: {
-    color: colors.grey,
+    color: c.grey,
     fontSize: 12,
     fontWeight: '900',
   },
   filterTextActive: {
-    color: colors.onBrandText,
+    color: c.onBrandText,
   },
   sectionTitle: {
-    color: colors.ink,
+    color: c.ink,
     fontSize: 14,
     fontWeight: '900',
-    marginBottom: spacing.sm,
+    marginBottom: s.sm,
   },
   listContent: {
-    paddingBottom: spacing['3xl'],
+    paddingBottom: s['3xl'],
   },
   emptyContent: {
     flexGrow: 1,
@@ -306,34 +311,34 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    backgroundColor: colors.card,
+    gap: s.md,
+    backgroundColor: c.card,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius['2xl'],
-    padding: spacing.md,
-    marginBottom: spacing.sm,
+    borderColor: c.border,
+    borderRadius: r['2xl'],
+    padding: s.md,
+    marginBottom: s.sm,
     ...shadows.card,
   },
   cardPressed: {
-    backgroundColor: colors.canvasLight,
+    backgroundColor: c.canvasLight,
   },
   avatar: {
     width: 52,
     height: 52,
     borderRadius: 17,
-    backgroundColor: colors.brandLight,
+    backgroundColor: c.brandLight,
   },
   avatarFallback: {
     width: 52,
     height: 52,
     borderRadius: 20,
-    backgroundColor: colors.brandLight,
+    backgroundColor: c.brandLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitial: {
-    color: colors.brandDark,
+    color: c.brandDark,
     fontSize: 18,
     fontWeight: '900',
   },
@@ -344,23 +349,23 @@ const styles = StyleSheet.create({
   cardTop: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: s.sm,
   },
   name: {
     flex: 1,
-    color: colors.ink,
+    color: c.ink,
     fontSize: 15,
     fontWeight: '900',
   },
   meta: {
     marginTop: 4,
-    color: colors.grey,
+    color: c.grey,
     fontSize: 12.5,
     lineHeight: 17,
   },
   interests: {
     marginTop: 4,
-    color: colors.brandText,
+    color: c.brandText,
     fontSize: 11.5,
     fontWeight: '800',
   },
@@ -368,58 +373,58 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: colors.tealLight,
-    borderRadius: borderRadius.full,
+    backgroundColor: c.tealLight,
+    borderRadius: r.full,
     paddingHorizontal: 7,
     paddingVertical: 3,
   },
   tutorText: {
-    color: colors.teal,
+    color: c.teal,
     fontSize: 10,
     fontWeight: '900',
   },
   smallButton: {
     minWidth: 68,
     height: 36,
-    borderRadius: borderRadius.full,
-    backgroundColor: colors.brand,
+    borderRadius: r.full,
+    backgroundColor: c.brand,
     borderWidth: 1,
-    borderColor: colors.brand,
+    borderColor: c.brand,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 5,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: s.sm,
   },
   smallButtonText: {
-    color: colors.brandText,
+    color: c.brandText,
     fontSize: 12,
     fontWeight: '900',
   },
   secondaryButton: {
-    backgroundColor: colors.brandLight,
-    borderColor: colors.brandBorder,
+    backgroundColor: c.brandLight,
+    borderColor: c.brandBorder,
   },
   secondaryButtonText: {
-    color: colors.brand,
+    color: c.brand,
     fontSize: 12,
     fontWeight: '900',
   },
   sentButton: {
-    backgroundColor: colors.canvasLight,
-    borderColor: colors.border,
+    backgroundColor: c.canvasLight,
+    borderColor: c.border,
   },
   sentButtonText: {
-    color: colors.grey,
+    color: c.grey,
     fontSize: 12,
     fontWeight: '900',
   },
   friendButton: {
-    backgroundColor: colors.greenLight,
+    backgroundColor: c.greenLight,
     borderColor: '#A7F3D0',
   },
   friendButtonText: {
-    color: colors.green,
+    color: c.green,
     fontSize: 12,
     fontWeight: '900',
   },

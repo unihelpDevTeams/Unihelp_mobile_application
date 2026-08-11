@@ -3,8 +3,7 @@ export const headerMenuSections = [
     title: 'Study',
     items: [
       { label: 'Home', route: '/(tabs)' },
-      { label: 'Lecture Notes', route: '/(tabs)/lectureNotes' },
-      { label: 'Past Questions', route: '/(tabs)/pastQuestions' },
+      { label: 'Resources', route: '/(tabs)/studyMaterials' },
       { label: 'News Feed', route: '/newsfeed' },
       { label: 'Challenge', route: '/challenge', icon: 'flash-outline' },
     ],

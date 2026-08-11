@@ -17,6 +17,9 @@ import {
 import {
   RELATIONSHIP,
   acceptFriendRequest,
+  acceptMessageRequest,
+  declineMessageRequest,
+  listenIncomingMessageRequests,
   listenRelationship,
   sendFriendRequest,
 } from '../../src/shared/services/friendships';
@@ -51,6 +54,7 @@ export default function ConversationPage() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [relationship, setRelationship] = useState({ state: RELATIONSHIP.NONE });
+  const [pendingMessageRequest, setPendingMessageRequest] = useState(null);
   const [relationshipBusy, setRelationshipBusy] = useState(false);
   const listRef = useRef(null);
 
@@ -199,6 +203,18 @@ export default function ConversationPage() {
     return listenRelationship(profile.uid, otherId, setRelationship);
   }, [profile?.uid, otherId]);
 
+  useEffect(() => {
+    if (!profile?.uid || !otherId) {
+      setPendingMessageRequest(null);
+      return undefined;
+    }
+
+    return listenIncomingMessageRequests(profile.uid, (rows) => {
+      const request = rows.find((item) => item.from === otherId && item.status === 'pending');
+      setPendingMessageRequest(request || null);
+    });
+  }, [profile?.uid, otherId]);
+
   const handleAddFriend = async () => {
     if (!profile?.uid || !otherId) return;
     setRelationshipBusy(true);
@@ -211,6 +227,38 @@ export default function ConversationPage() {
       });
     } catch (error) {
       Alert.alert('Friend request', error.message || 'Could not send friend request.');
+    } finally {
+      setRelationshipBusy(false);
+    }
+  };
+
+  const handleAcceptMessageRequest = async () => {
+    if (!pendingMessageRequest || !profile?.uid) return;
+    setRelationshipBusy(true);
+    try {
+      await acceptMessageRequest({
+        request: pendingMessageRequest,
+        currentUid: profile.uid,
+        currentProfile: profile,
+      });
+    } catch (error) {
+      Alert.alert('Message request', error.message || 'Could not accept request.');
+    } finally {
+      setRelationshipBusy(false);
+    }
+  };
+
+  const handleDeclineMessageRequest = async () => {
+    if (!pendingMessageRequest || !profile?.uid) return;
+    setRelationshipBusy(true);
+    try {
+      await declineMessageRequest({
+        request: pendingMessageRequest,
+        currentUid: profile.uid,
+        currentProfile: profile,
+      });
+    } catch (error) {
+      Alert.alert('Message request', error.message || 'Could not decline request.');
     } finally {
       setRelationshipBusy(false);
     }
@@ -238,26 +286,32 @@ export default function ConversationPage() {
     const isReceived = relationship.state === RELATIONSHIP.RECEIVED;
     const isSent = relationship.state === RELATIONSHIP.SENT;
     const isBlocked = relationship.state === RELATIONSHIP.BLOCKED;
-    const title = isReceived
-      ? 'Friend request waiting'
-      : isSent
-        ? 'Friend request sent'
-        : isBlocked
-          ? 'Chat unavailable'
-          : 'Add friend to keep chatting';
-    const text = isReceived
-      ? `${headerTitle} wants to connect. Accept the request to continue this chat freely.`
-      : isSent
-        ? 'You can continue chatting after the request is accepted.'
-        : isBlocked
-          ? 'Messaging is unavailable for this student.'
-          : 'You can only send one intro message before you become friends.';
+    const hasIntroRequest = !!pendingMessageRequest;
+
+    const title = hasIntroRequest
+      ? 'Accept intro message'
+      : isReceived
+        ? 'Friend request waiting'
+        : isSent
+          ? 'Friend request sent'
+          : isBlocked
+            ? 'Chat unavailable'
+            : 'Add friend to keep chatting';
+    const text = hasIntroRequest
+      ? `${headerTitle} sent you an introductory message. Accept to become friends and continue this chat.`
+      : isReceived
+        ? `${headerTitle} wants to connect. Accept the request to continue this chat freely.`
+        : isSent
+          ? 'You can continue chatting after the request is accepted.'
+          : isBlocked
+            ? 'Messaging is unavailable for this student.'
+            : 'You can only send one intro message before you become friends.';
 
     return (
       <View style={styles.relationshipCard}>
         <View style={styles.relationshipIcon}>
           <Ionicons
-            name={isBlocked ? 'ban-outline' : isReceived ? 'person-add-outline' : 'people-outline'}
+            name={isBlocked ? 'ban-outline' : hasIntroRequest || isReceived ? 'person-add-outline' : 'people-outline'}
             size={19}
             color={isBlocked ? colors.error : colors.brandText}
           />
@@ -266,7 +320,18 @@ export default function ConversationPage() {
           <Text style={styles.relationshipTitle}>{title}</Text>
           <Text style={styles.relationshipText}>{text}</Text>
         </View>
-        {isReceived ? (
+        {hasIntroRequest ? (
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Pressable style={styles.relationshipButton} onPress={handleAcceptMessageRequest} disabled={relationshipBusy}>
+              {relationshipBusy ? <ActivityIndicator color={colors.onBrand} size="small" /> : <Ionicons name="checkmark" size={15} color={colors.onBrand} />}
+              <Text style={styles.relationshipButtonText}>Accept</Text>
+            </Pressable>
+            <Pressable style={[styles.relationshipButton, styles.relationshipButtonMuted]} onPress={handleDeclineMessageRequest} disabled={relationshipBusy}>
+              {relationshipBusy ? <ActivityIndicator color={colors.textSecondary} size="small" /> : <Ionicons name="close" size={15} color={colors.textSecondary} />}
+              <Text style={[styles.relationshipButtonText, styles.relationshipButtonTextMuted]}>Decline</Text>
+            </Pressable>
+          </View>
+        ) : isReceived ? (
           <Pressable style={styles.relationshipButton} onPress={handleAcceptFriend} disabled={relationshipBusy}>
             {relationshipBusy ? <ActivityIndicator color={colors.onBrand} size="small" /> : <Ionicons name="checkmark" size={15} color={colors.onBrand} />}
             <Text style={styles.relationshipButtonText}>Accept</Text>
