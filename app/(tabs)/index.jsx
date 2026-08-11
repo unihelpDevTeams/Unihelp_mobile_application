@@ -514,6 +514,16 @@ export default function HomeScreen() {
   // Filtered tools based on user roles
   const toolsList = [
     {
+      id: 'cbt',
+      title: 'CBT Practice',
+      sub: 'Jamb & Post UTME',
+      icon: 'school',
+      color: '#10B981',
+      bgColor: '#ECFDF5',
+      route: '/cbt',
+      badge: 'PRO',
+    },
+    {
       id: 'cgpa',
       title: 'CGPA Tracker',
       sub: 'Monitor progress',
