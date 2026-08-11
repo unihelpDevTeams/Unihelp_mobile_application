@@ -537,7 +537,7 @@ export default function CBTPracticeScreen() {
 
         {/* Progress Bar */}
         <View className="h-1 w-full bg-gray-200 dark:bg-slate-800">
-          <View className="h-full bg-indigo-500" style={{ width: `${((currentIndex + 1) / questions.length) * 100}%` }} />
+          <View style={{ height: '100%', backgroundColor: '#6366F1', width: `${((currentIndex + 1) / questions.length) * 100}%` }} />
         </View>
 
         {/* Palette Modal (Overlay) */}
