@@ -1,6 +1,14 @@
-
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Linking,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +23,7 @@ const PAGE_SIZE = 20;
 const NGN = '\u20A6';
 const UP = '\u2191';
 const DOWN = '\u2193';
+const CAROUSEL_LIMIT = 8;
 
 const SORT_OPTIONS = [
   { key: 'newest', label: 'Newest', icon: 'time-outline' },
@@ -77,14 +86,21 @@ export default function HostelsPage() {
 
   const [hostels, setHostels] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor] = useState(null);
   const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState(null);
 
   const [search, setSearch] = useState('');
   const [location, setLocation] = useState('all');
   const [priceRange, setPriceRange] = useState('all');
   const [sort, setSort] = useState('newest');
+
+  // Ref mirror of pagination state so loadHostels stays a stable function
+  // (no re-creation churn) while still always reading the latest values.
+  const paginationRef = useRef({ cursor: null, hasMore: false, loadingMore: false });
+  paginationRef.current = { cursor, hasMore, loadingMore };
 
   const styles = useThemeStyles((c, s, r) => ({
     searchWrap: {
@@ -125,19 +141,18 @@ export default function HostelsPage() {
     sortOptionText: { fontSize: 12, fontWeight: '800', color: c.textSecondary },
     sortOptionTextActive: { color: c.onBrand },
 
-    sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: s.md, marginTop: s.sm },
+    sectionRow: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      flexWrap: 'wrap', rowGap: 8, marginBottom: s.md, marginTop: s.sm,
+    },
     sectionTitle: { fontSize: 14, fontWeight: '800', color: c.textPrimary },
-    sectionRowRight: { flexDirection: 'row', alignItems: 'center', gap: s.sm },
+    sectionRowRight: { flexDirection: 'row', alignItems: 'center', gap: s.sm, flexWrap: 'wrap' },
     countBadge: { minWidth: 28, height: 28, paddingHorizontal: s.sm, borderRadius: r.lg, backgroundColor: c.blueLight, alignItems: 'center', justifyContent: 'center' },
     countBadgeText: { fontSize: 12, fontWeight: '800', color: c.blue },
     clearFilters: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     uploadButton: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: c.blue, borderRadius: r.full, paddingHorizontal: s.lg, paddingVertical: 7 },
     uploadButtonPressed: { opacity: 0.85 },
     uploadButtonText: { color: c.onBrand, fontSize: 12, fontWeight: '800' },
-
-    list: { gap: s.md },
-    skeleton: { height: 128, borderRadius: r['2xl'], backgroundColor: c.skeletonBackground },
-    loadingWrap: { gap: s.md, paddingVertical: s.xl },
 
     adminButton: {
       flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
@@ -146,17 +161,59 @@ export default function HostelsPage() {
     },
     adminButtonText: { fontSize: 13, fontWeight: '800', color: c.brandText },
 
-    loadMoreButton: {
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-      backgroundColor: c.card, borderRadius: r.xl, borderWidth: 1, borderColor: c.borderDefault,
-      paddingVertical: s.md, marginTop: s.lg,
+    errorBanner: {
+      flexDirection: 'row', alignItems: 'center', gap: s.sm,
+      backgroundColor: c.dangerLight || c.canvasLight, borderWidth: 1, borderColor: c.borderDefault,
+      borderRadius: r.xl, padding: s.md, marginBottom: s.lg,
     },
-    loadMoreButtonPressed: { opacity: 0.82 },
-    loadMoreText: { fontSize: 13, fontWeight: '800', color: c.blue },
+    errorText: { flex: 1, fontSize: 12, fontWeight: '600', color: c.textPrimary },
+    retryText: { fontSize: 12, fontWeight: '800', color: c.blue },
+
+    footerLoader: { paddingVertical: s.lg, alignItems: 'center' },
   }));
 
   const isAdmin = profile?.admin === true;
   const hasActiveFilters = !!search || location !== 'all' || priceRange !== 'all';
+
+  const loadHostels = useCallback(async (isReset = false) => {
+    const { cursor: currentCursor, hasMore: currentHasMore, loadingMore: currentLoadingMore } = paginationRef.current;
+
+    if (isReset) {
+      setRefreshing(true);
+    } else {
+      if (currentLoadingMore || !currentHasMore) return;
+      setLoadingMore(true);
+    }
+    setError(null);
+
+    try {
+      const page = await fetchHostelsPage({
+        pageSize: PAGE_SIZE,
+        cursor: isReset ? null : currentCursor,
+      });
+
+      setHostels((current) => {
+        const nextItems = page.items || [];
+        if (isReset) return nextItems;
+        const seen = new Set(current.map((item) => item.id));
+        return [...current, ...nextItems.filter((item) => !seen.has(item.id))];
+      });
+
+      setCursor(page.cursor);
+      setHasMore(Boolean(page.hasMore));
+    } catch (err) {
+      setError(err?.message || 'Could not load hostels. Please try again.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+      setLoadingMore(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadHostels(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const locations = useMemo(() => {
     const set = new Set();
@@ -170,6 +227,7 @@ export default function HostelsPage() {
   const filteredHostels = useMemo(() => {
     const query = search.trim().toLowerCase();
     const range = PRICE_RANGES.find((p) => p.key === priceRange) || PRICE_RANGES[0];
+    const locationLower = location.toLowerCase();
 
     const result = hostels.filter((item) => {
       const haystack = [item?.title, item?.name, item?.description, item?.location, item?.area]
@@ -180,8 +238,11 @@ export default function HostelsPage() {
       if (query && !haystack.includes(query)) return false;
 
       if (location !== 'all') {
-        const itemLoc = (item?.location || '').toLowerCase();
-        if (!itemLoc || !itemLoc.includes(location)) return false;
+        const itemLoc = (item?.location || '').trim().toLowerCase();
+        // Exact match against the lowercased location (previously compared
+        // a lowercased value against the raw, un-lowercased filter, so any
+        // location with uppercase letters — e.g. "Yaba" — never matched).
+        if (itemLoc !== locationLower) return false;
       }
 
       const price = Number(item?.price || item?.rent);
@@ -207,49 +268,6 @@ export default function HostelsPage() {
     return sorted;
   }, [hostels, search, location, priceRange, sort]);
 
-  const loadHostels = useCallback(async ({ reset = false } = {}) => {
-    if (reset) {
-      setLoading(true);
-    } else {
-      if (loadingMore || !hasMore) return;
-      setLoadingMore(true);
-    }
-
-    try {
-      const page = await fetchHostelsPage({
-        pageSize: PAGE_SIZE,
-        cursor: reset ? null : cursor,
-      });
-      setHostels((current) => {
-        const nextItems = page.items || [];
-        if (reset) return nextItems;
-        const seen = new Set(current.map((item) => item.id));
-        return [...current, ...nextItems.filter((item) => !seen.has(item.id))];
-      });
-      setCursor(page.cursor);
-      setHasMore(page.hasMore);
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  }, [cursor, hasMore, loadingMore]);
-
-  useEffect(() => {
-    let mounted = true;
-    setLoading(true);
-    fetchHostelsPage({ pageSize: PAGE_SIZE })
-      .then((page) => {
-        if (!mounted) return;
-        setHostels(page.items || []);
-        setCursor(page.cursor);
-        setHasMore(page.hasMore);
-      })
-      .finally(() => {
-        if (mounted) setLoading(false);
-      });
-    return () => { mounted = false; };
-  }, []);
-
   const goToHostel = (item) => router.push({ pathname: '/view/[type]/[id]', params: { type: 'hostel', id: item.id } });
 
   const clearFilters = () => {
@@ -259,9 +277,19 @@ export default function HostelsPage() {
     setSort('newest');
   };
 
-  return (
-    <ScreenShell title="Hostels" subtitle="Find affordable accommodation around campus" showBack loading={loading}>
-      {/* Search bar */}
+  const HeaderComponent = (
+    <View>
+      {error ? (
+        <View style={styles.errorBanner}>
+          <Ionicons name="alert-circle-outline" size={16} color={colors.textSecondary} />
+          <Text style={styles.errorText}>{error}</Text>
+          <Pressable onPress={() => loadHostels(true)} hitSlop={8}>
+            <Text style={styles.retryText}>Retry</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {/* Search Bar */}
       <View style={styles.searchWrap}>
         <Ionicons name="search" size={18} color={colors.greyLight} />
         <TextInput
@@ -280,7 +308,7 @@ export default function HostelsPage() {
         ) : null}
       </View>
 
-      {/* Location filter */}
+      {/* Location Filter */}
       {!loading && locations.length > 1 && (
         <View style={styles.filterSection}>
           <View style={styles.filterLabel}>
@@ -296,6 +324,7 @@ export default function HostelsPage() {
                   onPress={() => setLocation(active ? 'all' : loc)}
                   style={({ pressed }) => [styles.chip, active && styles.chipActive, pressed && styles.chipPressed]}
                   accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
                 >
                   {active ? <Ionicons name="checkmark" size={14} color={colors.onBrand} /> : null}
                   <Text style={[styles.chipText, active && styles.chipTextActive]} numberOfLines={1}>
@@ -308,7 +337,7 @@ export default function HostelsPage() {
         </View>
       )}
 
-      {/* Budget filter */}
+      {/* Budget Filter */}
       <View style={styles.filterSection}>
         <View style={styles.filterLabel}>
           <Ionicons name="wallet-outline" size={13} color={colors.greyLight} />
@@ -323,6 +352,7 @@ export default function HostelsPage() {
                 onPress={() => setPriceRange(active ? 'all' : range.key)}
                 style={({ pressed }) => [styles.chip, active && styles.chipActive, pressed && styles.chipPressed]}
                 accessibilityRole="button"
+                accessibilityState={{ selected: active }}
               >
                 {active ? <Ionicons name="checkmark" size={14} color={colors.onBrand} /> : null}
                 <Text style={[styles.chipText, active && styles.chipTextActive]}>{range.label}</Text>
@@ -332,7 +362,7 @@ export default function HostelsPage() {
         </ScrollView>
       </View>
 
-      {/* Sort */}
+      {/* Sort Bar */}
       <View style={styles.filterSection}>
         <View style={styles.sortWrap}>
           {SORT_OPTIONS.map((opt) => {
@@ -343,6 +373,7 @@ export default function HostelsPage() {
                 onPress={() => setSort(opt.key)}
                 style={[styles.sortOption, active && styles.sortOptionActive]}
                 accessibilityRole="button"
+                accessibilityState={{ selected: active }}
               >
                 <Ionicons name={opt.icon} size={14} color={active ? colors.onBrand : colors.textSecondary} />
                 <Text style={[styles.sortOptionText, active && styles.sortOptionTextActive]}>{opt.label}</Text>
@@ -352,17 +383,24 @@ export default function HostelsPage() {
         </View>
       </View>
 
-      {/* Featured carousel (only when browsing normally) */}
+      {/* Featured Carousel */}
       {!loading && !hasActiveFilters && filteredHostels.length > 0 ? (
-        <MediaCarousel items={filteredHostels} onPressItem={(item) => goToHostel(item)} />
+        <MediaCarousel items={filteredHostels.slice(0, CAROUSEL_LIMIT)} onPressItem={(item) => goToHostel(item)} />
       ) : null}
 
+      {/* Section Row Header */}
       <View style={styles.sectionRow}>
         <Text style={styles.sectionTitle}>
           {hasActiveFilters ? 'Search results' : 'Available hostels'}
         </Text>
         <View style={styles.sectionRowRight}>
-          <Pressable onPress={() => router.push('/upload?type=hostel')} hitSlop={4} style={({ pressed }) => [styles.uploadButton, pressed && styles.uploadButtonPressed]} accessibilityRole="button" accessibilityLabel="Add a hostel">
+          <Pressable
+            onPress={() => router.push('/upload?type=hostel')}
+            hitSlop={4}
+            style={({ pressed }) => [styles.uploadButton, pressed && styles.uploadButtonPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Add a hostel"
+          >
             <Ionicons name="add" size={15} color={colors.onBrand} />
             <Text style={styles.uploadButtonText}>Add</Text>
           </Pressable>
@@ -384,29 +422,42 @@ export default function HostelsPage() {
           <Text style={styles.adminButtonText}>Admin Panel</Text>
         </Pressable>
       ) : null}
+    </View>
+  );
 
-      {loading ? (
-        <View style={styles.loadingWrap}>
-          <ActivityIndicator size="large" color={colors.blue} />
-          <Text style={{ textAlign: 'center', fontSize: 13, fontWeight: '600', color: colors.blue }}>Loading hostels...</Text>
-          {[1, 2, 3].map((i) => <View key={i} style={styles.skeleton} />)}
-        </View>
-      ) : filteredHostels.length > 0 ? (
-        <View style={styles.list}>
-          {filteredHostels.map((item) => (
-            <HostelCard key={item.id} item={item} onPress={() => goToHostel(item)} />
-          ))}
-
-          {hasMore ? (
-            <Pressable onPress={() => loadHostels().catch(() => {})} disabled={loadingMore} style={({ pressed }) => [styles.loadMoreButton, pressed && styles.loadMoreButtonPressed]}>
-              {loadingMore ? <ActivityIndicator size="small" color={colors.blue} /> : <Ionicons name="chevron-down" size={16} color={colors.blue} />}
-              <Text style={styles.loadMoreText}>{loadingMore ? 'Loading more...' : 'Load more hostels'}</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : (
-        <EmptyListings hasActiveFilters={hasActiveFilters} onReset={clearFilters} />
-      )}
+  return (
+    <ScreenShell title="Hostels" subtitle="Find affordable accommodation around campus" showBack loading={loading}>
+      <FlatList
+        data={filteredHostels}
+        keyExtractor={(item, index) => item?.id ?? `hostel-${index}`}
+        ListHeaderComponent={HeaderComponent}
+        renderItem={({ item }) => <HostelCard item={item} onPress={() => goToHostel(item)} />}
+        contentContainerStyle={{ gap: 12, paddingBottom: 24 }}
+        showsVerticalScrollIndicator={false}
+        refreshing={refreshing}
+        onRefresh={() => loadHostels(true)}
+        onEndReached={() => {
+          // Keep paginating from the server even with filters active — a
+          // filtered view with few local matches should still be able to
+          // pull in further pages that may contain more matches.
+          if (hasMore && !loadingMore) {
+            loadHostels(false);
+          }
+        }}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={styles.footerLoader}>
+              <ActivityIndicator size="small" color={colors.blue} />
+            </View>
+          ) : null
+        }
+        ListEmptyComponent={
+          !loading ? (
+            <EmptyListings hasActiveFilters={hasActiveFilters} onReset={clearFilters} />
+          ) : null
+        }
+      />
     </ScreenShell>
   );
 }
@@ -481,21 +532,34 @@ function HostelCard({ item, onPress }) {
 
   const title = item?.title || item?.name || 'Hostel';
   const imageUrl = resolveImage(item);
+  const safeImageUrl = typeof imageUrl === 'string' ? imageUrl.trim() : imageUrl || '';
   const price = formatNaira(item?.price || item?.rent);
   const [imageFailed, setImageFailed] = useState(false);
-  const showImage = Boolean(imageUrl) && !imageFailed;
+  useEffect(() => {
+    setImageFailed(false);
+  }, [safeImageUrl]);
+  const showImage = Boolean(safeImageUrl) && !imageFailed;
   const phone = item?.phone;
 
-  const callHostel = () => {
+  const callHostel = useCallback(async () => {
     const cleaned = String(phone || '').replace(/[^\d+]/g, '');
-    if (cleaned) Linking.openURL(`tel:${cleaned}`);
-  };
+    if (!cleaned) return;
+    const url = `tel:${cleaned}`;
+    try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (canOpen) {
+        await Linking.openURL(url);
+      }
+    } catch {
+      // Device has no dialer capability or the user cancelled — nothing to do.
+    }
+  }, [phone]);
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.cardPressed]} accessibilityRole="button" accessibilityLabel={title}>
       <View style={styles.media}>
         {showImage ? (
-          <Image source={{ uri: imageUrl }} style={styles.image} contentFit="cover" cachePolicy="disk" transition={200} onError={() => setImageFailed(true)} />
+          <Image source={{ uri: safeImageUrl }} style={styles.image} contentFit="cover" cachePolicy="disk" transition={200} onError={() => setImageFailed(true)} />
         ) : (
           <View style={styles.fallback}>
             <Text style={styles.fallbackText}>{title.charAt(0).toUpperCase()}</Text>

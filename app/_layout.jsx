@@ -71,7 +71,6 @@ function AppContent() {
           <Stack.Screen name="ai" />
           <Stack.Screen name="newsfeed" />
           <Stack.Screen name="announcements" />
-          <Stack.Screen name="admin-withdrawals" />
           <Stack.Screen name="adminpanel" />
           <Stack.Screen name="cgpa" />
           <Stack.Screen name="create" />
@@ -86,7 +85,6 @@ function AppContent() {
           <Stack.Screen name="myproducts" />
           <Stack.Screen name="mystories" />
           <Stack.Screen name="premium" options={{ presentation: 'card' }} />
-          <Stack.Screen name="select-role" />
           <Stack.Screen name="smart-timetable" />
           <Stack.Screen name="tasks" />
           <Stack.Screen name="uploadquestion" />
@@ -104,8 +102,6 @@ function AppContent() {
           <Stack.Screen name="support" />
           <Stack.Screen name="formula-hub" />
           <Stack.Screen name="challenge" />
-          <Stack.Screen name="tutorial" />
-          <Stack.Screen name="create-tutorial" />
           <Stack.Screen name="view" />
           <Stack.Screen name="view-user-profile" />
           <Stack.Screen name="faq" />

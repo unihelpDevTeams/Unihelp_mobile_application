@@ -9,8 +9,22 @@ export default function Step3Profile({ formData, errors, updateField }) {
   const pickPhoto = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) return;
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.85 });
-    if (!result.canceled && result.assets?.[0]?.uri) updateField('photoURI', result.assets[0].uri);
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (result.canceled || !result.assets?.[0]?.uri) return;
+
+    const asset = result.assets[0];
+    if (asset.fileSize && asset.fileSize > 30 * 1024 * 1024) {
+      alert('Image is too large. Please upload an image smaller than 30MB.');
+      return;
+    }
+
+    updateField('photoURI', asset.uri);
   };
 
   const toggleInterest = (interest) => {

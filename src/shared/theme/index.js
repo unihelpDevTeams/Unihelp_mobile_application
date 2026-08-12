@@ -28,7 +28,7 @@ export const lightColors = {
   skeletonLine: '#E2E8F0',
 
   // Accent tones
-  blue: '#0EA5E9',
+  blue: '#0e5be9',
   blueLight: '#F0F9FF',
   green: '#10B981',
   greenLight: '#ECFDF5',
@@ -133,8 +133,7 @@ export const darkColors = {
   skeleton: '#1E293B',
   skeletonLine: '#334155',
 
-  // Accent tones (Desaturated slightly to reduce eye strain in dark mode)
-  blue: '#38BDF8',
+  blue: '#384bf8',
   blueLight: '#0C4A6E',
   green: '#34D399',
   greenLight: '#064E3B',

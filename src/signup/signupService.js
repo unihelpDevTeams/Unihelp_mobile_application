@@ -7,12 +7,15 @@ import {
   setDoc,
   serverTimestamp,
 } from 'firebase/firestore';
+import * as FileSystem from 'expo-file-system/legacy';
 import {
   createUserWithEmailAndPassword,
   updateProfile as updateFirebaseAuthProfile,
 } from 'firebase/auth';
 import { auth, db } from '../../firebase/config';
-import { uploadToCloudinary } from '../../services/cloudinary';
+import { toCloudinaryAsset, uploadToCloudinary } from '../../services/cloudinary';
+
+const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 
 export async function checkUsernameAvailability(username) {
   if (!username || username.trim().length < 3) {
@@ -31,16 +34,29 @@ export async function checkUsernameAvailability(username) {
   return { available: true };
 }
 
-export async function uploadProfilePicture(uri, username) {
+export async function uploadProfilePicture(uri) {
   if (!uri) return '';
 
-  const fileName = `${username.trim().replace(/\s+/g, '-').toLowerCase() || 'profile'}.jpg`;
+  const fileInfo = await FileSystem.getInfoAsync(uri);
+  if (!fileInfo.exists || !fileInfo.size) {
+    throw new Error('This image could not be read. Please try another file.');
+  }
+
+  if (fileInfo.size > MAX_IMAGE_BYTES) {
+    throw new Error('Image is too large. Please upload an image smaller than 30MB.');
+  }
+
+  const fileName = `profile-${Date.now()}.${String(uri).toLowerCase().endsWith('.png') ? 'png' : 'jpg'}`;
   const uploaded = await uploadToCloudinary(
-    { uri, name: fileName, type: 'image/jpeg' },
+    { uri, name: fileName, type: 'image/jpeg', size: fileInfo.size },
     { resourceType: 'image', validationKind: 'image' }
   );
 
-  return uploaded?.secure_url || '';
+  const secureUrl = uploaded?.secure_url || uploaded?.url || '';
+  return {
+    url: secureUrl,
+    asset: toCloudinaryAsset(uploaded, { url: secureUrl, resourceType: 'image' }),
+  };
 }
 
 export async function createCompleteAccount(formData) {
@@ -51,6 +67,7 @@ export async function createCompleteAccount(formData) {
     email,
     password,
     photoURL,
+    photoAsset,
     universityId,
     universityName,
     departmentId,
@@ -82,6 +99,8 @@ export async function createCompleteAccount(formData) {
     usernameLower: username.trim().toLowerCase(),
     email: email.trim().toLowerCase(),
     photoURL: photoURL || '',
+    photo: photoURL || '',
+    photoAsset: photoAsset || null,
     universityId: universityId || '',
     universityName: universityName || '',
     departmentId: departmentId || '',

@@ -441,8 +441,8 @@ export default function ConversationPage() {
           onPress={() => otherId && router.push(`/view-user-profile/${otherId}`)}
           disabled={!otherId}
         >
-          {otherUser.avatar ? (
-            <Image source={{ uri: otherUser.avatar }} style={styles.avatar} />
+          {otherUser.avatar && !avatarFailed ? (
+            <Image source={{ uri: otherUser.avatar }} style={styles.avatar} onError={() => setAvatarFailed(true)} />
           ) : (
             <View style={styles.avatarFallback}>
               <Text style={styles.avatarInitial}>{(otherUser.name || 'S')[0].toUpperCase()}</Text>

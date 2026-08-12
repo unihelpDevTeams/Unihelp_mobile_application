@@ -27,6 +27,7 @@ import {
   uploadImage,
   uploadPDF,
 } from '../../services/cloudinary';
+import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 
 const SPACE = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 28 };
@@ -637,9 +638,9 @@ export default function UploadPage() {
     setError('');
     setMessage('');
 
-    try {
-      const uploadedAttachments = [];
+    const uploadedAttachments = [];
 
+    try {
       for (const file of attachments) {
         const uploaded = await uploadAttachment(file);
         uploadedAttachments.push({
@@ -676,6 +677,9 @@ export default function UploadPage() {
       setPreviewItem(null);
       router.replace(config.routeAfter);
     } catch (submitError) {
+      if (uploadedAttachments.length) {
+        await deleteCloudinaryAssets({ assets: uploadedAttachments }).catch(() => {});
+      }
       setError(submitError?.message || 'Upload failed. Please try again.');
     } finally {
       setUploading(false);

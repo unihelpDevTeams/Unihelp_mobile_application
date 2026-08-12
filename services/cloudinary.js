@@ -52,8 +52,7 @@ export const isUsableUrl = (url = "") => {
 
 export const isPreviewImageUrl = (url = "") =>
   typeof url === "string" &&
-  (url.startsWith("data:image/") ||
-    url.startsWith("blob:") ||
+  (url.startsWith("blob:") ||
     /\.(avif|gif|jpe?g|png|webp|svg)(\?.*)?$/i.test(url));
 
 export const isPdfUrl = (url = "") => {

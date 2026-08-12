@@ -47,8 +47,7 @@ export const getCloudinaryOriginalUrl = (url = '') => {
 
 export const isPreviewImageUrl = (url = '') =>
   typeof url === 'string' &&
-  (url.startsWith('data:image/') ||
-    url.startsWith('blob:') ||
+  (url.startsWith('blob:') ||
     /\.(avif|gif|jpe?g|png|webp|svg)(\?.*)?$/i.test(url));
 
 export const getCloudinaryPdfPageUrl = (url, page = 1, width = 1200) => {

@@ -423,8 +423,12 @@ function GroupCard({ group, role, joinState, joining, onOpen, onJoin, onShare, s
   const isRequested = joinState === 'requested';
   const isPrivate = group.privacy === 'private';
   const imageUrl = pickImage(group);
+  const safeImageUrl = typeof imageUrl === 'string' ? imageUrl.trim() : imageUrl || '';
   const [imageFailed, setImageFailed] = useState(false);
-  const showImage = Boolean(imageUrl) && !imageFailed;
+  useEffect(() => {
+    setImageFailed(false);
+  }, [safeImageUrl]);
+  const showImage = Boolean(safeImageUrl) && !imageFailed;
   const memberCount = Number(group.memberCount || group.members?.length || 0);
   const joinLabel = isPrivate ? 'Request access' : 'Join group';
 
@@ -433,7 +437,7 @@ function GroupCard({ group, role, joinState, joining, onOpen, onJoin, onShare, s
       <View style={styles.cardTop}>
         <View style={styles.avatar}>
           {showImage ? (
-            <Image source={{ uri: imageUrl }} style={styles.avatarImage} contentFit="cover" cachePolicy="disk" onError={() => setImageFailed(true)} />
+            <Image source={{ uri: safeImageUrl }} style={styles.avatarImage} contentFit="cover" cachePolicy="disk" onError={() => setImageFailed(true)} />
           ) : (
             <View style={styles.avatarFallback}>
               <Text style={styles.avatarFallbackText}>{title.charAt(0).toUpperCase()}</Text>

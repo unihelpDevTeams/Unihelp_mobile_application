@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
   Platform,
   Pressable,
   Text,
@@ -36,9 +37,10 @@ export default function StudyMaterials() {
   // Active Tab ('questions' | 'notes')
   const [activeTab, setActiveTab] = useState('questions');
 
-  // Shared Data States
+  // Shared Data & Pagination States
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor] = useState(null);
   const [hasMore, setHasMore] = useState(false);
@@ -49,12 +51,12 @@ export default function StudyMaterials() {
   const [sort, setSort] = useState('newest');
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
 
-  // Ref flags to prevent race conditions during rapid async switching
+  // Ref flag to handle rapid tab switching safely
   const isMountedRef = useRef(true);
 
   // Dynamic Accents
   const isQuestions = activeTab === 'questions';
-  const activeTone = isQuestions ? colors.blueLight : colors.brand;
+  const activeTone = isQuestions ? colors.blue : colors.brand;
   const activeLightTone = isQuestions ? colors.blueLight : colors.brandLight;
 
   const styles = useThemeStyles((c, s, r) => ({
@@ -78,7 +80,7 @@ export default function StudyMaterials() {
       gap: s.xs,
     },
     tabButtonActiveQuestions: {
-      backgroundColor: c.blueLight,
+      backgroundColor: c.blue,
       ...Platform.select({
         ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 4 },
         android: { elevation: 3 },
@@ -94,7 +96,7 @@ export default function StudyMaterials() {
     tabText: { fontSize: 13, fontWeight: '700', color: c.textSecondary },
     tabTextActive: { color: c.onBrand, fontWeight: '800' },
 
-    // SLIM STATUS STRIP (replaces the old tall hero)
+    // SLIM STATUS STRIP
     statusStrip: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -105,17 +107,23 @@ export default function StudyMaterials() {
       marginBottom: s.md,
     },
     statusIconWrap: {
-      width: 34, height: 34, borderRadius: r.lg,
+      width: 34,
+      height: 34,
+      borderRadius: r.lg,
       backgroundColor: 'rgba(255, 255, 255, 0.22)',
-      alignItems: 'center', justifyContent: 'center',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     statusTextWrap: { flex: 1 },
     statusTitle: { fontSize: 14, fontWeight: '800', color: c.onBrand },
     statusSubtitle: { fontSize: 11.5, color: c.onBrand, marginTop: 1 },
     statusUploadButton: {
-      width: 34, height: 34, borderRadius: r.lg,
+      width: 34,
+      height: 34,
+      borderRadius: r.lg,
       backgroundColor: 'rgba(255, 255, 255, 0.22)',
-      alignItems: 'center', justifyContent: 'center',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     statusUploadButtonPressed: { opacity: 0.7 },
 
@@ -136,52 +144,67 @@ export default function StudyMaterials() {
     searchInput: { flex: 1, fontSize: 14, color: c.textPrimary, paddingVertical: 0 },
     searchClear: { padding: 4 },
     filterButton: {
-      width: 46, height: 46, borderRadius: r.xl,
-      alignItems: 'center', justifyContent: 'center',
-      backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault,
+      width: 46,
+      height: 46,
+      borderRadius: r.xl,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
     },
     filterButtonActive: { backgroundColor: activeLightTone, borderColor: activeTone },
     filterButtonPressed: { opacity: 0.75 },
     filterDot: {
-      position: 'absolute', top: 8, right: 8, width: 7, height: 7, borderRadius: 4,
-      backgroundColor: activeTone, borderWidth: 1.5, borderColor: c.card,
+      position: 'absolute',
+      top: 8,
+      right: 8,
+      width: 7,
+      height: 7,
+      borderRadius: 4,
+      backgroundColor: activeTone,
+      borderWidth: 1.5,
+      borderColor: c.card,
     },
 
-    // Quick active-filter summary (tap reopens the sheet)
+    // QUICK ACTIVE FILTER SUMMARY
     activeFilterSummary: {
-      flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: s.md, marginLeft: 2,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginBottom: s.md,
+      marginLeft: 2,
     },
     activeFilterText: { fontSize: 12, fontWeight: '600', color: c.textSecondary },
     activeFilterTextTone: { color: activeTone, fontWeight: '800' },
     activeFilterClear: { fontSize: 12, fontWeight: '800', color: c.red, marginLeft: 4 },
 
-    // RESULTS ROW & COUNTER
+    // RESULTS HEADER
     sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: s.md },
     countBadge: { minWidth: 28, height: 28, paddingHorizontal: s.sm, borderRadius: r.lg, alignItems: 'center', justifyContent: 'center' },
-    countBadgeTextQuestions: { fontSize: 12, fontWeight: '800', color: c.blueLight },
+    countBadgeTextQuestions: { fontSize: 12, fontWeight: '800', color: c.blue },
     countBadgeTextNotes: { fontSize: 12, fontWeight: '800', color: c.brandText },
 
-    // LIST & LOADERS
-    list: { gap: s.sm },
+    // LOADERS & SKELETONS
     loadingWrap: { gap: s.sm, paddingTop: s.xs },
     skeletonCard: {
-      flexDirection: 'row', alignItems: 'center', gap: s.md,
-      height: 84, borderRadius: r['2xl'], paddingHorizontal: s.md,
-      backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.md,
+      height: 84,
+      borderRadius: r['2xl'],
+      paddingHorizontal: s.md,
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
     },
     skeletonIcon: { width: 42, height: 42, borderRadius: r.lg, backgroundColor: c.canvasLight },
     skeletonLines: { flex: 1, gap: 8 },
     skeletonLineWide: { height: 12, borderRadius: 6, backgroundColor: c.canvasLight, width: '70%' },
     skeletonLineNarrow: { height: 10, borderRadius: 5, backgroundColor: c.canvasLight, width: '40%' },
-    loadMoreButton: {
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: s.sm,
-      backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault, borderRadius: r.xl,
-      paddingVertical: s.md, marginTop: s.md,
-    },
-    loadMoreButtonPressed: { backgroundColor: c.canvasLight },
-    loadMoreText: { fontSize: 13, fontWeight: '800' },
+    footerLoader: { paddingVertical: s.lg, alignItems: 'center', justifyContent: 'center' },
 
-    // FILTER SHEET CONTENT
+    // BOTTOM SHEET
     sheetLabel: { fontSize: 11.5, fontWeight: '800', color: c.greyLight, letterSpacing: 0.6, marginBottom: s.sm, marginTop: s.xs },
     sortRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, gap: s.md },
     sortIconWrap: { width: 30, height: 30, borderRadius: 9, backgroundColor: c.canvasLight, alignItems: 'center', justifyContent: 'center' },
@@ -191,20 +214,28 @@ export default function StudyMaterials() {
     sheetDivider: { height: 1, backgroundColor: c.skeleton, marginVertical: s.sm },
     chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: s.xs, marginBottom: s.sm },
     filterChip: {
-      paddingHorizontal: s.md, paddingVertical: 8, borderRadius: r.full,
-      backgroundColor: c.canvasLight, borderWidth: 1, borderColor: c.borderDefault,
+      paddingHorizontal: s.md,
+      paddingVertical: 8,
+      borderRadius: r.full,
+      backgroundColor: c.canvasLight,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
     },
     filterChipActive: { backgroundColor: activeTone, borderColor: activeTone },
     filterChipText: { fontSize: 12.5, fontWeight: '700', color: c.textSecondary },
     filterChipTextActive: { color: c.onBrand, fontWeight: '800' },
     clearAllButton: {
-      alignItems: 'center', justifyContent: 'center', paddingVertical: 13,
-      borderRadius: r.lg, backgroundColor: c.canvasLight, marginTop: s.md,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 13,
+      borderRadius: r.lg,
+      backgroundColor: c.canvasLight,
+      marginTop: s.md,
     },
     clearAllText: { fontSize: 13.5, fontWeight: '800', color: c.red },
   }));
 
-  // Tab switch handler with complete filter reset
+  // Handle Tab Switching
   const handleTabSwitch = (tab) => {
     if (tab === activeTab) return;
     setActiveTab(tab);
@@ -213,11 +244,11 @@ export default function StudyMaterials() {
     setSort('newest');
   };
 
-  // Safe Page Loader
-  const loadPage = useCallback(
-    async ({ reset = false } = {}) => {
-      if (reset) {
-        setLoading(true);
+  // Safe Infinite Page Loader
+  const loadMaterials = useCallback(
+    async (isReset = false) => {
+      if (isReset) {
+        setRefreshing(true);
       } else {
         if (loadingMore || !hasMore) return;
         setLoadingMore(true);
@@ -227,17 +258,18 @@ export default function StudyMaterials() {
         const fetcher = isQuestions ? fetchQuestionsPage : fetchNotesPage;
         const page = await fetcher({
           pageSize: PAGE_SIZE,
-          cursor: reset ? null : cursor,
+          cursor: isReset ? null : cursor,
         });
 
         if (!isMountedRef.current) return;
 
         setItems((current) => {
           const nextItems = page?.items || [];
-          if (reset) return nextItems;
+          if (isReset) return nextItems;
           const seen = new Set(current.map((item) => item.id));
           return [...current, ...nextItems.filter((item) => !seen.has(item.id))];
         });
+
         setCursor(page?.cursor || null);
         setHasMore(Boolean(page?.hasMore));
       } catch (err) {
@@ -245,12 +277,42 @@ export default function StudyMaterials() {
       } finally {
         if (isMountedRef.current) {
           setLoading(false);
+          setRefreshing(false);
           setLoadingMore(false);
         }
       }
     },
     [cursor, hasMore, isQuestions, loadingMore]
   );
+
+  // Primary Fetch Handler
+  useEffect(() => {
+    isMountedRef.current = true;
+    setLoading(true);
+    setItems([]);
+    setCursor(null);
+    setHasMore(false);
+
+    const fetcher = isQuestions ? fetchQuestionsPage : fetchNotesPage;
+
+    fetcher({ pageSize: PAGE_SIZE })
+      .then((page) => {
+        if (!isMountedRef.current) return;
+        setItems(page?.items || []);
+        setCursor(page?.cursor || null);
+        setHasMore(Boolean(page?.hasMore));
+      })
+      .catch((err) => {
+        console.error('Error fetching study data:', err);
+      })
+      .finally(() => {
+        if (isMountedRef.current) setLoading(false);
+      });
+
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, [activeTab, isQuestions]);
 
   // Extract distinct subjects dynamically
   const subjects = useMemo(() => {
@@ -262,7 +324,7 @@ export default function StudyMaterials() {
     return ['All', ...Array.from(subjectSet).sort()];
   }, [items]);
 
-  // Optimized Search and Sorting Filter
+  // Optimized Filtering and Sorting
   const filteredItems = useMemo(() => {
     const query = search.trim().toLowerCase();
     const result = items.filter((item) => {
@@ -313,7 +375,6 @@ export default function StudyMaterials() {
     return sorted;
   }, [items, activeSubject, search, sort]);
 
-  // Filters = subject/sort chosen in the sheet. Search is separate (cleared via its own X).
   const hasActiveFilters = activeSubject !== 'All' || sort !== 'newest';
   const hasAnyRefinement = hasActiveFilters || !!search;
 
@@ -330,56 +391,29 @@ export default function StudyMaterials() {
 
   const activeSortLabel = SORT_OPTIONS.find((o) => o.key === sort)?.label || 'Newest first';
 
-  // Mount/Tab Change effect
-  useEffect(() => {
-    isMountedRef.current = true;
-    setLoading(true);
-    setItems([]);
-    setCursor(null);
-    setHasMore(false);
-
-    const fetcher = isQuestions ? fetchQuestionsPage : fetchNotesPage;
-
-    fetcher({ pageSize: PAGE_SIZE })
-      .then((page) => {
-        if (!isMountedRef.current) return;
-        setItems(page?.items || []);
-        setCursor(page?.cursor || null);
-        setHasMore(Boolean(page?.hasMore));
-      })
-      .catch((err) => {
-        console.error('Error fetching study data:', err);
-      })
-      .finally(() => {
-        if (isMountedRef.current) setLoading(false);
-      });
-
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, [activeTab, isQuestions]);
-
-  // Adjust subject filter if selection no longer exists in current payload
+  // Align Subject selection when tab switches
   useEffect(() => {
     if (activeSubject !== 'All' && !subjects.includes(activeSubject)) {
       setActiveSubject('All');
     }
   }, [activeSubject, subjects]);
 
-  return (
-    <ScreenShell
-      title="Study Materials"
-      subtitle="Access exam past questions & class lecture notes."
-      showBack={false}
-    >
+  // FlatList Header Controls
+  const ListHeader = (
+    <View>
       {/* SEGMENTED TAB BAR */}
       <View style={styles.tabContainer}>
         <Pressable
           onPress={() => handleTabSwitch('questions')}
           accessibilityRole="tab"
           accessibilityState={{ selected: isQuestions }}
-          style={[styles.tabButton, isQuestions && styles.tabButtonActiveQuestions]}>
-          <Ionicons name={isQuestions ? 'clipboard' : 'clipboard-outline'} size={16} color={isQuestions ? colors.onBrand : colors.textSecondary} />
+          style={[styles.tabButton, isQuestions && styles.tabButtonActiveQuestions]}
+        >
+          <Ionicons
+            name={isQuestions ? 'clipboard' : 'clipboard-outline'}
+            size={16}
+            color={isQuestions ? colors.onBrand : colors.textSecondary}
+          />
           <Text style={[styles.tabText, isQuestions && styles.tabTextActive]}>Past Questions</Text>
         </Pressable>
 
@@ -389,12 +423,16 @@ export default function StudyMaterials() {
           accessibilityState={{ selected: !isQuestions }}
           style={[styles.tabButton, !isQuestions && styles.tabButtonActiveNotes]}
         >
-          <Ionicons name={!isQuestions ? 'book' : 'book-outline'} size={16} color={!isQuestions ? colors.onBrand : colors.textSecondary} />
+          <Ionicons
+            name={!isQuestions ? 'book' : 'book-outline'}
+            size={16}
+            color={!isQuestions ? colors.onBrand : colors.textSecondary}
+          />
           <Text style={[styles.tabText, !isQuestions && styles.tabTextActive]}>Lecture Notes</Text>
         </Pressable>
       </View>
 
-      {/* SLIM STATUS STRIP — replaces the old tall hero banner */}
+      {/* SLIM STATUS STRIP */}
       <View style={[styles.statusStrip, { backgroundColor: activeTone }]}>
         <View style={styles.statusIconWrap}>
           <Ionicons name={isQuestions ? 'document-text' : 'journal'} size={18} color={colors.onBrand} />
@@ -427,7 +465,6 @@ export default function StudyMaterials() {
             style={styles.searchInput}
             returnKeyType="search"
             autoCorrect={false}
-            clearButtonMode="never"
           />
           {search.length > 0 && (
             <Pressable onPress={() => setSearch('')} hitSlop={8} style={styles.searchClear} accessibilityLabel="Clear search text">
@@ -448,7 +485,7 @@ export default function StudyMaterials() {
         </Pressable>
       </View>
 
-      {/* QUICK SUMMARY OF ACTIVE FILTERS — tap to reopen the sheet, no permanent chip row */}
+      {/* ACTIVE FILTER SUMMARY */}
       {hasActiveFilters ? (
         <Pressable onPress={() => setFilterSheetOpen(true)} style={styles.activeFilterSummary} accessibilityRole="button" accessibilityLabel="Edit active filters">
           <Ionicons name="funnel" size={12} color={activeTone} />
@@ -475,11 +512,19 @@ export default function StudyMaterials() {
           </View>
         )}
       </View>
+    </View>
+  );
 
-      {/* CONTENT LIST & STATES */}
+  return (
+    <ScreenShell
+      title="Study Materials"
+      subtitle="Access exam past questions & class lecture notes."
+      showBack={false}
+    >
       {loading ? (
         <View style={styles.loadingWrap}>
-          {[1, 2, 3, 4].map((i) => (
+          {ListHeader}
+          {[1, 2, 3, 4, 5].map((i) => (
             <View key={i} style={styles.skeletonCard}>
               <View style={styles.skeletonIcon} />
               <View style={styles.skeletonLines}>
@@ -489,11 +534,13 @@ export default function StudyMaterials() {
             </View>
           ))}
         </View>
-      ) : filteredItems.length > 0 ? (
-        <View style={styles.list}>
-          {filteredItems.map((item) => (
+      ) : (
+        <FlatList
+          data={filteredItems}
+          keyExtractor={(item) => item.id}
+          ListHeaderComponent={ListHeader}
+          renderItem={({ item }) => (
             <DocumentCard
-              key={item.id}
               item={item}
               tone={activeTone}
               onPress={() =>
@@ -503,35 +550,39 @@ export default function StudyMaterials() {
                 })
               }
             />
-          ))}
-
-          {hasMore && (
-            <Pressable
-              onPress={() => loadPage()}
-              disabled={loadingMore}
-              style={({ pressed }) => [styles.loadMoreButton, pressed && styles.loadMoreButtonPressed]}
-              accessibilityRole="button"
-            >
-              {loadingMore ? <ActivityIndicator size="small" color={activeTone} /> : <Ionicons name="chevron-down" size={16} color={activeTone} />}
-              <Text style={[styles.loadMoreText, { color: activeTone }]}>
-                {loadingMore ? 'Loading more...' : `Load more ${isQuestions ? 'questions' : 'notes'}`}
-              </Text>
-            </Pressable>
           )}
-        </View>
-      ) : (
-        <EmptyState
-          title={
-            hasAnyRefinement
-              ? `No matching ${isQuestions ? 'questions' : 'notes'}`
-              : activeSubject === 'All'
-              ? `No ${isQuestions ? 'questions' : 'notes'} available`
-              : `No ${activeSubject} ${isQuestions ? 'questions' : 'notes'}`
+          contentContainerStyle={{ gap: 10, paddingBottom: 24 }}
+          showsVerticalScrollIndicator={false}
+          refreshing={refreshing}
+          onRefresh={() => loadMaterials(true)}
+          onEndReached={() => {
+            if (!hasAnyRefinement && hasMore && !loadingMore) {
+              loadMaterials(false);
+            }
+          }}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.footerLoader}>
+                <ActivityIndicator size="small" color={activeTone} />
+              </View>
+            ) : null
           }
-          description={hasAnyRefinement ? 'Try clearing your search query or adjusting filters.' : 'No study documents have been added yet.'}
-          actionLabel={hasAnyRefinement ? 'Clear filters' : activeSubject !== 'All' ? 'Show all subjects' : undefined}
-          onAction={hasAnyRefinement ? clearEverything : activeSubject !== 'All' ? () => setActiveSubject('All') : undefined}
-          icon="search-outline"
+          ListEmptyComponent={
+            <EmptyState
+              title={
+                hasAnyRefinement
+                  ? `No matching ${isQuestions ? 'questions' : 'notes'}`
+                  : activeSubject === 'All'
+                  ? `No ${isQuestions ? 'questions' : 'notes'} available`
+                  : `No ${activeSubject} ${isQuestions ? 'questions' : 'notes'}`
+              }
+              description={hasAnyRefinement ? 'Try clearing your search query or adjusting filters.' : 'No study documents have been added yet.'}
+              actionLabel={hasAnyRefinement ? 'Clear filters' : activeSubject !== 'All' ? 'Show all subjects' : undefined}
+              onAction={hasAnyRefinement ? clearEverything : activeSubject !== 'All' ? () => setActiveSubject('All') : undefined}
+              icon="search-outline"
+            />
+          }
         />
       )}
 

@@ -37,6 +37,70 @@ const getPeerInfo = (item, currentUid) => {
   return { peerId, peerInfo: item.memberInfo?.[peerId] || {} };
 };
 
+function ConversationItem({
+  item,
+  currentUid,
+  router,
+  colors,
+  styles,
+  getConversationRelationshipLabel,
+  getPeerInfo,
+}) {
+  const { peerId, peerInfo } = getPeerInfo(item, currentUid);
+  const unread = item.unread?.[currentUid] || 0;
+  const relationshipLabel = getConversationRelationshipLabel(peerId);
+  const avatar = typeof peerInfo.avatar === 'string' ? peerInfo.avatar.trim() : peerInfo.avatar || '';
+  const [avatarFailed, setAvatarFailed] = useState(false);
+
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [avatar]);
+
+  return (
+    <Pressable style={styles.chatCard} onPress={() => router.push(`/messages/${item.id}`)}>
+      <View style={styles.avatarWrapper}>
+        {avatar && !avatarFailed ? (
+          <Image source={{ uri: avatar }} style={styles.avatar} onError={() => setAvatarFailed(true)} />
+        ) : (
+          <View style={styles.avatarFallback}>
+            <Text style={styles.avatarInitial}>{(peerInfo.name || 'Student')[0].toUpperCase()}</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.chatCopy}>
+        <View style={styles.chatHeaderRow}>
+          <Text style={styles.chatTitle}>{peerInfo.name || 'Student'}</Text>
+          <Text style={styles.chatTime}>{formatShortTime(item.updatedAt)}</Text>
+        </View>
+        <Text style={styles.chatMessage} numberOfLines={1}>{item.lastMessage || 'Start the conversation.'}</Text>
+        {relationshipLabel ? (
+          <View style={[
+            styles.relationshipPill,
+            relationshipLabel.tone === 'warning' && styles.relationshipPillWarning,
+          ]}>
+            <Ionicons
+              name={relationshipLabel.icon}
+              size={12}
+              color={relationshipLabel.tone === 'warning' ? colors.error : colors.brandText}
+            />
+            <Text style={[
+              styles.relationshipPillText,
+              relationshipLabel.tone === 'warning' && styles.relationshipPillTextWarning,
+            ]}>
+              {relationshipLabel.text}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+      {unread > 0 ? (
+        <View style={styles.unreadBadge}>
+          <Text style={styles.unreadText}>{unread}</Text>
+        </View>
+      ) : null}
+    </Pressable>
+  );
+}
+
 export default function MessagesPage() {
   const router = useRouter();
   const { user, profile } = useAuth();
@@ -359,55 +423,17 @@ export default function MessagesPage() {
   };
 
   // --- Render: Chats Tab ---
-  const renderConversation = ({ item }) => {
-    const { peerId, peerInfo } = getPeerInfo(item, profile?.uid);
-    const unread = item.unread?.[profile?.uid] || 0;
-    const relationshipLabel = getConversationRelationshipLabel(peerId);
-
-    return (
-      <Pressable style={styles.chatCard} onPress={() => router.push(`/messages/${item.id}`)}>
-        <View style={styles.avatarWrapper}>
-          {peerInfo.avatar ? (
-            <Image source={{ uri: peerInfo.avatar }} style={styles.avatar} />
-          ) : (
-            <View style={styles.avatarFallback}>
-              <Text style={styles.avatarInitial}>{(peerInfo.name || 'Student')[0].toUpperCase()}</Text>
-            </View>
-          )}
-        </View>
-        <View style={styles.chatCopy}>
-          <View style={styles.chatHeaderRow}>
-            <Text style={styles.chatTitle}>{peerInfo.name || 'Student'}</Text>
-            <Text style={styles.chatTime}>{formatShortTime(item.updatedAt)}</Text>
-          </View>
-          <Text style={styles.chatMessage} numberOfLines={1}>{item.lastMessage || 'Start the conversation.'}</Text>
-          {relationshipLabel ? (
-            <View style={[
-              styles.relationshipPill,
-              relationshipLabel.tone === 'warning' && styles.relationshipPillWarning,
-            ]}>
-              <Ionicons
-                name={relationshipLabel.icon}
-                size={12}
-                color={relationshipLabel.tone === 'warning' ? colors.error : colors.brandText}
-              />
-              <Text style={[
-                styles.relationshipPillText,
-                relationshipLabel.tone === 'warning' && styles.relationshipPillTextWarning,
-              ]}>
-                {relationshipLabel.text}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-        {unread > 0 ? (
-          <View style={styles.unreadBadge}>
-            <Text style={styles.unreadText}>{unread}</Text>
-          </View>
-        ) : null}
-      </Pressable>
-    );
-  };
+  const renderConversation = ({ item }) => (
+    <ConversationItem
+      item={item}
+      currentUid={profile?.uid}
+      router={router}
+      colors={colors}
+      styles={styles}
+      getConversationRelationshipLabel={getConversationRelationshipLabel}
+      getPeerInfo={getPeerInfo}
+    />
+  );
 
   const renderChatsTab = () => (
     <View style={styles.tabContent}>
@@ -693,7 +719,7 @@ export default function MessagesPage() {
 
   // --- Main Render ---
   return (
-    <ScreenShell title="Messenger" subtitle="Direct messages" showBack loading={loading}>
+    <ScreenShell title="Messenger" subtitle="Direct messages" showBack loading={loading} scrollable={false}>
       {/* Tab Bar */}
       <View style={styles.tabBar}>
         {TABS.map((tab) => {

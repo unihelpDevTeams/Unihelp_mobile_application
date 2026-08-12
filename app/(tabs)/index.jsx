@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
+  ActivityIndicator,
   Pressable,
   Text,
   View,
@@ -13,6 +14,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { layout } from '../../src/shared/theme';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
@@ -27,9 +29,12 @@ import {
   notifyInactiveUsers,
   fetchDailyStreak,
   recordDailyStreak,
+  fetchHostels,
+  fetchStudentListings,
 } from '../../services/firestoreSync';
 import { useAuth } from '../../context/AuthContext';
 import { isRouteAllowedForRole } from '../../src/shared/navigation/routePermissions';
+import { listSuggestedFriends } from '../../src/shared/services/friendships';
 
 // Curated high-res imagery for top-tier visual hierarchy
 const IMAGES = {
@@ -40,26 +45,103 @@ const IMAGES = {
   community: 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?q=80&w=600&auto=format&fit=crop',
 };
 
+const FAB_SIZE = 56;
+
+const pickMediaUrl = (value) => {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  if (typeof value === 'object') {
+    for (const key of ['url', 'secure_url', 'previewUrl', 'fileUrl', 'downloadUrl', 'href', 'link']) {
+      if (typeof value[key] === 'string' && value[key].trim()) return value[key].trim();
+    }
+  }
+  return null;
+};
+
+const shuffleSample = (items = [], limit = 6) => {
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, limit);
+};
+
+const resolveImage = (item = {}) => {
+  const candidates = [];
+  const pushValue = (value) => {
+    if (value == null) return;
+    if (Array.isArray(value)) {
+      value.forEach(pushValue);
+      return;
+    }
+    const candidate = pickMediaUrl(value);
+    if (candidate) candidates.push(candidate);
+  };
+  pushValue(item.imageUrl);
+  pushValue(item.coverUrl);
+  pushValue(item.thumbnailUrl);
+  pushValue(item.previewUrl);
+  pushValue(item.photo);
+  pushValue(item.avatar);
+  pushValue(item.images);
+  pushValue(item.media);
+  pushValue(item.assets);
+  return candidates.find(Boolean) || null;
+};
+
+const formatPrice = (value) => {
+  const num = Number(value);
+  if (value === undefined || value === null || value === '' || Number.isNaN(num)) return null;
+  return `₦${num.toLocaleString()}`;
+};
+
+const friendlyPersonName = (person = {}) => person.username || person.name || person.displayName || person.email || 'Student';
+
 export default function HomeScreen() {
   const router = useRouter();
   const { profile } = useAuth();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const [streakCount, setStreakCount] = useState(0);
   const [streakDates, setStreakDates] = useState([]);
   const [, setIsFabDragging] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
+  const [discoverData, setDiscoverData] = useState({
+    hostels: [],
+    friends: [],
+    products: [],
+    loading: true,
+    error: null,
+  });
+
+  // Reset avatar-error state whenever the source photo actually changes,
+  // otherwise a newly-uploaded photo can never recover from a prior failed load.
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [profile?.photoURL]);
 
   // Floating Action Button Physics
   const fabPan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const fabPositionRef = useRef({ x: 0, y: 0 });
   const fabStartPosition = useRef({ x: 0, y: 0 });
-  const fabLayout = useRef({ width: 0, height: 0 });
+  const fabLayout = useRef({ width: FAB_SIZE, height: FAB_SIZE });
   const fabScale = useRef(new Animated.Value(1)).current;
   const dragDistance = useRef(0);
   const hasPositionedFab = useRef(false);
 
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+
+  // Keep the latest profile available to the discover-fetch effect without
+  // making the effect itself depend on the (frequently-changing) object reference.
+  const profileRef = useRef(profile);
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
 
   const styles = useThemeStyles((c, s, r) => ({
     // Fluid Ambient Top Bar
@@ -136,15 +218,21 @@ export default function HomeScreen() {
     },
 
     // Focus Zone (Dynamic Hero Card)
-    focusCard: {
+    // NOTE: shadow lives on the OUTER wrapper only. The inner wrapper below
+    // carries `overflow: hidden` to clip the image/gradient — combining both
+    // on one view silently kills the shadow on iOS.
+    focusCardShadowWrap: {
       borderRadius: r['3xl'],
-      overflow: 'hidden',
       marginBottom: s.xl,
       shadowColor: c.brand,
       shadowOffset: { width: 0, height: 12 },
       shadowOpacity: 0.18,
       shadowRadius: 24,
       elevation: 8,
+    },
+    focusCard: {
+      borderRadius: r['3xl'],
+      overflow: 'hidden',
     },
     focusImageBg: {
       width: '100%',
@@ -345,30 +433,34 @@ export default function HomeScreen() {
     },
 
     // Floating AI Dynamic Glass Pill
-    fab: {
+    // Shadow on the outer wrapper; overflow:hidden (for the gradient) lives
+    // on the inner wrapper so the shadow actually renders.
+    fabShadowWrap: {
       position: 'absolute',
       zIndex: 1000,
-      minWidth: 80,
-      height: 52,
-      paddingHorizontal: s.lg,
-      borderRadius: '50%',
-      overflow: 'hidden',
+      width: FAB_SIZE,
+      height: FAB_SIZE,
+      borderRadius: FAB_SIZE / 2,
       elevation: 12,
       shadowColor: c.brand,
       shadowOpacity: 0.35,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 6 },
     },
+    fab: {
+      flex: 1,
+      borderRadius: FAB_SIZE / 2,
+      overflow: 'hidden',
+    },
     fabGradient: {
       flex: 1,
-      flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
-      gap: 4,
+      gap: 2,
     },
     fabText: {
       color: c.onBrand,
-      fontSize: 13,
+      fontSize: 10,
       fontWeight: '800',
     },
   }));
@@ -399,6 +491,48 @@ export default function HomeScreen() {
     notifyInactiveUsers().catch(() => {});
   }, [profile?.uid]);
 
+  useEffect(() => {
+    let isActive = true;
+    const loadDiscover = async () => {
+      setDiscoverData((current) => ({ ...current, loading: true, error: null }));
+      try {
+        const currentProfile = profileRef.current;
+        const [hostelRows, productRows, friendRows] = await Promise.all([
+          fetchHostels().catch(() => []),
+          fetchStudentListings().catch(() => []),
+          currentProfile?.uid
+            ? listSuggestedFriends({ uid: currentProfile.uid, profile: currentProfile, pageSize: 8 }).catch(() => [])
+            : Promise.resolve([]),
+        ]);
+
+        if (!isActive) return;
+
+        const hostels = shuffleSample(
+          (hostelRows || []).filter((item) => item && (item.title || item.name || item.location)).slice(0, 12),
+          4
+        );
+        const products = shuffleSample(
+          (productRows || []).filter((item) => item && (item.title || item.name)).slice(0, 12),
+          4
+        );
+        const friends = (friendRows || []).slice(0, 4);
+
+        setDiscoverData({ hostels, friends, products, loading: false, error: null });
+      } catch (error) {
+        if (!isActive) return;
+        setDiscoverData({ hostels: [], friends: [], products: [], loading: false, error: error?.message || 'Discover feed unavailable.' });
+      }
+    };
+
+    loadDiscover();
+    return () => {
+      isActive = false;
+    };
+    // Deliberately only re-fetch when the signed-in user changes — `profile`
+    // is read from profileRef so a new object reference (e.g. after a
+    // streak/activity update) doesn't retrigger this fetch.
+  }, [profile?.uid]);
+
   const handleStreakPress = useCallback(() => router.push('/streak'), [router]);
 
   const handleStudyNow = useCallback(async () => {
@@ -415,19 +549,22 @@ export default function HomeScreen() {
   const avatarInitial = (profile?.username || 'U').trim().charAt(0).toUpperCase();
   const showAvatarImage = !!profile?.photoURL && !avatarFailed;
 
-  // Drag Clamping for AI FAB
+  // Drag Clamping for AI FAB — keeps extra clearance above the footer/tab
+  // bar and the device's bottom safe-area inset so the FAB never sits on
+  // top of navigation chrome.
   const clampFabPosition = useCallback(
     (nextX, nextY) => {
-      const width = fabLayout.current.width || 120;
-      const height = fabLayout.current.height || 52;
+      const width = fabLayout.current.width || FAB_SIZE;
+      const height = fabLayout.current.height || FAB_SIZE;
+      const bottomClearance = 96 + (insets.bottom || 0);
       const maxX = Math.max(0, screenWidth - width - layout.screenPadding);
-      const maxY = Math.max(0, screenHeight - height - 100);
+      const maxY = Math.max(0, screenHeight - height - bottomClearance);
       return {
         x: Math.min(Math.max(nextX, layout.screenPadding), maxX),
-        y: Math.min(Math.max(nextY, 20), maxY),
+        y: Math.min(Math.max(nextY, insets.top + 20), maxY),
       };
     },
-    [screenHeight, screenWidth]
+    [screenHeight, screenWidth, insets.bottom, insets.top]
   );
 
   const animateFabScale = useCallback(
@@ -451,13 +588,13 @@ export default function HomeScreen() {
         hasPositionedFab.current = true;
         const initial = clampFabPosition(
           screenWidth - width - layout.screenPadding,
-          screenHeight - height - 110
+          screenHeight - height - (96 + (insets.bottom || 0))
         );
         fabPositionRef.current = initial;
         fabPan.setValue(initial);
       }
     },
-    [clampFabPosition, fabPan, screenHeight, screenWidth]
+    [clampFabPosition, fabPan, screenHeight, screenWidth, insets.bottom]
   );
 
   const panResponder = useMemo(
@@ -493,7 +630,7 @@ export default function HomeScreen() {
             return;
           }
           dragDistance.current = 0;
-          const width = fabLayout.current.width || 120;
+          const width = fabLayout.current.width || FAB_SIZE;
           const midX = fabPositionRef.current.x + width / 2;
           const snapLeft = layout.screenPadding;
           const snapRight = Math.max(0, screenWidth - width - layout.screenPadding);
@@ -510,6 +647,219 @@ export default function HomeScreen() {
       }),
     [animateFabScale, clampFabPosition, fabPan, router, screenWidth]
   );
+
+  const discoverySectionStyles = useThemeStyles((c, s, r) => ({
+    discoverySection: {
+      marginBottom: s.xl,
+    },
+    sectionMeta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: s.md,
+    },
+    discoveryTitle: {
+      fontSize: 18,
+      fontWeight: '900',
+      color: c.ink,
+      letterSpacing: -0.3,
+    },
+    metaText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: c.brandText,
+    },
+    discoveryRow: {
+      flexDirection: 'row',
+      flexShrink: 0,
+      gap: s.sm,
+      marginHorizontal: -layout.screenPadding,
+      paddingHorizontal: layout.screenPadding,
+    },
+    // Shadow on the outer wrapper; overflow:hidden (needed to clip the
+    // image corners) lives on the inner wrapper.
+    discoveryCardShadowWrap: {
+      width: 190,
+      marginRight: s.md,
+      borderRadius: r['2xl'],
+      shadowColor: c.shadow,
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.1,
+      shadowRadius: 12,
+      elevation: 3,
+    },
+    discoveryCard: {
+      borderRadius: r['2xl'],
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.borderLight || c.border,
+      overflow: 'hidden',
+    },
+    discoveryMedia: {
+      width: '100%',
+      height: 116,
+      backgroundColor: c.canvasLight,
+    },
+    discoveryBody: {
+      padding: s.md,
+    },
+    discoveryPrice: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: c.brandText,
+      marginBottom: 6,
+    },
+    discoveryName: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: c.ink,
+      marginBottom: 3,
+    },
+    discoveryMeta: {
+      fontSize: 11,
+      color: c.grey,
+      fontWeight: '600',
+    },
+    avatarRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.sm,
+      marginBottom: 8,
+    },
+    avatarBubble: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: c.brandLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    avatarText: {
+      color: c.brandText,
+      fontSize: 12,
+      fontWeight: '800',
+    },
+    discoveryFooter: {
+      marginTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    miniLabel: {
+      fontSize: 10,
+      fontWeight: '800',
+      color: c.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    loadingWrap: {
+      height: 120,
+      borderRadius: r['2xl'],
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.borderLight || c.border,
+    },
+    discoveryPlaceholder: {
+      paddingVertical: s.md,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: r.xl,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.borderLight || c.border,
+    },
+    discoveryPlaceholderText: {
+      fontSize: 12,
+      color: c.grey,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+  }));
+
+  const renderDiscoveryCard = (item, type) => {
+    if (type === 'hostel') {
+      const price = formatPrice(item?.price || item?.rent) || 'Price available';
+      const imageUrl = resolveImage(item) || IMAGES.hostel;
+      return (
+        <View key={item.id || item.uid || item.title || 'hostel'} style={discoverySectionStyles.discoveryCardShadowWrap}>
+          <Pressable style={discoverySectionStyles.discoveryCard} onPress={() => router.push('/hostelmarketplace')}>
+            <Image source={{ uri: imageUrl }} style={discoverySectionStyles.discoveryMedia} resizeMode="cover" />
+            <View style={discoverySectionStyles.discoveryBody}>
+              <Text style={discoverySectionStyles.discoveryPrice}>{price}</Text>
+              <Text style={discoverySectionStyles.discoveryName} numberOfLines={1}>{item.title || item.name || 'Student hostel'}</Text>
+              <Text style={discoverySectionStyles.discoveryMeta} numberOfLines={2}>{item.location || item.area || 'Near campus'}</Text>
+              <View style={discoverySectionStyles.discoveryFooter}>
+                <Text style={discoverySectionStyles.miniLabel}>Hostel</Text>
+                <Ionicons name="arrow-forward" size={14} color={colors.brandText} />
+              </View>
+            </View>
+          </Pressable>
+        </View>
+      );
+    }
+
+    if (type === 'friend') {
+      const person = item || {};
+      const personName = friendlyPersonName(person);
+      const personImage = resolveImage(person) || null;
+      const school = person.school || person.university || person.department || 'Student network';
+      const targetId = person.id || person.uid;
+      return (
+        <View key={targetId || personName} style={discoverySectionStyles.discoveryCardShadowWrap}>
+          <Pressable
+            style={discoverySectionStyles.discoveryCard}
+            disabled={!targetId}
+            onPress={() => targetId && router.push(`/view-user-profile/${targetId}`)}
+          >
+            <View style={[discoverySectionStyles.discoveryMedia, { justifyContent: 'center', alignItems: 'center', backgroundColor: colors.brandLight }]}>
+              {personImage ? (
+                <Image source={{ uri: personImage }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+              ) : (
+                <View style={discoverySectionStyles.avatarBubble}>
+                  <Text style={discoverySectionStyles.avatarText}>{personName[0]?.toUpperCase() || 'S'}</Text>
+                </View>
+              )}
+            </View>
+            <View style={discoverySectionStyles.discoveryBody}>
+              <View style={discoverySectionStyles.avatarRow}>
+                <View style={discoverySectionStyles.avatarBubble}>
+                  <Text style={discoverySectionStyles.avatarText}>{personName[0]?.toUpperCase() || 'S'}</Text>
+                </View>
+                <Text style={discoverySectionStyles.discoveryName} numberOfLines={1}>{personName}</Text>
+              </View>
+              <Text style={discoverySectionStyles.discoveryMeta} numberOfLines={2}>{school}</Text>
+              <View style={discoverySectionStyles.discoveryFooter}>
+                <Text style={discoverySectionStyles.miniLabel}>Match</Text>
+                <Text style={discoverySectionStyles.discoveryMeta}>{item.score ? `${item.score}%` : 'New'}</Text>
+              </View>
+            </View>
+          </Pressable>
+        </View>
+      );
+    }
+
+    const price = formatPrice(item?.price || item?.amount) || 'Price available';
+    const imageUrl = resolveImage(item) || IMAGES.marketplace;
+    return (
+      <View key={item.id || item.uid || item.title || 'product'} style={discoverySectionStyles.discoveryCardShadowWrap}>
+        <Pressable style={discoverySectionStyles.discoveryCard} onPress={() => router.push('/studentmarketplace')}>
+          <Image source={{ uri: imageUrl }} style={discoverySectionStyles.discoveryMedia} resizeMode="cover" />
+          <View style={discoverySectionStyles.discoveryBody}>
+            <Text style={discoverySectionStyles.discoveryPrice}>{price}</Text>
+            <Text style={discoverySectionStyles.discoveryName} numberOfLines={1}>{item.title || item.name || 'Student product'}</Text>
+            <Text style={discoverySectionStyles.discoveryMeta} numberOfLines={2}>{item.category || item.status || 'Campus listing'}</Text>
+            <View style={discoverySectionStyles.discoveryFooter}>
+              <Text style={discoverySectionStyles.miniLabel}>Market</Text>
+              <Ionicons name="arrow-forward" size={14} color={colors.brandText} />
+            </View>
+          </View>
+        </Pressable>
+      </View>
+    );
+  };
 
   // Filtered tools based on user roles
   const toolsList = [
@@ -565,6 +915,11 @@ export default function HomeScreen() {
     },
   ].filter((tool) => isRouteAllowedForRole(tool.route, profile?.role));
 
+  const streakSubtitle =
+    streakCount > 0
+      ? `You have ${streakCount} consecutive study day${streakCount === 1 ? '' : 's'} logged. Keep the momentum going!`
+      : 'Log today\u2019s study session to start your streak.';
+
   return (
     <ScreenShell
       showFooter
@@ -572,7 +927,7 @@ export default function HomeScreen() {
         <Animated.View
           onLayout={handleFabLayout}
           style={[
-            styles.fab,
+            styles.fabShadowWrap,
             {
               transform: [
                 { translateX: fabPan.x },
@@ -582,7 +937,7 @@ export default function HomeScreen() {
             },
           ]}
           {...panResponder.panHandlers}>
-          <Pressable style={{ flex: 1 }} onPress={() => router.push('/ai')}>
+          <Pressable style={styles.fab} onPress={() => router.push('/ai')}>
             <LinearGradient
               colors={['#6366F1', '#8B5CF6']}
               start={{ x: 0, y: 0 }}
@@ -624,55 +979,55 @@ export default function HomeScreen() {
       </View>
 
       {/* DYNAMIC FOCUS ZONE HERO CARD */}
-      <View style={styles.focusCard}>
-        <ImageBackground
-          source={{ uri: IMAGES.heroMesh }}
-          style={styles.focusImageBg}
-          resizeMode="cover"
-        >
-          <LinearGradient
-            colors={['rgba(15, 23, 42, 0.4)', 'rgba(15, 23, 42, 0.92)']}
-            style={styles.focusGradient}
+      <View style={styles.focusCardShadowWrap}>
+        <View style={styles.focusCard}>
+          <ImageBackground
+            source={{ uri: IMAGES.heroMesh }}
+            style={styles.focusImageBg}
+            resizeMode="cover"
           >
-            <View style={styles.focusHeaderRow}>
-              <View style={styles.focusTag}>
-                <View style={styles.liveDot} />
-                <Text style={styles.focusTagText}>ACADEMIC COCKPIT</Text>
+            <LinearGradient
+              colors={['rgba(15, 23, 42, 0.4)', 'rgba(15, 23, 42, 0.92)']}
+              style={styles.focusGradient}
+            >
+              <View style={styles.focusHeaderRow}>
+                <View style={styles.focusTag}>
+                  <View style={styles.liveDot} />
+                  <Text style={styles.focusTagText}>ACADEMIC COCKPIT</Text>
+                </View>
+                <Ionicons name="compass" size={22} color={colors.onBrand} />
               </View>
-              <Ionicons name="compass" size={22} color={colors.onBrand} />
-            </View>
 
-            <View style={styles.focusBody}>
-              <Text style={styles.focusTitle}>Ready to crush today&apos;s goals?</Text>
-              <Text style={styles.focusSubtitle}>
-                You have {streakCount} consecutive study days logged. Keep the momentum going!
-              </Text>
-            </View>
+              <View style={styles.focusBody}>
+                <Text style={styles.focusTitle}>Ready to crush today&apos;s goals?</Text>
+                <Text style={styles.focusSubtitle}>{streakSubtitle}</Text>
+              </View>
 
-            <View style={styles.focusFooterRow}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.btnFocusPrimary,
-                  pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] },
-                ]}
-                onPress={() => router.push('/(tabs)/studyMaterials')}
-              >
-                <Ionicons name="library" size={18} color={colors.brandText} />
-                <Text style={styles.btnFocusPrimaryText}>Study Vault</Text>
-              </Pressable>
+              <View style={styles.focusFooterRow}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.btnFocusPrimary,
+                    pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] },
+                  ]}
+                  onPress={() => router.push('/(tabs)/studyMaterials')}
+                >
+                  <Ionicons name="library" size={18} color={colors.brandText} />
+                  <Text style={styles.btnFocusPrimaryText}>Study Vault</Text>
+                </Pressable>
 
-              <Pressable
-                style={({ pressed }) => [
-                  styles.btnFocusIcon,
-                  pressed && { opacity: 0.9 },
-                ]}
-                onPress={() => router.push('/tasks')}
-              >
-                <Ionicons name="checkmark-done" size={20} color={colors.onBrand} />
-              </Pressable>
-            </View>
-          </LinearGradient>
-        </ImageBackground>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.btnFocusIcon,
+                    pressed && { opacity: 0.9 },
+                  ]}
+                  onPress={() => router.push('/tasks')}
+                >
+                  <Ionicons name="checkmark-done" size={20} color={colors.onBrand} />
+                </Pressable>
+              </View>
+            </LinearGradient>
+          </ImageBackground>
+        </View>
       </View>
 
       {/* STREAK WIDGET */}
@@ -726,8 +1081,7 @@ export default function HomeScreen() {
           ))}
         </View>
       </View>
-
-      {/* HORIZONTAL CAMPUS DISCOVERY CAROUSEL */}
+          {/* HORIZONTAL CAMPUS DISCOVERY CAROUSEL */}
       <View style={{ marginBottom: layout.screenPadding }}>
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionTitle}>Explore Campus</Text>
@@ -793,6 +1147,83 @@ export default function HomeScreen() {
           </Pressable>
         </ScrollView>
       </View>
+      
+      <View style={discoverySectionStyles.discoverySection}>
+        <View style={discoverySectionStyles.sectionMeta}>
+          <Text style={discoverySectionStyles.discoveryTitle}>Discover</Text>
+          <Pressable onPress={() => router.push('/find-friends')}>
+            <Text style={discoverySectionStyles.metaText}>Fresh picks</Text>
+          </Pressable>
+        </View>
+
+        {discoverData.loading ? (
+          <View style={discoverySectionStyles.loadingWrap}>
+            <ActivityIndicator size="small" color={colors.brand} />
+          </View>
+        ) : discoverData.error ? (
+          <View style={discoverySectionStyles.discoveryPlaceholder}>
+            <Text style={discoverySectionStyles.discoveryPlaceholderText}>{discoverData.error}</Text>
+          </View>
+        ) : (
+          <View style={{ gap: 18 }}>
+            <View>
+              <View style={discoverySectionStyles.sectionMeta}>
+                <Text style={styles.sectionTitle}>Hostels</Text>
+                <Pressable onPress={() => router.push('/hostelmarketplace')}>
+                  <Text style={discoverySectionStyles.metaText}>View all</Text>
+                </Pressable>
+              </View>
+              {discoverData.hostels.length ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={discoverySectionStyles.discoveryRow}>
+                  {discoverData.hostels.map((item) => renderDiscoveryCard(item, 'hostel'))}
+                </ScrollView>
+              ) : (
+                <View style={discoverySectionStyles.discoveryPlaceholder}>
+                  <Text style={discoverySectionStyles.discoveryPlaceholderText}>No hostels are available right now.</Text>
+                </View>
+              )}
+            </View>
+
+            <View>
+              <View style={discoverySectionStyles.sectionMeta}>
+                <Text style={styles.sectionTitle}>Friend suggestions</Text>
+                <Pressable onPress={() => router.push('/find-friends')}>
+                  <Text style={discoverySectionStyles.metaText}>Connect</Text>
+                </Pressable>
+              </View>
+              {discoverData.friends.length ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={discoverySectionStyles.discoveryRow}>
+                  {discoverData.friends.map((item) => renderDiscoveryCard(item, 'friend'))}
+                </ScrollView>
+              ) : (
+                <View style={discoverySectionStyles.discoveryPlaceholder}>
+                  <Text style={discoverySectionStyles.discoveryPlaceholderText}>Your network is warming up. Check back soon.</Text>
+                </View>
+              )}
+            </View>
+
+            <View>
+              <View style={discoverySectionStyles.sectionMeta}>
+                <Text style={styles.sectionTitle}>Marketplace</Text>
+                <Pressable onPress={() => router.push('/studentmarketplace')}>
+                  <Text style={discoverySectionStyles.metaText}>Browse</Text>
+                </Pressable>
+              </View>
+              {discoverData.products.length ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={discoverySectionStyles.discoveryRow}>
+                  {discoverData.products.map((item) => renderDiscoveryCard(item, 'product'))}
+                </ScrollView>
+              ) : (
+                <View style={discoverySectionStyles.discoveryPlaceholder}>
+                  <Text style={discoverySectionStyles.discoveryPlaceholderText}>There are no recent student listings yet.</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        )}
+      </View>
+
+      
     </ScreenShell>
   );
 }

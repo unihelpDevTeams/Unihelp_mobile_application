@@ -16,6 +16,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { spacing } from '../../src/shared/theme';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
@@ -30,14 +31,62 @@ import { useDepartments } from '../../src/signup/hooks/useDepartments';
 import { ACADEMIC_LEVELS } from '../../src/signup/validation';
 import { useAuth } from '../../context/AuthContext';
 import { saveUserProfile, fetchDailyStreak } from '../../services/firestoreSync';
-import { uploadToCloudinary } from '../../services/cloudinary';
-import { updateProfile as updateFirebaseAuthProfile } from 'firebase/auth';
 import { getDocs, collection, query, where } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { COLLECTIONS } from '../../src/shared/firestoreSchema';
 import { fetchChallengeStats } from './../../src/shared/challenge/service';
+import { toCloudinaryAsset, uploadToCloudinary } from '../../services/cloudinary';
+import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 
 const BIO_MAX_LENGTH = 160;
+const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
+
+const updateProfilePhoto = async ({ kind = 'photo', uri }) => {
+  if (!uri) {
+    throw new Error('No image was selected. Please choose another photo.');
+  }
+
+  const fileInfo = await FileSystem.getInfoAsync(uri);
+  if (!fileInfo.exists || !fileInfo.size) {
+    throw new Error('This image could not be read. Please try another file.');
+  }
+
+  if (fileInfo.size > MAX_IMAGE_BYTES) {
+    throw new Error('Image is too large. Please upload an image smaller than 30MB.');
+  }
+
+  const extension = String(uri).toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+  const filename = `${kind}-${Date.now()}.${extension}`;
+  const uploaded = await uploadToCloudinary(
+    { uri, name: filename, type: 'image/jpeg', size: fileInfo.size },
+    { resourceType: 'image', validationKind: 'image' }
+  );
+
+  const secureUrl = uploaded?.secure_url || uploaded?.url || '';
+  if (!secureUrl) {
+    throw new Error('The image upload did not return a valid URL. Please try again.');
+  }
+
+  if (kind === 'photo') {
+    const photoAsset = toCloudinaryAsset(uploaded, { url: secureUrl, resourceType: 'image' });
+    try {
+      await saveUserProfile({ photo: secureUrl, photoURL: secureUrl, photoAsset });
+    } catch (saveError) {
+      await deleteCloudinaryAssets({ assets: [photoAsset] }).catch(() => {});
+      throw saveError;
+    }
+    return photoAsset;
+  }
+
+  const coverAsset = toCloudinaryAsset(uploaded, { url: secureUrl, resourceType: 'image' });
+  try {
+    await saveUserProfile({ cover: secureUrl, coverPhoto: secureUrl, coverAsset });
+  } catch (saveError) {
+    await deleteCloudinaryAssets({ assets: [coverAsset] }).catch(() => {});
+    throw saveError;
+  }
+  return coverAsset;
+};
 
 // Fields shown together inside the single "Edit Profile" sheet, in order.
 const fields = [
@@ -115,6 +164,14 @@ export default function ProfileScreen() {
     moreButtonPressed: { backgroundColor: c.canvasLight },
 
     identity: { alignItems: 'center', paddingVertical: s.lg, marginBottom: s.md },
+    coverWrap: { width: '100%', height: 140, borderRadius: r['2xl'], overflow: 'hidden', marginBottom: s.md },
+    coverImage: { width: '100%', height: '100%' },
+    coverPlaceholder: { width: '100%', height: '100%', backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
+    coverBadge: {
+      position: 'absolute', right: s.sm, bottom: s.sm, width: 34, height: 34, borderRadius: 17,
+      backgroundColor: 'rgba(15, 23, 42, 0.5)', alignItems: 'center', justifyContent: 'center',
+      borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)',
+    },
     avatarWrap: { position: 'relative', marginBottom: s.md },
     avatar: {
       width: 88, height: 88, borderRadius: 44, backgroundColor: c.brand,
@@ -349,7 +406,8 @@ export default function ProfileScreen() {
     return source.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('') || 'S';
   }, [form.username, user?.email]);
 
-  const profilePhoto = profile?.photo || user?.photoURL || '';
+  const profilePhoto = profile?.photoURL || profile?.photo || user?.photoURL || '';
+  const profileCover = profile?.coverPhoto || profile?.cover || profile?.coverUrl || '';
   const isAdmin = profile?.admin === true;
   const totalUploads = stats.listings + stats.hostelListings + stats.stories;
 
@@ -402,33 +460,68 @@ export default function ProfileScreen() {
       }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true, aspect: [1, 1], quality: 0.85,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.5,
       });
+
       if (result.canceled || !result.assets?.[0]?.uri) return;
+
+      const asset = result.assets[0];
+      if (asset.fileSize && asset.fileSize > MAX_IMAGE_BYTES) {
+        showStatus({ type: 'error', text: 'Image is too large. Please upload an image smaller than 30MB.' });
+        return;
+      }
+
       setPhotoUploading(true);
       setStatus(null);
-      const uploaded = await uploadToCloudinary(
-        { uri: result.assets[0].uri, name: `${(form.username || user?.email || 'profile').trim().replace(/\s+/g, '-').toLowerCase() || 'profile'}.jpg`, type: 'image/jpeg' },
-        { resourceType: 'image', validationKind: 'image' }
-      );
-      const nextPhoto = uploaded?.secure_url || '';
-      const currentPhoto = profile?.photo || user?.photoURL;
-      if (currentPhoto && currentPhoto.includes('res.cloudinary.com')) {
-        try {
-          const { deleteCloudinaryAssets } = await import('../../services/mediaCleanup');
-          await deleteCloudinaryAssets({ urls: [currentPhoto] });
-        } catch (cleanupError) {
-          console.log('Profile photo cleanup (non-blocking):', cleanupError?.message);
-        }
-      }
-      await updateFirebaseAuthProfile(user, { photoURL: nextPhoto || null });
-      await saveUserProfile({ photo: nextPhoto || '' });
+      const previousAsset = profile?.photoAsset || (profilePhoto ? { url: profilePhoto, resourceType: 'image' } : null);
+      await updateProfilePhoto({ kind: 'photo', uri: asset.uri });
       await refreshProfile();
+      if (previousAsset?.publicId || previousAsset?.url) {
+        await deleteCloudinaryAssets({ assets: [previousAsset] }).catch(() => {});
+      }
       if (isMountedRef.current) showStatus({ type: 'success', text: 'Profile photo updated.' });
     } catch (error) {
       if (isMountedRef.current) showStatus({ type: 'error', text: error?.message || 'Unable to update your profile photo. Please try again.' });
     } finally {
       if (isMountedRef.current) setPhotoUploading(false);
+    }
+  };
+
+  const pickCoverPhoto = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        showStatus({ type: 'error', text: 'Photo library access is needed to change your cover photo. You can enable it in Settings.' });
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.5,
+      });
+
+      if (result.canceled || !result.assets?.[0]?.uri) return;
+
+      const asset = result.assets[0];
+      if (asset.fileSize && asset.fileSize > MAX_IMAGE_BYTES) {
+        showStatus({ type: 'error', text: 'Cover photo is too large. Please upload an image smaller than 30MB.' });
+        return;
+      }
+
+      setStatus(null);
+      const previousAsset = profile?.coverAsset || (profileCover ? { url: profileCover, resourceType: 'image' } : null);
+      await updateProfilePhoto({ kind: 'cover', uri: asset.uri });
+      await refreshProfile();
+      if (previousAsset?.publicId || previousAsset?.url) {
+        await deleteCloudinaryAssets({ assets: [previousAsset] }).catch(() => {});
+      }
+      if (isMountedRef.current) showStatus({ type: 'success', text: 'Cover photo updated.' });
+    } catch (error) {
+      if (isMountedRef.current) showStatus({ type: 'error', text: error?.message || 'Unable to update your cover photo. Please try again.' });
     }
   };
 
@@ -802,9 +895,26 @@ export default function ProfileScreen() {
         {/* IDENTITY HEADER */}
         <Animated.View style={[styles.identity, { opacity: headerFade }]}>
           <Pressable
-            style={styles.avatarWrap}
-            onPress={pickPhoto}
+            style={styles.coverWrap}
+            onPress={pickCoverPhoto}
+            accessibilityRole="button"
+            accessibilityLabel="Change cover photo"
+          >
+            {profileCover ? (
+              <Image source={{ uri: profileCover }} style={styles.coverImage} contentFit="cover" />
+            ) : (
+              <View style={styles.coverPlaceholder}>
+                <Ionicons name="image-outline" size={26} color={colors.brandText} />
+              </View>
+            )}
+            <View style={styles.coverBadge}>
+              <Ionicons name="camera-outline" size={16} color={colors.onBrand} />
+            </View>
+          </Pressable>
+
+          <Pressable
             disabled={photoUploading}
+            onPress={pickPhoto}
             accessibilityRole="button"
             accessibilityLabel="Change profile photo"
           >
