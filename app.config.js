@@ -28,7 +28,7 @@ const extra = {
     process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID || "",
 
   eas: {
-    projectId: "42510ca2-86e1-425d-a072-16c0a5c2feb4",
+    projectId: "4126b4b6-fee5-4a7f-a0ed-481e1bc9cd87",
   },
 };
 
