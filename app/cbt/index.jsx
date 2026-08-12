@@ -690,15 +690,15 @@ export default function CBTPracticeScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 }}>Mock Simulator</Text>
                   <Text style={{ color: T.white, fontSize: 24, fontWeight: '900', marginTop: 4 }}>Ready for Practice?</Text>
-                  <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 12, marginTop: 6, lineHeight: 18 }}>Prepare with standard UTME & JAMB mock test papers.</Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 12, marginTop: 6, lineHeight: 18 }}>Level-up your exam performance with our interactive mock tests.</Text>
                 </View>
                 <TouchableOpacity
                   onPress={() => setShowHistory(true)}
-                  style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: 12, borderRadius: 16 }}
+                  style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 16 }}
                   accessibilityRole="button"
                   accessibilityLabel="View test history"
                 >
-                  <Ionicons name="bar-chart-outline" size={22} color={T.white} />
+                  <Ionicons name="time-outline" size={22} color={'red'} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -813,7 +813,7 @@ export default function CBTPracticeScreen() {
               <View style={{ marginBottom: 24, gap: 12 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
                   <Ionicons name="time" size={20} color={T.indigo} />
-                  <Text style={{ flex: 1, color: T.textSecondary, fontSize: 14, lineHeight: 20 }}>Timer countdown will initiate immediately upon clicking "Launch Test Session".</Text>
+                  <Text style={{ flex: 1, color: T.textSecondary, fontSize: 14, lineHeight: 20 }}>Timer countdown will initiate immediately upon clicking &#34;Launch Test Session&#34;.</Text>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
                   <Ionicons name="grid" size={20} color={T.indigo} />
@@ -1017,7 +1017,7 @@ export default function CBTPracticeScreen() {
             </Modal>
 
             {/* Primary Question View Surface */}
-            <ScrollView style={{ flex: 1, paddingHorizontal: 20, paddingTop: 24 }} contentContainerStyle={{ paddingBottom: 120 }}>
+            <ScrollView style={{ flex: 1, paddingHorizontal: 20, paddingTop: 20 }} contentContainerStyle={{ paddingBottom: 120 }}>
               <View style={{ backgroundColor: T.card, padding: 24, borderRadius: 24, borderWidth: 1, borderColor: T.border, marginBottom: 24 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <Text style={{ fontSize: 12, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1, color: T.indigo }}>Question {currentIndex + 1}</Text>
@@ -1065,7 +1065,7 @@ export default function CBTPracticeScreen() {
             </ScrollView>
 
             {/* Authentic CBT Navigation Dock */}
-            <View style={{ backgroundColor: T.card, borderTopWidth: 1, borderTopColor: T.border, padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ backgroundColor: T.card, borderTopWidth: 1, borderTopColor: T.border, padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', bottom: 0, left: 0, right: 0, position: 'absolute' }}>
               <TouchableOpacity
                 onPress={goBack}
                 disabled={currentIndex === 0}

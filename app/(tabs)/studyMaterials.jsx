@@ -54,7 +54,7 @@ export default function StudyMaterials() {
 
   // Dynamic Accents
   const isQuestions = activeTab === 'questions';
-  const activeTone = isQuestions ? colors.blue : colors.brand;
+  const activeTone = isQuestions ? colors.blueLight : colors.brand;
   const activeLightTone = isQuestions ? colors.blueLight : colors.brandLight;
 
   const styles = useThemeStyles((c, s, r) => ({
@@ -78,7 +78,7 @@ export default function StudyMaterials() {
       gap: s.xs,
     },
     tabButtonActiveQuestions: {
-      backgroundColor: c.blue,
+      backgroundColor: c.blueLight,
       ...Platform.select({
         ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 4 },
         android: { elevation: 3 },
@@ -111,7 +111,7 @@ export default function StudyMaterials() {
     },
     statusTextWrap: { flex: 1 },
     statusTitle: { fontSize: 14, fontWeight: '800', color: c.onBrand },
-    statusSubtitle: { fontSize: 11.5, color: c.brandGlow, marginTop: 1 },
+    statusSubtitle: { fontSize: 11.5, color: c.onBrand, marginTop: 1 },
     statusUploadButton: {
       width: 34, height: 34, borderRadius: r.lg,
       backgroundColor: 'rgba(255, 255, 255, 0.22)',
@@ -158,7 +158,7 @@ export default function StudyMaterials() {
     // RESULTS ROW & COUNTER
     sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: s.md },
     countBadge: { minWidth: 28, height: 28, paddingHorizontal: s.sm, borderRadius: r.lg, alignItems: 'center', justifyContent: 'center' },
-    countBadgeTextQuestions: { fontSize: 12, fontWeight: '800', color: c.blue },
+    countBadgeTextQuestions: { fontSize: 12, fontWeight: '800', color: c.blueLight },
     countBadgeTextNotes: { fontSize: 12, fontWeight: '800', color: c.brandText },
 
     // LIST & LOADERS
@@ -378,8 +378,7 @@ export default function StudyMaterials() {
           onPress={() => handleTabSwitch('questions')}
           accessibilityRole="tab"
           accessibilityState={{ selected: isQuestions }}
-          style={[styles.tabButton, isQuestions && styles.tabButtonActiveQuestions]}
-        >
+          style={[styles.tabButton, isQuestions && styles.tabButtonActiveQuestions]}>
           <Ionicons name={isQuestions ? 'clipboard' : 'clipboard-outline'} size={16} color={isQuestions ? colors.onBrand : colors.textSecondary} />
           <Text style={[styles.tabText, isQuestions && styles.tabTextActive]}>Past Questions</Text>
         </Pressable>
@@ -465,6 +464,9 @@ export default function StudyMaterials() {
       <View style={styles.sectionRow}>
         <SectionHeader
           title={hasAnyRefinement ? 'Results' : activeSubject === 'All' ? `All ${isQuestions ? 'Papers' : 'Notes'}` : activeSubject}
+          icon={isQuestions ? 'document-text-outline' : 'book-outline'}
+          tone={activeTone}
+          size="md"
           subtitle={filteredItems.length === 1 ? `1 ${isQuestions ? 'paper' : 'note'} found` : `${filteredItems.length} ${isQuestions ? 'papers' : 'notes'} found`}
         />
         {filteredItems.length > 0 && (

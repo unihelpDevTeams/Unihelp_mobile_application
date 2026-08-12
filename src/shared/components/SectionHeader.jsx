@@ -11,10 +11,10 @@ export default function SectionHeader({ title, subtitle, actionLabel, onPress, i
     row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: s.md, marginBottom: s.md },
     copy: { flex: 1 },
     titleRow: { flexDirection: 'row', alignItems: 'center', gap: s.sm },
-    iconBubble: { width: 24, height: 24, borderRadius: r.full, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
+    iconBubble: { width: 24, height: 24, borderRadius: r.full, alignItems: 'center', justifyContent: 'center' },
     title: { fontSize: 17, fontWeight: '800', color: c.textPrimary },
     subtitle: { marginTop: s.xs, fontSize: 13, color: c.textSecondary, lineHeight: 18 },
-    action: { paddingHorizontal: s.md, paddingVertical: s.sm, borderRadius: r.full, backgroundColor: c.brandLight },
+    action: { paddingHorizontal: s.md, paddingVertical: s.sm, borderRadius: r.full, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
     actionText: { fontSize: 12, fontWeight: '700', color: c.brandText },
   }));
 
@@ -23,7 +23,7 @@ export default function SectionHeader({ title, subtitle, actionLabel, onPress, i
       <View style={styles.copy}>
         <View style={styles.titleRow}>
           <View style={styles.iconBubble}>
-            <Ionicons name={icon} size={13} color={colors.brandText} />
+            <Ionicons name={icon} size={20} color={colors.blueLight} />
           </View>
           <Text style={styles.title}>{title}</Text>
         </View>

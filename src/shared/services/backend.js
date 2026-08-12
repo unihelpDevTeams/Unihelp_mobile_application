@@ -4,7 +4,7 @@ import { auth } from '../../../firebase/config';
 const extra = Constants.expoConfig?.extra || Constants.manifest?.extra || {};
 
 export const getApiUrl = () => {
-  const fallback = 'https://unihelp-backend-vdps.onrender.com';
+  const fallback = 'https://unihelp-backend-vdps.onrender.com' || 'http://localhost:5000';
   const rawUrl = extra?.EXPO_PUBLIC_API_URL || (typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_API_URL : undefined) || fallback;
   return String(rawUrl).replace(/\/$/, '');
 };
