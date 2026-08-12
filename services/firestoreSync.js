@@ -63,3 +63,11 @@ export {
   fetchDailyStreak,
   
 } from '../src/shared/services/firestore';
+
+export {
+  createPromoSpotlight,
+  deletePromoSpotlight,
+  fetchPromoSpotlightsForAdmin,
+  fetchPromoSpotlightStats,
+  updatePromoSpotlight,
+} from '../src/shared/services/promoSpotlightService';

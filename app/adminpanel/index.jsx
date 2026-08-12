@@ -11,22 +11,8 @@ import { COLLECTIONS } from '../../src/shared/firestoreSchema';
 import { blockUser, createAnnouncement, unblockUser } from '../../services/firestoreSync';
 import ChallengeQuestionForm from '../../src/admin/ChallengeQuestionForm';
 import UniversityManager from '../../src/admin/UniversityManager';
-
-
-const COLORS = {
-  indigo: '#6366F1',
-  indigoDark: '#4338CA',
-  indigoSoft: '#EEF2FF',
-  white: '#FFFFFF',
-  ink: '#0F172A',
-  inkSoft: '#64748B',
-  border: '#E2E8F0',
-  success: '#059669',
-  error: '#DC2626',
-  errorSoft: '#FEF2F2',
-  amber: '#D97706',
-  amberSoft: '#FEF3E1',
-};
+import PromoSpotlightManager from '../../src/admin/PromoSpotlightManager';
+import { useTheme } from '../../src/shared/theme/ThemeContext';
 
 const TABS = [
   { key: 'users', label: 'Users', icon: 'people-outline' },
@@ -36,6 +22,7 @@ const TABS = [
   { key: 'challenge', label: 'Challenge Qs', icon: 'flash-outline' },
   { key: 'universities', label: 'Universities', icon: 'school-outline' },
   { key: 'notifications', label: 'Send Notification', icon: 'notifications-outline' },
+  { key: 'promoSpotlights', label: 'Promo Spotlights', icon: 'sparkles-outline' },
 ];
 
 const ADMIN_COLLECTION_MAP = {
@@ -46,6 +33,9 @@ const ADMIN_COLLECTION_MAP = {
 export default function AdminPanelPage() {
   const router = useRouter();
   const { profile, user } = useAuth();
+  const { colors } = useTheme();
+  const pageStyles = useMemo(() => createPageStyles(colors), [colors]);
+
   const [activeTab, setActiveTab] = useState('marketplace');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -88,7 +78,6 @@ export default function AdminPanelPage() {
           onPress: async () => {
             setDeletingId(item.id);
             try {
-              // Route through the backend so the Cloudinary assets are deleted too.
               const { deleteMediaDocument } = await import('../../services/mediaCleanup');
               await deleteMediaDocument(config.collection, item.id);
               setItems((prev) => prev.filter((i) => i.id !== item.id));
@@ -129,14 +118,13 @@ export default function AdminPanelPage() {
     return Number.isNaN(n) ? '' : `₦${n.toLocaleString()}`;
   };
 
-  // Non-admin users see a restricted message
   if (!isAdmin) {
     return (
       <ScreenShell title="Admin Panel" subtitle="Admin-only operations." showBack>
-        <View style={styles.restricted}>
-          <Ionicons name="shield-checkmark-outline" size={48} color={COLORS.inkSoft} />
-          <Text style={styles.restrictedTitle}>Access Restricted</Text>
-          <Text style={styles.restrictedText}>
+        <View style={pageStyles.restricted}>
+          <Ionicons name="shield-checkmark-outline" size={48} color={colors.textSecondary} />
+          <Text style={pageStyles.restrictedTitle}>Access Restricted</Text>
+          <Text style={pageStyles.restrictedText}>
             You need admin privileges to access this panel. Contact the app administrator if you believe this is an error.
           </Text>
         </View>
@@ -147,92 +135,97 @@ export default function AdminPanelPage() {
   return (
     <ScreenShell title="Admin Panel" subtitle={`Welcome, ${profile?.username || 'Admin'}`} showBack loading={loading && activeTab !== 'notifications'}>
       {/* Tab bar */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabBar}>
-        {TABS.map((tab) => (
-          <Pressable
-            key={tab.key}
-            style={[styles.tab, activeTab === tab.key && styles.tabActive]}
-            onPress={() => setActiveTab(tab.key)}
-          >
-            <Ionicons
-              name={tab.icon}
-              size={16}
-              color={activeTab === tab.key ? COLORS.indigoDark : COLORS.inkSoft}
-            />
-            <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}>
-              {tab.label}
-            </Text>
-          </Pressable>
-        ))}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={pageStyles.tabBar}>
+        {TABS.map((tab) => {
+          const isActive = activeTab === tab.key;
+          return (
+            <Pressable
+              key={tab.key}
+              style={[pageStyles.tab, isActive && pageStyles.tabActive]}
+              onPress={() => setActiveTab(tab.key)}
+            >
+              <Ionicons
+                name={tab.icon}
+                size={16}
+                color={isActive ? colors.brandText || colors.brand : colors.textSecondary}
+              />
+              <Text style={[pageStyles.tabText, isActive && pageStyles.tabTextActive]}>
+                {tab.label}
+              </Text>
+            </Pressable>
+          );
+        })}
       </ScrollView>
 
-      {/* Users tab */}
+      {/* Main Content Areas */}
       {activeTab === 'users' ? (
-        <UsersList />
+        <UsersList colors={colors} />
       ) : activeTab === 'support' ? (
-        <View style={styles.notificationPlaceholder}>
-          <Ionicons name="headset-outline" size={48} color={COLORS.indigo} />
-          <Text style={styles.notificationTitle}>Support Center</Text>
-          <Text style={styles.notificationText}>
+        <View style={pageStyles.notificationPlaceholder}>
+          <Ionicons name="headset-outline" size={48} color={colors.brand} />
+          <Text style={pageStyles.notificationTitle}>Support Center</Text>
+          <Text style={pageStyles.notificationText}>
             Manage contact messages, reports, and suggestions from users.
           </Text>
           <Pressable
-            style={styles.notificationButton}
+            style={pageStyles.notificationButton}
             onPress={() => router.push('/adminpanel/support-center')}
           >
-            <Ionicons name="arrow-forward-outline" size={18} color={COLORS.white} />
-            <Text style={styles.notificationButtonText}>Open Support Center</Text>
+            <Ionicons name="arrow-forward-outline" size={18} color={colors.onBrand || '#FFF'} />
+            <Text style={pageStyles.notificationButtonText}>Open Support Center</Text>
           </Pressable>
         </View>
       ) : activeTab === 'challenge' ? (
         <ChallengeQuestionForm />
       ) : activeTab === 'universities' ? (
         <UniversityManager />
-      ) : activeTab !== 'notifications' ? ( 
+      ) : activeTab === 'promoSpotlights' ? (
+        <PromoSpotlightManager />
+      ) : activeTab !== 'notifications' ? (
         loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={COLORS.indigo} />
+          <View style={pageStyles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.brand} />
           </View>
         ) : items.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="folder-open-outline" size={40} color={COLORS.inkSoft} />
-            <Text style={styles.emptyText}>No listings found</Text>
+          <View style={pageStyles.emptyContainer}>
+            <Ionicons name="folder-open-outline" size={40} color={colors.textSecondary} />
+            <Text style={pageStyles.emptyText}>No listings found</Text>
           </View>
         ) : (
           <FlatList
             data={items}
             keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={pageStyles.listContent}
             renderItem={({ item }) => (
-              <View style={styles.listingCard}>
-                <View style={styles.listingLeft}>
+              <View style={pageStyles.listingCard}>
+                <View style={pageStyles.listingLeft}>
                   {getImageUrl(item) ? (
                     <Image
                       source={{ uri: getImageUrl(item) }}
-                      style={styles.listingThumb}
+                      style={pageStyles.listingThumb}
                       contentFit="cover"
                       cachePolicy="disk"
                     />
                   ) : (
-                    <View style={styles.listingThumbFallback}>
-                      <Ionicons name="image-outline" size={20} color={COLORS.inkSoft} />
+                    <View style={pageStyles.listingThumbFallback}>
+                      <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
                     </View>
                   )}
                 </View>
-                <View style={styles.listingBody}>
-                  <Text style={styles.listingTitle} numberOfLines={1}>
+                <View style={pageStyles.listingBody}>
+                  <Text style={pageStyles.listingTitle} numberOfLines={1}>
                     {item.title || item.name || 'Untitled'}
                   </Text>
                   {item.price != null && (
-                    <Text style={styles.listingPrice}>{formatNaira(item.price)}</Text>
+                    <Text style={pageStyles.listingPrice}>{formatNaira(item.price)}</Text>
                   )}
-                  <Text style={styles.listingOwner} numberOfLines={1}>
+                  <Text style={pageStyles.listingOwner} numberOfLines={1}>
                     {item.sellerName || item.ownerName || 'Unknown'}
                   </Text>
                 </View>
-                <View style={styles.listingActions}>
+                <View style={pageStyles.listingActions}>
                   <Pressable
-                    style={styles.viewButton}
+                    style={pageStyles.viewButton}
                     onPress={() =>
                       router.push({
                         pathname: '/view/[type]/[id]',
@@ -243,17 +236,17 @@ export default function AdminPanelPage() {
                       })
                     }
                   >
-                    <Ionicons name="eye-outline" size={18} color={COLORS.indigo} />
+                    <Ionicons name="eye-outline" size={18} color={colors.brand} />
                   </Pressable>
                   <Pressable
-                    style={styles.deleteButton}
+                    style={pageStyles.deleteButton}
                     onPress={() => handleDelete(item)}
                     disabled={deletingId === item.id}
                   >
                     {deletingId === item.id ? (
-                      <ActivityIndicator size="small" color={COLORS.error} />
+                      <ActivityIndicator size="small" color={colors.danger || '#DC2626'} />
                     ) : (
-                      <Ionicons name="trash-outline" size={18} color={COLORS.error} />
+                      <Ionicons name="trash-outline" size={18} color={colors.danger || '#DC2626'} />
                     )}
                   </Pressable>
                 </View>
@@ -262,15 +255,16 @@ export default function AdminPanelPage() {
           />
         )
       ) : (
-        /* Create Announcement Form */
-        <CreateAnnouncementForm />
+        <CreateAnnouncementForm colors={colors} />
       )}
     </ScreenShell>
   );
 }
 
-function CreateAnnouncementForm() {
+function CreateAnnouncementForm({ colors }) {
   const { profile } = useAuth();
+  const annStyles = useMemo(() => createAnnouncementStyles(colors), [colors]);
+
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [priority, setPriority] = useState('normal');
@@ -308,7 +302,7 @@ function CreateAnnouncementForm() {
   };
 
   const priorities = [
-    { key: 'normal', label: 'Normal', color: '#6366F1' },
+    { key: 'normal', label: 'Normal', color: colors.brand || '#6366F1' },
     { key: 'high', label: 'High', color: '#DC2626' },
     { key: 'urgent', label: 'Urgent', color: '#991B1B' },
   ];
@@ -317,7 +311,7 @@ function CreateAnnouncementForm() {
     <View style={annStyles.container}>
       <View style={annStyles.header}>
         <View style={annStyles.headerIcon}>
-          <Ionicons name="megaphone" size={22} color={COLORS.indigo} />
+          <Ionicons name="megaphone" size={22} color={colors.brand} />
         </View>
         <View style={annStyles.headerBody}>
           <Text style={annStyles.headerTitle}>Create Announcement</Text>
@@ -327,7 +321,7 @@ function CreateAnnouncementForm() {
 
       {success ? (
         <View style={annStyles.successBanner}>
-          <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
+          <Ionicons name="checkmark-circle" size={18} color={colors.success || '#10B981'} />
           <Text style={annStyles.successText}>{success}</Text>
         </View>
       ) : null}
@@ -339,7 +333,7 @@ function CreateAnnouncementForm() {
           value={title}
           onChangeText={setTitle}
           placeholder="e.g. New Study Materials Available"
-          placeholderTextColor={COLORS.inkSoft}
+          placeholderTextColor={colors.textSecondary}
         />
       </View>
 
@@ -350,7 +344,7 @@ function CreateAnnouncementForm() {
           value={body}
           onChangeText={setBody}
           placeholder="Write the announcement details..."
-          placeholderTextColor={COLORS.inkSoft}
+          placeholderTextColor={colors.textSecondary}
           multiline
           numberOfLines={5}
           textAlignVertical="top"
@@ -361,29 +355,25 @@ function CreateAnnouncementForm() {
       <View style={annStyles.fieldGroup}>
         <Text style={annStyles.label}>Priority</Text>
         <View style={annStyles.priorityRow}>
-          {priorities.map((p) => (
-            <Pressable
-              key={p.key}
-              onPress={() => setPriority(p.key)}
-              style={({ pressed }) => [
-                annStyles.priorityChip,
-                priority === p.key && { backgroundColor: p.color, borderColor: p.color },
-                pressed && annStyles.priorityChipPressed,
-              ]}
-            >
-              {priority === p.key ? (
-                <Ionicons name="checkmark" size={14} color="#FFF" />
-              ) : null}
-              <Text
-                style={[
-                  annStyles.priorityText,
-                  priority === p.key && annStyles.priorityTextActive,
+          {priorities.map((p) => {
+            const isSelected = priority === p.key;
+            return (
+              <Pressable
+                key={p.key}
+                onPress={() => setPriority(p.key)}
+                style={({ pressed }) => [
+                  annStyles.priorityChip,
+                  isSelected && { backgroundColor: p.color, borderColor: p.color },
+                  pressed && annStyles.priorityChipPressed,
                 ]}
               >
-                {p.label}
-              </Text>
-            </Pressable>
-          ))}
+                {isSelected && <Ionicons name="checkmark" size={14} color="#FFF" />}
+                <Text style={[annStyles.priorityText, isSelected && annStyles.priorityTextActive]}>
+                  {p.label}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
       </View>
 
@@ -409,26 +399,39 @@ function CreateAnnouncementForm() {
   );
 }
 
-function UsersList() {
+function UsersList({ colors }) {
   const router = useRouter();
+  const userStyles = useMemo(() => createUserStyles(colors), [colors]);
+
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
+    let isMounted = true;
     const load = async () => {
       try {
         const snapshot = await getDocs(collection(db, COLLECTIONS.users));
         const all = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setUsers(all.sort((a, b) => {
-          const aTime = a.createdAt?.toDate?.()?.getTime?.() || 0;
-          const bTime = b.createdAt?.toDate?.()?.getTime?.() || 0;
-          return bTime - aTime;
-        }));
-      } catch {}
-      setLoading(false);
+        if (isMounted) {
+          setUsers(
+            all.sort((a, b) => {
+              const aTime = a.createdAt?.toDate?.()?.getTime?.() || 0;
+              const bTime = b.createdAt?.toDate?.()?.getTime?.() || 0;
+              return bTime - aTime;
+            })
+          );
+        }
+      } catch (err) {
+        console.warn('User load error:', err);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
     };
     load();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const filteredUsers = useMemo(() => {
@@ -446,25 +449,21 @@ function UsersList() {
 
   const handleBlockToggle = async (userItem) => {
     if (userItem.blocked) {
-      Alert.alert(
-        'Unblock User',
-        `Allow ${userItem.username || userItem.email} to access the app again?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Unblock',
-            onPress: async () => {
-              try {
-                await unblockUser(userItem.uid || userItem.id);
-                setUsers((prev) => prev.map((u) => (u.id === userItem.id ? { ...u, blocked: false } : u)));
-                Alert.alert('Unblocked', 'The user can now access the app.');
-              } catch (error) {
-                Alert.alert('Error', error.message || 'Failed to unblock user.');
-              }
-            },
+      Alert.alert('Unblock User', `Allow ${userItem.username || userItem.email} to access the app again?`, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unblock',
+          onPress: async () => {
+            try {
+              await unblockUser(userItem.uid || userItem.id);
+              setUsers((prev) => prev.map((u) => (u.id === userItem.id ? { ...u, blocked: false } : u)));
+              Alert.alert('Unblocked', 'The user can now access the app.');
+            } catch (error) {
+              Alert.alert('Error', error.message || 'Failed to unblock user.');
+            }
           },
-        ]
-      );
+        },
+      ]);
     } else {
       Alert.alert(
         'Block User',
@@ -490,36 +489,38 @@ function UsersList() {
   };
 
   return (
-    <View>
+    <View style={userStyles.container}>
       <View style={userStyles.searchWrap}>
-        <Ionicons name="search" size={16} color={COLORS.inkSoft} />
+        <Ionicons name="search" size={16} color={colors.textSecondary} />
         <TextInput
           style={userStyles.searchInput}
           value={search}
           onChangeText={setSearch}
           placeholder="Search by name, email, school..."
-          placeholderTextColor={COLORS.inkSoft}
+          placeholderTextColor={colors.textSecondary}
         />
         {search ? (
           <Pressable onPress={() => setSearch('')}>
-            <Ionicons name="close-circle" size={16} color={COLORS.inkSoft} />
+            <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
           </Pressable>
         ) : null}
       </View>
 
       {loading ? (
         <View style={userStyles.loadingWrap}>
-          <ActivityIndicator size="large" color={COLORS.indigo} />
-          {[1,2,3].map(i => <View key={i} style={userStyles.skeleton} />)}
+          <ActivityIndicator size="large" color={colors.brand} />
+          {[1, 2, 3].map((i) => (
+            <View key={i} style={userStyles.skeleton} />
+          ))}
         </View>
       ) : filteredUsers.length > 0 ? (
         <FlatList
           data={filteredUsers}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={{ gap: 8, paddingBottom: 40 }}
+          contentContainerStyle={userStyles.listPadding}
           renderItem={({ item }) => (
             <Pressable
-              style={({ pressed }) => [userStyles.card, pressed && { opacity: 0.9 }]}
+              style={({ pressed }) => [userStyles.card, pressed && userStyles.cardPressed]}
               onPress={() => router.push(`/view-user-profile/${item.uid || item.id}`)}
             >
               <View style={userStyles.avatar}>
@@ -530,29 +531,35 @@ function UsersList() {
                 )}
               </View>
               <View style={userStyles.body}>
-                <Text style={userStyles.name} numberOfLines={1}>{item.username || 'Student'}</Text>
-                <Text style={userStyles.email} numberOfLines={1}>{item.email || 'No email'}</Text>
+                <Text style={userStyles.name} numberOfLines={1}>
+                  {item.username || 'Student'}
+                </Text>
+                <Text style={userStyles.email} numberOfLines={1}>
+                  {item.email || 'No email'}
+                </Text>
                 <View style={userStyles.metaRow}>
                   {item.role ? (
                     <View style={userStyles.metaChip}>
-                      <Ionicons name="school" size={10} color={COLORS.indigo} />
+                      <Ionicons name="school" size={10} color={colors.brand} />
                       <Text style={userStyles.metaChipText}>{item.role}</Text>
                     </View>
                   ) : null}
                   {item.school ? (
-                    <Text style={userStyles.school} numberOfLines={1}>{item.school}</Text>
+                    <Text style={userStyles.school} numberOfLines={1}>
+                      {item.school}
+                    </Text>
                   ) : null}
                 </View>
                 {item.blocked && (
                   <View style={userStyles.blockedBadge}>
-                    <Ionicons name="ban-outline" size={10} color={COLORS.error} />
+                    <Ionicons name="ban-outline" size={10} color={colors.danger || '#DC2626'} />
                     <Text style={userStyles.blockedBadgeText}>Blocked</Text>
                   </View>
                 )}
               </View>
               {item.admin ? (
                 <View style={userStyles.adminBadge}>
-                  <Ionicons name="shield-checkmark" size={12} color="#4338CA" />
+                  <Ionicons name="shield-checkmark" size={12} color={colors.brand} />
                   <Text style={userStyles.adminBadgeText}>Admin</Text>
                 </View>
               ) : (
@@ -560,7 +567,7 @@ function UsersList() {
                   style={({ pressed }) => [
                     userStyles.actionButton,
                     item.blocked ? userStyles.unblockButton : userStyles.blockButton,
-                    pressed && { opacity: 0.8 },
+                    pressed && userStyles.actionPressed,
                   ]}
                   onPress={(e) => {
                     e.stopPropagation();
@@ -568,9 +575,7 @@ function UsersList() {
                   }}
                 >
                   <Ionicons name={item.blocked ? 'checkmark-circle' : 'ban-outline'} size={14} color="#FFF" />
-                  <Text style={userStyles.actionButtonText}>
-                    {item.blocked ? 'Unblock' : 'Block'}
-                  </Text>
+                  <Text style={userStyles.actionButtonText}>{item.blocked ? 'Unblock' : 'Block'}</Text>
                 </Pressable>
               )}
             </Pressable>
@@ -579,7 +584,7 @@ function UsersList() {
         />
       ) : (
         <View style={userStyles.emptyWrap}>
-          <Ionicons name="people-outline" size={36} color={COLORS.inkSoft} />
+          <Ionicons name="people-outline" size={36} color={colors.textSecondary} />
           <Text style={userStyles.emptyText}>{search ? 'No users match your search' : 'No users found'}</Text>
         </View>
       )}
@@ -587,369 +592,345 @@ function UsersList() {
   );
 }
 
-const userStyles = StyleSheet.create({
-  searchWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: COLORS.white,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 14,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: COLORS.ink,
-    paddingVertical: 0,
-  },
-  loadingWrap: { gap: 12, paddingVertical: 20 },
-  skeleton: { height: 72, borderRadius: 14, backgroundColor: COLORS.border },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: COLORS.white,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 12,
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: COLORS.indigoSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  avatarImage: { width: 44, height: 44 },
-  avatarText: { fontWeight: '800', fontSize: 16, color: COLORS.indigoDark },
-  body: { flex: 1 },
-  name: { fontSize: 14, fontWeight: '800', color: COLORS.ink },
-  email: { fontSize: 11, color: COLORS.inkSoft, marginTop: 1 },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
-  metaChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: COLORS.indigoSoft,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  metaChipText: { fontSize: 10, fontWeight: '700', color: COLORS.indigo },
-  school: { fontSize: 10, color: COLORS.inkSoft, flex: 1 },
-  adminBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: '#EEF2FF',
-    borderWidth: 1,
-    borderColor: '#C7D2FE',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  adminBadgeText: { fontSize: 10, fontWeight: '800', color: '#4338CA' },
-  emptyWrap: { alignItems: 'center', paddingVertical: 60, gap: 12 },
-  emptyText: { fontSize: 14, color: COLORS.inkSoft, fontWeight: '600' },
-});
+const createPageStyles = (colors) =>
+  StyleSheet.create({
+    restricted: {
+      flex: 1,
+      alignItems: 'center',
+      justify: 'center',
+      paddingHorizontal: 32,
+      paddingVertical: 60,
+    },
+    restrictedTitle: {
+      marginTop: 16,
+      fontSize: 18,
+      fontWeight: '800',
+      color: colors.textPrimary || '#111827',
+    },
+    restrictedText: {
+      marginTop: 8,
+      fontSize: 14,
+      color: colors.textSecondary || '#6B7280',
+      textAlign: 'center',
+      lineHeight: 20,
+    },
+    tabBar: {
+      flexDirection: 'row',
+      backgroundColor: colors.card || '#FFFFFF',
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
+      marginBottom: 14,
+    },
+    tab: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+    },
+    tabActive: {
+      backgroundColor: colors.brandLight || '#EEF2FF',
+    },
+    tabText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.textSecondary || '#6B7280',
+    },
+    tabTextActive: {
+      color: colors.brandText || colors.brand || '#4338CA',
+    },
+    loadingContainer: {
+      paddingVertical: 60,
+      alignItems: 'center',
+    },
+    emptyContainer: {
+      paddingVertical: 60,
+      alignItems: 'center',
+      gap: 12,
+    },
+    emptyText: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.textSecondary || '#6B7280',
+    },
+    listContent: {
+      gap: 10,
+      paddingBottom: 40,
+    },
+    listingCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.card || '#FFFFFF',
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
+      padding: 12,
+    },
+    listingLeft: {
+      marginRight: 12,
+    },
+    listingThumb: {
+      width: 52,
+      height: 52,
+      borderRadius: 12,
+      backgroundColor: colors.brandLight || '#EEF2FF',
+    },
+    listingThumbFallback: {
+      width: 52,
+      height: 52,
+      borderRadius: 12,
+      backgroundColor: colors.brandLight || '#EEF2FF',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    listingBody: {
+      flex: 1,
+    },
+    listingTitle: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: colors.textPrimary || '#111827',
+    },
+    listingPrice: {
+      marginTop: 2,
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.success || '#10B981',
+    },
+    listingOwner: {
+      marginTop: 2,
+      fontSize: 12,
+      color: colors.textSecondary || '#6B7280',
+    },
+    listingActions: {
+      flexDirection: 'row',
+      gap: 6,
+      marginLeft: 8,
+    },
+    viewButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      backgroundColor: colors.brandLight || '#EEF2FF',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    deleteButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      backgroundColor: colors.dangerLight || '#FEE2E2',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    notificationPlaceholder: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 32,
+      paddingVertical: 60,
+      gap: 12,
+    },
+    notificationTitle: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: colors.textPrimary || '#111827',
+    },
+    notificationText: {
+      fontSize: 14,
+      color: colors.textSecondary || '#6B7280',
+      textAlign: 'center',
+      lineHeight: 20,
+    },
+    notificationButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.brand || '#4F46E5',
+      borderRadius: 14,
+      paddingVertical: 12,
+      paddingHorizontal: 20,
+      marginTop: 8,
+    },
+    notificationButtonText: {
+      color: colors.onBrand || '#FFFFFF',
+      fontWeight: '800',
+      fontSize: 14,
+    },
+  });
 
-const annStyles = StyleSheet.create({
-  container: {
-    gap: 16,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    backgroundColor: COLORS.indigoSoft,
-    borderRadius: 16,
-    padding: 16,
-  },
-  headerIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerBody: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: COLORS.ink,
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    color: COLORS.inkSoft,
-    marginTop: 2,
-  },
-  successBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#ECFDF5',
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-    borderRadius: 12,
-    padding: 14,
-  },
-  successText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.success,
-    flex: 1,
-  },
-  fieldGroup: {
-    gap: 6,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.ink,
-  },
-  input: {
-    backgroundColor: COLORS.white,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 14,
-    color: COLORS.ink,
-  },
-  textArea: {
-    minHeight: 120,
-    paddingTop: 12,
-  },
-  charCount: {
-    fontSize: 11,
-    color: COLORS.inkSoft,
-    textAlign: 'right',
-  },
-  priorityRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  priorityChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.white,
-  },
-  priorityChipPressed: {
-    opacity: 0.8,
-  },
-  priorityText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.inkSoft,
-  },
-  priorityTextActive: {
-    color: '#FFF',
-  },
-  submitButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: COLORS.indigo,
-    borderRadius: 14,
-    paddingVertical: 14,
-    marginTop: 8,
-  },
-  submitButtonPressed: {
-    backgroundColor: COLORS.indigoDark,
-  },
-  submitButtonDisabled: {
-    opacity: 0.5,
-  },
-  submitText: {
-    color: '#FFF',
-    fontWeight: '800',
-    fontSize: 14,
-  },
-});
+const createAnnouncementStyles = (colors) =>
+  StyleSheet.create({
+    container: { gap: 16 },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      backgroundColor: colors.brandLight || '#EEF2FF',
+      borderRadius: 16,
+      padding: 16,
+    },
+    headerIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      backgroundColor: colors.card || '#FFFFFF',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    headerBody: { flex: 1 },
+    headerTitle: { fontSize: 16, fontWeight: '800', color: colors.textPrimary || '#111827' },
+    headerSubtitle: { fontSize: 12, color: colors.textSecondary || '#6B7280', marginTop: 2 },
+    successBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: '#ECFDF5',
+      borderWidth: 1,
+      borderColor: '#A7F3D0',
+      borderRadius: 12,
+      padding: 14,
+    },
+    successText: { fontSize: 13, fontWeight: '700', color: colors.success || '#10B981', flex: 1 },
+    fieldGroup: { gap: 6 },
+    label: { fontSize: 13, fontWeight: '700', color: colors.textPrimary || '#111827' },
+    input: {
+      backgroundColor: colors.card || '#FFFFFF',
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      fontSize: 14,
+      color: colors.textPrimary || '#111827',
+    },
+    textArea: { minHeight: 120, paddingTop: 12 },
+    charCount: { fontSize: 11, color: colors.textSecondary || '#6B7280', textAlign: 'right' },
+    priorityRow: { flexDirection: 'row', gap: 8 },
+    priorityChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
+      backgroundColor: colors.card || '#FFFFFF',
+    },
+    priorityChipPressed: { opacity: 0.8 },
+    priorityText: { fontSize: 12, fontWeight: '700', color: colors.textSecondary || '#6B7280' },
+    priorityTextActive: { color: '#FFF' },
+    submitButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      backgroundColor: colors.brand || '#4F46E5',
+      borderRadius: 14,
+      paddingVertical: 14,
+      marginTop: 8,
+    },
+    submitButtonPressed: { opacity: 0.8 },
+    submitButtonDisabled: { opacity: 0.5 },
+    submitText: { color: '#FFF', fontWeight: '800', fontSize: 14 },
+  });
 
-const styles = StyleSheet.create({
-  restricted: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-    paddingVertical: 60,
-  },
-  restrictedTitle: {
-    marginTop: 16,
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.ink,
-  },
-  restrictedText: {
-    marginTop: 8,
-    fontSize: 14,
-    color: COLORS.inkSoft,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.white,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    marginBottom: 14,
-  },
-  tab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 12,
-    marginHorizontal: 4,
-  },
-  tabActive: {
-    backgroundColor: COLORS.indigoSoft,
-  },
-  tabText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.inkSoft,
-  },
-  tabTextActive: {
-    color: COLORS.indigoDark,
-  },
-  loadingContainer: {
-    paddingVertical: 60,
-    alignItems: 'center',
-  },
-  emptyContainer: {
-    paddingVertical: 60,
-    alignItems: 'center',
-    gap: 12,
-  },
-  emptyText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.inkSoft,
-  },
-  listContent: {
-    gap: 10,
-    paddingBottom: 40,
-  },
-  listingCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 12,
-  },
-  listingLeft: {
-    marginRight: 12,
-  },
-  listingThumb: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-    backgroundColor: COLORS.indigoSoft,
-  },
-  listingThumbFallback: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-    backgroundColor: COLORS.indigoSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  listingBody: {
-    flex: 1,
-  },
-  listingTitle: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: COLORS.ink,
-  },
-  listingPrice: {
-    marginTop: 2,
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.success,
-  },
-  listingOwner: {
-    marginTop: 2,
-    fontSize: 12,
-    color: COLORS.inkSoft,
-  },
-  listingActions: {
-    flexDirection: 'row',
-    gap: 6,
-    marginLeft: 8,
-  },
-  viewButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: COLORS.indigoSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  deleteButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: COLORS.errorSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notificationPlaceholder: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-    paddingVertical: 60,
-    gap: 12,
-  },
-  notificationTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.ink,
-  },
-  notificationText: {
-    fontSize: 14,
-    color: COLORS.inkSoft,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  notificationButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: COLORS.indigo,
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    marginTop: 8,
-  },
-  notificationButtonText: {
-    color: COLORS.white,
-    fontWeight: '800',
-    fontSize: 14,
-  },
-});
+const createUserStyles = (colors) =>
+  StyleSheet.create({
+    container: { flex: 1 },
+    searchWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.card || '#FFFFFF',
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginBottom: 14,
+    },
+    searchInput: {
+      flex: 1,
+      fontSize: 14,
+      color: colors.textPrimary || '#111827',
+      paddingVertical: 0,
+    },
+    loadingWrap: { gap: 12, paddingVertical: 20 },
+    skeleton: { height: 72, borderRadius: 14, backgroundColor: colors.borderDefault || '#E5E7EB' },
+    listPadding: { gap: 8, paddingBottom: 40 },
+    card: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      backgroundColor: colors.card || '#FFFFFF',
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
+      padding: 12,
+    },
+    cardPressed: { opacity: 0.9 },
+    avatar: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      backgroundColor: colors.brandLight || '#EEF2FF',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    avatarImage: { width: 44, height: 44 },
+    avatarText: { fontWeight: '800', fontSize: 16, color: colors.brandText || colors.brand || '#4338CA' },
+    body: { flex: 1 },
+    name: { fontSize: 14, fontWeight: '800', color: colors.textPrimary || '#111827' },
+    email: { fontSize: 11, color: colors.textSecondary || '#6B7280', marginTop: 1 },
+    metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+    metaChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      backgroundColor: colors.brandLight || '#EEF2FF',
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 6,
+    },
+    metaChipText: { fontSize: 10, fontWeight: '700', color: colors.brand || '#4338CA' },
+    school: { fontSize: 10, color: colors.textSecondary || '#6B7280', flex: 1 },
+    blockedBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      marginTop: 4,
+    },
+    blockedBadgeText: { fontSize: 10, color: colors.danger || '#DC2626', fontWeight: '700' },
+    adminBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      backgroundColor: colors.brandLight || '#EEF2FF',
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#C7D2FE',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 8,
+    },
+    adminBadgeText: { fontSize: 10, fontWeight: '800', color: colors.brandText || colors.brand || '#4338CA' },
+    actionButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 8,
+    },
+    blockButton: { backgroundColor: colors.danger || '#DC2626' },
+    unblockButton: { backgroundColor: colors.success || '#10B981' },
+    actionPressed: { opacity: 0.8 },
+    actionButtonText: { color: '#FFF', fontSize: 11, fontWeight: '700' },
+    emptyWrap: { alignItems: 'center', paddingVertical: 60, gap: 12 },
+    emptyText: { fontSize: 14, color: colors.textSecondary || '#6B7280', fontWeight: '600' },
+  });

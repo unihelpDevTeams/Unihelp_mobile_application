@@ -27,6 +27,8 @@ export const COLLECTIONS = {
   supportNotes: 'supportNotes',
   noteRequests: 'noteRequests',
   questionRequests: 'questionRequests',
+  promoSpotlights: 'promoSpotlights',
+  promoSpotlightEvents: 'promoSpotlightEvents',
 };
 
 export const userSubcollections = {
@@ -89,4 +91,6 @@ export const collectionLabels = {
   [COLLECTIONS.stories]: 'Stories',
   [COLLECTIONS.formulas]: 'Formula Hub',
   [COLLECTIONS.subscriptions]: 'Subscriptions',
+  [COLLECTIONS.promoSpotlights]: 'Promo Spotlights',
+  [COLLECTIONS.promoSpotlightEvents]: 'Promo Spotlight Events',
 };

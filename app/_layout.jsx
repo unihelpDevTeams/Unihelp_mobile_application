@@ -11,6 +11,8 @@ import { AIProvider } from '../src/shared/context/AIContext';
 import RoleGuard from '../components/RoleGuard';
 import { PushNotificationBootstrap } from '../hooks/usePushNotifications';
 import { ThemeProvider, useTheme, ThemeGate } from '../src/shared/theme/ThemeContext';
+import PromoSpotlight from '../src/shared/components/PromoSpotlight/PromoSpotlight';
+import { usePromoSpotlight } from '../src/shared/hooks/usePromoSpotlight';
 
 function BrandSpinner({ color, size = 24 }) {
   const spinAnim = useRef(new Animated.Value(0)).current;
@@ -43,6 +45,7 @@ function GlobalPreloader() {
 
 function AppContent() {
   const { colors, isDark, themeLoaded } = useTheme();
+  const { promo, visible: promoVisible, dismiss: dismissPromo, markClicked: markPromoClicked } = usePromoSpotlight();
 
   // Prevent flash - don't render until theme is loaded
   if (!themeLoaded) {
@@ -122,6 +125,12 @@ function AppContent() {
           <Stack.Screen name="payment-success" options={{ presentation: 'modal' }} />
         </Stack>
       </RoleGuard>
+      <PromoSpotlight
+        promo={promo}
+        visible={promoVisible}
+        onDismiss={dismissPromo}
+        onAction={markPromoClicked}
+      />
     </ThemeGate>
   );
 }
