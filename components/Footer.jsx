@@ -39,7 +39,12 @@ export default function Footer({
   showCopyright = true,
   onBackToTop = null,
   version = 'v1.0.1',
-  socialLinks = [], // e.g. [{ icon: 'logo-instagram', url: 'https://instagram.com/...', label: 'Instagram' }]
+  socialLinks = [
+    { icon: 'logo-instagram', url: 'https://instagram.com/...', label: 'Instagram' },
+    { icon: 'logo-twitter', url: 'https://twitter.com/...', label: 'Twitter' },
+    { icon: 'logo-facebook', url: 'https://facebook.com/...', label: 'Facebook' },
+    { icon: 'logo-linkedin', url: 'https://linkedin.com/...', label: 'LinkedIn' },
+  ], 
 }) {
   const router = useRouter();
   const { colors, isDark } = useTheme();

@@ -3,6 +3,7 @@ const appJson = require("./app.json");
 
 dotenv.config();
 
+// Standard Expo 49+ public env variables using ExpoConstants / process.env
 const extra = {
   EXPO_PUBLIC_APP_URL: process.env.EXPO_PUBLIC_APP_URL || "https://unihelp.app",
   EXPO_PUBLIC_API_URL: process.env.EXPO_PUBLIC_API_URL || "",
@@ -28,13 +29,15 @@ const extra = {
     process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID || "",
 
   eas: {
-    projectId: "4126b4b6-fee5-4a7f-a0ed-481e1bc9cd87",
+    projectId: "87a58ee5-c197-4625-9348-1e47e8bf781b",
   },
 };
 
 module.exports = {
   expo: {
     ...appJson.expo,
+
+    owner: "unihelpdevteam",
 
     updates: {
       url: "https://u.expo.dev/42510ca2-86e1-425d-a072-16c0a5c2feb4",

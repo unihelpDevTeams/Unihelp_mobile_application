@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "UniHelp",
-    "slug": "unihelp",
+    "slug": "unihelpteam",
     "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/favicon.png",
@@ -37,7 +37,7 @@
         "RECORD_AUDIO"
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/icon.png",
+        "foregroundImage": "./assets/images/favicon.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
@@ -57,7 +57,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/icon.png",
+          "image": "./assets/images/favicon.png",
           "imageWidth": 200,
           "resizeMode": "cover",
           "backgroundColor": "#ffffff"
