@@ -59,7 +59,7 @@ const ALL_TOOLS = [
       },
       {
         id: 'cbt',
-        title: 'CBt practice',
+        title: 'CBT practice',
         sub: 'Live mock exams & quizzes',
         icon: 'school',
         color: '#DC2626',

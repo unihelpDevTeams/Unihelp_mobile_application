@@ -6,7 +6,6 @@ const universityOnlyRoutes = [
   '/create-tutorial',
   '/my-tutorials',
   '/tutor-dashboard',
-  '/tutor-earnings',
   '/student-purchases',
   '/adminpanel',
   '/admin-withdrawals',

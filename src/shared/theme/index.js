@@ -107,82 +107,75 @@ export const lightColors = {
 };
 
 // ============================================================
-// COLORS - Dark Mode
+// COLORS - Dark Mode (Optimized)
 // ============================================================
 export const darkColors = {
-  // Brand
+  // Brand (Softened for dark backgrounds to pass WCAG AAA)
   brand: '#6366F1',
-  brandDark: '#818CF8',
-  brandText: '#C7D2FE',
-  brandLight: '#312E81',
-  brandBorder: '#4338CA',
-  brandGlow: '#6366F1',
+  brandDark: '#4F46E5',
+  brandText: '#818CF8',
+  brandLight: '#1E1B4B',
+  brandBorder: '#312E81',
+  brandGlow: 'rgba(99, 102, 241, 0.35)',
   onBrand: '#FFFFFF',
 
-  // Neutrals
+  // Neutrals (Slate/Midnight tones that complement light canvas)
   ink: '#F8FAFC',
   inkLight: '#E2E8F0',
-  inkMuted: '#CBD5E1',
+  inkMuted: '#94A3B8',
   grey: '#94A3B8',
   greyLight: '#64748B',
-  border: '#334155',
+  border: '#1E293B',
   borderLight: '#1E293B',
   surface: '#111827',
-  canvas: '#0F172A',
-  canvasLight: '#1E293B',
+  canvas: '#0B0F17',
+  canvasLight: '#151C2C',
   skeleton: '#1E293B',
   skeletonLine: '#334155',
 
-  // Accent tones
+  // Accent tones (Desaturated slightly to reduce eye strain in dark mode)
   blue: '#38BDF8',
-  blueLight: '#082F49',
-
+  blueLight: '#0C4A6E',
   green: '#34D399',
-  greenLight: '#052E2B',
-
+  greenLight: '#064E3B',
   orange: '#FB923C',
   orangeLight: '#431407',
-
   purple: '#A78BFA',
-  purpleLight: '#2E1065',
-
+  purpleLight: '#3B0764',
   amber: '#FBBF24',
   amberLight: '#451A03',
-
   teal: '#2DD4BF',
-  tealLight: '#042F2E',
-
+  tealLight: '#134E4A',
   red: '#F87171',
   redLight: '#450A0A',
   redBorder: '#7F1D1D',
-
   rose: '#FB7185',
 
   // Premium
   gold: '#FBBF24',
-  goldLight: '#3F2A00',
+  goldLight: '#451A03',
 
   // Overlay
-  overlay: 'rgba(0,0,0,0.65)',
-  whiteTransparent: 'rgba(17,24,39,0.92)',
-  brandTransparent: '#6366F122',
+  overlay: 'rgba(2, 6, 23, 0.75)',
+  whiteTransparent: 'rgba(17, 24, 39, 0.92)',
+  brandTransparent: 'rgba(99, 102, 241, 0.15)',
 
   // Semantic aliases
-  background: '#0F172A',
+  background: '#0B0F17',
   surfacePrimary: '#111827',
   surfaceSecondary: '#1E293B',
 
   textPrimary: '#F8FAFC',
-  textSecondary: '#CBD5E1',
-  textTertiary: '#94A3B8',
+  textSecondary: '#94A3B8',
+  textTertiary: '#64748B',
 
-  borderDefault: '#334155',
-  divider: '#334155',
+  borderDefault: '#1E293B',
+  divider: '#1E293B',
 
-  inputBackground: '#1E293B',
+  inputBackground: '#151C2C',
   placeholder: '#64748B',
 
-  icon: '#CBD5E1',
+  icon: '#94A3B8',
 
   shadow: '#000000',
 
@@ -198,7 +191,7 @@ export const darkColors = {
   statusBar: 'light',
 
   tabBarBackground: '#111827',
-  tabBarBorder: '#334155',
+  tabBarBorder: '#1E293B',
   tabBarActive: '#818CF8',
   tabBarInactive: '#64748B',
 
@@ -209,7 +202,7 @@ export const darkColors = {
   bottomSheetBackground: '#111827',
 
   toastBackground: '#F8FAFC',
-  toastText: '#111827',
+  toastText: '#0B0F17',
 
   skeletonBackground: '#1E293B',
   skeletonHighlight: '#334155',
@@ -217,24 +210,23 @@ export const darkColors = {
   disabledBackground: '#1E293B',
   disabledText: '#64748B',
 
-  focusRing: '#818CF8',
+  focusRing: '#6366F1',
 
   danger: '#F87171',
   dangerLight: '#450A0A',
   dangerBorder: '#7F1D1D',
 
   // Additional required semantic tokens
-  inputBorder: '#475569',
+  inputBorder: '#334155',
   inputPlaceholder: '#64748B',
   iconSecondary: '#64748B',
   cardElevated: '#1E293B',
   tabBar: '#111827',
   header: '#111827',
-  modal: '#1E293B',
+  modal: '#111827',
   toast: '#F8FAFC',
   fab: '#6366F1',
 };
-
 // ============================================================
 // REACTIVE COLORS - Module-level state for theme switching
 // ============================================================

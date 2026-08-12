@@ -106,12 +106,6 @@ function AppContent() {
           <Stack.Screen name="challenge" />
           <Stack.Screen name="tutorial" />
           <Stack.Screen name="create-tutorial" />
-          <Stack.Screen name="tutorial-marketplace" />
-          <Stack.Screen name="student-purchases" />
-          <Stack.Screen name="my-tutorials" />
-          <Stack.Screen name="tutor-dashboard" />
-          <Stack.Screen name="tutor-earnings" />
-          <Stack.Screen name="admin-tutorial-payments" />
           <Stack.Screen name="view" />
           <Stack.Screen name="view-user-profile" />
           <Stack.Screen name="faq" />

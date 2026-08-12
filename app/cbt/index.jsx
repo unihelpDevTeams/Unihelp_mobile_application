@@ -25,14 +25,6 @@ const STATUS = {
   ANSWERED_MARKED: 'answered-marked',
 };
 
-const STATUS_META = {
-  [STATUS.NOT_VISITED]: { label: 'Unvisited', color: '#64748B', bg: 'bg-slate-500' },
-  [STATUS.NOT_ANSWERED]: { label: 'Unanswered', color: '#EF4444', bg: 'bg-rose-500' },
-  [STATUS.ANSWERED]: { label: 'Answered', color: '#10B981', bg: 'bg-emerald-500' },
-  [STATUS.MARKED]: { label: 'Review Later', color: '#F59E0B', bg: 'bg-amber-500' },
-  [STATUS.ANSWERED_MARKED]: { label: 'Ans & Flagged', color: '#6366F1', bg: 'bg-indigo-500' },
-};
-
 function formatClock(totalSeconds) {
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
@@ -44,47 +36,61 @@ function formatClock(totalSeconds) {
 }
 
 // ---------------------------------------------------------------------------
-// This screen styles itself with Tailwind `dark:` variants via NativeWind,
-// which by default follow the *device's* system color scheme — not this
-// app's own in-app theme toggle (ThemeContext). A user who switches themes
-// from the Profile screen would see this screen ignore that choice unless
-// it's system dark mode too. withTheme() re-resolves any "X dark:Y" class
-// pair against the real `isDark` flag from useTheme() instead, so the
-// screen follows the app's theme everywhere the app is used.
+// THEME
+// ---------------------------------------------------------------------------
+// This screen previously styled itself with NativeWind `dark:` classes,
+// which follow the *device's* system color scheme rather than this app's
+// in-app theme toggle (ThemeContext). Everything below is resolved from
+// `isDark` (sourced from useTheme() inside the component, never at module
+// scope) so the screen always matches the app's own theme switch.
 //
-// Structural classes (border-b, rounded-t-3xl, w-6, shadow-sm, etc.) are
-// always kept — only color-bearing utilities (bg-*, text-*, border-*,
-// ring-*, shadow-*, divide-*, placeholder-*) are swapped between their
-// light and dark variants, so e.g. `border-b border-slate-100 dark:border-slate-800`
-// keeps its border-bottom width and only swaps the color.
-const TAILWIND_COLOR_WORDS = new Set([
-  'slate', 'gray', 'zinc', 'neutral', 'stone', 'red', 'orange', 'amber', 'yellow',
-  'lime', 'green', 'emerald', 'teal', 'cyan', 'sky', 'blue', 'indigo', 'violet',
-  'purple', 'fuchsia', 'pink', 'rose', 'white', 'black', 'transparent', 'current',
-]);
-const COLOR_PROPS = new Set(['bg', 'text', 'border', 'ring', 'shadow', 'placeholder', 'divide']);
+// Tokens marked "confirmed" are pulled straight from `colors` because
+// they're already used the same way elsewhere in the app. Tokens marked
+// "fallback" aren't guaranteed to exist on your `colors` object yet — they
+// fall back to a hand-picked hex so nothing breaks, but if your theme.js
+// already defines equivalents, swap them in here (this is the only place
+// they're defined, so it's a one-line change per token).
+function useCbtTheme(colors, isDark) {
+  return useMemo(() => {
+    const c = colors || {};
+    return {
+      // confirmed tokens
+      textPrimary: c.textPrimary ?? (isDark ? '#F8FAFC' : '#0F172A'),
+      textSecondary: c.textSecondary ?? (isDark ? '#CBD5E1' : '#475569'),
+      textMuted: c.inkMuted ?? (isDark ? '#94A3B8' : '#94A3B8'),
+      border: c.borderDefault ?? (isDark ? '#1E293B' : '#F1F5F9'),
+      surface: c.surfaceSecondary ?? (isDark ? '#0F172A' : '#FFFFFF'),
+      greenTint: c.greenLight ?? (isDark ? 'rgba(16,185,129,0.16)' : 'rgba(16,185,129,0.10)'),
+      dangerTint: c.dangerLight ?? (isDark ? 'rgba(244,63,94,0.16)' : 'rgba(244,63,94,0.10)'),
 
-function isColorToken(token) {
-  const parts = token.split('-');
-  if (parts.length < 2 || !COLOR_PROPS.has(parts[0])) return false;
-  const colorWord = parts[1].split('/')[0];
-  return TAILWIND_COLOR_WORDS.has(colorWord);
+      // fallback tokens (verify against your theme.js)
+      bg: c.background ?? (isDark ? '#020617' : '#F8FAFC'),
+      card: c.surfacePrimary ?? c.surfaceSecondary ?? (isDark ? '#0F172A' : '#FFFFFF'),
+      input: c.surfaceInput ?? (isDark ? '#1E293B' : '#F8FAFC'),
+      chip: c.surfaceChip ?? (isDark ? '#1E293B' : '#F1F5F9'),
+      overlay: 'rgba(0,0,0,0.6)',
+
+      // semantic accent colors — deliberately kept constant across themes,
+      // only their *tint* (badge/pill background) shifts with isDark
+      indigo: '#4F46E5',
+      indigoTint: isDark ? 'rgba(99,102,241,0.18)' : 'rgba(99,102,241,0.10)',
+      green: '#10B981',
+      rose: '#F43F5E',
+      amber: '#F59E0B',
+      amberTint: isDark ? 'rgba(245,158,11,0.16)' : 'rgba(245,158,11,0.10)',
+      slate: '#64748B',
+      white: '#FFFFFF',
+    };
+  }, [colors, isDark]);
 }
 
-function withTheme(classString, isDark) {
-  const tokens = String(classString || '').split(/\s+/).filter(Boolean);
-  const lightTokens = [];
-  const darkTokens = [];
-  tokens.forEach((token) => {
-    if (token.startsWith('dark:')) darkTokens.push(token.slice(5));
-    else lightTokens.push(token);
-  });
-  if (!isDark) return lightTokens.join(' ');
-
-  const darkColorProps = new Set(darkTokens.filter(isColorToken).map((t) => t.split('-')[0]));
-  const filteredLight = lightTokens.filter((token) => !isColorToken(token) || !darkColorProps.has(token.split('-')[0]));
-  return [...filteredLight, ...darkTokens].join(' ');
-}
+const STATUS_META = (T) => ({
+  [STATUS.NOT_VISITED]: { label: 'Unvisited', color: T.white, bg: T.slate },
+  [STATUS.NOT_ANSWERED]: { label: 'Unanswered', color: T.white, bg: T.rose },
+  [STATUS.ANSWERED]: { label: 'Answered', color: T.white, bg: T.green },
+  [STATUS.MARKED]: { label: 'Review Later', color: T.white, bg: T.amber },
+  [STATUS.ANSWERED_MARKED]: { label: 'Ans & Flagged', color: T.white, bg: T.indigo },
+});
 
 // ---------------------------------------------------------------------------
 // In-app confirmation / notice modal — replaces every Alert.alert() in this
@@ -96,8 +102,7 @@ function withTheme(classString, isDark) {
 // Tapping the backdrop always behaves like a safe "cancel" (just closes the
 // modal) — it never triggers a destructive action on its own.
 // ---------------------------------------------------------------------------
-function ConfirmDialogModal({ dialog, onClose, isDark }) {
-  const tw = (s) => withTheme(s, isDark);
+function ConfirmDialogModal({ dialog, onClose, T }) {
   const visible = !!dialog;
   const scale = useRef(new Animated.Value(0.92)).current;
   const opacity = useRef(new Animated.Value(0)).current;
@@ -114,38 +119,48 @@ function ConfirmDialogModal({ dialog, onClose, isDark }) {
 
   if (!dialog) return null;
 
-  const { icon, iconColor = '#6366F1', iconBg = 'bg-indigo-100 dark:bg-indigo-950/40', title, message, actions = [] } = dialog;
+  const { icon, iconColor = T.indigo, iconBg = T.indigoTint, title, message, actions = [] } = dialog;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable onPress={onClose} className="flex-1 bg-black/60 items-center justify-center px-6">
+      <Pressable
+        onPress={onClose}
+        style={{ flex: 1, backgroundColor: T.overlay, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}
+      >
         <Animated.View style={{ transform: [{ scale }], opacity, width: '100%', maxWidth: 360 }}>
           {/* Inner Pressable with a no-op onPress absorbs taps so they don't bubble to the backdrop */}
-          <Pressable onPress={() => {}} className={tw("bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl")}>
+          <Pressable
+            onPress={() => {}}
+            style={{ backgroundColor: T.card, borderRadius: 24, padding: 24, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 20, elevation: 8 }}
+          >
             {icon ? (
-              <View className={tw(`w-14 h-14 rounded-2xl items-center justify-center mb-4 self-center ${iconBg}`)}>
+              <View style={{ width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 16, alignSelf: 'center', backgroundColor: iconBg }}>
                 <Ionicons name={icon} size={26} color={iconColor} />
               </View>
             ) : null}
-            {title ? <Text className={tw("text-lg font-black text-slate-900 dark:text-white text-center mb-2")}>{title}</Text> : null}
-            {message ? <Text className={tw("text-sm text-slate-500 dark:text-slate-400 text-center leading-relaxed mb-6")}>{message}</Text> : null}
+            {title ? (
+              <Text style={{ fontSize: 18, fontWeight: '900', color: T.textPrimary, textAlign: 'center', marginBottom: 8 }}>{title}</Text>
+            ) : null}
+            {message ? (
+              <Text style={{ fontSize: 14, color: T.textSecondary, textAlign: 'center', lineHeight: 20, marginBottom: 24 }}>{message}</Text>
+            ) : null}
 
-            <View className="gap-2.5">
+            <View style={{ gap: 10 }}>
               {actions.map((action) => {
-                const variantClass =
-                  action.variant === 'destructive' ? 'bg-rose-600' :
-                  action.variant === 'secondary' ? 'bg-slate-100 dark:bg-slate-800' :
-                  'bg-indigo-600';
-                const textClass = action.variant === 'secondary' ? 'text-slate-700 dark:text-slate-300' : 'text-white';
+                const bg =
+                  action.variant === 'destructive' ? T.rose :
+                  action.variant === 'secondary' ? T.chip :
+                  T.indigo;
+                const textColor = action.variant === 'secondary' ? T.textSecondary : T.white;
                 return (
                   <TouchableOpacity
                     key={action.key}
                     onPress={action.onPress}
-                    className={tw(`py-3.5 rounded-2xl items-center ${variantClass}`)}
+                    style={{ paddingVertical: 14, borderRadius: 16, alignItems: 'center', backgroundColor: bg }}
                     accessibilityRole="button"
                     accessibilityLabel={action.label}
                   >
-                    <Text className={tw(`font-bold text-sm ${textClass}`)}>{action.label}</Text>
+                    <Text style={{ fontWeight: '700', fontSize: 14, color: textColor }}>{action.label}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -160,7 +175,8 @@ function ConfirmDialogModal({ dialog, onClose, isDark }) {
 export default function CBTPracticeScreen() {
   const router = useRouter();
   const { colors, isDark } = useTheme();
-  const tw = useCallback((s) => withTheme(s, isDark), [isDark]);
+  const T = useCbtTheme(colors, isDark);
+  const statusMeta = useMemo(() => STATUS_META(T), [T]);
 
   // Primary State
   const [courses, setCourses] = useState([]);
@@ -230,33 +246,51 @@ export default function CBTPracticeScreen() {
     fetchCoursesAndUser();
   }, []);
 
-  // Sync History
+  // Sync History — load once on mount and again whenever the history panel
+  // is opened. (Previously this re-read AsyncStorage on every single stage
+  // change, e.g. every navigation between exam questions.)
+  const loadHistory = useCallback(async () => {
+    try {
+      const saved = await AsyncStorage.getItem('cbt_history_v2');
+      if (saved) setHistory(JSON.parse(saved));
+    } catch (e) {}
+  }, []);
+
   useEffect(() => {
-    const loadHistory = async () => {
-      try {
-        const saved = await AsyncStorage.getItem('cbt_history_v2');
-        if (saved) setHistory(JSON.parse(saved));
-      } catch (e) {}
-    };
     loadHistory();
-  }, [showHistory, stage]);
+  }, [loadHistory]);
+
+  useEffect(() => {
+    if (showHistory) loadHistory();
+  }, [showHistory, loadHistory]);
+
+  // finishExam is recreated every render (it closes over current exam
+  // state). confirmExitExam is memoized with an empty dep array so its
+  // dialog actions can be triggered from the hardware back handler without
+  // resubscribing that handler on every render — but that means we can't
+  // let it close over `finishExam` directly, or it would submit whatever
+  // exam state existed on first mount (i.e. nothing). Routing the call
+  // through a ref keeps confirmExitExam stable while always invoking the
+  // *current* finishExam.
+  const finishExamRef = useRef(null);
 
   // Shared "leave an active exam" pop-up — used by both the hardware back
   // button and the header back button, so the two entry points stay in sync.
   const confirmExitExam = useCallback(() => {
     setDialog({
       icon: 'warning',
-      iconColor: '#F59E0B',
-      iconBg: 'bg-amber-100 dark:bg-amber-950/40',
+      iconColor: T.amber,
+      iconBg: T.amberTint,
       title: 'Active Exam Session',
       message: 'Are you sure you want to exit? You can submit your current answers for grading, or discard this session entirely.',
       actions: [
         { key: 'resume', label: 'Resume Exam', variant: 'secondary', onPress: closeDialog },
-        { key: 'submit', label: 'Submit & Exit', variant: 'primary', onPress: () => { closeDialog(); finishExam(false); } },
-        { key: 'discard', label: 'Discard Session', variant: 'destructive', onPress: () => { closeDialog(); finishExam(true); } },
+        { key: 'submit', label: 'Submit & Exit', variant: 'primary', onPress: () => { closeDialog(); finishExamRef.current?.(false); } },
+        { key: 'discard', label: 'Discard Session', variant: 'destructive', onPress: () => { closeDialog(); finishExamRef.current?.(true); } },
       ],
     });
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [T]);
 
   // Exam Back-button Safety Guard
   useEffect(() => {
@@ -296,14 +330,15 @@ export default function CBTPracticeScreen() {
     if (stage === 'exam' && timeLeft === 0 && startedAt) {
       setDialog({
         icon: 'time',
-        iconColor: '#6366F1',
-        iconBg: 'bg-indigo-100 dark:bg-indigo-950/40',
+        iconColor: T.indigo,
+        iconBg: T.indigoTint,
         title: 'Time Elapsed',
         message: 'The official examination duration has concluded. Your test paper has been submitted automatically.',
         actions: [{ key: 'ok', label: 'View Results', variant: 'primary', onPress: closeDialog }],
       });
       finishExam();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeLeft, stage]);
 
   // Scientific Calculator Logic
@@ -315,6 +350,8 @@ export default function CBTPracticeScreen() {
     if (val === '=') {
       try {
         const sanitized = calcDisplay.replace(/×/g, '*').replace(/÷/g, '/');
+        if (!/^[0-9+\-*/.\s]+$/.test(sanitized)) throw new Error('invalid');
+        // eslint-disable-next-line no-new-func
         const res = Function(`'use strict'; return (${sanitized})`)();
         setCalcDisplay(String(res));
       } catch (e) {
@@ -424,8 +461,8 @@ export default function CBTPracticeScreen() {
         setStage('setup');
         setDialog({
           icon: 'close-circle',
-          iconColor: '#F43F5E',
-          iconBg: 'bg-rose-100 dark:bg-rose-950/40',
+          iconColor: T.rose,
+          iconBg: T.dangerTint,
           title: 'Unable to Start',
           message: 'Could not parse the test paper from server. Please try again.',
           actions: [{ key: 'ok', label: 'OK', variant: 'primary', onPress: closeDialog }],
@@ -435,8 +472,8 @@ export default function CBTPracticeScreen() {
       setStage('setup');
       setDialog({
         icon: 'cloud-offline',
-        iconColor: '#F43F5E',
-        iconBg: 'bg-rose-100 dark:bg-rose-950/40',
+        iconColor: T.rose,
+        iconBg: T.dangerTint,
         title: 'Network Failure',
         message: 'Verify your active internet connection and retry.',
         actions: [{ key: 'ok', label: 'OK', variant: 'primary', onPress: closeDialog }],
@@ -476,9 +513,17 @@ export default function CBTPracticeScreen() {
         date: new Date().toISOString(),
       };
       saved.unshift(record);
-      await AsyncStorage.setItem('cbt_history_v2', JSON.stringify(saved.slice(0, 50)));
+      const trimmed = saved.slice(0, 50);
+      await AsyncStorage.setItem('cbt_history_v2', JSON.stringify(trimmed));
+      setHistory(trimmed);
     } catch (e) {}
   };
+
+  // Keep the ref pointed at the latest finishExam on every render, so
+  // confirmExitExam (memoized once) always triggers a fresh submission.
+  useEffect(() => {
+    finishExamRef.current = finishExam;
+  });
 
   const requestSubmit = () => {
     const unansweredCount = questions.length - Object.keys(answers).length;
@@ -488,8 +533,8 @@ export default function CBTPracticeScreen() {
 
     setDialog({
       icon: unansweredCount > 0 ? 'alert-circle' : 'checkmark-circle',
-      iconColor: unansweredCount > 0 ? '#F59E0B' : '#10B981',
-      iconBg: unansweredCount > 0 ? 'bg-amber-100 dark:bg-amber-950/40' : 'bg-emerald-100 dark:bg-emerald-950/40',
+      iconColor: unansweredCount > 0 ? T.amber : T.green,
+      iconBg: unansweredCount > 0 ? T.amberTint : T.greenTint,
       title: 'Submit Test Paper',
       message,
       actions: [
@@ -510,15 +555,65 @@ export default function CBTPracticeScreen() {
     setVisited({});
     setReviewFilter('all');
   };
-  const dialogModal = <ConfirmDialogModal dialog={dialog} onClose={closeDialog} isDark={isDark} />;
+
+  // Validate config before moving to the rules screen — previously you
+  // could type "0" or leave the field empty/non-numeric and still proceed,
+  // which produced a broken exam with no questions or no timer.
+  const proceedToInstructions = () => {
+    const qty = parseInt(numQuestions, 10);
+    const mins = parseInt(timeLimit, 10);
+    const course = courses.find(c => c.id === setupCourse);
+    const max = course?.question_count || Infinity;
+
+    if (!qty || qty < 1) {
+      setDialog({
+        icon: 'alert-circle',
+        iconColor: T.rose,
+        iconBg: T.dangerTint,
+        title: 'Invalid Question Count',
+        message: 'Enter a whole number of at least 1 question.',
+        actions: [{ key: 'ok', label: 'OK', variant: 'primary', onPress: closeDialog }],
+      });
+      return;
+    }
+    if (qty > max) {
+      setDialog({
+        icon: 'alert-circle',
+        iconColor: T.rose,
+        iconBg: T.dangerTint,
+        title: 'Too Many Questions',
+        message: `This paper only has ${max} questions available.`,
+        actions: [{ key: 'ok', label: 'OK', variant: 'primary', onPress: closeDialog }],
+      });
+      return;
+    }
+    if (!mins || mins < 1) {
+      setDialog({
+        icon: 'alert-circle',
+        iconColor: T.rose,
+        iconBg: T.dangerTint,
+        title: 'Invalid Duration',
+        message: 'Enter a whole number of at least 1 minute.',
+        actions: [{ key: 'ok', label: 'OK', variant: 'primary', onPress: closeDialog }],
+      });
+      return;
+    }
+
+    setAgreed(false);
+    setStage('instructions');
+  };
+
+  const dialogModal = <ConfirmDialogModal dialog={dialog} onClose={closeDialog} T={T} />;
 
   if (loading) {
     return (
       <>
         <ScreenShell showBack title="CBT Terminal" onBack={() => router.back()}>
-          <View className="flex-1 items-center justify-center pt-20">
-            <ActivityIndicator size="large" color="#4F46E5" />
-            <Text className="text-slate-500 font-bold tracking-widest uppercase text-xs mt-4">Initializing Test Engine...</Text>
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 }}>
+            <ActivityIndicator size="large" color={T.indigo} />
+            <Text style={{ color: T.textMuted, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', fontSize: 12, marginTop: 16 }}>
+              Initializing Test Engine...
+            </Text>
           </View>
         </ScreenShell>
         {dialogModal}
@@ -530,10 +625,10 @@ export default function CBTPracticeScreen() {
     return (
       <>
         <ScreenShell showBack title="CBT Terminal" onBack={() => router.back()}>
-          <View className="flex-1 items-center justify-center pt-20 px-6">
-            <Ionicons name="cloud-offline-outline" size={60} color="#F43F5E" />
-            <Text className={tw("text-xl font-black text-slate-900 dark:text-white mt-4")}>Server Unreachable</Text>
-            <Text className="text-center text-slate-500 mt-2">Failed to sync question banks from terminal host.</Text>
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80, paddingHorizontal: 24 }}>
+            <Ionicons name="cloud-offline-outline" size={60} color={T.rose} />
+            <Text style={{ fontSize: 20, fontWeight: '900', color: T.textPrimary, marginTop: 16 }}>Server Unreachable</Text>
+            <Text style={{ textAlign: 'center', color: T.textMuted, marginTop: 8 }}>Failed to sync question banks from terminal host.</Text>
           </View>
         </ScreenShell>
         {dialogModal}
@@ -545,30 +640,33 @@ export default function CBTPracticeScreen() {
     return (
       <>
         <ScreenShell showBack title="Mock Test History" onBack={() => setShowHistory(false)}>
-          <ScrollView className="flex-1 px-4 pt-4">
+          <ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingTop: 16 }}>
             {history.length === 0 ? (
-              <View className="items-center justify-center py-20">
-                <Ionicons name="documents-outline" size={56} color="#94A3B8" />
-                <Text className="text-slate-500 font-semibold mt-3">No prior test attempts recorded.</Text>
+              <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 80 }}>
+                <Ionicons name="documents-outline" size={56} color={T.slate} />
+                <Text style={{ color: T.textMuted, fontWeight: '600', marginTop: 12 }}>No prior test attempts recorded.</Text>
               </View>
             ) : (
               history.map((item) => {
                 const pct = Math.round((item.score / item.totalQuestions) * 100);
                 const isPass = pct >= 50;
                 return (
-                  <View key={item.id || item.date} className={tw("bg-white dark:bg-slate-900 p-4 rounded-2xl mb-3 border border-slate-100 dark:border-slate-800 shadow-sm flex-row items-center justify-between")}>
-                    <View className="flex-1 pr-3">
-                      <Text className={tw("font-bold text-base text-slate-900 dark:text-white")} numberOfLines={1}>{item.courseTitle}</Text>
-                      <Text className="text-xs text-indigo-500 font-medium mt-0.5">Candidate: {item.candidate || 'Default'}</Text>
-                      <Text className="text-[11px] text-slate-400 mt-1">
+                  <View
+                    key={item.id || item.date}
+                    style={{ backgroundColor: T.card, padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: T.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+                  >
+                    <View style={{ flex: 1, paddingRight: 12 }}>
+                      <Text style={{ fontWeight: '700', fontSize: 16, color: T.textPrimary }} numberOfLines={1}>{item.courseTitle}</Text>
+                      <Text style={{ fontSize: 12, color: T.indigo, fontWeight: '600', marginTop: 2 }}>Candidate: {item.candidate || 'Default'}</Text>
+                      <Text style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>
                         {new Date(item.date).toLocaleDateString()} • Duration: {formatClock(item.timeTaken || 0)}
                       </Text>
                     </View>
-                    <View className={tw("items-end bg-slate-50 dark:bg-slate-800 px-3 py-2 rounded-xl")}>
-                      <Text className={tw(`font-black text-lg ${isPass ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'}`)}>
+                    <View style={{ alignItems: 'flex-end', backgroundColor: T.chip, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 }}>
+                      <Text style={{ fontWeight: '900', fontSize: 18, color: isPass ? T.green : T.rose }}>
                         {item.score}/{item.totalQuestions}
                       </Text>
-                      <Text className="text-[10px] text-slate-400 font-bold uppercase">{pct}% Overall</Text>
+                      <Text style={{ fontSize: 10, color: T.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>{pct}% Overall</Text>
                     </View>
                   </View>
                 );
@@ -585,47 +683,56 @@ export default function CBTPracticeScreen() {
     return (
       <>
         <ScreenShell showBack title="MockCBT Simulator" onBack={() => router.back()}>
-          <ScrollView className="flex-1 px-4 pt-3 pb-10" showsVerticalScrollIndicator={false}>
+          <ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
             {/* Hero Banner */}
-            <View className="bg-indigo-600 rounded-3xl p-5 mb-6 shadow-xl shadow-indigo-500/20">
-              <View className="flex-row justify-between items-start">
-                <View className="flex-1">
-                  <Text className="text-indigo-200 text-xs font-bold uppercase tracking-widest">Mock Simulator</Text>
-                  <Text className="text-white text-2xl font-black mt-1">Ready for Practice?</Text>
-                  <Text className="text-indigo-100 text-xs mt-1.5 leading-relaxed">Prepare with standard UTME & JAMB mock test papers.</Text>
+            <View style={{ backgroundColor: T.indigo, borderRadius: 24, padding: 20, marginBottom: 24, shadowColor: T.indigo, shadowOpacity: 0.2, shadowRadius: 16, elevation: 4 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 }}>Mock Simulator</Text>
+                  <Text style={{ color: T.white, fontSize: 24, fontWeight: '900', marginTop: 4 }}>Ready for Practice?</Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 12, marginTop: 6, lineHeight: 18 }}>Prepare with standard UTME & JAMB mock test papers.</Text>
                 </View>
-                <TouchableOpacity onPress={() => setShowHistory(true)} className="bg-white/20 p-3 rounded-2xl">
-                  <Ionicons name="bar-chart-outline" size={22} color="white" />
+                <TouchableOpacity
+                  onPress={() => setShowHistory(true)}
+                  style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: 12, borderRadius: 16 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="View test history"
+                >
+                  <Ionicons name="bar-chart-outline" size={22} color={T.white} />
                 </TouchableOpacity>
               </View>
             </View>
 
             {/* Search Bar */}
-            <View className={tw("flex-row items-center bg-white dark:bg-slate-900 rounded-2xl px-4 py-3 mb-5 shadow-sm border border-slate-100 dark:border-slate-800")}>
-              <Ionicons name="search" size={20} color="#94A3B8" />
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.card, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 20, borderWidth: 1, borderColor: T.border }}>
+              <Ionicons name="search" size={20} color={T.textMuted} />
               <TextInput
-                className={tw("flex-1 ml-3 text-base text-slate-900 dark:text-white")}
+                style={{ flex: 1, marginLeft: 12, fontSize: 16, color: T.textPrimary }}
                 placeholder="Search subject or course code..."
-                placeholderTextColor="#94A3B8"
+                placeholderTextColor={T.textMuted}
                 value={searchTerm}
                 onChangeText={setSearchTerm}
               />
             </View>
 
             {/* Course Grid */}
-            <Text className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Available Papers ({filteredCourses.length})</Text>
-            <View className="flex-row flex-wrap justify-between">
+            <Text style={{ fontSize: 12, fontWeight: '700', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
+              Available Papers ({filteredCourses.length})
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
               {filteredCourses.map(course => (
                 <TouchableOpacity
                   key={course.id}
                   onPress={() => beginSetup(course.id)}
-                  className={tw("w-[48%] bg-white dark:bg-slate-900 p-4 rounded-2xl mb-4 border border-slate-100 dark:border-slate-800 shadow-sm")}
+                  style={{ width: '48%', backgroundColor: T.card, padding: 16, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: T.border }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Start ${course.title} practice`}
                 >
-                  <View className={tw("bg-indigo-50 dark:bg-indigo-950 w-10 h-10 rounded-xl items-center justify-center mb-3")}>
-                    <MaterialCommunityIcons name="file-document-edit-outline" size={22} color="#6366F1" />
+                  <View style={{ backgroundColor: T.indigoTint, width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+                    <MaterialCommunityIcons name="file-document-edit-outline" size={22} color={T.indigo} />
                   </View>
-                  <Text className={tw("font-bold text-slate-900 dark:text-white text-base mb-1")} numberOfLines={2}>{course.title}</Text>
-                  <Text className="text-xs text-slate-400 font-semibold">{course.question_count} Questions</Text>
+                  <Text style={{ fontWeight: '700', color: T.textPrimary, fontSize: 15, marginBottom: 4 }} numberOfLines={2}>{course.title}</Text>
+                  <Text style={{ fontSize: 12, color: T.textMuted, fontWeight: '600' }}>{course.question_count} Questions</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -641,50 +748,51 @@ export default function CBTPracticeScreen() {
     return (
       <>
         <ScreenShell showBack title="Paper Configuration" onBack={() => setStage('browse')}>
-          <ScrollView className="flex-1 px-4 pt-4">
-            <View className={tw("bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm")}>
-              <View className={tw("border-b border-slate-100 dark:border-slate-800 pb-4 mb-6")}>
-                <Text className="text-xs font-black uppercase tracking-widest text-indigo-500 mb-1">CBT Setup Desk</Text>
-                <Text className={tw("text-2xl font-black text-slate-900 dark:text-white")}>{course?.title}</Text>
+          <ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingTop: 16 }}>
+            <View style={{ backgroundColor: T.card, padding: 24, borderRadius: 24, borderWidth: 1, borderColor: T.border }}>
+              <View style={{ borderBottomWidth: 1, borderBottomColor: T.border, paddingBottom: 16, marginBottom: 24 }}>
+                <Text style={{ fontSize: 12, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1, color: T.indigo, marginBottom: 4 }}>CBT Setup Desk</Text>
+                <Text style={{ fontSize: 24, fontWeight: '900', color: T.textPrimary }}>{course?.title}</Text>
               </View>
 
-              <View className="mb-5">
-                <Text className={tw("font-bold text-slate-700 dark:text-slate-300 mb-2")}>Username / Candidate Display Name</Text>
+              <View style={{ marginBottom: 20 }}>
+                <Text style={{ fontWeight: '700', color: T.textSecondary, marginBottom: 8 }}>Username / Candidate Display Name</Text>
                 <TextInput
-                  className={tw("bg-slate-50 dark:bg-slate-800 rounded-xl px-4 py-3 text-base border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white")}
+                  style={{ backgroundColor: T.input, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, borderWidth: 1, borderColor: T.border, color: T.textPrimary }}
                   placeholder="Enter your name..."
-                  placeholderTextColor="#94A3B8"
+                  placeholderTextColor={T.textMuted}
                   value={username}
                   onChangeText={setUsername}
                 />
               </View>
 
-              <View className="mb-5">
-                <Text className={tw("font-bold text-slate-700 dark:text-slate-300 mb-2")}>Question Quantity</Text>
+              <View style={{ marginBottom: 20 }}>
+                <Text style={{ fontWeight: '700', color: T.textSecondary, marginBottom: 8 }}>Question Quantity</Text>
                 <TextInput
-                  className={tw("bg-slate-50 dark:bg-slate-800 rounded-xl px-4 py-3 text-base border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white")}
-                  keyboardType="numeric"
+                  style={{ backgroundColor: T.input, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, borderWidth: 1, borderColor: T.border, color: T.textPrimary }}
+                  keyboardType="number-pad"
                   value={numQuestions}
                   onChangeText={setNumQuestions}
                 />
-                <Text className="text-xs text-slate-400 mt-1">Maximum available: {course?.question_count}</Text>
+                <Text style={{ fontSize: 12, color: T.textMuted, marginTop: 4 }}>Maximum available: {course?.question_count}</Text>
               </View>
 
-              <View className="mb-6">
-                <Text className={tw("font-bold text-slate-700 dark:text-slate-300 mb-2")}>Duration (Minutes)</Text>
+              <View style={{ marginBottom: 24 }}>
+                <Text style={{ fontWeight: '700', color: T.textSecondary, marginBottom: 8 }}>Duration (Minutes)</Text>
                 <TextInput
-                  className={tw("bg-slate-50 dark:bg-slate-800 rounded-xl px-4 py-3 text-base border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white")}
-                  keyboardType="numeric"
+                  style={{ backgroundColor: T.input, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, borderWidth: 1, borderColor: T.border, color: T.textPrimary }}
+                  keyboardType="number-pad"
                   value={timeLimit}
                   onChangeText={setTimeLimit}
                 />
               </View>
 
               <TouchableOpacity
-                onPress={() => { setAgreed(false); setStage('instructions'); }}
-                className="bg-indigo-600 py-4 rounded-2xl items-center shadow-lg shadow-indigo-500/30"
+                onPress={proceedToInstructions}
+                style={{ backgroundColor: T.indigo, paddingVertical: 16, borderRadius: 16, alignItems: 'center', shadowColor: T.indigo, shadowOpacity: 0.3, shadowRadius: 10, elevation: 3 }}
+                accessibilityRole="button"
               >
-                <Text className="text-white font-black text-base">Proceed to Candidate Rules</Text>
+                <Text style={{ color: T.white, fontWeight: '900', fontSize: 15 }}>Proceed to Candidate Rules</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -698,41 +806,45 @@ export default function CBTPracticeScreen() {
     return (
       <>
         <ScreenShell showBack title="Candidate Rules" onBack={() => setStage('setup')}>
-          <ScrollView className="flex-1 px-4 pt-4">
-            <View className={tw("bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm")}>
-              <Text className={tw("text-xl font-black text-slate-900 dark:text-white mb-4")}>Official Examination Guidelines</Text>
+          <ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingTop: 16 }}>
+            <View style={{ backgroundColor: T.card, padding: 24, borderRadius: 24, borderWidth: 1, borderColor: T.border }}>
+              <Text style={{ fontSize: 20, fontWeight: '900', color: T.textPrimary, marginBottom: 16 }}>Official Examination Guidelines</Text>
 
-              <View className="space-y-4 mb-6">
-                <View className="flex-row items-start gap-3">
-                  <Ionicons name="time" size={20} color="#6366F1" />
-                  <Text className={tw("flex-1 text-slate-700 dark:text-slate-300 text-sm leading-relaxed")}>Timer countdown will initiate immediately upon clicking "Launch Test Session".</Text>
+              <View style={{ marginBottom: 24, gap: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+                  <Ionicons name="time" size={20} color={T.indigo} />
+                  <Text style={{ flex: 1, color: T.textSecondary, fontSize: 14, lineHeight: 20 }}>Timer countdown will initiate immediately upon clicking "Launch Test Session".</Text>
                 </View>
-                <View className="flex-row items-start gap-3 mt-3">
-                  <Ionicons name="grid" size={20} color="#6366F1" />
-                  <Text className={tw("flex-1 text-slate-700 dark:text-slate-300 text-sm leading-relaxed")}>Use the top grid navigator to inspect answered vs unvisited questions.</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+                  <Ionicons name="grid" size={20} color={T.indigo} />
+                  <Text style={{ flex: 1, color: T.textSecondary, fontSize: 14, lineHeight: 20 }}>Use the top grid navigator to inspect answered vs unvisited questions.</Text>
                 </View>
-                <View className="flex-row items-start gap-3 mt-3">
-                  <Ionicons name="calculator" size={20} color="#6366F1" />
-                  <Text className={tw("flex-1 text-slate-700 dark:text-slate-300 text-sm leading-relaxed")}>In-app Scientific Calculator is available in the top utility toolbar.</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+                  <Ionicons name="calculator" size={20} color={T.indigo} />
+                  <Text style={{ flex: 1, color: T.textSecondary, fontSize: 14, lineHeight: 20 }}>In-app Scientific Calculator is available in the top utility toolbar.</Text>
                 </View>
               </View>
 
               <TouchableOpacity
                 onPress={() => setAgreed(!agreed)}
-                className={tw("flex-row items-center gap-3 mb-6 bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700")}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 24, backgroundColor: T.input, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: T.border }}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: agreed }}
               >
-                <View className={`w-6 h-6 rounded-lg border items-center justify-center ${agreed ? 'bg-indigo-600 border-indigo-600' : 'border-slate-400'}`}>
-                  {agreed && <Ionicons name="checkmark" size={16} color="white" />}
+                <View style={{ width: 24, height: 24, borderRadius: 8, borderWidth: agreed ? 0 : 1, alignItems: 'center', justifyContent: 'center', backgroundColor: agreed ? T.indigo : 'transparent', borderColor: T.slate }}>
+                  {agreed && <Ionicons name="checkmark" size={16} color={T.white} />}
                 </View>
-                <Text className={tw("flex-1 font-semibold text-slate-800 dark:text-slate-200 text-sm")}>I certify that I am ready for this mock examination.</Text>
+                <Text style={{ flex: 1, fontWeight: '600', color: T.textPrimary, fontSize: 14 }}>I certify that I am ready for this mock examination.</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={startExam}
                 disabled={!agreed}
-                className={tw(`py-4 rounded-2xl items-center shadow-lg ${agreed ? 'bg-indigo-600 shadow-indigo-500/30' : 'bg-slate-300 dark:bg-slate-800'}`)}
+                style={{ paddingVertical: 16, borderRadius: 16, alignItems: 'center', backgroundColor: agreed ? T.indigo : T.chip, shadowColor: agreed ? T.indigo : 'transparent', shadowOpacity: agreed ? 0.3 : 0, shadowRadius: 10, elevation: agreed ? 3 : 0 }}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !agreed }}
               >
-                <Text className={`font-black text-base ${agreed ? 'text-white' : 'text-slate-500'}`}>Launch Test Session</Text>
+                <Text style={{ fontWeight: '900', fontSize: 15, color: agreed ? T.white : T.textMuted }}>Launch Test Session</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -747,9 +859,11 @@ export default function CBTPracticeScreen() {
       return (
         <>
           <ScreenShell showBack title="Loading Room" onBack={() => finishExam(true)}>
-            <View className="flex-1 items-center justify-center">
-              <ActivityIndicator size="large" color="#6366F1" />
-              <Text className={tw("text-slate-500 dark:text-slate-400 mt-4 font-mono uppercase text-xs tracking-widest")}>Preparing Examination Paper...</Text>
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+              <ActivityIndicator size="large" color={T.indigo} />
+              <Text style={{ color: T.textMuted, marginTop: 16, fontFamily: 'monospace', textTransform: 'uppercase', fontSize: 12, letterSpacing: 1 }}>
+                Preparing Examination Paper...
+              </Text>
             </View>
           </ScreenShell>
           {dialogModal}
@@ -767,59 +881,82 @@ export default function CBTPracticeScreen() {
           title={activeCourse?.title || "CBT Practice Room"}
           onBack={confirmExitExam}
         >
-          <View className={tw("flex-1 bg-slate-100 dark:bg-slate-950")}>
+          <View style={{ flex: 1, backgroundColor: T.bg }}>
             {/* Authentic CBT Desktop Top Bar */}
-            <View className="bg-slate-900 px-4 py-3 flex-row items-center justify-between border-b border-slate-800">
-              <View className="flex-row items-center flex-1 mr-2">
-                <View className="w-9 h-9 rounded-full bg-indigo-600 items-center justify-center mr-3 border border-indigo-400">
-                  <Ionicons name="person" size={18} color="white" />
+            <View style={{ backgroundColor: '#0F172A', paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#1E293B' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 }}>
+                <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: T.indigo, alignItems: 'center', justifyContent: 'center', marginRight: 12, borderWidth: 1, borderColor: '#818CF8' }}>
+                  <Ionicons name="person" size={18} color={T.white} />
                 </View>
-                <View className="flex-1">
-                  <Text className="text-white font-bold text-xs" numberOfLines={1}>{username}</Text>
-                  <Text className="text-slate-400 font-mono text-[10px]" numberOfLines={1}>{activeCourse?.title}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: T.white, fontWeight: '700', fontSize: 12 }} numberOfLines={1}>{username}</Text>
+                  <Text style={{ color: '#94A3B8', fontFamily: 'monospace', fontSize: 10 }} numberOfLines={1}>{activeCourse?.title}</Text>
                 </View>
               </View>
 
               {/* Quick Utility Toolbar */}
-              <View className="flex-row items-center gap-2">
-                <TouchableOpacity onPress={() => setShowCalc(!showCalc)} className={`p-2 rounded-lg ${showCalc ? 'bg-indigo-600' : 'bg-slate-800'}`}>
-                  <Ionicons name="calculator" size={18} color="white" />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <TouchableOpacity
+                  onPress={() => setShowCalc(!showCalc)}
+                  style={{ padding: 8, borderRadius: 10, backgroundColor: showCalc ? T.indigo : '#1E293B' }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Toggle calculator"
+                >
+                  <Ionicons name="calculator" size={18} color={T.white} />
                 </TouchableOpacity>
 
-                <TouchableOpacity onPress={() => setFontSizeOffset(prev => (prev >= 4 ? -2 : prev + 2))} className="p-2 bg-slate-800 rounded-lg">
-                  <Text className="text-white font-bold text-xs">A{fontSizeOffset > 0 ? `+${fontSizeOffset}` : ''}</Text>
+                <TouchableOpacity
+                  onPress={() => setFontSizeOffset(prev => (prev >= 4 ? -2 : prev + 2))}
+                  style={{ padding: 8, backgroundColor: '#1E293B', borderRadius: 10 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Adjust text size"
+                >
+                  <Text style={{ color: T.white, fontWeight: '700', fontSize: 12 }}>A{fontSizeOffset > 0 ? `+${fontSizeOffset}` : ''}</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity onPress={() => setShowPalette(true)} className="p-2 bg-indigo-600 rounded-lg flex-row items-center gap-1">
-                  <Ionicons name="grid" size={16} color="white" />
-                  <Text className="text-white font-bold text-xs">{currentIndex + 1}/{questions.length}</Text>
+                <TouchableOpacity
+                  onPress={() => setShowPalette(true)}
+                  style={{ padding: 8, backgroundColor: T.indigo, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open question navigator"
+                >
+                  <Ionicons name="grid" size={16} color={T.white} />
+                  <Text style={{ color: T.white, fontWeight: '700', fontSize: 12 }}>{currentIndex + 1}/{questions.length}</Text>
                 </TouchableOpacity>
               </View>
             </View>
 
             {/* Dynamic Countdown Banner */}
-            <View className={`py-2 px-4 flex-row items-center justify-between ${timeLeft < 180 ? 'bg-rose-600' : 'bg-slate-800'}`}>
-              <Text className="text-white font-mono text-xs font-bold uppercase tracking-wider">Time Remaining</Text>
-              <View className="flex-row items-center gap-1.5">
-                <Ionicons name="time-outline" size={16} color="white" />
-                <Text className="text-white font-mono font-black text-base">{formatClock(timeLeft)}</Text>
+            <View style={{ paddingVertical: 8, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: timeLeft < 180 ? T.rose : '#1E293B' }}>
+              <Text style={{ color: T.white, fontFamily: 'monospace', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 }}>Time Remaining</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name="time-outline" size={16} color={T.white} />
+                <Text style={{ color: T.white, fontFamily: 'monospace', fontWeight: '900', fontSize: 16 }}>{formatClock(timeLeft)}</Text>
               </View>
             </View>
 
             {/* Built-in Scientific Calculator Floating Overlay */}
             {showCalc && (
-              <View className="absolute top-28 right-4 z-50 bg-slate-900 border border-slate-700 p-4 rounded-2xl w-64 shadow-2xl">
-                <View className="flex-row justify-between items-center mb-2">
-                  <Text className="text-slate-400 font-mono text-xs uppercase">CBT Calculator</Text>
-                  <TouchableOpacity onPress={() => setShowCalc(false)}><Ionicons name="close" size={18} color="#94A3B8" /></TouchableOpacity>
+              <View style={{ position: 'absolute', top: 112, right: 16, zIndex: 50, backgroundColor: '#0F172A', borderWidth: 1, borderColor: '#334155', padding: 16, borderRadius: 20, width: 256, shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 16, elevation: 8 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <Text style={{ color: '#94A3B8', fontFamily: 'monospace', fontSize: 12, textTransform: 'uppercase' }}>CBT Calculator</Text>
+                  <TouchableOpacity onPress={() => setShowCalc(false)} accessibilityRole="button" accessibilityLabel="Close calculator">
+                    <Ionicons name="close" size={18} color="#94A3B8" />
+                  </TouchableOpacity>
                 </View>
-                <View className="bg-black/60 p-3 rounded-xl mb-3 items-end">
-                  <Text className="text-emerald-400 font-mono text-xl font-bold">{calcDisplay}</Text>
+                <View style={{ backgroundColor: 'rgba(0,0,0,0.6)', padding: 12, borderRadius: 12, marginBottom: 12, alignItems: 'flex-end' }}>
+                  <Text style={{ color: T.green, fontFamily: 'monospace', fontSize: 20, fontWeight: '700' }}>{calcDisplay}</Text>
                 </View>
-                <View className="flex-row flex-wrap gap-2 justify-between">
-                  {['7','8','9','÷','4','5','6','×','1','2','3','-','C','0','=','+'].map((btn) => (
-                    <TouchableOpacity key={btn} onPress={() => handleCalcPress(btn)} className="w-[22%] bg-slate-800 py-2.5 rounded-lg items-center">
-                      <Text className="text-white font-bold text-base">{btn}</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between' }}>
+                  {['7', '8', '9', '÷', '4', '5', '6', '×', '1', '2', '3', '-', 'C', '0', '=', '+'].map((btn) => (
+                    <TouchableOpacity
+                      key={btn}
+                      onPress={() => handleCalcPress(btn)}
+                      style={{ width: '22%', backgroundColor: '#1E293B', paddingVertical: 10, borderRadius: 10, alignItems: 'center' }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Calculator ${btn}`}
+                    >
+                      <Text style={{ color: T.white, fontWeight: '700', fontSize: 16 }}>{btn}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -827,18 +964,23 @@ export default function CBTPracticeScreen() {
             )}
 
             {/* Palette Modal Navigation */}
-            <Modal visible={showPalette} animationType="slide" transparent={true} onRequestClose={() => setShowPalette(false)}>
-              <View className="flex-1 justify-end bg-black/70">
-                <View className={tw("bg-white dark:bg-slate-900 rounded-t-3xl p-6 max-h-[80%] shadow-2xl")}>
-                  <View className="flex-row justify-between items-center mb-4">
-                    <Text className={tw("text-xl font-black text-slate-900 dark:text-white")}>Question Navigator Grid</Text>
-                    <TouchableOpacity onPress={() => setShowPalette(false)} className={tw("bg-slate-100 dark:bg-slate-800 p-2 rounded-full")}>
-                      <Ionicons name="close" size={20} color="#64748B" />
+            <Modal visible={showPalette} animationType="slide" transparent onRequestClose={() => setShowPalette(false)}>
+              <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: T.overlay }}>
+                <View style={{ backgroundColor: T.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '80%', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 20, elevation: 8 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <Text style={{ fontSize: 20, fontWeight: '900', color: T.textPrimary }}>Question Navigator Grid</Text>
+                    <TouchableOpacity
+                      onPress={() => setShowPalette(false)}
+                      style={{ backgroundColor: T.chip, padding: 8, borderRadius: 999 }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Close navigator"
+                    >
+                      <Ionicons name="close" size={20} color={T.textMuted} />
                     </TouchableOpacity>
                   </View>
 
                   <ScrollView showsVerticalScrollIndicator={false}>
-                    <View className="flex-row flex-wrap gap-2.5 justify-center mb-6">
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center', marginBottom: 24 }}>
                       {questions.map((_, idx) => {
                         const st = statusFor(idx);
                         const isCurrent = idx === currentIndex;
@@ -846,20 +988,26 @@ export default function CBTPracticeScreen() {
                           <TouchableOpacity
                             key={idx}
                             onPress={() => goToQuestion(idx)}
-                            className={tw(`w-11 h-11 rounded-xl items-center justify-center border-2 ${STATUS_META[st].bg} ${isCurrent ? 'border-slate-900 dark:border-white' : 'border-transparent'}`)}
+                            style={{
+                              width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
+                              borderWidth: 2, backgroundColor: statusMeta[st].bg,
+                              borderColor: isCurrent ? T.textPrimary : 'transparent',
+                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Question ${idx + 1}, ${statusMeta[st].label}`}
                           >
-                            <Text className="text-white font-bold">{idx + 1}</Text>
+                            <Text style={{ color: T.white, fontWeight: '700' }}>{idx + 1}</Text>
                           </TouchableOpacity>
                         );
                       })}
                     </View>
 
                     {/* Legend */}
-                    <View className={tw("bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl flex-row flex-wrap justify-between gap-y-3")}>
-                      {Object.values(STATUS_META).map((meta, idx) => (
-                        <View key={idx} className="flex-row items-center w-[48%]">
-                          <View className={`w-3 h-3 rounded-full mr-2 ${meta.bg}`} />
-                          <Text className={tw("text-xs font-medium text-slate-600 dark:text-slate-300")}>{meta.label}</Text>
+                    <View style={{ backgroundColor: T.input, padding: 16, borderRadius: 16, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 }}>
+                      {Object.values(statusMeta).map((meta, idx) => (
+                        <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', width: '48%' }}>
+                          <View style={{ width: 12, height: 12, borderRadius: 6, marginRight: 8, backgroundColor: meta.bg }} />
+                          <Text style={{ fontSize: 12, fontWeight: '600', color: T.textSecondary }}>{meta.label}</Text>
                         </View>
                       ))}
                     </View>
@@ -869,25 +1017,25 @@ export default function CBTPracticeScreen() {
             </Modal>
 
             {/* Primary Question View Surface */}
-            <ScrollView className="flex-1 px-5 pt-6" contentContainerStyle={{ paddingBottom: 120 }}>
-              <View className={tw("bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm mb-6")}>
-                <View className="flex-row justify-between items-center mb-4">
-                  <Text className="text-xs font-black uppercase tracking-widest text-indigo-500">Question {currentIndex + 1}</Text>
+            <ScrollView style={{ flex: 1, paddingHorizontal: 20, paddingTop: 24 }} contentContainerStyle={{ paddingBottom: 120 }}>
+              <View style={{ backgroundColor: T.card, padding: 24, borderRadius: 24, borderWidth: 1, borderColor: T.border, marginBottom: 24 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1, color: T.indigo }}>Question {currentIndex + 1}</Text>
                   {isMarked && (
-                    <View className={tw("bg-amber-100 dark:bg-amber-950/50 px-3 py-1 rounded-full flex-row items-center gap-1")}>
-                      <Ionicons name="bookmark" size={12} color="#F59E0B" />
-                      <Text className={tw("text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase")}>Flagged</Text>
+                    <View style={{ backgroundColor: T.amberTint, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Ionicons name="bookmark" size={12} color={T.amber} />
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: T.amber, textTransform: 'uppercase' }}>Flagged</Text>
                     </View>
                   )}
                 </View>
 
-                <Text style={{ fontSize: baseFontSize }} className={tw("text-slate-900 dark:text-slate-100 font-medium leading-relaxed")}>
+                <Text style={{ fontSize: baseFontSize, color: T.textPrimary, fontWeight: '500', lineHeight: baseFontSize * 1.5 }}>
                   {currentQ?.question}
                 </Text>
               </View>
 
               {/* Options Grid */}
-              <View className="space-y-3">
+              <View style={{ gap: 12 }}>
                 {currentQ?.options.map((opt, idx) => {
                   const letters = ['A', 'B', 'C', 'D', 'E'];
                   const isSelected = answers[currentIndex] === opt;
@@ -895,14 +1043,19 @@ export default function CBTPracticeScreen() {
                     <TouchableOpacity
                       key={idx}
                       onPress={() => selectOption(opt)}
-                      className={tw(`flex-row items-center p-4 rounded-2xl border ${isSelected ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40' : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'}`)}
+                      style={{
+                        flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 16, borderWidth: 1,
+                        borderColor: isSelected ? T.indigo : T.border,
+                        backgroundColor: isSelected ? T.indigoTint : T.card,
+                      }}
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: isSelected }}
+                      accessibilityLabel={`Option ${letters[idx]}: ${opt}`}
                     >
-                      <View className={tw(`w-8 h-8 rounded-xl items-center justify-center mr-3 ${isSelected ? 'bg-indigo-600' : 'bg-slate-100 dark:bg-slate-800'}`)}>
-                        <Text className={tw(`font-bold text-xs ${isSelected ? 'text-white' : 'text-slate-600 dark:text-slate-400'}`)}>
-                          {letters[idx]}
-                        </Text>
+                      <View style={{ width: 32, height: 32, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: 12, backgroundColor: isSelected ? T.indigo : T.chip }}>
+                        <Text style={{ fontWeight: '700', fontSize: 12, color: isSelected ? T.white : T.textSecondary }}>{letters[idx]}</Text>
                       </View>
-                      <Text style={{ fontSize: baseFontSize - 1 }} className={tw(`flex-1 font-medium ${isSelected ? 'text-indigo-950 dark:text-indigo-200' : 'text-slate-800 dark:text-slate-200'}`)}>
+                      <Text style={{ fontSize: baseFontSize - 1, flex: 1, fontWeight: '500', color: isSelected ? T.indigo : T.textPrimary }}>
                         {opt}
                       </Text>
                     </TouchableOpacity>
@@ -912,33 +1065,48 @@ export default function CBTPracticeScreen() {
             </ScrollView>
 
             {/* Authentic CBT Navigation Dock */}
-            <View className={tw("bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 p-4 flex-row items-center justify-between")}>
+            <View style={{ backgroundColor: T.card, borderTopWidth: 1, borderTopColor: T.border, padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <TouchableOpacity
                 onPress={goBack}
                 disabled={currentIndex === 0}
-                className={tw(`px-4 py-3 rounded-xl flex-row items-center gap-1 ${currentIndex === 0 ? 'opacity-30' : 'bg-slate-100 dark:bg-slate-800'}`)}
+                style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4, opacity: currentIndex === 0 ? 0.3 : 1, backgroundColor: T.chip }}
+                accessibilityRole="button"
+                accessibilityLabel="Previous question"
+                accessibilityState={{ disabled: currentIndex === 0 }}
               >
-                <Ionicons name="chevron-back" size={20} color="#6366F1" />
-                <Text className={tw("font-bold text-slate-700 dark:text-slate-300 text-xs uppercase")}>Prev</Text>
+                <Ionicons name="chevron-back" size={20} color={T.indigo} />
+                <Text style={{ fontWeight: '700', color: T.textSecondary, fontSize: 12, textTransform: 'uppercase' }}>Prev</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={toggleMarkForReview}
-                className={tw(`px-4 py-3 rounded-xl border flex-row items-center gap-1 ${isMarked ? 'bg-amber-500 border-amber-500' : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`)}
+                style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, borderWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: isMarked ? T.amber : T.input, borderColor: isMarked ? T.amber : T.border }}
+                accessibilityRole="button"
+                accessibilityLabel={isMarked ? 'Unmark for review' : 'Mark for review'}
               >
-                <Ionicons name="bookmark-outline" size={18} color={isMarked ? "white" : "#64748B"} />
-                <Text className={tw(`font-bold text-xs uppercase ${isMarked ? 'text-white' : 'text-slate-600 dark:text-slate-400'}`)}>Review</Text>
+                <Ionicons name="bookmark-outline" size={18} color={isMarked ? T.white : T.textMuted} />
+                <Text style={{ fontWeight: '700', fontSize: 12, textTransform: 'uppercase', color: isMarked ? T.white : T.textSecondary }}>Review</Text>
               </TouchableOpacity>
 
               {currentIndex === questions.length - 1 ? (
-                <TouchableOpacity onPress={requestSubmit} className="bg-emerald-600 px-5 py-3 rounded-xl flex-row items-center gap-1">
-                  <Text className="text-white font-black text-xs uppercase">Submit</Text>
-                  <Ionicons name="checkmark-done" size={18} color="white" />
+                <TouchableOpacity
+                  onPress={requestSubmit}
+                  style={{ backgroundColor: T.green, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Submit exam"
+                >
+                  <Text style={{ color: T.white, fontWeight: '900', fontSize: 12, textTransform: 'uppercase' }}>Submit</Text>
+                  <Ionicons name="checkmark-done" size={18} color={T.white} />
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity onPress={goNext} className="bg-indigo-600 px-5 py-3 rounded-xl flex-row items-center gap-1">
-                  <Text className="text-white font-black text-xs uppercase">Next</Text>
-                  <Ionicons name="chevron-forward" size={18} color="white" />
+                <TouchableOpacity
+                  onPress={goNext}
+                  style={{ backgroundColor: T.indigo, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Next question"
+                >
+                  <Text style={{ color: T.white, fontWeight: '900', fontSize: 12, textTransform: 'uppercase' }}>Next</Text>
+                  <Ionicons name="chevron-forward" size={18} color={T.white} />
                 </TouchableOpacity>
               )}
             </View>
@@ -954,52 +1122,66 @@ export default function CBTPracticeScreen() {
     return (
       <>
         <ScreenShell showBack title="Test Diagnostics" onBack={resetAll}>
-          <ScrollView className="flex-1 px-4 pt-4" showsVerticalScrollIndicator={false}>
+          <ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingTop: 16 }} showsVerticalScrollIndicator={false}>
             {/* Diagnostic Result Card */}
-            <View className={tw("bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm items-center mb-6")}>
-              <View className={tw(`w-20 h-20 rounded-full items-center justify-center mb-3 ${isPass ? 'bg-emerald-100 dark:bg-emerald-950/50' : 'bg-rose-100 dark:bg-rose-950/50'}`)}>
-                <Ionicons name={isPass ? "trophy" : "alert-circle"} size={40} color={isPass ? "#10B981" : "#F43F5E"} />
+            <View style={{ backgroundColor: T.card, padding: 24, borderRadius: 24, borderWidth: 1, borderColor: T.border, alignItems: 'center', marginBottom: 24 }}>
+              <View style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 12, backgroundColor: isPass ? T.greenTint : T.dangerTint }}>
+                <Ionicons name={isPass ? 'trophy' : 'alert-circle'} size={40} color={isPass ? T.green : T.rose} />
               </View>
 
-              <Text className="text-sm font-bold text-indigo-500 mb-1">{username}</Text>
-              <Text className={tw("text-3xl font-black text-slate-900 dark:text-white")}>
-                {score} <Text className="text-slate-400 text-lg font-medium">/ {questions.length}</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: T.indigo, marginBottom: 4 }}>{username}</Text>
+              <Text style={{ fontSize: 30, fontWeight: '900', color: T.textPrimary }}>
+                {score} <Text style={{ color: T.textMuted, fontSize: 18, fontWeight: '500' }}>/ {questions.length}</Text>
               </Text>
-              <Text className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-0.5">{completionPercent}% Accuracy Score</Text>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginTop: 2 }}>{completionPercent}% Accuracy Score</Text>
 
               {/* Metrics Breakdown */}
-              <View className={tw("flex-row justify-around w-full mt-6 pt-6 border-t border-slate-100 dark:border-slate-800")}>
-                <View className="items-center">
-                  <Text className="text-xs text-slate-400 font-bold uppercase">Time Spent</Text>
-                  <Text className={tw("text-base font-black text-slate-800 dark:text-slate-200 mt-1")}>{formatClock(timeSpentSeconds)}</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-around', width: '100%', marginTop: 24, paddingTop: 24, borderTopWidth: 1, borderTopColor: T.border }}>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 12, color: T.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>Time Spent</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '900', color: T.textPrimary, marginTop: 4 }}>{formatClock(timeSpentSeconds)}</Text>
                 </View>
-                <View className="items-center">
-                  <Text className="text-xs text-slate-400 font-bold uppercase">Outcome</Text>
-                  <Text className={`text-base font-black mt-1 ${isPass ? 'text-emerald-500' : 'text-rose-500'}`}>{isPass ? 'PASSED' : 'RETAKE'}</Text>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 12, color: T.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>Outcome</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '900', marginTop: 4, color: isPass ? T.green : T.rose }}>{isPass ? 'PASSED' : 'RETAKE'}</Text>
                 </View>
               </View>
 
-              <View className="flex-row gap-3 mt-6 w-full">
-                <TouchableOpacity onPress={resetAll} className={tw("flex-1 bg-slate-100 dark:bg-slate-800 py-3.5 rounded-2xl items-center")}>
-                  <Text className={tw("font-bold text-slate-700 dark:text-slate-300 text-xs uppercase")}>Retake Paper</Text>
+              <View style={{ flexDirection: 'row', gap: 12, marginTop: 24, width: '100%' }}>
+                <TouchableOpacity
+                  onPress={resetAll}
+                  style={{ flex: 1, backgroundColor: T.chip, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
+                  accessibilityRole="button"
+                >
+                  <Text style={{ fontWeight: '700', color: T.textSecondary, fontSize: 12, textTransform: 'uppercase' }}>Retake Paper</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => router.push('/')} className="flex-1 bg-indigo-600 py-3.5 rounded-2xl items-center shadow-lg shadow-indigo-500/30">
-                  <Text className="font-black text-white text-xs uppercase">Exit Terminal</Text>
+                <TouchableOpacity
+                  onPress={() => router.push('/')}
+                  style={{ flex: 1, backgroundColor: T.indigo, paddingVertical: 14, borderRadius: 16, alignItems: 'center', shadowColor: T.indigo, shadowOpacity: 0.3, shadowRadius: 10, elevation: 3 }}
+                  accessibilityRole="button"
+                >
+                  <Text style={{ fontWeight: '900', color: T.white, fontSize: 12, textTransform: 'uppercase' }}>Exit Terminal</Text>
                 </TouchableOpacity>
               </View>
             </View>
 
             {/* Diagnostic Filter Bar */}
-            <Text className={tw("font-black text-lg text-slate-900 dark:text-white mb-3")}>Questions Review & Explanations</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-4">
-              <View className="flex-row gap-2">
+            <Text style={{ fontWeight: '900', fontSize: 18, color: T.textPrimary, marginBottom: 12 }}>Questions Review & Explanations</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
                 {['all', 'correct', 'incorrect', 'skipped', 'marked'].map(filterKey => (
                   <TouchableOpacity
                     key={filterKey}
                     onPress={() => setReviewFilter(filterKey)}
-                    className={tw(`px-4 py-2 rounded-full border ${reviewFilter === filterKey ? 'bg-indigo-600 border-indigo-600' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'}`)}
+                    style={{
+                      paddingHorizontal: 16, paddingVertical: 8, borderRadius: 999, borderWidth: 1,
+                      backgroundColor: reviewFilter === filterKey ? T.indigo : T.card,
+                      borderColor: reviewFilter === filterKey ? T.indigo : T.border,
+                    }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: reviewFilter === filterKey }}
                   >
-                    <Text className={tw(`text-xs font-bold capitalize ${reviewFilter === filterKey ? 'text-white' : 'text-slate-500 dark:text-slate-400'}`)}>{filterKey}</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '700', textTransform: 'capitalize', color: reviewFilter === filterKey ? T.white : T.textMuted }}>{filterKey}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -1007,42 +1189,48 @@ export default function CBTPracticeScreen() {
 
             {/* Filtered Explanation Cards */}
             {filteredReviewList.map((r) => (
-              <View key={r.idx} className={tw("bg-white dark:bg-slate-900 p-5 rounded-2xl mb-4 border border-slate-100 dark:border-slate-800 shadow-sm")}>
-                <View className="flex-row items-center justify-between mb-3">
-                  <Text className="text-xs font-bold text-indigo-500 uppercase tracking-wider">Question {r.idx + 1}</Text>
+              <View key={r.idx} style={{ backgroundColor: T.card, padding: 20, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: T.border }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: T.indigo, textTransform: 'uppercase', letterSpacing: 1 }}>Question {r.idx + 1}</Text>
                   {r.isSkipped ? (
-                    <View className={tw("bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-md")}><Text className="text-[10px] font-bold text-slate-500">Skipped</Text></View>
+                    <View style={{ backgroundColor: T.chip, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: T.textMuted }}>Skipped</Text>
+                    </View>
                   ) : r.isCorrect ? (
-                    <View className={tw("bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-md border border-emerald-200 dark:border-emerald-800")}><Text className={tw("text-[10px] font-bold text-emerald-600 dark:text-emerald-400")}>Correct</Text></View>
+                    <View style={{ backgroundColor: T.greenTint, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: T.green }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: T.green }}>Correct</Text>
+                    </View>
                   ) : (
-                    <View className={tw("bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1 rounded-md border border-rose-200 dark:border-rose-800")}><Text className={tw("text-[10px] font-bold text-rose-600 dark:text-rose-400")}>Incorrect</Text></View>
+                    <View style={{ backgroundColor: T.dangerTint, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: T.rose }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: T.rose }}>Incorrect</Text>
+                    </View>
                   )}
                 </View>
 
-                <Text className={tw("text-base text-slate-800 dark:text-slate-200 font-medium mb-4")}>{r.q.question}</Text>
+                <Text style={{ fontSize: 16, color: T.textPrimary, fontWeight: '500', marginBottom: 16 }}>{r.q.question}</Text>
 
-                <View className="space-y-2 mb-4">
+                <View style={{ gap: 8, marginBottom: 16 }}>
                   {!r.isSkipped && !r.isCorrect && (
-                    <View className={tw("bg-rose-50 dark:bg-rose-950/30 p-3 rounded-xl border border-rose-100 dark:border-rose-900/30")}>
-                      <Text className="text-[10px] text-rose-500 font-bold uppercase mb-0.5">Your Choice</Text>
-                      <Text className={tw("text-rose-900 dark:text-rose-200 text-sm font-medium")}>{r.selected}</Text>
+                    <View style={{ backgroundColor: T.dangerTint, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: T.rose }}>
+                      <Text style={{ fontSize: 10, color: T.rose, fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 }}>Your Choice</Text>
+                      <Text style={{ color: T.textPrimary, fontSize: 14, fontWeight: '500' }}>{r.selected}</Text>
                     </View>
                   )}
-                  <View className={tw("bg-emerald-50 dark:bg-emerald-950/30 p-3 rounded-xl border border-emerald-100 dark:border-emerald-900/30")}>
-                    <Text className={tw("text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase mb-0.5")}>Correct Answer</Text>
-                    <Text className={tw("text-emerald-900 dark:text-emerald-200 text-sm font-medium")}>{r.q.correctAnswer}</Text>
+                  <View style={{ backgroundColor: T.greenTint, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: T.green }}>
+                    <Text style={{ fontSize: 10, color: T.green, fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 }}>Correct Answer</Text>
+                    <Text style={{ color: T.textPrimary, fontSize: 14, fontWeight: '500' }}>{r.q.correctAnswer}</Text>
                   </View>
                 </View>
 
                 {r.q.explanation && (
-                  <View className={tw("bg-indigo-50/50 dark:bg-indigo-950/30 p-4 rounded-xl border border-indigo-100/50 dark:border-indigo-900/40")}>
-                    <Text className="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-1">Official Explanation</Text>
-                    <Text className={tw("text-sm text-indigo-950 dark:text-indigo-200 leading-relaxed")}>{r.q.explanation}</Text>
+                  <View style={{ backgroundColor: T.indigoTint, padding: 16, borderRadius: 12, borderWidth: 1, borderColor: T.indigo }}>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: T.indigo, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Official Explanation</Text>
+                    <Text style={{ fontSize: 14, color: T.textPrimary, lineHeight: 20 }}>{r.q.explanation}</Text>
                   </View>
                 )}
               </View>
             ))}
-            <View className="h-10" />
+            <View style={{ height: 40 }} />
           </ScrollView>
         </ScreenShell>
         {dialogModal}

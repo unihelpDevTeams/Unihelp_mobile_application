@@ -248,7 +248,7 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
   },
   card: {
-    backgroundColor: colors.card,
+    backgroundColor: colors.suface,
     borderRadius: borderRadius['2xl'],
     padding: spacing.xl,
     borderWidth: 1,

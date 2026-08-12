@@ -1,66 +1,44 @@
-import { initializeApp, getApps } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import {
   getAuth,
   initializeAuth,
   getReactNativePersistence,
 } from "firebase/auth";
 import {
-  initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
+  getFirestore,
 } from "firebase/firestore";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import Constants from "expo-constants";
-
-const extra = Constants.expoConfig?.extra || Constants.manifest?.extra || {};
-const env = typeof process !== "undefined" ? process.env || {} : {};
 
 const firebaseConfig = {
-  apiKey:
-    extra.EXPO_PUBLIC_FIREBASE_API_KEY ||
-    env.EXPO_PUBLIC_FIREBASE_API_KEY ||
-    "",
-  authDomain:
-    extra.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN ||
-    env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN ||
-    "",
-  projectId:
-    extra.EXPO_PUBLIC_FIREBASE_PROJECT_ID ||
-    env.EXPO_PUBLIC_FIREBASE_PROJECT_ID ||
-    "",
-  storageBucket:
-    extra.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET ||
-    env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET ||
-    "",
-  messagingSenderId:
-    extra.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ||
-    env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ||
-    "",
-  appId:
-    extra.EXPO_PUBLIC_FIREBASE_APP_ID ||
-    env.EXPO_PUBLIC_FIREBASE_APP_ID ||
-    "",
-  measurementId:
-    extra.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID ||
-    env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID ||
-    "",
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
+  measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
+// Initialize Firebase only once
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+// Firebase Auth
+let auth;
 
-const auth =
-  Platform.OS === "web"
-    ? getAuth(app)
-    : initializeAuth(app, {
-        persistence: getReactNativePersistence(AsyncStorage),
-      });
+if (Platform.OS === "web") {
+  auth = getAuth(app);
+} else {
+  try {
+    auth = initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+  } catch (error) {
+    // Auth may already have been initialized
+    auth = getAuth(app);
+  }
+}
 
-// Initialize Firestore with local persistence enabled
-const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager(),
-  }),
-});
+// Firestore
+const db = getFirestore(app);
 
 export { app, auth, db };
