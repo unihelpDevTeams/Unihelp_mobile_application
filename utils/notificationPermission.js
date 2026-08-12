@@ -46,7 +46,9 @@ export const requestNotificationPermission = async () => {
       return null;
     }
 
-    const token = await Notifications.getExpoPushTokenAsync();
+    const token = await Notifications.getExpoPushTokenAsync({
+      projectId: Constants.expoConfig?.extra?.eas?.projectId || "42510ca2-86e1-425d-a072-16c0a5c2feb4"
+    });
     return token?.data || null;
   } catch (error) {
     console.log('Notification permission error:', error);
