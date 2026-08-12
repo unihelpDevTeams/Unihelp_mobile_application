@@ -1,10 +1,11 @@
-const { getDefaultConfig } = require("expo/metro-config");
-const { withNativewind } = require("nativewind/metro");
- 
-/** @type {import('expo/metro-config').MetroConfig} */
+const { getDefaultConfig } = require('expo/metro-config');
+const path = require('path');
+
 const config = getDefaultConfig(__dirname);
-config.resolver.sourceExts.push('mjs');
-config.resolver.sourceExts.push('cjs');
-config.resolver.unstable_enablePackageExports = false;
- 
-module.exports = withNativewind(config);
+
+// Force Metro to resolve 'react-native' explicitly from your local node_modules
+config.resolver.extraNodeModules = {
+  'react-native': path.resolve(__dirname, 'node_modules/react-native'),
+};
+
+module.exports = config;

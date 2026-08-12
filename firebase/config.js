@@ -4,7 +4,11 @@ import {
   initializeAuth,
   getReactNativePersistence,
 } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from "firebase/firestore";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
@@ -52,6 +56,11 @@ const auth =
         persistence: getReactNativePersistence(AsyncStorage),
       });
 
-const db = getFirestore(app);
+// Initialize Firestore with local persistence enabled
+const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager(),
+  }),
+});
 
 export { app, auth, db };
