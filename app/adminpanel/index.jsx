@@ -188,7 +188,7 @@ export default function AdminPanelPage() {
         <ChallengeQuestionForm />
       ) : activeTab === 'universities' ? (
         <UniversityManager />
-      ) : activeTab !== 'notifications' ? (
+      ) : activeTab !== 'notifications' ? ( 
         loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={COLORS.indigo} />

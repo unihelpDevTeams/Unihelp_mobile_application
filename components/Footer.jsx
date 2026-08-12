@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, Pressable, Text, View } from 'react-native';
+import { Image, Linking, Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,17 +28,25 @@ const DEFAULT_LINK_SECTIONS = [
   },
 ];
 
+// Below this content width, link columns stack full-width instead of
+// wrapping into cramped side-by-side columns.
+const NARROW_BREAKPOINT = 400;
+
 export default function Footer({
   title = 'Unihelp',
   tagline = 'Study made simple',
   sections = DEFAULT_LINK_SECTIONS,
   showCopyright = true,
   onBackToTop = null,
+  version = 'v1.0.1',
+  socialLinks = [], // e.g. [{ icon: 'logo-instagram', url: 'https://instagram.com/...', label: 'Instagram' }]
 }) {
   const router = useRouter();
   const { colors, isDark } = useTheme();
+  const { width } = useWindowDimensions();
   const year = new Date().getFullYear();
   const brandGradient = isDark ? darkGradients.brand : gradients.brand;
+  const isNarrow = width < NARROW_BREAKPOINT;
 
   const styles = useThemeStyles((c, s, r) => ({
     footerContainer: {
@@ -67,7 +75,8 @@ export default function Footer({
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      marginBottom: s.xl,
+      marginBottom: s.lg,
+      gap: s.sm,
     },
     brandWrap: {
       flexDirection: 'row',
@@ -75,23 +84,26 @@ export default function Footer({
       gap: s.sm,
       flex: 1,
     },
+    logoRing: {
+      width: 46,
+      height: 46,
+      borderRadius: r.lg + 2,
+      padding: 2,
+      shadowColor: c.brand,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.12,
+      shadowRadius: 5,
+    },
     logoFrame: {
-      width: 42,
-      height: 42,
+      flex: 1,
       borderRadius: r.lg,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: c.brandLight,
-      borderWidth: 1,
-      borderColor: c.brandBorder,
-      shadowColor: c.brand,
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.08,
-      shadowRadius: 4,
+      backgroundColor: c.surface,
     },
     logo: {
-      width: 24,
-      height: 24,
+      width: 22,
+      height: 22,
     },
     brandTextWrap: {
       flex: 1,
@@ -111,21 +123,49 @@ export default function Footer({
       textTransform: 'uppercase',
     },
     backToTopButton: {
-      width: 36,
-      height: 36,
-      borderRadius: r.md,
-      backgroundColor: c.surface,
+      flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'center',
+      gap: 5,
+      height: 36,
+      paddingHorizontal: s.md,
+      borderRadius: r.full,
+      backgroundColor: c.surface,
       borderWidth: 1,
       borderColor: c.borderDefault,
+    },
+    backToTopText: {
+      color: c.textSecondary,
+      fontSize: 12,
+      fontWeight: '800',
+    },
+
+    // Optional social row
+    socialRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: s.sm,
+      marginBottom: s.lg,
+    },
+    socialButton: {
+      width: 34,
+      height: 34,
+      borderRadius: r.md,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    socialButtonPressed: {
+      backgroundColor: c.brandLight,
+      borderColor: c.brandBorder,
     },
 
     // Link Columns Layout
     sectionsGrid: {
-      flexDirection: 'row',
+      flexDirection: isNarrow ? 'column' : 'row',
       flexWrap: 'wrap',
-      gap: s.xl,
+      gap: isNarrow ? s.lg : s.xl,
       paddingVertical: s.md,
       borderTopWidth: 1,
       borderBottomWidth: 1,
@@ -133,8 +173,9 @@ export default function Footer({
       marginBottom: s.lg,
     },
     sectionColumn: {
-      flex: 1,
-      minWidth: 140,
+      flex: isNarrow ? undefined : 1,
+      width: isNarrow ? '100%' : undefined,
+      minWidth: isNarrow ? undefined : 140,
       gap: s.xs,
     },
     sectionTitle: {
@@ -146,7 +187,12 @@ export default function Footer({
       marginBottom: s.xs,
     },
     linkItem: {
-      paddingVertical: 5,
+      paddingVertical: 8,
+    },
+    linkRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
     },
     linkText: {
       color: c.textSecondary,
@@ -160,8 +206,10 @@ export default function Footer({
     // Bottom Bar
     bottomRow: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
       alignItems: 'center',
       justifyContent: 'space-between',
+      rowGap: s.sm,
       gap: s.md,
     },
     copyrightWrap: {
@@ -192,6 +240,15 @@ export default function Footer({
     },
   }));
 
+  const openSocialLink = (link) => {
+    if (!link) return;
+    if (link.url) {
+      Linking.openURL(link.url).catch(() => {});
+    } else if (link.route) {
+      router.push(link.route);
+    }
+  };
+
   return (
     <View style={styles.footerContainer}>
       {/* Top Gradient Accent Line */}
@@ -206,9 +263,11 @@ export default function Footer({
         {/* BRAND ROW WITH BACK TO TOP */}
         <View style={styles.headerRow}>
           <View style={styles.brandWrap}>
-            <View style={styles.logoFrame}>
-              <Image source={logo} style={styles.logo} resizeMode="contain" />
-            </View>
+            <LinearGradient colors={brandGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.logoRing}>
+              <View style={styles.logoFrame}>
+                <Image source={logo} style={styles.logo} resizeMode="contain" />
+              </View>
+            </LinearGradient>
             <View style={styles.brandTextWrap}>
               <Text style={styles.brandName} numberOfLines={1}>
                 {title}
@@ -224,16 +283,35 @@ export default function Footer({
               onPress={onBackToTop}
               style={({ pressed }) => [
                 styles.backToTopButton,
-                pressed && { opacity: 0.7, transform: [{ scale: 0.95 }] },
+                pressed && { opacity: 0.7, transform: [{ scale: 0.97 }] },
               ]}
               accessibilityRole="button"
               accessibilityLabel="Scroll to top"
               hitSlop={6}
             >
-              <Ionicons name="arrow-up" size={18} color={colors.textPrimary} />
+              <Ionicons name="arrow-up" size={14} color={colors.textSecondary} />
+              <Text style={styles.backToTopText}>Top</Text>
             </Pressable>
           )}
         </View>
+
+        {/* OPTIONAL SOCIAL LINKS */}
+        {socialLinks.length > 0 && (
+          <View style={styles.socialRow}>
+            {socialLinks.map((link) => (
+              <Pressable
+                key={link.label}
+                onPress={() => openSocialLink(link)}
+                style={({ pressed }) => [styles.socialButton, pressed && styles.socialButtonPressed]}
+                hitSlop={4}
+                accessibilityRole="button"
+                accessibilityLabel={link.label}
+              >
+                <Ionicons name={link.icon} size={16} color={colors.textSecondary} />
+              </Pressable>
+            ))}
+          </View>
+        )}
 
         {/* CATEGORIZED LINKS GRID */}
         {sections.length > 0 && (
@@ -251,14 +329,19 @@ export default function Footer({
                     accessibilityLabel={link.label}
                   >
                     {({ pressed }) => (
-                      <Text
-                        style={[
-                          styles.linkText,
-                          pressed && styles.linkTextPressed,
-                        ]}
-                      >
-                        {link.label}
-                      </Text>
+                      <View style={styles.linkRow}>
+                        <Text
+                          style={[
+                            styles.linkText,
+                            pressed && styles.linkTextPressed,
+                          ]}
+                        >
+                          {link.label}
+                        </Text>
+                        {pressed && (
+                          <Ionicons name="chevron-forward" size={12} color={colors.brandText} />
+                        )}
+                      </View>
                     )}
                   </Pressable>
                 ))}
@@ -277,7 +360,7 @@ export default function Footer({
               </Text>
             </View>
             <View style={styles.badgeVersion}>
-              <Text style={styles.versionText}>v1.0.0</Text>
+              <Text style={styles.versionText}>{version}</Text>
             </View>
           </View>
         )}

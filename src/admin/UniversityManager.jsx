@@ -3,22 +3,9 @@ import { View, Text, TextInput, Pressable, ScrollView, StyleSheet, Alert, Activi
 import { Ionicons } from '@expo/vector-icons';
 import { collection, addDoc, getDocs, query, orderBy, limit, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
-import { NIGERIA_UNIVERSITIES } from './nigeriaUniversities';
 
 const C = { ink: '#0F172A', soft: '#64748B', border: '#E2E8F0', w: '#FFF', ind: '#6366F1' };
 
-function SeedUploader() {
-  const [u, setU] = useState(false);
-  const seed = useCallback(async () => {
-    try { setU(true);
-      const e = await getDocs(query(collection(db, 'universities'), orderBy('name'), limit(1)));
-      if (!e.empty) { Alert.alert('Info', 'Universities already exist in Firestore.'); return; }
-      for (const uni of NIGERIA_UNIVERSITIES) await addDoc(collection(db, 'universities'), { ...uni, createdAt: serverTimestamp() });
-      Alert.alert('Success', `${NIGERIA_UNIVERSITIES.length} universities added.`);
-    } catch (e) { Alert.alert('Error', e?.message || 'Failed.'); } finally { setU(false); }
-  }, []);
-  return (<View style={st.card}><Text style={st.ct}>Seed Nigerian Universities</Text><Text style={st.cs}>Populate Firestore with {NIGERIA_UNIVERSITIES.length} pre-listed universities.</Text><Pressable style={[st.btn, u && { opacity: 0.6 }]} onPress={seed} disabled={u}>{u ? <ActivityIndicator size="small" color="#fff" /> : <><Ionicons name="cloud-upload-outline" size={18} color="#fff" /><Text style={st.bt}>Seed Universities</Text></>}</Pressable></View>);
-}
 
 function AddUniversityForm() {
   const [f, setF] = useState({ name: '', shortName: '', state: '', country: 'Nigeria' });
@@ -45,7 +32,7 @@ function AddDepartmentForm() {
 }
 
 export default function UniversityManager() {
-  return (<ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}><SeedUploader /><AddUniversityForm /><AddDepartmentForm /></ScrollView>);
+  return (<ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}><AddUniversityForm /><AddDepartmentForm /></ScrollView>);
 }
 
 const st = StyleSheet.create({
