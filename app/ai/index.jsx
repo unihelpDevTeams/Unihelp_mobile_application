@@ -31,7 +31,7 @@ import {
   SessionBar,
   ResponseActionsRow,
   LOADING_LABELS,
-} from './studyTools';
+} from './_studyTools';
 
 const initialMessages = [
   {
