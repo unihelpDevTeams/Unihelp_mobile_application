@@ -238,6 +238,8 @@ export default function RecordViewPage() {
   const canMessageInApp = Boolean(ownerId && user && ownerId !== user.uid);
   const canWhatsApp = Boolean(whatsAppNumber);
   const showContactCta = ['listing', 'hostel'].includes(type) && (canMessageInApp || canWhatsApp);
+  const isCommerceType = ['listing', 'hostel'].includes(type);
+  const isHostel = type === 'hostel';
   const isPremiumUser = Boolean(profile?.premium && profile?.subscriptionStatus !== 'expired');
   const isDownloadRestricted = !isPremiumUser;
   const pdfViewerUrls = useMemo(
@@ -296,6 +298,33 @@ export default function RecordViewPage() {
   const recordMeta = [createdDate, ownerLabel].filter(Boolean).join(' • ');
 
   const fields = useMemo(() => buildFields(item, type), [item, type]);
+  const displayPrice = item?.price ?? item?.rent;
+  const formattedPrice = displayPrice !== undefined && displayPrice !== null && displayPrice !== '' ? formatNaira(displayPrice) : '';
+  const primaryLocation = item?.location || item?.address || item?.area || '';
+  const contactRole = isHostel ? 'agent' : 'seller';
+  const contactLabel = `Contact ${contactRole}`;
+  const commerceHighlights = useMemo(() => {
+    if (!isCommerceType || !item) return [];
+    const highlights = [];
+    const add = (icon, label, value) => {
+      if (value === undefined || value === null || value === '') return;
+      highlights.push({ icon, label, value: String(value) });
+    };
+
+    if (isHostel) {
+      add('location-outline', 'Area', primaryLocation);
+      add('bed-outline', 'Room', item.roomType || item.type);
+      add('walk-outline', 'Distance', item.distance);
+      add('checkmark-circle-outline', 'Status', item.availability || (item.verified ? 'Verified' : 'Available'));
+      return highlights.slice(0, 4);
+    }
+
+    add('pricetag-outline', 'Category', item.category);
+    add('shield-checkmark-outline', 'Condition', item.condition);
+    add('location-outline', 'Pickup', primaryLocation);
+    add('checkmark-circle-outline', 'Status', item.availability || (item.verified ? 'Verified' : 'Available'));
+    return highlights.slice(0, 4);
+  }, [isCommerceType, isHostel, item, primaryLocation]);
   const hasFileAsset = Boolean(asset?.fileUrl || asset?.downloadUrl);
 
   const openPdfPreview = (url) => {
@@ -388,7 +417,7 @@ export default function RecordViewPage() {
 
   const messageOwnerOnWhatsApp = async () => {
     if (!whatsAppNumber) return;
-    const message = `Hi, I'm interested in "${title}" on Unihelp - is it still available?`;
+    const message = `Hi, I'm interested in "${title}" on UniHelp - is it still available?`;
     const url = `https://wa.me/${whatsAppNumber}?text=${encodeURIComponent(message)}`;
     try {
       await Linking.openURL(url);
@@ -540,13 +569,13 @@ export default function RecordViewPage() {
             </View>
           </View>
 
-          {item.price !== undefined && item.price !== null && item.price !== '' ? (
+          {!isCommerceType && item.price !== undefined && item.price !== null && item.price !== '' ? (
             <View style={styles.priceBadge}>
               <Text style={styles.priceBadgeText}>{formatNaira(item.price)}</Text>
             </View>
           ) : null}
 
-          {recordMeta ? (
+          {!isCommerceType && recordMeta ? (
             <View style={styles.metaRow}>
               <Text style={styles.metaLabel}>{recordMeta}</Text>
             </View>
@@ -662,7 +691,72 @@ export default function RecordViewPage() {
             </Pressable>
           ) : null}
 
-          {!hasFileAsset && !showMediaGallery ? (
+          {isCommerceType ? (
+            <View style={styles.commerceCard}>
+              <View style={styles.commerceHeaderRow}>
+                <View style={styles.commerceTitleWrap}>
+                  <View style={styles.commerceEyebrowRow}>
+                    <Ionicons name={isHostel ? 'home-outline' : 'bag-handle-outline'} size={13} color={colors.brandText} />
+                    <Text style={styles.commerceEyebrow}>{isHostel ? 'Student housing' : 'Campus marketplace'}</Text>
+                  </View>
+                  <Text style={styles.commerceTitle}>{title}</Text>
+                  {recordMeta ? <Text style={styles.commerceMeta}>{recordMeta}</Text> : null}
+                </View>
+                {item?.verified ? (
+                  <View style={styles.verifiedPill}>
+                    <Ionicons name="checkmark-circle" size={13} color={colors.success} />
+                    <Text style={styles.verifiedPillText}>Verified</Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {formattedPrice ? (
+                <View style={styles.commercePriceRow}>
+                  <Text style={styles.commercePrice}>{formattedPrice}</Text>
+                  {isHostel ? <Text style={styles.commercePriceHint}>per listing</Text> : null}
+                </View>
+              ) : null}
+
+              {commerceHighlights.length ? (
+                <View style={styles.commerceHighlights}>
+                  {commerceHighlights.map((highlight) => (
+                    <View key={highlight.label} style={styles.highlightCard}>
+                      <Ionicons name={highlight.icon} size={15} color={colors.brandText} />
+                      <Text style={styles.highlightLabel}>{highlight.label}</Text>
+                      <Text style={styles.highlightValue} numberOfLines={2}>{highlight.value}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              <View style={styles.ownerPanel}>
+                <View style={styles.ownerAvatar}>
+                  {ownerPhoto ? (
+                    <Image source={{ uri: ownerPhoto }} style={styles.ownerAvatarImage} contentFit="cover" cachePolicy="disk" />
+                  ) : (
+                    <Text style={styles.ownerAvatarText}>{(ownerName || contactRole).charAt(0).toUpperCase()}</Text>
+                  )}
+                </View>
+                <View style={styles.ownerCopy}>
+                  <Text style={styles.ownerLabel}>{isHostel ? 'Listed by' : 'Sold by'}</Text>
+                  <Text style={styles.ownerName} numberOfLines={1}>{ownerName}</Text>
+                  <Text style={styles.ownerHint}>{canWhatsApp ? 'WhatsApp available' : 'Open details to contact'}</Text>
+                </View>
+                {showContactCta ? (
+                  <Pressable
+                    onPress={() => setContactSheetVisible(true)}
+                    style={({ pressed }) => [styles.ownerContactButton, pressed && styles.pressedBrand]}
+                    accessibilityRole="button"
+                    accessibilityLabel={contactLabel}
+                  >
+                    <Ionicons name="chatbubbles-outline" size={15} color={colors.onBrand} />
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
+
+          {!isCommerceType && !hasFileAsset && !showMediaGallery ? (
             <View style={styles.titleCard}>
               <Text style={styles.documentTitle}>{title}</Text>
             </View>
@@ -670,7 +764,7 @@ export default function RecordViewPage() {
 
           {description ? (
             <View style={styles.descriptionCard}>
-              <Text style={styles.sectionLabel}>DESCRIPTION</Text>
+              <Text style={styles.sectionLabel}>{isCommerceType ? (isHostel ? 'PROPERTY OVERVIEW' : 'PRODUCT OVERVIEW') : 'DESCRIPTION'}</Text>
               <Text style={styles.descriptionText}>{displayedDescription}</Text>
               {descriptionIsLong ? (
                 <Pressable onPress={() => setDescriptionExpanded((value) => !value)} hitSlop={6}>
@@ -708,7 +802,7 @@ export default function RecordViewPage() {
                 accessibilityLabel={`Contact ${ownerName}`}
               >
                 <Ionicons name="chatbubbles-outline" size={17} color={colors.onBrand} />
-                <Text style={styles.stickyContactButtonText}>Contact {ownerName}</Text>
+                <Text style={styles.stickyContactButtonText}>{contactLabel}</Text>
               </Pressable>
             ) : null}
             {hasFileAsset ? (
@@ -777,7 +871,7 @@ export default function RecordViewPage() {
           ]}
         >
           <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>Contact {ownerName}</Text>
+          <Text style={styles.sheetTitle}>{contactLabel}</Text>
           <Text style={styles.sheetSubtitle} numberOfLines={1}>
             About: {title}
           </Text>
@@ -799,7 +893,7 @@ export default function RecordViewPage() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.sheetOptionTitle}>Message on Unihelp</Text>
-                <Text style={styles.sheetOptionHint}>Sends a DM tagging this listing</Text>
+                <Text style={styles.sheetOptionHint}>Sends a DM about this {isHostel ? 'hostel' : 'product'}</Text>
               </View>
             </Pressable>
           ) : null}
@@ -1195,23 +1289,23 @@ const createStyles = (colors) => StyleSheet.create({
   galleryCard: {
     position: 'relative',
     backgroundColor: colors.card,
-    borderRadius: 24,
+    borderRadius: 26,
     borderWidth: 1,
     borderColor: colors.borderDefault,
     overflow: 'hidden',
-    marginBottom: 14,
+    marginBottom: 16,
     shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    elevation: 4,
   },
   galleryTrack: {
     gap: GALLERY_GAP,
   },
   gallerySlide: {
     width: GALLERY_SLIDE_WIDTH,
-    height: 240,
+    height: 280,
     borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: colors.brandLight,
@@ -1301,6 +1395,167 @@ const createStyles = (colors) => StyleSheet.create({
     borderColor: colors.borderDefault,
     padding: 16,
     marginBottom: 14,
+  },
+  commerceCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: colors.borderDefault,
+    padding: 16,
+    marginBottom: 14,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.07,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  commerceHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  commerceTitleWrap: {
+    flex: 1,
+  },
+  commerceEyebrowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 6,
+  },
+  commerceEyebrow: {
+    color: colors.brandText,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  commerceTitle: {
+    color: colors.textPrimary,
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: '900',
+  },
+  commerceMeta: {
+    marginTop: 6,
+    color: colors.textSecondary,
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  verifiedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.greenLight,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  verifiedPillText: {
+    color: colors.success,
+    fontSize: 10.5,
+    fontWeight: '900',
+  },
+  commercePriceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    marginTop: 14,
+  },
+  commercePrice: {
+    color: colors.brandDark,
+    fontSize: 26,
+    fontWeight: '900',
+  },
+  commercePriceHint: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  commerceHighlights: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 16,
+  },
+  highlightCard: {
+    width: '47%',
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.borderDefault,
+    padding: 12,
+  },
+  highlightLabel: {
+    marginTop: 7,
+    color: colors.textSecondary,
+    fontSize: 10.5,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  highlightValue: {
+    marginTop: 3,
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  ownerPanel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderDefault,
+  },
+  ownerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: colors.brandLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  ownerAvatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  ownerAvatarText: {
+    color: colors.brandDark,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  ownerCopy: {
+    flex: 1,
+  },
+  ownerLabel: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  ownerName: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '900',
+    marginTop: 2,
+  },
+  ownerHint: {
+    color: colors.textSecondary,
+    fontSize: 11.5,
+    marginTop: 2,
+  },
+  ownerContactButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 15,
+    backgroundColor: colors.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   documentBody: {
     padding: 16,
@@ -1433,7 +1688,12 @@ const createStyles = (colors) => StyleSheet.create({
     borderTopColor: colors.borderDefault,
     paddingHorizontal: SCREEN_PADDING,
     paddingTop: 12,
-    paddingBottom: 18,
+    paddingBottom: 20,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 8,
   },
   stickyContactButton: {
     flexDirection: 'row',
@@ -1441,8 +1701,8 @@ const createStyles = (colors) => StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     backgroundColor: colors.brand,
-    borderRadius: 14,
-    minHeight: 50,
+    borderRadius: 16,
+    minHeight: 52,
   },
   stickyContactButtonText: {
     color: colors.onBrand,

@@ -274,9 +274,6 @@ export default function ScreenShell({
     }, [uid])
   );
 
-  // Same section/role filtering as before, plus (non-destructively) a
-  // `count` attached to items that are gated behind an upload count, so
-  // the drawer can show "Hostels · 3" instead of a bare label.
   const filteredMenuSections = useMemo(() => {
     const roleFilteredSections = profile?.role ? filterMenuSectionsByRole(menuSections, profile.role) : menuSections;
     return roleFilteredSections
