@@ -52,13 +52,27 @@ export default function SignupFlow() {
       }
       try {
         await createCompleteAccount({ ...formData, photoURL: uploadedPhotoURL, photoAsset: uploadedPhotoAsset });
+        
+        try {
+          const { auth } = require('../../firebase/config');
+          const { sendEmailVerification, signOut } = require('firebase/auth');
+          if (auth.currentUser) {
+             await sendEmailVerification(auth.currentUser);
+             await signOut(auth);
+          }
+        } catch (e) {
+          console.error('Email verification error:', e);
+        }
+
+        Alert.alert('Account created', 'Please check your email to verify your account before signing in.', [
+          { text: 'OK', onPress: () => router.replace('/login') }
+        ]);
       } catch (accountError) {
         if (uploadedPhotoAsset) {
           await deleteCloudinaryAssets({ assets: [uploadedPhotoAsset] }).catch(() => {});
         }
         throw accountError;
       }
-      router.replace('/(tabs)');
     } catch (error) {
       const errorMessage = error?.message || 'Unable to create account.';
       setSubmitError(errorMessage);
