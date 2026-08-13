@@ -38,6 +38,15 @@ const PRICE_RANGES = [
   { key: 'over150k', label: `Over ${NGN}150k`, min: 150000, max: null },
 ];
 
+const shuffleArray = (array) => {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+};
+
 const formatNaira = (value) => {
   const num = Number(value);
   if (value === undefined || value === null || value === '' || Number.isNaN(num)) return null;
@@ -77,6 +86,16 @@ const resolveImage = (item = {}) => {
   pushValue(item.media);
   pushValue(item.assets);
   return candidates.find(Boolean) || null;
+};
+
+const getCreatedMs = (item = {}) => {
+  if (typeof item.createdAt?.toMillis === 'function') return item.createdAt.toMillis();
+  if (item.createdAt?.seconds) return item.createdAt.seconds * 1000;
+  if (typeof item.createdAt === 'string') {
+    const parsed = Date.parse(item.createdAt);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
 };
 
 export default function HostelsPage() {
@@ -160,6 +179,90 @@ export default function HostelsPage() {
       paddingVertical: 10, marginBottom: 12,
     },
     adminButtonText: { fontSize: 13, fontWeight: '800', color: c.brandText },
+
+    heroCard: {
+      backgroundColor: c.card,
+      borderRadius: r['2xl'],
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      padding: s.lg,
+      marginBottom: s.lg,
+      overflow: 'hidden',
+    },
+    heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: s.md },
+    heroCopy: { flex: 1 },
+    heroEyebrow: { color: c.blue, fontSize: 11, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.4 },
+    heroTitle: { color: c.textPrimary, fontSize: 20, fontWeight: '900', marginTop: 4 },
+    heroText: { color: c.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: 4 },
+    heroIconWrap: {
+      width: 58,
+      height: 58,
+      borderRadius: r.xl,
+      backgroundColor: c.blueLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    heroActions: { flexDirection: 'row', flexWrap: 'wrap', gap: s.sm, marginTop: s.md },
+    heroButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      borderRadius: r.full,
+      paddingHorizontal: s.md,
+      paddingVertical: 8,
+      backgroundColor: c.blue,
+    },
+    heroButtonMuted: { backgroundColor: c.blueLight, borderWidth: 1, borderColor: c.blueLight },
+    heroButtonText: { color: c.onBrand, fontSize: 12, fontWeight: '900' },
+    heroButtonTextMuted: { color: c.blue },
+    locationStrip: { marginBottom: s.xl },
+    locationTile: {
+      width: 118,
+      minHeight: 78,
+      backgroundColor: c.card,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      padding: s.sm,
+      justifyContent: 'space-between',
+      marginRight: s.sm,
+    },
+    locationIcon: {
+      width: 30,
+      height: 30,
+      borderRadius: r.md,
+      backgroundColor: c.blueLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 6,
+    },
+    locationName: { color: c.textPrimary, fontSize: 12, fontWeight: '900' },
+    locationCount: { color: c.textTertiary, fontSize: 10.5, fontWeight: '700', marginTop: 2 },
+    propertySection: { marginBottom: s.xl },
+    propertySectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: s.sm,
+    },
+    propertySectionTitle: { color: c.textPrimary, fontSize: 15, fontWeight: '900' },
+    propertySectionSubtitle: { color: c.textSecondary, fontSize: 11.5, marginTop: 2 },
+    propertySectionLink: { color: c.blue, fontSize: 12, fontWeight: '900' },
+    railContent: { gap: s.sm, paddingRight: s.md },
+    gridWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: s.sm },
+    loadMoreButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      borderRadius: r.full,
+      paddingVertical: 11,
+      marginBottom: s.lg,
+    },
+    loadMoreText: { color: c.blue, fontSize: 13, fontWeight: '900' },
 
     errorBanner: {
       flexDirection: 'row', alignItems: 'center', gap: s.sm,
@@ -267,6 +370,49 @@ export default function HostelsPage() {
     }
     return sorted;
   }, [hostels, search, location, priceRange, sort]);
+
+  const locationSummaries = useMemo(() => (
+    locations
+      .filter((loc) => loc !== 'all')
+      .map((loc) => ({
+        key: loc,
+        label: loc,
+        count: hostels.filter((item) => (item?.location || '').trim().toLowerCase() === loc.toLowerCase()).length,
+      }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+      .slice(0, 8)
+  ), [hostels, locations]);
+
+  const hostelSections = useMemo(() => {
+    const newest = [...filteredHostels].sort((a, b) => getCreatedMs(b) - getCreatedMs(a));
+    const budget = filteredHostels
+      .filter((item) => {
+        const price = Number(item?.price || item?.rent);
+        return Number.isFinite(price) && price > 0 && price <= 50000;
+      })
+      .sort((a, b) => Number(a?.price || a?.rent || 0) - Number(b?.price || b?.rent || 0));
+    const verified = filteredHostels.filter((item) => item?.verified);
+    const randomPicks = shuffleArray(filteredHostels);
+    const locationShelves = locationSummaries
+      .map((loc) => ({
+        key: `location-${loc.key}`,
+        title: loc.label,
+        subtitle: `${loc.count} ${loc.count === 1 ? 'space' : 'spaces'} around this area`,
+        items: shuffleArray(filteredHostels.filter((item) => (item?.location || '').trim().toLowerCase() === loc.key.toLowerCase())).slice(0, 8),
+        location: loc.key,
+      }))
+      .filter((section) => section.items.length >= 2)
+      .slice(0, 3);
+
+    return [
+      { key: 'featured', title: 'Featured stays', subtitle: 'Quick picks worth checking first', items: randomPicks.slice(0, CAROUSEL_LIMIT) },
+      { key: 'fresh', title: 'Newly listed', subtitle: 'Fresh hostel posts from the community', items: newest.slice(0, 8) },
+      { key: 'budget', title: 'Budget-friendly rooms', subtitle: `Options under ${NGN}50k`, items: budget.slice(0, 8) },
+      { key: 'verified', title: 'Verified options', subtitle: 'Listings with extra trust signals', items: verified.slice(0, 8) },
+      ...locationShelves,
+      { key: 'random', title: 'Explore more hostels', subtitle: 'A mixed set so browsing feels fresh', items: randomPicks.slice(0, 12), layout: 'grid' },
+    ].filter((section) => section.items.length > 0);
+  }, [filteredHostels, locationSummaries]);
 
   const goToHostel = (item) => router.push({ pathname: '/view/[type]/[id]', params: { type: 'hostel', id: item.id } });
 
@@ -383,52 +529,61 @@ export default function HostelsPage() {
         </View>
       </View>
 
-      {/* Featured Carousel */}
-      {!loading && !hasActiveFilters && filteredHostels.length > 0 ? (
-        <MediaCarousel items={filteredHostels.slice(0, CAROUSEL_LIMIT)} onPressItem={(item) => goToHostel(item)} />
-      ) : null}
-
-      {/* Section Row Header */}
-      <View style={styles.sectionRow}>
-        <Text style={styles.sectionTitle}>
-          {hasActiveFilters ? 'Search results' : 'Available hostels'}
-        </Text>
-        <View style={styles.sectionRowRight}>
-          <Pressable
-            onPress={() => router.push('/upload?type=hostel')}
-            hitSlop={4}
-            style={({ pressed }) => [styles.uploadButton, pressed && styles.uploadButtonPressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Add a hostel"
-          >
-            <Ionicons name="add" size={15} color={colors.onBrand} />
-            <Text style={styles.uploadButtonText}>Add</Text>
-          </Pressable>
-          {hasActiveFilters ? (
-            <Pressable onPress={clearFilters} hitSlop={6} style={styles.clearFilters} accessibilityRole="button">
-              <Ionicons name="refresh" size={14} color={colors.blue} />
-              <Text style={{ fontSize: 12, fontWeight: '800', color: colors.blue }}>Reset</Text>
-            </Pressable>
-          ) : null}
-          <View style={styles.countBadge}>
-            <Text style={styles.countBadgeText}>{filteredHostels.length}</Text>
-          </View>
-        </View>
-      </View>
-
       {isAdmin ? (
         <Pressable style={styles.adminButton} onPress={() => router.push('/adminpanel')}>
           <Ionicons name="shield-checkmark-outline" size={16} color={colors.brandText} />
           <Text style={styles.adminButtonText}>Admin Panel</Text>
         </Pressable>
       ) : null}
+
+      {!loading && !hasActiveFilters && filteredHostels.length > 0 ? (
+        <HostelDiscoveryHome
+          hostels={filteredHostels}
+          locations={locationSummaries}
+          sections={hostelSections}
+          styles={styles}
+          onPressHostel={goToHostel}
+          onAddHostel={() => router.push('/upload?type=hostel')}
+          onSelectLocation={(nextLocation) => setLocation(nextLocation)}
+          onLoadMore={() => loadHostels(false)}
+          canLoadMore={hasMore}
+          loadingMore={loadingMore}
+        />
+      ) : (
+        <View style={styles.sectionRow}>
+          <Text style={styles.sectionTitle}>
+            {hasActiveFilters ? 'Search results' : 'Available hostels'}
+          </Text>
+          <View style={styles.sectionRowRight}>
+            <Pressable
+              onPress={() => router.push('/upload?type=hostel')}
+              hitSlop={4}
+              style={({ pressed }) => [styles.uploadButton, pressed && styles.uploadButtonPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Add a hostel"
+            >
+              <Ionicons name="add" size={15} color={colors.onBrand} />
+              <Text style={styles.uploadButtonText}>Add</Text>
+            </Pressable>
+            {hasActiveFilters ? (
+              <Pressable onPress={clearFilters} hitSlop={6} style={styles.clearFilters} accessibilityRole="button">
+                <Ionicons name="refresh" size={14} color={colors.blue} />
+                <Text style={{ fontSize: 12, fontWeight: '800', color: colors.blue }}>Reset</Text>
+              </Pressable>
+            ) : null}
+            <View style={styles.countBadge}>
+              <Text style={styles.countBadgeText}>{filteredHostels.length}</Text>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
   );
 
   return (
     <ScreenShell title="Hostels" subtitle="Find affordable accommodation around campus" showBack loading={loading}>
       <FlatList
-        data={filteredHostels}
+        data={hasActiveFilters ? filteredHostels : []}
         keyExtractor={(item, index) => item?.id ?? `hostel-${index}`}
         ListHeaderComponent={HeaderComponent}
         renderItem={({ item }) => <HostelCard item={item} onPress={() => goToHostel(item)} />}
@@ -453,12 +608,142 @@ export default function HostelsPage() {
           ) : null
         }
         ListEmptyComponent={
-          !loading ? (
+          !loading && (hasActiveFilters || filteredHostels.length === 0) ? (
             <EmptyListings hasActiveFilters={hasActiveFilters} onReset={clearFilters} />
           ) : null
         }
       />
     </ScreenShell>
+  );
+}
+
+function HostelDiscoveryHome({
+  hostels,
+  locations,
+  sections,
+  styles,
+  onPressHostel,
+  onAddHostel,
+  onSelectLocation,
+  onLoadMore,
+  canLoadMore,
+  loadingMore,
+}) {
+  const { colors } = useTheme();
+  const featured = hostels.slice(0, CAROUSEL_LIMIT);
+
+  return (
+    <View>
+      <View style={styles.heroCard}>
+        <View style={styles.heroTop}>
+          <View style={styles.heroCopy}>
+            <Text style={styles.heroEyebrow}>Campus housing</Text>
+            <Text style={styles.heroTitle}>Find a place that fits student life</Text>
+            <Text style={styles.heroText}>Browse nearby rooms, shared spaces, and affordable stays without feeling like you are scrolling a plain directory.</Text>
+          </View>
+          <View style={styles.heroIconWrap}>
+            <Ionicons name="home-outline" size={30} color={colors.blue} />
+          </View>
+        </View>
+        <View style={styles.heroActions}>
+          <Pressable onPress={onAddHostel} style={styles.heroButton} accessibilityRole="button">
+            <Ionicons name="add" size={14} color={colors.onBrand} />
+            <Text style={styles.heroButtonText}>Add hostel</Text>
+          </Pressable>
+          {locations[0] ? (
+            <Pressable onPress={() => onSelectLocation(locations[0].key)} style={[styles.heroButton, styles.heroButtonMuted]} accessibilityRole="button">
+              <Ionicons name="location-outline" size={14} color={colors.blue} />
+              <Text style={[styles.heroButtonText, styles.heroButtonTextMuted]}>Popular areas</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+
+      {featured.length ? <MediaCarousel items={featured} onPressItem={onPressHostel} /> : null}
+
+      {locations.length ? (
+        <View style={styles.locationStrip}>
+          <View style={styles.propertySectionHeader}>
+            <View>
+              <Text style={styles.propertySectionTitle}>Browse by area</Text>
+              <Text style={styles.propertySectionSubtitle}>Start with locations students are posting in</Text>
+            </View>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            {locations.map((loc) => (
+              <Pressable
+                key={loc.key}
+                style={styles.locationTile}
+                onPress={() => onSelectLocation(loc.key)}
+                accessibilityRole="button"
+                accessibilityLabel={`Browse hostels in ${loc.label}`}
+              >
+                <View style={styles.locationIcon}>
+                  <Ionicons name="location-outline" size={16} color={colors.blue} />
+                </View>
+                <Text style={styles.locationName} numberOfLines={1}>{loc.label}</Text>
+                <Text style={styles.locationCount}>{loc.count} {loc.count === 1 ? 'space' : 'spaces'}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+
+      {sections.map((section) => (
+        <HostelSection
+          key={section.key}
+          section={section}
+          styles={styles}
+          onPressHostel={onPressHostel}
+          onViewAll={section.location ? () => onSelectLocation(section.location) : null}
+        />
+      ))}
+
+      {canLoadMore ? (
+        <Pressable onPress={onLoadMore} style={styles.loadMoreButton} disabled={loadingMore} accessibilityRole="button">
+          {loadingMore ? (
+            <ActivityIndicator size="small" color={colors.blue} />
+          ) : (
+            <Ionicons name="refresh-outline" size={15} color={colors.blue} />
+          )}
+          <Text style={styles.loadMoreText}>{loadingMore ? 'Loading more...' : 'Load more hostel options'}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function HostelSection({ section, styles, onPressHostel, onViewAll }) {
+  const isGrid = section.layout === 'grid';
+
+  return (
+    <View style={styles.propertySection}>
+      <View style={styles.propertySectionHeader}>
+        <View>
+          <Text style={styles.propertySectionTitle}>{section.title}</Text>
+          <Text style={styles.propertySectionSubtitle}>{section.subtitle}</Text>
+        </View>
+        {onViewAll ? (
+          <Pressable onPress={onViewAll} hitSlop={8} accessibilityRole="button">
+            <Text style={styles.propertySectionLink}>View all</Text>
+          </Pressable>
+        ) : null}
+      </View>
+
+      {isGrid ? (
+        <View style={styles.gridWrap}>
+          {section.items.map((item) => (
+            <HostelCard key={item.id} item={item} variant="tile" onPress={() => onPressHostel(item)} />
+          ))}
+        </View>
+      ) : (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railContent}>
+          {section.items.map((item) => (
+            <HostelCard key={item.id} item={item} variant="rail" onPress={() => onPressHostel(item)} />
+          ))}
+        </ScrollView>
+      )}
+    </View>
   );
 }
 
@@ -497,20 +782,38 @@ function EmptyListings({ hasActiveFilters, onReset }) {
   );
 }
 
-function HostelCard({ item, onPress }) {
+function HostelCard({ item, onPress, variant = 'row' }) {
   const { colors } = useTheme();
+  const isCompact = variant !== 'row';
   const styles = useThemeStyles((c, s, r) => ({
     card: {
       backgroundColor: c.card, borderRadius: r['2xl'], borderWidth: 1, borderColor: c.borderDefault,
       flexDirection: 'row', gap: s.md, padding: s.md, overflow: 'hidden',
     },
+    railCard: {
+      width: 178,
+      minHeight: 256,
+      flexDirection: 'column',
+      gap: 8,
+      padding: 8,
+    },
+    tileCard: {
+      width: '48.5%',
+      minHeight: 252,
+      flexDirection: 'column',
+      gap: 8,
+      padding: 8,
+    },
     cardPressed: { transform: [{ scale: 0.99 }] },
     media: { width: 104, height: 104, borderRadius: r.lg, overflow: 'hidden', backgroundColor: c.blueLight },
+    compactMedia: { width: '100%', height: 128 },
     image: { width: '100%', height: '100%' },
     fallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.blue },
     fallbackText: { color: c.onBrand, fontSize: 30, fontWeight: '900' },
     content: { flex: 1 },
+    compactContent: { minHeight: 98 },
     title: { fontSize: 15, fontWeight: '800', color: c.textPrimary },
+    compactTitle: { fontSize: 12.5, lineHeight: 17 },
     badgesRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 6 },
     badge: {
       paddingHorizontal: 8, paddingVertical: 3, borderRadius: r.full,
@@ -520,6 +823,7 @@ function HostelCard({ item, onPress }) {
     badgeText: { fontSize: 10, fontWeight: '800', color: c.blue },
     badgeVerifiedText: { color: c.green },
     price: { fontSize: 17, fontWeight: '900', color: c.blue, marginTop: 6 },
+    compactPrice: { fontSize: 14 },
     contactRow: { flexDirection: 'row', alignItems: 'center', gap: s.sm, marginTop: 8 },
     callButton: {
       flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
@@ -556,8 +860,18 @@ function HostelCard({ item, onPress }) {
   }, [phone]);
 
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.cardPressed]} accessibilityRole="button" accessibilityLabel={title}>
-      <View style={styles.media}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.card,
+        variant === 'rail' && styles.railCard,
+        variant === 'tile' && styles.tileCard,
+        pressed && styles.cardPressed,
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={title}
+    >
+      <View style={[styles.media, isCompact && styles.compactMedia]}>
         {showImage ? (
           <Image source={{ uri: safeImageUrl }} style={styles.image} contentFit="cover" cachePolicy="disk" transition={200} onError={() => setImageFailed(true)} />
         ) : (
@@ -567,8 +881,8 @@ function HostelCard({ item, onPress }) {
         )}
       </View>
 
-      <View style={styles.content}>
-        <Text style={styles.title} numberOfLines={2}>{title}</Text>
+      <View style={[styles.content, isCompact && styles.compactContent]}>
+        <Text style={[styles.title, isCompact && styles.compactTitle]} numberOfLines={2}>{title}</Text>
         {(item?.location || item?.verified) ? (
           <View style={styles.badgesRow}>
             {item?.location ? (
@@ -585,8 +899,8 @@ function HostelCard({ item, onPress }) {
             ) : null}
           </View>
         ) : null}
-        {price ? <Text style={styles.price}>{price}</Text> : null}
-        {phone ? (
+        {price ? <Text style={[styles.price, isCompact && styles.compactPrice]}>{price}</Text> : null}
+        {phone && !isCompact ? (
           <View style={styles.contactRow}>
             <Pressable
               onPress={callHostel}
@@ -600,7 +914,7 @@ function HostelCard({ item, onPress }) {
             </Pressable>
           </View>
         ) : (
-          <Text style={styles.detailHint}>View details</Text>
+          <Text style={styles.detailHint}>{isCompact ? 'Tap for details' : 'View details'}</Text>
         )}
       </View>
     </Pressable>

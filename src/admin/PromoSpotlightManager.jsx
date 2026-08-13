@@ -26,23 +26,7 @@ import {
   updatePromoSpotlight,
 } from '../../services/firestoreSync';
 import PromoSpotlight from '../shared/components/PromoSpotlight/PromoSpotlight';
-
-const COLORS = {
-  indigo: '#6366F1',
-  indigoDark: '#4338CA',
-  indigoSoft: '#EEF2FF',
-  white: '#FFFFFF',
-  ink: '#0F172A',
-  inkSoft: '#64748B',
-  border: '#E2E8F0',
-  success: '#10B981',
-  successSoft: '#ECFDF5',
-  error: '#EF4444',
-  errorSoft: '#FEF2F2',
-  amber: '#F59E0B',
-  amberSoft: '#FEF3E1',
-  bgLight: '#F8FAFC',
-};
+import { useTheme } from '../shared/theme/ThemeContext';
 
 const TYPES = [
   { key: 'external_ad', label: 'External Ad', icon: 'megaphone-outline' },
@@ -57,6 +41,13 @@ const ACTION_TYPES = [
   { key: 'deep_link', label: 'Deep Link' },
 ];
 
+const FREQUENCIES = [
+  { key: 'once', label: 'Once' },
+  { key: 'daily', label: 'Once per day' },
+  { key: 'every_3_days', label: 'Once every 3 days' },
+  { key: 'weekly', label: 'Once per week' },
+];
+
 const emptyForm = {
   type: 'external_ad',
   title: '',
@@ -68,12 +59,15 @@ const emptyForm = {
   actionUrl: '',
   advertiserName: '',
   advertiserLogoUrl: '',
+  frequency: 'daily',
   enabled: true,
   priority: '0',
   startAt: '',
   endAt: '',
   targetAudience: 'all',
 };
+
+const frequencyLabel = (frequency) => FREQUENCIES.find((option) => option.key === frequency)?.label || 'Once per day';
 
 const dateValue = (value) => {
   if (!value) return '';
@@ -106,6 +100,30 @@ const formatDisplayDate = (isoString) => {
 
 export default function PromoSpotlightManager() {
   const { profile, user } = useAuth();
+  const { colors, isDark } = useTheme();
+  const palette = useMemo(
+    () => ({
+      indigo: colors.brand || '#6366F1',
+      indigoDark: colors.brandDark || colors.brand || '#4338CA',
+      indigoSoft: isDark ? colors.brandLight || '#1F2937' : '#EEF2FF',
+      white: colors.card || '#FFFFFF',
+      ink: colors.textPrimary || '#0F172A',
+      inkSoft: colors.textSecondary || '#64748B',
+      border: colors.borderDefault || '#E2E8F0',
+      success: colors.success || '#10B981',
+      successSoft: isDark ? 'rgba(16,185,129,0.18)' : '#ECFDF5',
+      error: colors.danger || '#EF4444',
+      errorSoft: isDark ? 'rgba(239,68,68,0.18)' : '#FEF2F2',
+      amber: colors.warning || '#F59E0B',
+      amberSoft: isDark ? 'rgba(245,158,11,0.18)' : '#FEF3E1',
+      bgLight: colors.canvas || '#F8FAFC',
+      modalSurface: colors.modalBackground || colors.card || '#FFFFFF',
+      inputSurface: colors.surfaceSecondary || colors.canvas || '#F8FAFC',
+      muted: colors.greyLight || '#94A3B8',
+    }),
+    [colors, isDark]
+  );
+  const styles = useMemo(() => createStyles(palette), [palette]);
   const [items, setItems] = useState([]);
   const [statsByPromoId, setStatsByPromoId] = useState({});
   const [form, setForm] = useState(emptyForm);
@@ -335,7 +353,7 @@ export default function PromoSpotlightManager() {
           <Text style={styles.subtitle}>Manage app-launch takeover banners & ads.</Text>
         </View>
         <Pressable style={styles.previewButton} onPress={() => setPreviewVisible(true)}>
-          <Ionicons name="eye-outline" size={16} color={COLORS.indigoDark} />
+          <Ionicons name="eye-outline" size={16} color={palette.indigoDark} />
           <Text style={styles.previewText}>Preview</Text>
         </Pressable>
       </View>
@@ -344,7 +362,7 @@ export default function PromoSpotlightManager() {
       <View style={styles.formCard}>
         <Text style={styles.cardHeader}>{isEditing ? 'Edit Promotion' : 'Create New Promotion'}</Text>
 
-        <Segmented label="Promotion Type" options={TYPES} value={form.type} onChange={(val) => updateField('type', val)} />
+        <Segmented label="Promotion Type" options={TYPES} value={form.type} onChange={(val) => updateField('type', val)} palette={palette} styles={styles} />
 
         {/* Upload Box */}
         <Pressable style={styles.uploadBox} onPress={pickCreative} disabled={uploading}>
@@ -352,14 +370,14 @@ export default function PromoSpotlightManager() {
             <View style={styles.imagePreviewContainer}>
               <Image source={{ uri: form.imageUrl }} style={styles.uploadImage} contentFit="cover" />
               <View style={styles.reuploadBadge}>
-                <Ionicons name="camera-outline" size={14} color={COLORS.white} />
+                <Ionicons name="camera-outline" size={14} color={palette.white} />
                 <Text style={styles.reuploadText}>Change Image</Text>
               </View>
             </View>
           ) : (
             <View style={styles.uploadEmpty}>
               <View style={styles.uploadIconCircle}>
-                <Ionicons name="cloud-upload-outline" size={24} color={COLORS.indigo} />
+                <Ionicons name="cloud-upload-outline" size={24} color={palette.indigo} />
               </View>
               <Text style={styles.uploadText}>Upload Portrait Banner</Text>
               <Text style={styles.uploadHint}>Recommended aspect ratio 4:5 or 9:16</Text>
@@ -367,32 +385,34 @@ export default function PromoSpotlightManager() {
           )}
           {uploading && (
             <View style={styles.uploadOverlay}>
-              <ActivityIndicator color={COLORS.white} size="large" />
+              <ActivityIndicator color={palette.white} size="large" />
               <Text style={styles.uploadOverlayText}>{uploadProgress}% uploaded</Text>
             </View>
           )}
         </Pressable>
 
-        <Field label="Title *" value={form.title} onChangeText={(val) => updateField('title', val)} placeholder="e.g. Campus Challenge Arena is Live!" />
-        <Field label="Description" value={form.description} onChangeText={(val) => updateField('description', val)} placeholder="Short engaging copy for users..." multiline />
+        <Field label="Title *" value={form.title} onChangeText={(val) => updateField('title', val)} placeholder="e.g. Campus Challenge Arena is Live!" palette={palette} styles={styles} />
+        <Field label="Description" value={form.description} onChangeText={(val) => updateField('description', val)} placeholder="Short engaging copy for users..." multiline palette={palette} styles={styles} />
 
         {form.type === 'external_ad' && (
           <View style={styles.row}>
-            <Field label="Advertiser Name" value={form.advertiserName} onChangeText={(val) => updateField('advertiserName', val)} placeholder="e.g. Campus Bites" containerStyle={styles.flex} />
-            <Field label="Logo URL" value={form.advertiserLogoUrl} onChangeText={(val) => updateField('advertiserLogoUrl', val)} placeholder="https://..." containerStyle={styles.flex} autoCapitalize="none" />
+            <Field label="Advertiser Name" value={form.advertiserName} onChangeText={(val) => updateField('advertiserName', val)} placeholder="e.g. Campus Bites" containerStyle={styles.flex} palette={palette} styles={styles} />
+            <Field label="Logo URL" value={form.advertiserLogoUrl} onChangeText={(val) => updateField('advertiserLogoUrl', val)} placeholder="https://..." containerStyle={styles.flex} autoCapitalize="none" palette={palette} styles={styles} />
           </View>
         )}
 
         <View style={styles.row}>
-          <Field label="CTA Button Text" value={form.buttonText} onChangeText={(val) => updateField('buttonText', val)} placeholder="Learn More" containerStyle={styles.flex} />
-          <Field label="Priority" value={form.priority} onChangeText={(val) => updateField('priority', val)} keyboardType="numeric" containerStyle={{ width: 90 }} />
+          <Field label="CTA Button Text" value={form.buttonText} onChangeText={(val) => updateField('buttonText', val)} placeholder="Learn More" containerStyle={styles.flex} palette={palette} styles={styles} />
+          <Field label="Priority" value={form.priority} onChangeText={(val) => updateField('priority', val)} keyboardType="numeric" containerStyle={{ width: 90 }} palette={palette} styles={styles} />
         </View>
 
-        <Segmented label="Action Link Type" options={ACTION_TYPES} value={form.actionType} onChange={(val) => updateField('actionType', val)} />
+        <Segmented label="Action Link Type" options={ACTION_TYPES} value={form.actionType} onChange={(val) => updateField('actionType', val)} palette={palette} styles={styles} />
 
         {form.actionType !== 'none' && (
-          <Field label="Action Target (URL or Route)" value={form.actionUrl} onChangeText={(val) => updateField('actionUrl', val)} placeholder={form.actionType === 'external_url' ? 'https://example.com' : '/screens/home'} autoCapitalize="none" />
+          <Field label="Action Target (URL or Route)" value={form.actionUrl} onChangeText={(val) => updateField('actionUrl', val)} placeholder={form.actionType === 'external_url' ? 'https://example.com' : '/screens/home'} autoCapitalize="none" palette={palette} styles={styles} />
         )}
+
+        <Segmented label="Frequency" options={FREQUENCIES} value={form.frequency} onChange={(val) => updateField('frequency', val)} palette={palette} styles={styles} />
 
         {/* Schedule Inputs with Date Pickers */}
         <View style={styles.datePickerSection}>
@@ -405,6 +425,8 @@ export default function PromoSpotlightManager() {
               onPress={() => openDatePicker('startAt')}
               onClear={() => updateField('startAt', '')}
               containerStyle={styles.flex}
+              palette={palette}
+              styles={styles}
             />
             <DatePickerTrigger
               label="Ends At"
@@ -413,6 +435,8 @@ export default function PromoSpotlightManager() {
               onPress={() => openDatePicker('endAt')}
               onClear={() => updateField('endAt', '')}
               containerStyle={styles.flex}
+              palette={palette}
+              styles={styles}
             />
           </View>
         </View>
@@ -426,8 +450,8 @@ export default function PromoSpotlightManager() {
           <Switch
             value={form.enabled}
             onValueChange={(val) => updateField('enabled', val)}
-            trackColor={{ false: COLORS.border, true: COLORS.indigoSoft }}
-            thumbColor={form.enabled ? COLORS.indigo : '#94A3B8'}
+            trackColor={{ false: palette.border, true: palette.indigoSoft }}
+            thumbColor={form.enabled ? palette.indigo : palette.muted}
           />
         </View>
 
@@ -439,7 +463,7 @@ export default function PromoSpotlightManager() {
             </Pressable>
           )}
           <Pressable style={[styles.saveButton, saving && styles.disabled]} onPress={save} disabled={saving}>
-            {saving ? <ActivityIndicator color={COLORS.white} /> : <Text style={styles.saveText}>{isEditing ? 'Update Campaign' : 'Publish Campaign'}</Text>}
+            {saving ? <ActivityIndicator color={palette.white} /> : <Text style={styles.saveText}>{isEditing ? 'Update Campaign' : 'Publish Campaign'}</Text>}
           </Pressable>
         </View>
       </View>
@@ -452,7 +476,7 @@ export default function PromoSpotlightManager() {
               <View style={styles.pickerHeader}>
                 <Text style={styles.pickerTitle}>Select {datePickerConfig.field === 'startAt' ? 'Start' : 'End'} Date & Time</Text>
                 <Pressable onPress={() => setDatePickerConfig((prev) => ({ ...prev, visible: false }))}>
-                  <Ionicons name="close-circle" size={24} color={COLORS.inkSoft} />
+                  <Ionicons name="close-circle" size={24} color={palette.inkSoft} />
                 </Pressable>
               </View>
               <DateTimePicker
@@ -460,7 +484,7 @@ export default function PromoSpotlightManager() {
                 mode="datetime"
                 display="spinner"
                 onChange={handleDateChange}
-                textColor={COLORS.ink}
+                textColor={palette.ink}
               />
               <View style={styles.pickerActions}>
                 <Pressable style={styles.pickerCancelBtn} onPress={() => setDatePickerConfig((prev) => ({ ...prev, visible: false }))}>
@@ -487,7 +511,7 @@ export default function PromoSpotlightManager() {
       {/* List Section */}
       <Text style={styles.sectionTitle}>Campaign Inventory</Text>
       {loading ? (
-        <ActivityIndicator color={COLORS.indigo} style={{ marginVertical: 20 }} />
+        <ActivityIndicator color={palette.indigo} style={{ marginVertical: 20 }} />
       ) : (
         <ScrollView style={styles.list} nestedScrollEnabled showsVerticalScrollIndicator={false}>
           {items.length ? (
@@ -497,7 +521,7 @@ export default function PromoSpotlightManager() {
                   <Image source={{ uri: item.imageUrl }} style={styles.itemImage} contentFit="cover" />
                 ) : (
                   <View style={styles.itemImageFallback}>
-                    <Ionicons name="image-outline" size={20} color={COLORS.inkSoft} />
+                    <Ionicons name="image-outline" size={20} color={palette.inkSoft} />
                   </View>
                 )}
                 <View style={styles.itemBody}>
@@ -512,7 +536,7 @@ export default function PromoSpotlightManager() {
                     </View>
                   </View>
                   <Text style={styles.itemMeta}>
-                    Priority: {item.priority} • Type: {item.type}
+                    Priority: {item.priority} - Type: {item.type} - {frequencyLabel(item.frequency)}
                   </Text>
                   <Text style={styles.itemStats}>
                     {statsByPromoId[item.id]?.impressions || 0} views - {statsByPromoId[item.id]?.clicks || 0} clicks - {statsByPromoId[item.id]?.dismissals || 0} dismissals - {statsByPromoId[item.id]?.ctr || 0}% CTR
@@ -520,17 +544,17 @@ export default function PromoSpotlightManager() {
                 </View>
                 <View style={styles.itemActions}>
                   <Pressable style={styles.iconButton} onPress={() => edit(item)}>
-                    <Ionicons name="pencil-sharp" size={15} color={COLORS.indigo} />
+                    <Ionicons name="pencil-sharp" size={15} color={palette.indigo} />
                   </Pressable>
                   <Pressable style={[styles.iconButton, styles.deleteIcon]} onPress={() => remove(item)}>
-                    <Ionicons name="trash-outline" size={15} color={COLORS.error} />
+                    <Ionicons name="trash-outline" size={15} color={palette.error} />
                   </Pressable>
                 </View>
               </View>
             ))
           ) : (
             <View style={styles.empty}>
-              <Ionicons name="layers-outline" size={32} color={COLORS.inkSoft} />
+              <Ionicons name="layers-outline" size={32} color={palette.inkSoft} />
               <Text style={styles.emptyText}>No promotions configured yet</Text>
             </View>
           )}
@@ -548,7 +572,7 @@ export default function PromoSpotlightManager() {
   );
 }
 
-function Field({ label, containerStyle, multiline = false, ...props }) {
+function Field({ label, containerStyle, multiline = false, palette, styles, ...props }) {
   return (
     <View style={[styles.field, containerStyle]}>
       <Text style={styles.label}>{label}</Text>
@@ -556,25 +580,25 @@ function Field({ label, containerStyle, multiline = false, ...props }) {
         {...props}
         multiline={multiline}
         textAlignVertical={multiline ? 'top' : 'center'}
-        placeholderTextColor="#94A3B8"
+        placeholderTextColor={palette.muted}
         style={[styles.input, multiline && styles.textArea]}
       />
     </View>
   );
 }
 
-function DatePickerTrigger({ label, value, isSet, onPress, onClear, containerStyle }) {
+function DatePickerTrigger({ label, value, isSet, onPress, onClear, containerStyle, palette, styles }) {
   return (
     <View style={[styles.field, containerStyle]}>
       <Text style={styles.label}>{label}</Text>
       <Pressable style={styles.dateTrigger} onPress={onPress}>
-        <Ionicons name="calendar-outline" size={16} color={isSet ? COLORS.indigo : COLORS.inkSoft} />
+        <Ionicons name="calendar-outline" size={16} color={isSet ? palette.indigo : palette.inkSoft} />
         <Text style={[styles.dateTriggerText, !isSet && styles.dateTriggerPlaceholder]} numberOfLines={1}>
           {value}
         </Text>
         {isSet && (
           <Pressable onPress={onClear} style={styles.clearDateBtn}>
-            <Ionicons name="close-circle" size={16} color={COLORS.inkSoft} />
+            <Ionicons name="close-circle" size={16} color={palette.inkSoft} />
           </Pressable>
         )}
       </Pressable>
@@ -582,7 +606,7 @@ function DatePickerTrigger({ label, value, isSet, onPress, onClear, containerSty
   );
 }
 
-function Segmented({ label, options, value, onChange }) {
+function Segmented({ label, options, value, onChange, palette, styles }) {
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
@@ -591,7 +615,7 @@ function Segmented({ label, options, value, onChange }) {
           const active = option.key === value;
           return (
             <Pressable key={option.key} style={[styles.segment, active && styles.segmentActive]} onPress={() => onChange(option.key)}>
-              {option.icon && <Ionicons name={option.icon} size={14} color={active ? COLORS.white : COLORS.inkSoft} style={{ marginRight: 4 }} />}
+              {option.icon && <Ionicons name={option.icon} size={14} color={active ? palette.white : palette.inkSoft} style={{ marginRight: 4 }} />}
               <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{option.label}</Text>
             </Pressable>
           );
@@ -601,83 +625,83 @@ function Segmented({ label, options, value, onChange }) {
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { gap: 16, backgroundColor: COLORS.bgLight, padding: 12, borderRadius: 16 },
+const createStyles = (palette) => StyleSheet.create({
+  wrap: { gap: 16, backgroundColor: palette.bgLight, padding: 12, borderRadius: 16 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  title: { fontSize: 20, fontWeight: '900', color: COLORS.ink },
-  badgeCount: { backgroundColor: COLORS.indigoSoft, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 },
-  badgeCountText: { fontSize: 12, fontWeight: '800', color: COLORS.indigoDark },
-  subtitle: { marginTop: 2, fontSize: 12, color: COLORS.inkSoft },
-  previewButton: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.indigoSoft, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
-  previewText: { color: COLORS.indigoDark, fontWeight: '800', fontSize: 12 },
-  formCard: { backgroundColor: COLORS.white, borderRadius: 16, borderWidth: 1, borderColor: COLORS.border, padding: 16, gap: 14, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 6, elevation: 2 },
-  cardHeader: { fontSize: 15, fontWeight: '800', color: COLORS.ink, marginBottom: 2 },
+  title: { fontSize: 20, fontWeight: '900', color: palette.ink },
+  badgeCount: { backgroundColor: palette.indigoSoft, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 },
+  badgeCountText: { fontSize: 12, fontWeight: '800', color: palette.indigoDark },
+  subtitle: { marginTop: 2, fontSize: 12, color: palette.inkSoft },
+  previewButton: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: palette.indigoSoft, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
+  previewText: { color: palette.indigoDark, fontWeight: '800', fontSize: 12 },
+  formCard: { backgroundColor: palette.white, borderRadius: 16, borderWidth: 1, borderColor: palette.border, padding: 16, gap: 14, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 6, elevation: 2 },
+  cardHeader: { fontSize: 15, fontWeight: '800', color: palette.ink, marginBottom: 2 },
   field: { gap: 6 },
-  label: { fontSize: 12, color: COLORS.ink, fontWeight: '700' },
-  input: { borderWidth: 1, borderColor: COLORS.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: COLORS.ink, fontSize: 13, backgroundColor: COLORS.white },
+  label: { fontSize: 12, color: palette.ink, fontWeight: '700' },
+  input: { borderWidth: 1, borderColor: palette.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: palette.ink, fontSize: 13, backgroundColor: palette.white },
   textArea: { minHeight: 76 },
-  uploadBox: { height: 200, borderRadius: 14, borderWidth: 1.5, borderStyle: 'dashed', borderColor: COLORS.indigo, overflow: 'hidden', backgroundColor: COLORS.indigoSoft },
+  uploadBox: { height: 200, borderRadius: 14, borderWidth: 1.5, borderStyle: 'dashed', borderColor: palette.indigo, overflow: 'hidden', backgroundColor: palette.indigoSoft },
   imagePreviewContainer: { width: '100%', height: '100%', position: 'relative' },
   uploadImage: { width: '100%', height: '100%' },
   reuploadBadge: { position: 'absolute', bottom: 10, right: 10, backgroundColor: 'rgba(15,23,42,0.75)', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
-  reuploadText: { color: COLORS.white, fontSize: 11, fontWeight: '700' },
+  reuploadText: { color: palette.white, fontSize: 11, fontWeight: '700' },
   uploadEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6 },
-  uploadIconCircle: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center' },
-  uploadText: { color: COLORS.indigoDark, fontWeight: '800', fontSize: 13 },
-  uploadHint: { color: COLORS.inkSoft, fontSize: 11 },
+  uploadIconCircle: { width: 44, height: 44, borderRadius: 22, backgroundColor: palette.white, alignItems: 'center', justifyContent: 'center' },
+  uploadText: { color: palette.indigoDark, fontWeight: '800', fontSize: 13 },
+  uploadHint: { color: palette.inkSoft, fontSize: 11 },
   uploadOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,23,42,0.65)', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  uploadOverlayText: { color: COLORS.white, fontWeight: '800', fontSize: 13 },
+  uploadOverlayText: { color: palette.white, fontWeight: '800', fontSize: 13 },
   segmentWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  segment: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: COLORS.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: COLORS.white },
-  segmentActive: { backgroundColor: COLORS.indigo, borderColor: COLORS.indigo },
-  segmentText: { fontSize: 12, fontWeight: '700', color: COLORS.inkSoft },
-  segmentTextActive: { color: COLORS.white },
+  segment: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: palette.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: palette.white },
+  segmentActive: { backgroundColor: palette.indigo, borderColor: palette.indigo },
+  segmentText: { fontSize: 12, fontWeight: '700', color: palette.inkSoft },
+  segmentTextActive: { color: palette.white },
   row: { flexDirection: 'row', gap: 10 },
   flex: { flex: 1 },
   datePickerSection: { gap: 6 },
-  dateTrigger: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: COLORS.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: COLORS.white, gap: 8 },
-  dateTriggerText: { flex: 1, fontSize: 12, fontWeight: '600', color: COLORS.ink },
-  dateTriggerPlaceholder: { color: '#94A3B8', fontWeight: '400' },
+  dateTrigger: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: palette.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: palette.white, gap: 8 },
+  dateTriggerText: { flex: 1, fontSize: 12, fontWeight: '600', color: palette.ink },
+  dateTriggerPlaceholder: { color: palette.muted, fontWeight: '400' },
   clearDateBtn: { padding: 2 },
-  enabledBox: { borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, justifyContent: 'space-between', flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bgLight },
-  enabledTitle: { fontSize: 13, fontWeight: '700', color: COLORS.ink },
-  enabledSubtitle: { fontSize: 11, color: COLORS.inkSoft },
+  enabledBox: { borderWidth: 1, borderColor: palette.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, justifyContent: 'space-between', flexDirection: 'row', alignItems: 'center', backgroundColor: palette.bgLight },
+  enabledTitle: { fontSize: 13, fontWeight: '700', color: palette.ink },
+  enabledSubtitle: { fontSize: 11, color: palette.inkSoft },
   actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
-  saveButton: { backgroundColor: COLORS.indigo, borderRadius: 10, paddingHorizontal: 18, paddingVertical: 12, minWidth: 140, alignItems: 'center' },
-  saveText: { color: COLORS.white, fontWeight: '800', fontSize: 13 },
-  secondaryButton: { borderWidth: 1, borderColor: COLORS.border, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 12 },
-  secondaryText: { color: COLORS.inkSoft, fontWeight: '700', fontSize: 13 },
+  saveButton: { backgroundColor: palette.indigo, borderRadius: 10, paddingHorizontal: 18, paddingVertical: 12, minWidth: 140, alignItems: 'center' },
+  saveText: { color: palette.white, fontWeight: '800', fontSize: 13 },
+  secondaryButton: { borderWidth: 1, borderColor: palette.border, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 12 },
+  secondaryText: { color: palette.inkSoft, fontWeight: '700', fontSize: 13 },
   disabled: { opacity: 0.65 },
-  sectionTitle: { fontSize: 15, fontWeight: '800', color: COLORS.ink, marginTop: 4 },
+  sectionTitle: { fontSize: 15, fontWeight: '800', color: palette.ink, marginTop: 4 },
   list: { maxHeight: 360 },
-  itemCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: COLORS.white, borderRadius: 12, borderWidth: 1, borderColor: COLORS.border, padding: 10, marginBottom: 8 },
-  itemCardSelected: { borderColor: COLORS.indigo, borderWidth: 1.5 },
+  itemCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: palette.white, borderRadius: 12, borderWidth: 1, borderColor: palette.border, padding: 10, marginBottom: 8 },
+  itemCardSelected: { borderColor: palette.indigo, borderWidth: 1.5 },
   itemImage: { width: 48, height: 60, borderRadius: 8 },
-  itemImageFallback: { width: 48, height: 60, borderRadius: 8, backgroundColor: COLORS.indigoSoft, alignItems: 'center', justifyContent: 'center' },
+  itemImageFallback: { width: 48, height: 60, borderRadius: 8, backgroundColor: palette.indigoSoft, alignItems: 'center', justifyContent: 'center' },
   itemBody: { flex: 1, gap: 2 },
   itemTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
-  itemTitle: { fontSize: 13, fontWeight: '800', color: COLORS.ink, flex: 1 },
+  itemTitle: { fontSize: 13, fontWeight: '800', color: palette.ink, flex: 1 },
   statusTag: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  statusTagActive: { backgroundColor: COLORS.successSoft },
-  statusTagInactive: { backgroundColor: COLORS.errorSoft },
+  statusTagActive: { backgroundColor: palette.successSoft },
+  statusTagInactive: { backgroundColor: palette.errorSoft },
   statusTagText: { fontSize: 10, fontWeight: '800' },
-  statusTextActive: { color: COLORS.success },
-  statusTextInactive: { color: COLORS.error },
-  itemMeta: { color: COLORS.inkSoft, fontSize: 11 },
-  itemStats: { color: COLORS.ink, fontSize: 11, fontWeight: '700' },
+  statusTextActive: { color: palette.success },
+  statusTextInactive: { color: palette.error },
+  itemMeta: { color: palette.inkSoft, fontSize: 11 },
+  itemStats: { color: palette.ink, fontSize: 11, fontWeight: '700' },
   itemActions: { flexDirection: 'row', gap: 6 },
-  iconButton: { width: 32, height: 32, borderRadius: 8, backgroundColor: COLORS.indigoSoft, alignItems: 'center', justifyContent: 'center' },
-  deleteIcon: { backgroundColor: COLORS.errorSoft },
+  iconButton: { width: 32, height: 32, borderRadius: 8, backgroundColor: palette.indigoSoft, alignItems: 'center', justifyContent: 'center' },
+  deleteIcon: { backgroundColor: palette.errorSoft },
   empty: { alignItems: 'center', paddingVertical: 32, gap: 8 },
-  emptyText: { color: COLORS.inkSoft, fontWeight: '600', fontSize: 13 },
+  emptyText: { color: palette.inkSoft, fontWeight: '600', fontSize: 13 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  pickerContainer: { width: '100%', backgroundColor: COLORS.white, borderRadius: 16, padding: 16, gap: 12 },
+  pickerContainer: { width: '100%', backgroundColor: palette.white, borderRadius: 16, padding: 16, gap: 12 },
   pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  pickerTitle: { fontSize: 15, fontWeight: '800', color: COLORS.ink },
+  pickerTitle: { fontSize: 15, fontWeight: '800', color: palette.ink },
   pickerActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 },
   pickerCancelBtn: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8 },
-  pickerCancelText: { color: COLORS.inkSoft, fontWeight: '700' },
-  pickerConfirmBtn: { backgroundColor: COLORS.indigo, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8 },
-  pickerConfirmText: { color: COLORS.white, fontWeight: '800' },
+  pickerCancelText: { color: palette.inkSoft, fontWeight: '700' },
+  pickerConfirmBtn: { backgroundColor: palette.indigo, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8 },
+  pickerConfirmText: { color: palette.white, fontWeight: '800' },
 });

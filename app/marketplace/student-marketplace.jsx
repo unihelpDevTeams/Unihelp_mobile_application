@@ -38,6 +38,22 @@ const PRICE_RANGES = [
   { key: 'over100k', label: `Over ${NGN}100k`, min: 100000, max: null },
 ];
 
+const CATEGORY_ICONS = {
+  books: 'book-outline',
+  textbook: 'book-outline',
+  textbooks: 'book-outline',
+  gadget: 'phone-portrait-outline',
+  gadgets: 'phone-portrait-outline',
+  electronics: 'headset-outline',
+  fashion: 'shirt-outline',
+  clothing: 'shirt-outline',
+  furniture: 'bed-outline',
+  hostel: 'home-outline',
+  food: 'fast-food-outline',
+  beauty: 'sparkles-outline',
+  default: 'cube-outline',
+};
+
 const formatNaira = (value) => {
   const num = Number(value);
   if (value === undefined || value === null || value === '' || Number.isNaN(num)) return null;
@@ -71,6 +87,21 @@ const resolveImage = (item = {}) => {
   pushValue(item.images);
   pushValue(item.media);
   return candidates.find(Boolean) || null;
+};
+
+const getCreatedMs = (item = {}) => {
+  if (typeof item.createdAt?.toMillis === 'function') return item.createdAt.toMillis();
+  if (item.createdAt?.seconds) return item.createdAt.seconds * 1000;
+  if (typeof item.createdAt === 'string') {
+    const parsed = Date.parse(item.createdAt);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+};
+
+const getCategoryIcon = (category = '') => {
+  const key = String(category).trim().toLowerCase();
+  return CATEGORY_ICONS[key] || CATEGORY_ICONS.default;
 };
 
 export default function StudentMarketplacePage() {
@@ -297,6 +328,91 @@ export default function StudentMarketplacePage() {
       marginBottom: s.md,
     },
     adminButtonText: { fontSize: 13, fontWeight: '800', color: c.brandText },
+    heroCard: {
+      backgroundColor: c.card,
+      borderRadius: r['2xl'],
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      padding: s.lg,
+      marginBottom: s.md,
+      overflow: 'hidden',
+    },
+    heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: s.md },
+    heroCopy: { flex: 1 },
+    heroEyebrow: { color: c.warning, fontSize: 11, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.4 },
+    heroTitle: { color: c.textPrimary, fontSize: 20, fontWeight: '900', marginTop: 4 },
+    heroText: { color: c.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: 4 },
+    heroIconWrap: {
+      width: 58,
+      height: 58,
+      borderRadius: r.xl,
+      backgroundColor: c.brandLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    heroActions: { flexDirection: 'row', gap: s.sm, marginTop: s.md },
+    heroButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      borderRadius: r.full,
+      paddingHorizontal: s.md,
+      paddingVertical: 8,
+      backgroundColor: c.brand,
+    },
+    heroButtonMuted: { backgroundColor: c.brandLight, borderWidth: 1, borderColor: c.brandBorder },
+    heroButtonText: { color: c.onBrand, fontSize: 12, fontWeight: '900' },
+    heroButtonTextMuted: { color: c.brandText },
+    categoryStrip: { marginBottom: s.lg },
+    categoryTile: {
+      width: 88,
+      minHeight: 78,
+      backgroundColor: c.card,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      padding: s.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      marginRight: s.sm,
+    },
+    categoryTileActive: { backgroundColor: c.brandLight, borderColor: c.brandBorder },
+    categoryIcon: {
+      width: 30,
+      height: 30,
+      borderRadius: r.md,
+      backgroundColor: c.brandLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    categoryName: { color: c.textPrimary, fontSize: 11, fontWeight: '800', textAlign: 'center' },
+    categoryCount: { color: c.textTertiary, fontSize: 10, fontWeight: '700' },
+    storefrontSection: { marginBottom: s.xl },
+    storefrontSectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: s.sm,
+    },
+    storefrontTitle: { color: c.textPrimary, fontSize: 15, fontWeight: '900' },
+    storefrontSubtitle: { color: c.textSecondary, fontSize: 11.5, marginTop: 2 },
+    storefrontLink: { color: c.brand, fontSize: 12, fontWeight: '900' },
+    railContent: { gap: s.sm, paddingRight: s.md },
+    gridWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: s.sm },
+    loadMoreButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      borderRadius: r.full,
+      paddingVertical: 11,
+      marginBottom: s.lg,
+    },
+    loadMoreText: { color: c.brand, fontSize: 13, fontWeight: '900' },
     footerLoader: { paddingVertical: s.lg, alignItems: 'center' },
     errorBanner: {
       flexDirection: 'row',
@@ -409,6 +525,48 @@ export default function StudentMarketplacePage() {
     }
     return sorted;
   }, [items, search, category, priceRange, sort]);
+
+  const categorySummaries = useMemo(() => (
+    categories
+      .filter((cat) => cat !== 'all')
+      .map((cat) => ({
+        key: cat,
+        label: cat,
+        count: items.filter((item) => (item?.category || '').trim().toLowerCase() === cat.toLowerCase()).length,
+      }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+      .slice(0, 8)
+  ), [categories, items]);
+
+  const marketplaceSections = useMemo(() => {
+    const newest = [...filteredItems].sort((a, b) => getCreatedMs(b) - getCreatedMs(a));
+    const affordable = filteredItems
+      .filter((item) => {
+        const price = Number(item?.price);
+        return Number.isFinite(price) && price > 0 && price <= 20000;
+      })
+      .sort((a, b) => Number(a?.price || 0) - Number(b?.price || 0));
+    const verified = filteredItems.filter((item) => item?.verified);
+    const randomPicks = shuffleArray(filteredItems);
+    const categoryShelves = categorySummaries
+      .map((cat) => ({
+        key: `category-${cat.key}`,
+        title: cat.label,
+        subtitle: `${cat.count} campus ${cat.count === 1 ? 'listing' : 'listings'}`,
+        items: shuffleArray(filteredItems.filter((item) => (item?.category || '').trim().toLowerCase() === cat.key.toLowerCase())).slice(0, 8),
+        category: cat.key,
+      }))
+      .filter((section) => section.items.length >= 2)
+      .slice(0, 3);
+
+    return [
+      { key: 'fresh', title: 'Fresh on campus', subtitle: 'New items students just posted', items: newest.slice(0, 8) },
+      { key: 'deals', title: 'Budget finds', subtitle: `Useful picks under ${NGN}20k`, items: affordable.slice(0, 8) },
+      { key: 'trusted', title: 'Verified sellers', subtitle: 'Listings with extra trust signals', items: verified.slice(0, 8) },
+      ...categoryShelves,
+      { key: 'random', title: 'Explore more picks', subtitle: 'A mixed shelf so browsing feels fresh', items: randomPicks.slice(0, 12), layout: 'grid' },
+    ].filter((section) => section.items.length > 0);
+  }, [categorySummaries, filteredItems]);
 
   const goToListing = (item) => router.push({ pathname: '/view/[type]/[id]', params: { type: 'listing', id: item.id } });
 
@@ -584,41 +742,53 @@ export default function StudentMarketplacePage() {
         </View>
       )}
 
-      {/* Featured Carousel */}
-      {!loading && !hasActiveFilters && filteredItems.length > 0 ? (
-        <MediaCarousel items={filteredItems.slice(0, 5)} onPressItem={(item) => goToListing(item)} />
-      ) : null}
-
-      {/* Section Controls Header */}
-      <View style={styles.sectionRow}>
-        <Text style={styles.sectionTitle}>
-          {hasActiveFilters ? 'Filtered items' : 'Marketplace feed'}
-        </Text>
-        <View style={styles.sectionRowRight}>
-          <Pressable
-            onPress={() => router.push('/upload?type=marketplace')}
-            style={styles.uploadButton}
-            accessibilityRole="button"
-          >
-            <Ionicons name="add" size={14} color={colors.onBrand} />
-            <Text style={styles.uploadButtonText}>Sell</Text>
-          </Pressable>
-          {hasActiveFilters && (
-            <Pressable onPress={clearFilters} hitSlop={6} accessibilityRole="button">
-              <Text style={{ fontSize: 12, fontWeight: '800', color: colors.brand }}>Reset</Text>
-            </Pressable>
-          )}
-          <View style={styles.countBadge}>
-            <Text style={styles.countBadgeText}>{filteredItems.length}</Text>
-          </View>
-        </View>
-      </View>
-
       {isAdmin && (
         <Pressable style={styles.adminButton} onPress={() => router.push('/adminpanel')}>
           <Ionicons name="shield-checkmark-outline" size={16} color={colors.brandText} />
           <Text style={styles.adminButtonText}>Admin Panel</Text>
         </Pressable>
+      )}
+
+      {!loading && !hasActiveFilters && filteredItems.length > 0 ? (
+        <MarketplaceHome
+          items={filteredItems}
+          categories={categorySummaries}
+          sections={marketplaceSections}
+          styles={styles}
+          onPressItem={goToListing}
+          onSell={() => router.push('/upload?type=marketplace')}
+          onSelectCategory={(nextCategory) => {
+            setCategory(nextCategory);
+            setShowFilters(true);
+          }}
+          onLoadMore={() => loadListings(false)}
+          canLoadMore={hasMore}
+          loadingMore={loadingMore}
+        />
+      ) : (
+        <View style={styles.sectionRow}>
+          <Text style={styles.sectionTitle}>
+            {hasActiveFilters ? 'Filtered items' : 'Marketplace feed'}
+          </Text>
+          <View style={styles.sectionRowRight}>
+            <Pressable
+              onPress={() => router.push('/upload?type=marketplace')}
+              style={styles.uploadButton}
+              accessibilityRole="button"
+            >
+              <Ionicons name="add" size={14} color={colors.onBrand} />
+              <Text style={styles.uploadButtonText}>Sell</Text>
+            </Pressable>
+            {hasActiveFilters && (
+              <Pressable onPress={clearFilters} hitSlop={6} accessibilityRole="button">
+                <Text style={{ fontSize: 12, fontWeight: '800', color: colors.brand }}>Reset</Text>
+              </Pressable>
+            )}
+            <View style={styles.countBadge}>
+              <Text style={styles.countBadgeText}>{filteredItems.length}</Text>
+            </View>
+          </View>
+        </View>
       )}
     </View>
   );
@@ -627,7 +797,7 @@ export default function StudentMarketplacePage() {
     <ScreenShell title="Student Marketplace" subtitle="Buy and sell student essentials within your community" showBack loading={loading}>
       {/* Integrated FlatList Feed */}
       <FlatList
-        data={filteredItems}
+        data={hasActiveFilters ? filteredItems : []}
         keyExtractor={(item, index) => item?.id ?? `listing-${index}`}
         ListHeaderComponent={HeaderComponent}
         renderItem={({ item }) => <ProductCard item={item} onPress={() => goToListing(item)} />}
@@ -653,12 +823,140 @@ export default function StudentMarketplacePage() {
           ) : null
         }
         ListEmptyComponent={
-          !loading ? (
+          !loading && (hasActiveFilters || filteredItems.length === 0) ? (
             <EmptyListings hasActiveFilters={hasActiveFilters} onReset={clearFilters} />
           ) : null
         }
       />
     </ScreenShell>
+  );
+}
+
+function MarketplaceHome({
+  items,
+  categories,
+  sections,
+  styles,
+  onPressItem,
+  onSell,
+  onSelectCategory,
+  onLoadMore,
+  canLoadMore,
+  loadingMore,
+}) {
+  const { colors } = useTheme();
+  const heroItems = items.slice(0, 5);
+
+  return (
+    <View>
+      <View style={styles.heroCard}>
+        <View style={styles.heroTop}>
+          <View style={styles.heroCopy}>
+            <Text style={styles.heroEyebrow}>Campus deals</Text>
+            <Text style={styles.heroTitle}>Shop what students are selling</Text>
+            <Text style={styles.heroText}>Books, gadgets, essentials, and quick finds from your UniHelp community.</Text>
+          </View>
+          <View style={styles.heroIconWrap}>
+            <Ionicons name="bag-handle-outline" size={28} color={colors.brand} />
+          </View>
+        </View>
+        <View style={styles.heroActions}>
+          <Pressable onPress={onSell} style={styles.heroButton} accessibilityRole="button">
+            <Ionicons name="add" size={14} color={colors.onBrand} />
+            <Text style={styles.heroButtonText}>Sell an item</Text>
+          </Pressable>
+          <Pressable onPress={() => onSelectCategory(categories[0]?.key || 'all')} style={[styles.heroButton, styles.heroButtonMuted]} accessibilityRole="button">
+            <Ionicons name="grid-outline" size={14} color={colors.brandText} />
+            <Text style={[styles.heroButtonText, styles.heroButtonTextMuted]}>Browse categories</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {heroItems.length > 0 ? <MediaCarousel items={heroItems} onPressItem={onPressItem} /> : null}
+
+      {categories.length > 0 ? (
+        <View style={styles.categoryStrip}>
+          <View style={styles.storefrontSectionHeader}>
+            <View>
+              <Text style={styles.storefrontTitle}>Popular categories</Text>
+              <Text style={styles.storefrontSubtitle}>Jump straight into a shelf</Text>
+            </View>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            {categories.map((cat) => (
+              <Pressable
+                key={cat.key}
+                style={styles.categoryTile}
+                onPress={() => onSelectCategory(cat.key)}
+                accessibilityRole="button"
+                accessibilityLabel={`Browse ${cat.label}`}
+              >
+                <View style={styles.categoryIcon}>
+                  <Ionicons name={getCategoryIcon(cat.label)} size={16} color={colors.brand} />
+                </View>
+                <Text style={styles.categoryName} numberOfLines={2}>{cat.label}</Text>
+                <Text style={styles.categoryCount}>{cat.count}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+
+      {sections.map((section) => (
+        <MarketplaceSection
+          key={section.key}
+          section={section}
+          styles={styles}
+          onPressItem={onPressItem}
+          onViewAll={section.category ? () => onSelectCategory(section.category) : null}
+        />
+      ))}
+
+      {canLoadMore ? (
+        <Pressable onPress={onLoadMore} style={styles.loadMoreButton} disabled={loadingMore} accessibilityRole="button">
+          {loadingMore ? (
+            <ActivityIndicator size="small" color={colors.brand} />
+          ) : (
+            <Ionicons name="refresh-outline" size={15} color={colors.brand} />
+          )}
+          <Text style={styles.loadMoreText}>{loadingMore ? 'Loading more...' : 'Load more campus finds'}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function MarketplaceSection({ section, styles, onPressItem, onViewAll }) {
+  const isGrid = section.layout === 'grid';
+
+  return (
+    <View style={styles.storefrontSection}>
+      <View style={styles.storefrontSectionHeader}>
+        <View>
+          <Text style={styles.storefrontTitle}>{section.title}</Text>
+          <Text style={styles.storefrontSubtitle}>{section.subtitle}</Text>
+        </View>
+        {onViewAll ? (
+          <Pressable onPress={onViewAll} hitSlop={8} accessibilityRole="button">
+            <Text style={styles.storefrontLink}>View all</Text>
+          </Pressable>
+        ) : null}
+      </View>
+
+      {isGrid ? (
+        <View style={styles.gridWrap}>
+          {section.items.map((item) => (
+            <ProductCard key={item.id} item={item} variant="tile" onPress={() => onPressItem(item)} />
+          ))}
+        </View>
+      ) : (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railContent}>
+          {section.items.map((item) => (
+            <ProductCard key={item.id} item={item} variant="rail" onPress={() => onPressItem(item)} />
+          ))}
+        </ScrollView>
+      )}
+    </View>
   );
 }
 
@@ -709,8 +1007,9 @@ function EmptyListings({ hasActiveFilters, onReset }) {
   );
 }
 
-function ProductCard({ item, onPress }) {
+function ProductCard({ item, onPress, variant = 'row' }) {
   const { colors } = useTheme();
+  const isCompact = variant !== 'row';
   const styles = useThemeStyles((c, s, r) => ({
     card: {
       backgroundColor: c.card,
@@ -721,13 +1020,30 @@ function ProductCard({ item, onPress }) {
       gap: s.md,
       padding: s.md,
     },
+    railCard: {
+      width: 154,
+      minHeight: 244,
+      flexDirection: 'column',
+      gap: 8,
+      padding: 8,
+    },
+    tileCard: {
+      width: '48.5%',
+      minHeight: 242,
+      flexDirection: 'column',
+      gap: 8,
+      padding: 8,
+    },
     cardPressed: { opacity: 0.9, transform: [{ scale: 0.99 }] },
     media: { width: 96, height: 96, borderRadius: r.lg, overflow: 'hidden', backgroundColor: c.brandLight },
+    compactMedia: { width: '100%', height: 132, borderRadius: r.lg },
     image: { width: '100%', height: '100%' },
     fallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brand },
     fallbackText: { color: c.onBrand, fontSize: 28, fontWeight: '900' },
     content: { flex: 1, justifyContent: 'space-between' },
+    compactContent: { minHeight: 88 },
     title: { fontSize: 14, fontWeight: '800', color: c.textPrimary },
+    compactTitle: { fontSize: 12.5, lineHeight: 17 },
     badgesRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4, marginTop: 4 },
     badge: {
       paddingHorizontal: 6,
@@ -741,6 +1057,7 @@ function ProductCard({ item, onPress }) {
     badgeVerified: { backgroundColor: c.greenLight },
     badgeText: { fontSize: 10, fontWeight: '800', color: c.brandText },
     price: { fontSize: 16, fontWeight: '900', color: c.warning, marginTop: 4 },
+    compactPrice: { fontSize: 14 },
     contactRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
     callButton: {
       flexDirection: 'row',
@@ -783,10 +1100,15 @@ function ProductCard({ item, onPress }) {
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+      style={({ pressed }) => [
+        styles.card,
+        variant === 'rail' && styles.railCard,
+        variant === 'tile' && styles.tileCard,
+        pressed && styles.cardPressed,
+      ]}
       accessibilityRole="button"
     >
-      <View style={styles.media}>
+      <View style={[styles.media, isCompact && styles.compactMedia]}>
         {showImage ? (
           <Image
             source={{ uri: safeImageUrl }}
@@ -803,9 +1125,9 @@ function ProductCard({ item, onPress }) {
         )}
       </View>
 
-      <View style={styles.content}>
+      <View style={[styles.content, isCompact && styles.compactContent]}>
         <View>
-          <Text style={styles.title} numberOfLines={2}>{title}</Text>
+          <Text style={[styles.title, isCompact && styles.compactTitle]} numberOfLines={2}>{title}</Text>
           {(item?.category || item?.verified) ? (
             <View style={styles.badgesRow}>
               {item?.category ? (
@@ -825,8 +1147,8 @@ function ProductCard({ item, onPress }) {
         </View>
 
         <View>
-          {price ? <Text style={styles.price}>{price}</Text> : null}
-          {phone ? (
+          {price ? <Text style={[styles.price, isCompact && styles.compactPrice]}>{price}</Text> : null}
+          {phone && !isCompact ? (
             <View style={styles.contactRow}>
               <Pressable onPress={callSeller} style={styles.callButton} accessibilityRole="button" accessibilityLabel="Call seller">
                 <Ionicons name="call-outline" size={12} color={colors.onBrand} />
@@ -834,7 +1156,7 @@ function ProductCard({ item, onPress }) {
               </Pressable>
             </View>
           ) : (
-            <Text style={styles.detailHint}>View details</Text>
+            <Text style={styles.detailHint}>{isCompact ? 'Tap for details' : 'View details'}</Text>
           )}
         </View>
       </View>

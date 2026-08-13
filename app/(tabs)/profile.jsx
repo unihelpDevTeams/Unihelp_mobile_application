@@ -164,7 +164,7 @@ export default function ProfileScreen() {
     moreButtonPressed: { backgroundColor: c.canvasLight },
 
     identity: { alignItems: 'center', paddingVertical: s.lg, marginBottom: s.md },
-    coverWrap: { width: '100%', height: 140, borderRadius: r['2xl'], overflow: 'hidden', marginBottom: s.md },
+    coverWrap: { width: '100%', height: 140, borderRadius: r['2xl'], overflow: 'hidden', marginBottom: s.md, position: 'absolute' },
     coverImage: { width: '100%', height: '100%' },
     coverPlaceholder: { width: '100%', height: '100%', backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
     coverBadge: {
@@ -898,8 +898,7 @@ export default function ProfileScreen() {
             style={styles.coverWrap}
             onPress={pickCoverPhoto}
             accessibilityRole="button"
-            accessibilityLabel="Change cover photo"
-          >
+            accessibilityLabel="Change cover photo">
             {profileCover ? (
               <Image source={{ uri: profileCover }} style={styles.coverImage} contentFit="cover" />
             ) : (

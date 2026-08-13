@@ -10,12 +10,12 @@ import { layout } from '../theme';
 import { useTheme } from '../theme/ThemeContext';
 import { useThemeStyles } from '../theme/createStyles';
 import { headerMenuSections } from '../navigation/menuConfig';
+import ThemeToggle from './ThemeToggle';
 import { useAuth } from '../../../context/AuthContext';
 import { filterMenuSectionsByRole } from '../navigation/routePermissions';
 import { countUserUploads, fetchNotifications } from '../../../services/firestoreSync';
 import { COLLECTIONS } from '../firestoreSchema';
 import logo from '../../../assets/images/favicon.png';
-import Footer from '../../../components/Footer';
 
 const ROLE_LABELS = {
   university: 'University Student',
@@ -142,6 +142,25 @@ export default function ScreenShell({
       gap: s.md,
     },
     menuProfileCardPressed: { backgroundColor: c.brandBorder },
+    menuAppearanceCard: {
+      marginHorizontal: layout.screenPadding,
+      marginTop: s.sm,
+      backgroundColor: c.surfaceSecondary,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      borderRadius: r.xl,
+      paddingVertical: s.sm,
+      paddingHorizontal: s.md,
+    },
+    menuAppearanceRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: s.sm,
+    },
+    menuAppearanceTextWrap: { flex: 1, gap: 2 },
+    menuAppearanceTitle: { fontSize: 14, fontWeight: '800', color: c.textPrimary },
+    menuAppearanceSubtitle: { fontSize: 11, color: c.textSecondary },
     menuAvatarRing: {
       width: 60, height: 60, borderRadius: 30, padding: 3,
       backgroundColor: c.modalBackground, borderWidth: 1, borderColor: c.brandBorder,
@@ -272,7 +291,7 @@ export default function ScreenShell({
 
   const showUniversityIcons = !profile?.role || profile?.role === 'university';
   const body = loading ? <FullScreenLoader label="Loading..." /> : children;
-  const footer = showFooter ? <Footer {...footerProps} /> : null;
+  const footer = showFooter ? <View style={{ height: 12 }} /> : null;
 
   const content = scrollable ? (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -388,6 +407,7 @@ function HeaderBar({
 // ---------------------------------------------------------------------------
 function MenuDrawer({ visible, onClose, onNavigate, sections, profile, onProfilePress, footerNote, colors, styles }) {
   const { width: screenWidth } = useWindowDimensions();
+  const { isDark } = useTheme();
   const drawerX = useRef(new Animated.Value(screenWidth)).current;
   const scrimOpacity = useRef(new Animated.Value(0)).current;
   const [searchQuery, setSearchQuery] = useState('');
@@ -476,6 +496,16 @@ function MenuDrawer({ visible, onClose, onNavigate, sections, profile, onProfile
               </View>
               {onProfilePress ? <Ionicons name="chevron-forward" size={17} color={colors.greyLight} /> : null}
             </Pressable>
+
+            <View style={styles.menuAppearanceCard}>
+              <View style={styles.menuAppearanceRow}>
+                <View style={styles.menuAppearanceTextWrap}>
+                  <Text style={styles.menuAppearanceTitle}>Appearance</Text>
+                  <Text style={styles.menuAppearanceSubtitle}>{isDark ? 'Dark mode' : 'Light mode'}</Text>
+                </View>
+                <ThemeToggle />
+              </View>
+            </View>
 
             {showSearch ? (
               <View style={styles.menuSearchWrap}>

@@ -282,7 +282,7 @@ export function ContextForm({ mode, onSubmit, onSkip, onCancel, submitting }) {
           <Text style={styles.primaryText}>Start</Text>
         </Pressable>
         <Pressable onPress={() => onSkip(mode)} style={styles.skipButton} accessibilityRole="button" accessibilityLabel="Skip form and type directly">
-          <Text style={styles.skipText}>Skip, I'll type</Text>
+          <Text style={styles.skipText}>{"Skip, I'll type"}</Text>
         </Pressable>
       </View>
     </View>

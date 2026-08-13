@@ -13,9 +13,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth, db } from '../../../firebase/config';
 import { COLLECTIONS } from '../firestoreSchema';
 
-const SEEN_STORAGE_KEY = '@unihelp_seenPromoSpotlights';
+const PROMO_HISTORY_STORAGE_KEY = '@unihelp_promoSpotlightHistory';
 const PROMO_TYPES = new Set(['external_ad', 'unihelp_promotion', 'announcement']);
 const ACTION_TYPES = new Set(['none', 'external_url', 'screen', 'deep_link']);
+const PROMO_FREQUENCIES = new Set(['once', 'daily', 'every_3_days', 'weekly']);
+const DAY_MS = 24 * 60 * 60 * 1000;
+const CLICK_COOLDOWN_MS = 48 * 60 * 60 * 1000;
+
+const FREQUENCY_COOLDOWNS = {
+  once: Infinity,
+  daily: DAY_MS,
+  every_3_days: 3 * DAY_MS,
+  weekly: 7 * DAY_MS,
+};
 
 const toDateMs = (value) => {
   if (!value) return null;
@@ -33,6 +43,7 @@ export const normalizePromoSpotlight = (item = {}) => ({
   ...item,
   type: PROMO_TYPES.has(item.type) ? item.type : 'announcement',
   actionType: ACTION_TYPES.has(item.actionType) ? item.actionType : 'none',
+  frequency: PROMO_FREQUENCIES.has(item.frequency) ? item.frequency : 'daily',
   title: String(item.title || '').trim(),
   description: String(item.description || '').trim(),
   imageUrl: String(item.imageUrl || item.creativeUrl || '').trim(),
@@ -51,6 +62,42 @@ export const isPromoActive = (promo, now = Date.now()) => {
   if (startMs && startMs > now) return false;
   if (endMs && endMs < now) return false;
   return true;
+};
+
+const toTimestamp = (value) => {
+  const timestamp = Number(value);
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+};
+
+const normalizeHistoryEntry = (entry = {}) => ({
+  lastShownAt: toTimestamp(entry.lastShownAt),
+  lastDismissedAt: toTimestamp(entry.lastDismissedAt),
+  lastClickedAt: toTimestamp(entry.lastClickedAt),
+});
+
+export const getPromoCooldownMs = (promo, historyEntry = {}) => {
+  const frequency = PROMO_FREQUENCIES.has(promo?.frequency) ? promo.frequency : 'daily';
+  const frequencyMs = FREQUENCY_COOLDOWNS[frequency] ?? DAY_MS;
+  return historyEntry?.lastClickedAt ? Math.max(frequencyMs, CLICK_COOLDOWN_MS) : frequencyMs;
+};
+
+export const isPromoEligible = (promo, history = {}, now = Date.now()) => {
+  if (!isPromoActive(promo, now) || !promo?.id) return false;
+
+  const frequency = PROMO_FREQUENCIES.has(promo.frequency) ? promo.frequency : 'daily';
+  const entry = normalizeHistoryEntry(history[promo.id] || {});
+  const lastInteractionAt = Math.max(entry.lastShownAt || 0, entry.lastDismissedAt || 0, entry.lastClickedAt || 0);
+
+  if (frequency === 'once') return !lastInteractionAt;
+  if (!lastInteractionAt) return true;
+
+  const frequencyMs = FREQUENCY_COOLDOWNS[frequency] ?? DAY_MS;
+  const nextAllowedAt = Math.max(
+    (entry.lastShownAt || 0) + frequencyMs,
+    (entry.lastDismissedAt || 0) + frequencyMs,
+    (entry.lastClickedAt || 0) + Math.max(frequencyMs, CLICK_COOLDOWN_MS)
+  );
+  return now >= nextAllowedAt;
 };
 
 export async function fetchActivePromoSpotlights({ pageSize = 20 } = {}) {
@@ -73,30 +120,55 @@ export async function fetchActivePromoSpotlights({ pageSize = 20 } = {}) {
     .slice(0, pageSize);
 }
 
-export async function getSeenPromoSpotlightIds() {
+export async function getPromoSpotlightHistory() {
   try {
-    const raw = await AsyncStorage.getItem(SEEN_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    const raw = await AsyncStorage.getItem(PROMO_HISTORY_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') return {};
+    return Object.keys(parsed).reduce((history, promoId) => {
+      history[promoId] = normalizeHistoryEntry(parsed[promoId]);
+      return history;
+    }, {});
   } catch {
-    return [];
+    return {};
   }
 }
 
-export async function markPromoSpotlightSeen(id) {
+export async function updatePromoSpotlightHistory(id, patch = {}) {
   if (!id) return;
-  const seen = await getSeenPromoSpotlightIds();
-  const next = Array.from(new Set([...seen, id])).slice(-100);
-  await AsyncStorage.setItem(SEEN_STORAGE_KEY, JSON.stringify(next));
+  const history = await getPromoSpotlightHistory();
+  const current = normalizeHistoryEntry(history[id] || {});
+  const next = {
+    ...history,
+    [id]: normalizeHistoryEntry({
+      ...current,
+      ...patch,
+    }),
+  };
+
+  const entries = Object.entries(next).slice(-100);
+  await AsyncStorage.setItem(PROMO_HISTORY_STORAGE_KEY, JSON.stringify(Object.fromEntries(entries)));
+}
+
+export function markPromoSpotlightShown(id, now = Date.now()) {
+  return updatePromoSpotlightHistory(id, { lastShownAt: now });
+}
+
+export function markPromoSpotlightDismissed(id, now = Date.now()) {
+  return updatePromoSpotlightHistory(id, { lastDismissedAt: now });
+}
+
+export function markPromoSpotlightClicked(id, now = Date.now()) {
+  return updatePromoSpotlightHistory(id, { lastClickedAt: now });
 }
 
 export async function fetchNextPromoSpotlight() {
-  const [promos, seenIds] = await Promise.all([
+  const now = Date.now();
+  const [promos, history] = await Promise.all([
     fetchActivePromoSpotlights(),
-    getSeenPromoSpotlightIds(),
+    getPromoSpotlightHistory(),
   ]);
-  const seen = new Set(seenIds);
-  return promos.find((promo) => promo?.id && !seen.has(promo.id)) || null;
+  return promos.find((promo) => isPromoEligible(promo, history, now)) || null;
 }
 
 const emptyToNull = (value) => {
@@ -119,6 +191,7 @@ const normalizeWritePayload = (payload = {}) => ({
   imageAsset: payload.imageAsset || null,
   buttonText: String(payload.buttonText || '').trim(),
   actionType: ACTION_TYPES.has(payload.actionType) ? payload.actionType : 'none',
+  frequency: PROMO_FREQUENCIES.has(payload.frequency) ? payload.frequency : 'daily',
   actionUrl: String(payload.actionUrl || '').trim(),
   advertiserName: String(payload.advertiserName || '').trim(),
   advertiserLogoUrl: String(payload.advertiserLogoUrl || '').trim(),
@@ -202,6 +275,7 @@ export async function trackPromoSpotlightEvent(eventName, promo) {
       eventType: eventName,
       promoType: promo.type || 'announcement',
       userId: auth.currentUser?.uid || null,
+      timestamp: Date.now(),
       createdAt: serverTimestamp(),
     });
   } catch (error) {

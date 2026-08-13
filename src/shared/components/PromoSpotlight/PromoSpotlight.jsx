@@ -52,7 +52,7 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
     const maxWidth = Math.min(width - 32, 390);
     const maxHeight = height - insets.top - insets.bottom - 44;
     const contentHeight = promo?.description ? 164 : 132;
-    const imageHeight = Math.max(260, Math.min(maxWidth * 1.32, maxHeight - contentHeight));
+    const imageHeight = Math.max(240, Math.min(maxWidth * 1.45, maxHeight - contentHeight));
     return { maxWidth, maxHeight, imageHeight };
   }, [height, insets.bottom, insets.top, promo?.description, width]);
 
@@ -132,7 +132,7 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
               styles.imageWrap,
               {
                 height: sizing.imageHeight,
-                backgroundColor: colors.surfaceSecondary || colors.backgroundSecondary || '#F3F4F6',
+                backgroundColor: 'transparent',
               },
             ]}
           >
@@ -140,7 +140,7 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
               <Image
                 source={{ uri: promo.imageUrl }}
                 style={styles.image}
-                contentFit="cover"
+                contentFit="contain"
                 cachePolicy="disk"
                 transition={160}
                 onLoadEnd={() => setImageLoading(false)}
@@ -159,7 +159,7 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
             )}
 
             {imageLoading && (
-              <View style={[styles.imageLoader, { backgroundColor: colors.surfaceSecondary || 'rgba(0,0,0,0.1)' }]}>
+              <View style={styles.imageLoader}>
                 <ActivityIndicator color={colors.brand || '#4F46E5'} />
               </View>
             )}
@@ -268,7 +268,7 @@ const styles = StyleSheet.create({
     height: 38,
     borderRadius: 19,
     alignItems: 'center',
-    justify: 'center',
+    justifyContent: 'center',
   },
   pressed: {
     opacity: 0.82,

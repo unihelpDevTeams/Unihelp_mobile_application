@@ -56,6 +56,7 @@ export default function ConversationPage() {
   const [relationship, setRelationship] = useState({ state: RELATIONSHIP.NONE });
   const [pendingMessageRequest, setPendingMessageRequest] = useState(null);
   const [relationshipBusy, setRelationshipBusy] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const listRef = useRef(null);
 
   const styles = useThemeStyles((c, s, r) => ({
@@ -193,6 +194,10 @@ export default function ConversationPage() {
   const headerSubtitle = otherUser.email || 'Direct message';
   const areFriends = relationship.state === RELATIONSHIP.FRIENDS;
   const canChat = !otherId || areFriends;
+
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [otherUser.avatar]);
 
   useEffect(() => {
     if (!profile?.uid || !otherId) {

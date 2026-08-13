@@ -625,7 +625,7 @@ export default function AiPage() {
             </View>
             <Text style={styles.modalTitle}>Daily limit reached</Text>
             <Text style={styles.modalText}>
-              You've used today's free AI tokens. Upgrade to Premium to keep studying with UniHelp AI, or come back tomorrow.
+              {"You've used today's free AI tokens. Upgrade to Premium to keep studying with UniHelp AI, or come back tomorrow."}
             </Text>
             <Pressable
               style={styles.modalPrimaryButton}

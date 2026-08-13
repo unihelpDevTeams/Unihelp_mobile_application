@@ -1,9 +1,7 @@
 import React from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { useTheme } from '../src/shared/theme/ThemeContext';
-import Header from './Header';
-import Footer from './Footer';
+import ScreenShell from '../src/shared/components/ScreenShell';
 
 export default function PageContainer({
   title = 'Unihelp',
@@ -30,45 +28,28 @@ export default function PageContainer({
     children
   );
 
-  if (!scrollable) {
-    return (
-      <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
-        <Header title={title} subtitle={subtitle} showBack={showBack} />
-        <View style={[styles.nonScrollableContent, containerStyle]}>{content}</View>
-        {showFooter ? <Footer {...footerProps} /> : null}
-      </SafeAreaView>
-    );
-  }
-
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
-      <Header title={title} subtitle={subtitle} showBack={showBack} />
-      <ScrollView
-        contentContainerStyle={[styles.scrollContent, { backgroundColor: colors.background }, contentStyle]}
-        showsVerticalScrollIndicator={false}
-      >
+    <ScreenShell
+      title={title}
+      subtitle={subtitle}
+      showBack={showBack}
+      scrollable={scrollable}
+      showFooter={showFooter}
+      footerProps={footerProps}
+    >
+      <View style={[scrollable ? styles.scrollContent : styles.nonScrollableContent, containerStyle, contentStyle]}>
         {content}
-        {showFooter ? <Footer {...footerProps} /> : null}
-      </ScrollView>
-    </SafeAreaView>
+      </View>
+    </ScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 28,
   },
   nonScrollableContent: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 28,
   },
   loadingBox: {
     borderRadius: 16,

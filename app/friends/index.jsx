@@ -7,7 +7,7 @@ import EmptyState from '../../src/shared/components/EmptyState';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
-import { spacing, borderRadius, shadows } from '../../src/shared/theme';
+import { shadows } from '../../src/shared/theme';
 import {
   acceptFriendRequest,
   acceptMessageRequest,
@@ -36,7 +36,7 @@ const TABS = [
 const nameOf = (person = {}) => person.name || person.username || person.email || 'Student';
 const schoolLine = (person = {}) => [person.university || person.school, person.department, person.level].filter(Boolean).join(' • ');
 
-function Avatar({ person, size = 50 }) {
+function Avatar({ person, styles, size = 50 }) {
   const name = nameOf(person);
   const uri = person.avatar || person.photo || person.photoURL || '';
   return uri ? (
@@ -48,7 +48,7 @@ function Avatar({ person, size = 50 }) {
   );
 }
 
-function SkeletonCard() {
+function SkeletonCard({ styles }) {
   return (
     <View style={styles.card}>
       <View style={styles.skeletonAvatar} />
@@ -60,10 +60,10 @@ function SkeletonCard() {
   );
 }
 
-function StudentCard({ person, subtitle, children, onPress }) {
+function StudentCard({ person, subtitle, children, onPress, styles }) {
   return (
     <Pressable style={({ pressed }) => [styles.card, pressed && onPress && styles.cardPressed]} onPress={onPress} disabled={!onPress}>
-      <Avatar person={person} />
+      <Avatar person={person} styles={styles} />
       <View style={styles.cardBody}>
         <View style={styles.nameRow}>
           <Text style={styles.cardTitle} numberOfLines={1}>{nameOf(person)}</Text>
@@ -76,7 +76,7 @@ function StudentCard({ person, subtitle, children, onPress }) {
   );
 }
 
-function ActionButton({ label, icon, variant = 'primary', loading, onPress }) {
+function ActionButton({ label, icon, variant = 'primary', loading, onPress, styles }) {
   const { colors } = useTheme();
   return (
     <Pressable
@@ -176,8 +176,8 @@ export default function FriendsPage() {
       const friendId = item.users?.find((id) => id !== uid);
       const person = item.profiles?.[friendId] || { uid: friendId };
       return (
-        <StudentCard person={person} onPress={() => router.push(`/view-user-profile/${friendId}`)}>
-          <ActionButton label="Message" icon="chatbubble-outline" loading={busyId === friendId} onPress={() => openMessage(person)} />
+        <StudentCard person={person} onPress={() => router.push(`/view-user-profile/${friendId}`)} styles={styles}>
+          <ActionButton styles={styles} label="Message" icon="chatbubble-outline" loading={busyId === friendId} onPress={() => openMessage(person)} />
         </StudentCard>
       );
     }
@@ -185,12 +185,12 @@ export default function FriendsPage() {
     if (activeTab === 'requests' && item.requestType === 'message') {
       const person = item.fromProfile || { uid: item.from };
       return (
-        <StudentCard person={person} subtitle={item.message}>
-          <ActionButton label="Accept" icon="checkmark" loading={busyId === item.id} onPress={() => handleAction(item.id, async () => {
+        <StudentCard person={person} subtitle={item.message} styles={styles}>
+          <ActionButton styles={styles} label="Accept" icon="checkmark" loading={busyId === item.id} onPress={() => handleAction(item.id, async () => {
             const conversationId = await acceptMessageRequest({ request: item, currentUid: uid, currentProfile: profile });
             router.push(`/messages/${conversationId}`);
           })} />
-          <ActionButton label="Decline" icon="close" variant="secondary" loading={busyId === item.id} onPress={() => handleAction(item.id, () => declineMessageRequest({ request: item, currentUid: uid, currentProfile: profile }))} />
+          <ActionButton styles={styles} label="Decline" icon="close" variant="secondary" loading={busyId === item.id} onPress={() => handleAction(item.id, () => declineMessageRequest({ request: item, currentUid: uid, currentProfile: profile }))} />
         </StudentCard>
       );
     }
@@ -198,9 +198,9 @@ export default function FriendsPage() {
     if (activeTab === 'requests') {
       const person = item.fromProfile || { uid: item.from };
       return (
-        <StudentCard person={person} onPress={() => router.push(`/view-user-profile/${item.from}`)}>
-          <ActionButton label="Accept" icon="checkmark" loading={busyId === item.id} onPress={() => handleAction(item.id, () => acceptFriendRequest({ request: item, currentUid: uid, currentProfile: profile }))} />
-          <ActionButton label="Decline" icon="close" variant="secondary" loading={busyId === item.id} onPress={() => handleAction(item.id, () => declineFriendRequest({ request: item, currentUid: uid, currentProfile: profile }))} />
+        <StudentCard person={person} onPress={() => router.push(`/view-user-profile/${item.from}`)} styles={styles}>
+          <ActionButton styles={styles} label="Accept" icon="checkmark" loading={busyId === item.id} onPress={() => handleAction(item.id, () => acceptFriendRequest({ request: item, currentUid: uid, currentProfile: profile }))} />
+          <ActionButton styles={styles} label="Decline" icon="close" variant="secondary" loading={busyId === item.id} onPress={() => handleAction(item.id, () => declineFriendRequest({ request: item, currentUid: uid, currentProfile: profile }))} />
         </StudentCard>
       );
     }
@@ -208,16 +208,16 @@ export default function FriendsPage() {
     if (activeTab === 'sent') {
       const person = item.toProfile || { uid: item.to };
       return (
-        <StudentCard person={person} onPress={() => router.push(`/view-user-profile/${item.to}`)}>
-          <ActionButton label="Cancel" icon="close-circle-outline" variant="secondary" loading={busyId === item.id} onPress={() => handleAction(item.id, () => cancelFriendRequest({ requestId: item.id, currentUid: uid }))} />
+        <StudentCard person={person} onPress={() => router.push(`/view-user-profile/${item.to}`)} styles={styles}>
+          <ActionButton styles={styles} label="Cancel" icon="close-circle-outline" variant="secondary" loading={busyId === item.id} onPress={() => handleAction(item.id, () => cancelFriendRequest({ requestId: item.id, currentUid: uid }))} />
         </StudentCard>
       );
     }
 
     if (activeTab === 'suggested') {
       return (
-        <StudentCard person={{ ...item, uid: item.id || item.uid }} subtitle={`${schoolLine(item) || 'Suggested student'}${item.score ? ` • ${item.score}% match` : ''}`} onPress={() => router.push(`/view-user-profile/${item.id || item.uid}`)}>
-          <ActionButton label="Add" icon="person-add-outline" loading={busyId === item.id} onPress={() => handleAction(item.id, () => sendFriendRequest({
+        <StudentCard person={{ ...item, uid: item.id || item.uid }} subtitle={`${schoolLine(item) || 'Suggested student'}${item.score ? ` • ${item.score}% match` : ''}`} onPress={() => router.push(`/view-user-profile/${item.id || item.uid}`)} styles={styles}>
+          <ActionButton styles={styles} label="Add" icon="person-add-outline" loading={busyId === item.id} onPress={() => handleAction(item.id, () => sendFriendRequest({
             currentUid: uid,
             targetUid: item.id || item.uid,
             currentProfile: profile,
@@ -229,8 +229,8 @@ export default function FriendsPage() {
 
     const person = item.blockedProfile || { uid: item.blockedId, name: item.blockedId };
     return (
-      <StudentCard person={person}>
-        <ActionButton label="Unblock" icon="lock-open-outline" variant="secondary" loading={busyId === item.blockedId} onPress={() => handleAction(item.blockedId, () => unblockStudent({ currentUid: uid, targetUid: item.blockedId }))} />
+      <StudentCard person={person} styles={styles}>
+        <ActionButton styles={styles} label="Unblock" icon="lock-open-outline" variant="secondary" loading={busyId === item.blockedId} onPress={() => handleAction(item.blockedId, () => unblockStudent({ currentUid: uid, targetUid: item.blockedId }))} />
       </StudentCard>
     );
   };
@@ -272,9 +272,9 @@ export default function FriendsPage() {
 
       {loading ? (
         <View>
-          <SkeletonCard />
-          <SkeletonCard />
-          <SkeletonCard />
+          <SkeletonCard styles={styles} />
+          <SkeletonCard styles={styles} />
+          <SkeletonCard styles={styles} />
         </View>
       ) : (
         <FlatList
