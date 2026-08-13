@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions, KeyboardAvoidingView, Platform } from 'react-native';
+import { Alert, Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNetInfo } from '@react-native-community/netinfo';
 import { FullScreenLoader } from './AILoaders';
@@ -57,7 +57,7 @@ export default function ScreenShell({
   menuFooterNote,
 }) {
   const router = useRouter();
-  const { profile, user } = useAuth();
+  const { profile, user, logout } = useAuth();
   const { colors } = useTheme();
   const { isConnected } = useNetInfo();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -231,6 +231,25 @@ export default function ScreenShell({
       borderTopWidth: 1, borderTopColor: c.borderDefault,
     },
     menuFooterNoteText: { fontSize: 11, color: c.textTertiary, textAlign: 'center' },
+    menuLogoutWrap: {
+      paddingHorizontal: layout.screenPadding,
+      paddingVertical: s.md,
+      borderTopWidth: 1,
+      borderTopColor: c.borderDefault,
+    },
+    menuLogoutButton: {
+      minHeight: 46,
+      borderRadius: r.lg,
+      backgroundColor: c.dangerLight,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: s.sm,
+    },
+    menuLogoutButtonPressed: { opacity: 0.75 },
+    menuLogoutText: { color: c.danger, fontSize: 14, fontWeight: '900' },
   }));
 
   useFocusEffect(
@@ -290,6 +309,14 @@ export default function ScreenShell({
   const body = loading ? <FullScreenLoader label="Loading..." /> : children;
   const footer = showFooter ? <View style={{ height: 12 }} /> : null;
 
+  const confirmLogout = useCallback(() => {
+    setMenuOpen(false);
+    Alert.alert('Sign out', 'You will need to sign back in to access your account.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign out', style: 'destructive', onPress: logout },
+    ]);
+  }, [logout]);
+
   const content = scrollable ? (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
       <OfflineNotice visible={isConnected === false} colors={colors} styles={styles} />
@@ -335,6 +362,7 @@ export default function ScreenShell({
         sections={filteredMenuSections}
         profile={profile}
         onProfilePress={onProfilePress ? () => { setMenuOpen(false); onProfilePress(); } : null}
+        onLogout={confirmLogout}
         footerNote={menuFooterNote}
         colors={colors}
         styles={styles}
@@ -404,7 +432,7 @@ function HeaderBar({
 // that only appears once there are enough items to be worth filtering, then
 // grouped sections with count badges, and an optional footer note.
 // ---------------------------------------------------------------------------
-function MenuDrawer({ visible, onClose, onNavigate, sections, profile, onProfilePress, footerNote, colors, styles }) {
+function MenuDrawer({ visible, onClose, onNavigate, sections, profile, onProfilePress, onLogout, footerNote, colors, styles }) {
   const { width: screenWidth } = useWindowDimensions();
   const { isDark } = useTheme();
   const drawerX = useRef(new Animated.Value(screenWidth)).current;
@@ -572,6 +600,18 @@ function MenuDrawer({ visible, onClose, onNavigate, sections, profile, onProfile
                 </Text>
               </View>
             )}
+
+            <View style={styles.menuLogoutWrap}>
+              <Pressable
+                onPress={onLogout}
+                style={({ pressed }) => [styles.menuLogoutButton, pressed && styles.menuLogoutButtonPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Sign out"
+              >
+                <Ionicons name="log-out-outline" size={16} color={colors.danger} />
+                <Text style={styles.menuLogoutText}>Sign out</Text>
+              </Pressable>
+            </View>
 
             {footerNote ? (
               <View style={styles.menuFooterNote}>

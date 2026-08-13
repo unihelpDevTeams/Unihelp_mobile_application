@@ -211,7 +211,7 @@ export default function ManageUploadsScreen({ type }) {
   const confirmDelete = (item) => {
     Alert.alert(
       'Delete upload?',
-      'This removes the document and its Cloudinary media. This action cannot be undone.',
+      'This removes the document and its media. This action cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Delete', style: 'destructive', onPress: () => handleDelete(item) },

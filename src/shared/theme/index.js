@@ -107,124 +107,124 @@ export const lightColors = {
 };
 
 // ============================================================
-// COLORS - Dark Mode (Optimized)
+// COLORS - Dark Mode
 // ============================================================
 export const darkColors = {
-  // Brand (Softened for dark backgrounds to pass WCAG AAA)
-  brand: '#6366F1',
-  brandDark: '#4F46E5',
-  brandText: '#818CF8',
-  brandLight: '#1E1B4B',
-  brandBorder: '#312E81',
-  brandGlow: 'rgba(99, 102, 241, 0.35)',
+  // Brand
+  brand: '#818CF8',
+  brandDark: '#6366F1',
+  brandText: '#A5B4FC',
+  brandLight: '#202148',
+  brandBorder: '#3F3D8F',
+  brandGlow: 'rgba(129, 140, 248, 0.28)',
   onBrand: '#FFFFFF',
 
-  // Neutrals (Slate/Midnight tones that complement light canvas)
-  ink: '#F8FAFC',
-  inkLight: '#E2E8F0',
-  inkMuted: '#94A3B8',
-  grey: '#94A3B8',
-  greyLight: '#64748B',
-  border: '#1E293B',
-  borderLight: '#1E293B',
-  surface: '#111827',
-  canvas: '#0B0F17',
-  canvasLight: '#151C2C',
-  skeleton: '#1E293B',
-  skeletonLine: '#334155',
+  // Neutrals
+  ink: '#F4F7FB',
+  inkLight: '#D8E0EC',
+  inkMuted: '#B4C0D0',
+  grey: '#A7B3C4',
+  greyLight: '#7B8797',
+  border: '#2A3546',
+  borderLight: '#243044',
+  surface: '#151B26',
+  canvas: '#0F141D',
+  canvasLight: '#192130',
+  skeleton: '#202A3A',
+  skeletonLine: '#2B374A',
 
-  blue: '#384bf8',
-  blueLight: '#0C4A6E',
+  blue: '#60A5FA',
+  blueLight: '#102A45',
   green: '#34D399',
-  greenLight: '#064E3B',
+  greenLight: '#073B31',
   orange: '#FB923C',
-  orangeLight: '#431407',
+  orangeLight: '#3D230F',
   purple: '#A78BFA',
-  purpleLight: '#3B0764',
+  purpleLight: '#2F2148',
   amber: '#FBBF24',
-  amberLight: '#451A03',
+  amberLight: '#3A2A0B',
   teal: '#2DD4BF',
-  tealLight: '#134E4A',
+  tealLight: '#113D3A',
   red: '#F87171',
-  redLight: '#450A0A',
-  redBorder: '#7F1D1D',
+  redLight: '#3A1218',
+  redBorder: '#7F2D36',
   rose: '#FB7185',
 
   // Premium
   gold: '#FBBF24',
-  goldLight: '#451A03',
+  goldLight: '#3A2A0B',
 
   // Overlay
-  overlay: 'rgba(2, 6, 23, 0.75)',
-  whiteTransparent: 'rgba(17, 24, 39, 0.92)',
-  brandTransparent: 'rgba(99, 102, 241, 0.15)',
+  overlay: 'rgba(8, 13, 22, 0.78)',
+  whiteTransparent: 'rgba(21, 27, 38, 0.92)',
+  brandTransparent: 'rgba(129, 140, 248, 0.16)',
 
   // Semantic aliases
-  background: '#0B0F17',
-  surfacePrimary: '#111827',
-  surfaceSecondary: '#1E293B',
+  background: '#0F141D',
+  surfacePrimary: '#151B26',
+  surfaceSecondary: '#192130',
 
-  textPrimary: '#F8FAFC',
-  textSecondary: '#94A3B8',
-  textTertiary: '#64748B',
+  textPrimary: '#F4F7FB',
+  textSecondary: '#B4C0D0',
+  textTertiary: '#7B8797',
 
-  borderDefault: '#1E293B',
-  divider: '#1E293B',
+  borderDefault: '#2A3546',
+  divider: '#243044',
 
-  inputBackground: '#151C2C',
-  placeholder: '#64748B',
+  inputBackground: '#111823',
+  placeholder: '#7B8797',
 
-  icon: '#94A3B8',
+  icon: '#A7B3C4',
 
-  shadow: '#000000',
+  shadow: '#050914',
 
-  notification: '#6366F1',
+  notification: '#818CF8',
 
   success: '#34D399',
   warning: '#FB923C',
   error: '#F87171',
   info: '#38BDF8',
 
-  card: '#111827',
+  card: '#151B26',
 
   statusBar: 'light',
 
-  tabBarBackground: '#111827',
-  tabBarBorder: '#1E293B',
-  tabBarActive: '#818CF8',
-  tabBarInactive: '#64748B',
+  tabBarBackground: '#151B26',
+  tabBarBorder: '#2A3546',
+  tabBarActive: '#A5B4FC',
+  tabBarInactive: '#7B8797',
 
-  headerBackground: '#111827',
-  headerText: '#F8FAFC',
+  headerBackground: '#151B26',
+  headerText: '#F4F7FB',
 
-  modalBackground: '#111827',
-  bottomSheetBackground: '#111827',
+  modalBackground: '#202939',
+  bottomSheetBackground: '#202939',
 
-  toastBackground: '#F8FAFC',
-  toastText: '#0B0F17',
+  toastBackground: '#202939',
+  toastText: '#F4F7FB',
 
-  skeletonBackground: '#1E293B',
-  skeletonHighlight: '#334155',
+  skeletonBackground: '#202A3A',
+  skeletonHighlight: '#2B374A',
 
-  disabledBackground: '#1E293B',
-  disabledText: '#64748B',
+  disabledBackground: '#202A3A',
+  disabledText: '#6F7B8C',
 
-  focusRing: '#6366F1',
+  focusRing: '#818CF8',
 
   danger: '#F87171',
-  dangerLight: '#450A0A',
-  dangerBorder: '#7F1D1D',
+  dangerLight: '#3A1218',
+  dangerBorder: '#7F2D36',
 
   // Additional required semantic tokens
   inputBorder: '#334155',
-  inputPlaceholder: '#64748B',
-  iconSecondary: '#64748B',
-  cardElevated: '#1E293B',
-  tabBar: '#111827',
-  header: '#111827',
-  modal: '#111827',
-  toast: '#F8FAFC',
-  fab: '#6366F1',
+  inputPlaceholder: '#7B8797',
+  iconSecondary: '#7B8797',
+  cardElevated: '#202939',
+  tabBar: '#151B26',
+  header: '#151B26',
+  modal: '#202939',
+  toast: '#202939',
+  fab: '#818CF8',
 };
 // ============================================================
 // REACTIVE COLORS - Module-level state for theme switching
@@ -395,6 +395,6 @@ export const gradients = {
 };
 
 export const darkGradients = {
-  brand: ['#818CF8', '#6D28D9'],
-  auth: ['#0F172A', '#1E1B4B', '#020617'],
+  brand: ['#818CF8', '#6D5DF6'],
+  auth: ['#0F141D', '#171B2F', '#202148'],
 };

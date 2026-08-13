@@ -1,0 +1,34 @@
+[expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+"shadow*" style props are deprecated. Use "boxShadow".
+λ  WARN  Route "./ai/_studyTools.jsx" is missing the required default export. Ensure a React component is exported as default. 
+  console.warn (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  getDirectoryTree (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo-router\build\getRoutesCore.js:311:29)
+  getRoutes (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo-router\build\getRoutesCore.js:23:27)
+  getRoutes (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo-router\build\getRoutes.js:20:41)
+  useStore (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo-router\build\global-state\router-store.js:141:48)
+  Component (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo-router\build\ExpoRoot.js:128:46)
+  Object.callComponentInDEV [as react-stack-bottom-frame] (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:8970:18)
+  renderWithHooks (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:4699:19)
+  run (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5134:23)
+  retryNode (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5899:31)
+[expo-av]: Expo AV has been deprecated and will be removed in SDK 54. Use the `expo-audio` and `expo-video` packages to replace the required functionality.
+[expo-notifications] Error reading persisted server registration info:  TypeError: localStorage.getItem is not a function
+    at Object.getRegistrationInfoAsync (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo-notifications\build\ServerRegistrationModule.web.js:28:29)
+    at factory (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo-notifications\build\DevicePushTokenAutoRegistration.fx.js:102:30)
+    at loadModuleImplementation (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo\node_modules\@expo\cli\build\metro-require\require.js:248:36)
+    at guardedLoadModule (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo\node_modules\@expo\cli\build\metro-require\require.js:163:16)
+    at require (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo\node_modules\@expo\cli\build\metro-require\require.js:74:75)
+    at factory (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo-notifications\build\getExpoPushTokenAsync.js:4:1)
+    at loadModuleImplementation (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo\node_modules\@expo\cli\build\metro-require\require.js:248:36)
+    at guardedLoadModule (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo\node_modules\@expo\cli\build\metro-require\require.js:163:16)
+    at require (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo\node_modules\@expo\cli\build\metro-require\require.js:74:75)
+    at C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo-notifications\build\index.js:12:1
+(node:9080) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+Error: Cannot pipe to a closed or destroyed stream
+    at pipelineImpl (node:internal/streams/pipeline:264:15)
+    at node:stream/promises:31:5
+    at new Promise (<anonymous>)
+    at pipeline (node:stream/promises:20:10)
+    at respond (C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo-server\src\vendor\http.ts:138:19)
+    at C:\Users\SKYLOFT\Downloads\unihelp-testing-main\Unihelp-Mobile\node_modules\expo-server\src\vendor\http.ts:68:13

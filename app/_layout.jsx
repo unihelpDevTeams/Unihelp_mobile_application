@@ -106,6 +106,7 @@ function AppContent() {
           <Stack.Screen name="formula-hub" />
           <Stack.Screen name="challenge" />
           <Stack.Screen name="view" />
+          <Stack.Screen name="profile/danger" options={{ presentation: 'card' }} />
           <Stack.Screen name="view-user-profile" />
           <Stack.Screen name="faq" />
           <Stack.Screen name="about" />

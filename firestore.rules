@@ -18,6 +18,18 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == uid;
     }
 
+    function ownsExistingResource() {
+      return resource.data.ownerId == request.auth.uid ||
+        resource.data.uploadedBy == request.auth.uid ||
+        resource.data.userId == request.auth.uid;
+    }
+
+    function resourceOwnerFieldsUnchanged() {
+      return (!('ownerId' in resource.data) || request.resource.data.ownerId == resource.data.ownerId) &&
+        (!('uploadedBy' in resource.data) || request.resource.data.uploadedBy == resource.data.uploadedBy) &&
+        (!('userId' in resource.data) || request.resource.data.userId == resource.data.userId);
+    }
+
     function pairIdFor(a, b) {
       return a + '_' + b;
     }
@@ -226,8 +238,33 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    match /{document=**} {
+    match /notes/{noteId} {
+      allow read: if signedIn();
+      allow create: if signedIn() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        request.resource.data.uploadedBy == request.auth.uid;
+      allow update: if signedIn() &&
+        (isAdminRequest() || ownsExistingResource()) &&
+        resourceOwnerFieldsUnchanged();
+      allow delete: if signedIn() && (isAdminRequest() || ownsExistingResource());
+    }
+
+    match /questions/{questionId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdminRequest();
+    }
+
+    match /groups/{groupId}/{subPath=**} {
       allow read, write: if signedIn();
+    }
+
+    match /{collectionId}/{documentId} {
+      allow read, write: if signedIn() && !(collectionId in [
+        'notes',
+        'questions',
+        'promoSpotlights',
+        'promoSpotlightEvents'
+      ]);
     }
   }
 }

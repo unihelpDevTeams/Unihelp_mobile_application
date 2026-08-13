@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../src/shared/components/ScreenShell';
 import { useAuth } from '../context/AuthContext';
-import { colors, spacing, borderRadius, shadows } from '../src/shared/theme';
+import { useThemeStyles } from '../src/shared/theme/createStyles';
+import { useTheme } from '../src/shared/theme/ThemeContext';
 import { updatePrivacySettings } from '../src/shared/services/friendships';
 
 const FRIEND_OPTIONS = [
@@ -20,33 +21,134 @@ const MESSAGE_OPTIONS = [
   { value: 'nobody', label: 'Nobody', icon: 'lock-closed-outline' },
 ];
 
-function OptionGroup({ title, subtitle, value, options, onChange }) {
-  return (
-    <View style={styles.group}>
-      <Text style={styles.groupTitle}>{title}</Text>
-      <Text style={styles.groupSubtitle}>{subtitle}</Text>
-      <View style={styles.options}>
-        {options.map((option) => {
-          const selected = value === option.value;
-          return (
-            <Pressable
-              key={option.value}
-              style={[styles.option, selected && styles.optionSelected]}
-              onPress={() => onChange(option.value)}
-            >
-              <Ionicons name={option.icon} size={17} color={selected ? colors.surface : colors.brand} />
-              <Text style={[styles.optionText, selected && styles.optionTextSelected]}>{option.label}</Text>
-              {selected ? <Ionicons name="checkmark-circle" size={18} color={colors.onBrand} /> : null}
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
 export default function PrivacySettingsPage() {
   const { profile, updateProfile } = useAuth();
+  const { colors, spacing, borderRadius } = useTheme();
+  const styles = useThemeStyles((colors, spacing, borderRadius) => ({
+    hero: {
+      flexDirection: 'row',
+      gap: spacing.md,
+      backgroundColor: colors.surface,
+      borderRadius: borderRadius['2xl'],
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.lg,
+      marginBottom: spacing.lg,
+      shadowColor: colors.shadow,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.05,
+      shadowRadius: 8,
+      elevation: 3,
+    },
+    heroIcon: {
+      width: 48,
+      height: 48,
+      borderRadius: 16,
+      backgroundColor: colors.brandLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    heroBody: {
+      flex: 1,
+    },
+    heroTitle: {
+      color: colors.ink,
+      fontWeight: '900',
+      fontSize: 16,
+    },
+    heroText: {
+      marginTop: 5,
+      color: colors.grey,
+      fontSize: 13,
+      lineHeight: 19,
+    },
+    group: {
+      marginBottom: spacing.lg,
+    },
+    groupTitle: {
+      color: colors.ink,
+      fontWeight: '900',
+      fontSize: 15,
+    },
+    groupSubtitle: {
+      marginTop: 4,
+      color: colors.grey,
+      fontSize: 12.5,
+      lineHeight: 18,
+    },
+    options: {
+      marginTop: spacing.md,
+      gap: spacing.sm,
+    },
+    option: {
+      minHeight: 48,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      backgroundColor: colors.surface,
+      borderRadius: borderRadius.xl,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: spacing.md,
+    },
+    optionSelected: {
+      backgroundColor: colors.brand,
+      borderColor: colors.brand,
+    },
+    optionText: {
+      flex: 1,
+      color: colors.ink,
+      fontWeight: '800',
+      fontSize: 13,
+    },
+    optionTextSelected: {
+      color: colors.surface,
+    },
+    saveButton: {
+      minHeight: 52,
+      borderRadius: borderRadius.xl,
+      backgroundColor: colors.brand,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'row',
+      gap: spacing.sm,
+      marginTop: spacing.sm,
+    },
+    saveButtonDisabled: {
+      backgroundColor: colors.brandGlow,
+    },
+    saveText: {
+      color: colors.surface,
+      fontWeight: '900',
+      fontSize: 14,
+    },
+  }));
+
+  function OptionGroup({ title, subtitle, value, options, onChange }) {
+    return (
+      <View style={styles.group}>
+        <Text style={styles.groupTitle}>{title}</Text>
+        <Text style={styles.groupSubtitle}>{subtitle}</Text>
+        <View style={styles.options}>
+          {options.map((option) => {
+            const selected = value === option.value;
+            return (
+              <Pressable
+                key={option.value}
+                style={[styles.option, selected && styles.optionSelected]}
+                onPress={() => onChange(option.value)}
+              >
+                <Ionicons name={option.icon} size={17} color={selected ? colors.surface : colors.brand} />
+                <Text style={[styles.optionText, selected && styles.optionTextSelected]}>{option.label}</Text>
+                {selected ? <Ionicons name="checkmark-circle" size={18} color={colors.onBrand} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    );
+  }
+  
   const uid = profile?.uid || profile?.id;
   const initial = useMemo(() => ({
     friendRequests: profile?.privacy?.friendRequests || 'everyone',
@@ -106,99 +208,3 @@ export default function PrivacySettingsPage() {
     </ScreenShell>
   );
 }
-
-const styles = StyleSheet.create({
-  hero: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius['2xl'],
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
-    ...shadows.card,
-  },
-  heroIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: colors.brandLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heroBody: {
-    flex: 1,
-  },
-  heroTitle: {
-    color: colors.ink,
-    fontWeight: '900',
-    fontSize: 16,
-  },
-  heroText: {
-    marginTop: 5,
-    color: colors.grey,
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  group: {
-    marginBottom: spacing.lg,
-  },
-  groupTitle: {
-    color: colors.ink,
-    fontWeight: '900',
-    fontSize: 15,
-  },
-  groupSubtitle: {
-    marginTop: 4,
-    color: colors.grey,
-    fontSize: 12.5,
-    lineHeight: 18,
-  },
-  options: {
-    marginTop: spacing.md,
-    gap: spacing.sm,
-  },
-  option: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.xl,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-  },
-  optionSelected: {
-    backgroundColor: colors.brand,
-    borderColor: colors.brand,
-  },
-  optionText: {
-    flex: 1,
-    color: colors.ink,
-    fontWeight: '800',
-    fontSize: 13,
-  },
-  optionTextSelected: {
-    color: colors.surface,
-  },
-  saveButton: {
-    minHeight: 52,
-    borderRadius: borderRadius.xl,
-    backgroundColor: colors.brand,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  saveButtonDisabled: {
-    backgroundColor: colors.brandGlow,
-  },
-  saveText: {
-    color: colors.surface,
-    fontWeight: '900',
-    fontSize: 14,
-  },
-});

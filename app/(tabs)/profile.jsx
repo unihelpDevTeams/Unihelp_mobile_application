@@ -1029,6 +1029,18 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
           </Pressable>
         </View>
+
+        <Text style={styles.groupLabel}>DANGER ZONE</Text>
+        <View style={styles.groupCard}>
+          <Pressable onPress={() => router.push('/profile/danger')} style={({ pressed }) => [styles.listRow, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="Open danger zone">
+            <View style={[styles.rowIconSm, styles.rowIconDanger]}><Ionicons name="person-remove-outline" size={16} color={colors.red} /></View>
+            <View style={styles.rowTextWrap}>
+              <Text style={[styles.rowTitle, { color: colors.red }]}>Delete Account</Text>
+              <Text style={styles.rowSubtitle}>Delete account and activity history</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
+          </Pressable>
+        </View>
       </ScrollView>
 
       {/* SINGLE SHARED SHEET — content swaps based on `sheet` */}

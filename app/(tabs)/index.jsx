@@ -528,9 +528,6 @@ export default function HomeScreen() {
     return () => {
       isActive = false;
     };
-    // Deliberately only re-fetch when the signed-in user changes — `profile`
-    // is read from profileRef so a new object reference (e.g. after a
-    // streak/activity update) doesn't retrigger this fetch.
   }, [profile?.uid]);
 
   const handleStreakPress = useCallback(() => router.push('/streak'), [router]);
@@ -885,7 +882,7 @@ export default function HomeScreen() {
     },
     {
       id: 'gpa',
-      title: 'GPA Calc',
+      title: 'GPA Calculator',
       sub: 'Estimate semester',
       icon: 'calculator',
       color: '#EA580C',
@@ -912,6 +909,16 @@ export default function HomeScreen() {
       bgColor: '#F3E8FF',
       route: '/formula-hub',
       badge: 'GUIDE',
+    },
+    {
+      id: 'pomodoro',
+      title: 'Pomodoro Timer',
+      sub: 'Focus & Productivity',
+      icon: 'timer',
+      color: '#F59E0B',
+      bgColor: '#FFFAF0',
+      route: '/pomodoroScreen',
+      badge: 'FOCUS',
     },
   ].filter((tool) => isRouteAllowedForRole(tool.route, profile?.role));
 

@@ -21,6 +21,30 @@ import { COLLECTIONS, conversationSubcollections, groupSubcollections, profileDe
 import { sendAppNotification } from './backend';
 
 const mapDocs = (snapshot) => snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+const RESOURCE_ADMIN_EMAILS = new Set(['iadejuwon77@gmail.com', 'onakomayaokiki@gmail.com']);
+
+const currentUserIsResourceAdmin = async () => {
+  const user = auth.currentUser;
+  if (!user?.uid) return false;
+  if (RESOURCE_ADMIN_EMAILS.has(String(user.email || '').toLowerCase())) return true;
+  const profile = await getCurrentUserProfile(user.uid);
+  return profile?.admin === true;
+};
+
+const ownsResource = (data = {}, uid) =>
+  Boolean(uid && [data.ownerId, data.uploadedBy, data.userId].includes(uid));
+
+const sanitizeResourceUpdate = (payload = {}) => {
+  const {
+    id,
+    ownerId,
+    uploadedBy,
+    userId,
+    createdAt,
+    ...safePayload
+  } = payload;
+  return safePayload;
+};
 
 const orderedPage = async (name, field = 'createdAt', direction = 'desc', pageSize = 20, cursor = null) => {
   const constraints = [orderBy(field, direction)];
@@ -431,6 +455,7 @@ export async function createNote(payload) {
 
 export async function createQuestion(payload) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
+  if (!(await currentUserIsResourceAdmin())) throw new Error('Only admins can upload past questions.');
   const ref = await addDoc(collection(db, COLLECTIONS.questions), {
     ...payload,
     files: Array.isArray(payload.files)
@@ -452,6 +477,43 @@ export async function createQuestion(payload) {
     createdAt: serverTimestamp(),
   });
   return { id: ref.id };
+}
+
+export async function updateNote(id, payload) {
+  if (!auth.currentUser?.uid) throw new Error('No authenticated user');
+  const ref = doc(db, COLLECTIONS.notes, id);
+  const snapshot = await getDoc(ref);
+  if (!snapshot.exists()) throw new Error('Note not found');
+  const data = snapshot.data();
+  const isAdmin = await currentUserIsResourceAdmin();
+  if (!isAdmin && !ownsResource(data, auth.currentUser.uid)) {
+    throw new Error('You can only edit notes you uploaded.');
+  }
+  await updateDoc(ref, {
+    ...sanitizeResourceUpdate(payload),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function updateQuestion(id, payload) {
+  if (!auth.currentUser?.uid) throw new Error('No authenticated user');
+  if (!(await currentUserIsResourceAdmin())) throw new Error('Only admins can edit past questions.');
+  await updateDoc(doc(db, COLLECTIONS.questions, id), {
+    ...sanitizeResourceUpdate(payload),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function deleteNote(id) {
+  if (!auth.currentUser?.uid) throw new Error('No authenticated user');
+  const { deleteMediaDocument } = await import('../../../services/mediaCleanup');
+  await deleteMediaDocument('notes', id);
+}
+
+export async function deleteQuestion(id) {
+  if (!auth.currentUser?.uid) throw new Error('No authenticated user');
+  const { deleteMediaDocument } = await import('../../../services/mediaCleanup');
+  await deleteMediaDocument('questions', id);
 }
 
 export async function createGroup(payload = {}) {

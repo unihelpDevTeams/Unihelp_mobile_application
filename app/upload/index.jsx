@@ -19,6 +19,8 @@ import {
   createStudentListing,
   fetchRecord,
   updateHostelListing,
+  updateNote,
+  updateQuestion,
   updateStudentListing,
 } from '../../services/firestoreSync';
 import {
@@ -29,6 +31,7 @@ import {
 } from '../../services/cloudinary';
 import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { canManageResource, canUploadResource } from '../../src/shared/auth/resourcePermissions';
 
 const SPACE = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 28 };
 const RADIUS = { sm: 10, md: 14, lg: 18, xl: 22, pill: 999 };
@@ -42,6 +45,13 @@ const QUESTION_TYPES = [
 
 const IMAGE_TYPES = ['image/*'];
 const PDF_TYPES = ['application/pdf'];
+const RESOURCE_UPLOAD_TYPES = ['note', 'question'];
+const EDIT_COLLECTIONS = {
+  marketplace: 'studentMarketplace',
+  hostel: 'hostels',
+  note: 'notes',
+  question: 'questions',
+};
 
 const EXAM_TYPE_OPTIONS = [
   'Semester exam',
@@ -93,6 +103,48 @@ const AMENITY_OPTIONS = [
   'Security',
   'Parking',
 ];
+
+const assetIdentity = (asset = {}) => asset.publicId || asset.cloudinaryPublicId || asset.url || asset.secure_url || '';
+
+const collectResourceAssets = (item = {}) => {
+  const assets = [];
+  const pushAsset = (asset) => {
+    if (!asset) return;
+    if (typeof asset === 'string') {
+      assets.push({ url: asset });
+      return;
+    }
+    assets.push({
+      name: asset.name || asset.fileName || item.fileName || '',
+      url: asset.url || asset.secure_url || asset.fileUrl || asset.downloadUrl || '',
+      publicId: asset.publicId || asset.public_id || asset.cloudinaryPublicId || '',
+      resourceType: asset.resourceType || asset.resource_type || asset.cloudinaryResourceType || 'raw',
+      size: asset.size || asset.fileSize || 0,
+      type: asset.type || asset.fileType || '',
+    });
+  };
+
+  if (Array.isArray(item.files)) item.files.forEach(pushAsset);
+  if (item.fileAsset) pushAsset(item.fileAsset);
+  if (item.fileUrl || item.downloadUrl || item.previewUrl || item.cloudinaryPublicId) {
+    pushAsset({
+      name: item.fileName,
+      url: item.downloadUrl || item.fileUrl || item.previewUrl,
+      publicId: item.cloudinaryPublicId,
+      resourceType: item.cloudinaryResourceType || 'raw',
+      size: item.fileSize,
+      type: item.fileType,
+    });
+  }
+
+  const seen = new Set();
+  return assets.filter((asset) => {
+    const key = assetIdentity(asset);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
 
 const CONFIGS = {
   question: {
@@ -254,7 +306,7 @@ function SectionHeader({ step, icon, title, subtitle, trailing, styles, colors }
 export default function UploadPage() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -288,6 +340,7 @@ export default function UploadPage() {
   const isFreeUser = !profile?.premium;
   const freeLimit = 5;
   const postedBy = profile?.username || profile?.fullName;
+  const canCreateCurrentResource = canUploadResource({ type: uploadType, user, profile });
 
   useEffect(() => {
     setForm({ ...config.defaultForm });
@@ -319,7 +372,7 @@ export default function UploadPage() {
   }, [isLimitRestricted, profile?.premium, profile?.uid, uploadType]);
 
   useEffect(() => {
-    if (!editId || !['marketplace', 'hostel'].includes(uploadType)) {
+    if (!editId || !EDIT_COLLECTIONS[uploadType]) {
       setEditItem(null);
       return;
     }
@@ -327,12 +380,25 @@ export default function UploadPage() {
     let cancelled = false;
     (async () => {
       try {
-        const record = await fetchRecord(uploadType === 'marketplace' ? 'studentMarketplace' : 'hostels', editId);
+        const record = await fetchRecord(EDIT_COLLECTIONS[uploadType], editId);
         if (!cancelled && record) {
           setEditItem(record);
           setForm({
             ...config.defaultForm,
             title: record.title || '',
+            school: record.school || '',
+            schoolId: record.schoolId || '',
+            course: record.course || record.courseCode || '',
+            courseCode: record.courseCode || record.course || '',
+            year: record.year ? String(record.year) : '',
+            examType: record.examType || '',
+            semester: record.semester || '',
+            department: record.department || record.dept || '',
+            departmentId: record.departmentId || record.deptId || '',
+            dept: record.dept || record.department || '',
+            deptId: record.deptId || record.departmentId || '',
+            level: record.level || '',
+            lecturer: record.lecturer || '',
             category: record.category || '',
             condition: record.condition || '',
             price: record.price ? String(record.price) : '',
@@ -346,7 +412,7 @@ export default function UploadPage() {
           });
         }
       } catch {
-        if (!cancelled) setError('Could not load this listing to edit.');
+        if (!cancelled) setError('Could not load this item to edit.');
       }
     })();
 
@@ -367,6 +433,12 @@ export default function UploadPage() {
     return editItem.images || editItem.imageAssets?.map((a) => a.url || a.secure_url).filter(Boolean) || editItem.photos || [];
   }, [editItem]);
 
+  const existingResourceAssets = useMemo(
+    () => (RESOURCE_UPLOAD_TYPES.includes(uploadType) ? collectResourceAssets(editItem || {}) : []),
+    [editItem, uploadType]
+  );
+  const canManageCurrentEdit = !isEditMode || !RESOURCE_UPLOAD_TYPES.includes(uploadType) || canManageResource({ type: uploadType, item: editItem, user, profile });
+
   const missingItems = useMemo(() => {
     const items = [];
     const emptyField = requiredFieldKeys.find((key) => !String(form[key] || '').trim());
@@ -374,21 +446,21 @@ export default function UploadPage() {
       const field = config.fields.find((f) => f.key === emptyField);
       items.push(`Fill in ${field ? field.label.replace(' (optional)', '').toLowerCase() : 'required fields'}`);
     }
-    const hasExistingAssets = existingImages.length > 0;
-    if (uploadType === 'note' && attachments.length !== 1) {
+    const hasExistingAssets = existingImages.length > 0 || existingResourceAssets.length > 0;
+    if (uploadType === 'note' && attachments.length !== 1 && !(isEditMode && hasExistingAssets)) {
       items.push('Attach exactly one PDF');
     } else if (uploadType !== 'note' && attachments.length === 0 && !(isEditMode && hasExistingAssets)) {
       items.push(uploadType === 'question' ? 'Attach at least one file' : 'Attach at least one photo');
     }
     return items;
-  }, [attachments.length, config.fields, existingImages.length, form, isEditMode, requiredFieldKeys, uploadType]);
+  }, [attachments.length, config.fields, existingImages.length, existingResourceAssets.length, form, isEditMode, requiredFieldKeys, uploadType]);
 
   const validation = missingItems.length === 0;
   const normalizedPrice = Number(String(form.price || '').replace(/[^\d.]/g, ''));
   const hasValidPrice = !['marketplace', 'hostel'].includes(uploadType) || (Number.isFinite(normalizedPrice) && normalizedPrice > 0);
   const hasValidYear = uploadType !== 'question' || !form.year || /^\d{4}$/.test(String(form.year).trim());
   const canUploadMore = !isLimitRestricted || !isFreeUser || (limitInfo?.count ?? 0) < freeLimit;
-  const uploadReady = validation && hasValidPrice && hasValidYear && canUploadMore;
+  const uploadReady = validation && hasValidPrice && hasValidYear && canUploadMore && canCreateCurrentResource && canManageCurrentEdit;
   const primaryAttachment = attachments[0] || null;
   const previewSource = previewItem || primaryAttachment;
   const isGridKind = config.fileKind === 'images';
@@ -505,7 +577,7 @@ export default function UploadPage() {
   const buildPayload = (uploadedAttachments) => {
     if (uploadType === 'note') {
       const uploaded = uploadedAttachments[0];
-      return {
+      const payload = {
         title: form.title.trim(),
         course: form.course.trim(),
         dept: form.dept.trim(),
@@ -513,17 +585,23 @@ export default function UploadPage() {
         level: form.level || '',
         lecturer: form.lecturer.trim(),
         description: form.description.trim(),
-        fileUrl: uploaded?.url || '',
-        downloadUrl: uploaded?.url || '',
-        previewUrl: uploaded?.url || '',
-        fileName: uploaded?.name || '',
-        fileSize: uploaded?.size || 0,
-        files: uploadedAttachments,
-        fileAsset: uploaded ? toCloudinaryAsset(uploaded) : null,
-        cloudinaryPublicId: uploaded?.publicId || '',
-        cloudinaryResourceType: uploaded?.resourceType || 'raw',
         postedBy,
       };
+      if (uploaded) {
+        return {
+          ...payload,
+          fileUrl: uploaded.url || '',
+          downloadUrl: uploaded.url || '',
+          previewUrl: uploaded.url || '',
+          fileName: uploaded.name || '',
+          fileSize: uploaded.size || 0,
+          files: uploadedAttachments,
+          fileAsset: toCloudinaryAsset(uploaded),
+          cloudinaryPublicId: uploaded.publicId || '',
+          cloudinaryResourceType: uploaded.resourceType || 'raw',
+        };
+      }
+      return payload;
     }
 
     if (uploadType === 'marketplace') {
@@ -575,17 +653,24 @@ export default function UploadPage() {
       return basePayload;
     }
 
-    return {
+    const firstUploaded = uploadedAttachments[0];
+    const questionPayload = {
       ...form,
-      files: uploadedAttachments,
-      fileUrl: uploadedAttachments[0]?.url || '',
-      previewUrl: uploadedAttachments[0]?.url || '',
-      fileName: uploadedAttachments[0]?.name || '',
     };
+    if (uploadedAttachments.length) {
+      questionPayload.files = uploadedAttachments;
+      questionPayload.fileUrl = firstUploaded?.url || '';
+      questionPayload.previewUrl = firstUploaded?.url || '';
+      questionPayload.fileName = firstUploaded?.name || '';
+    }
+    return questionPayload;
   };
 
   const submitToDatabase = async (payload) => {
     if (uploadType === 'note') {
+      if (isEditMode && editId) {
+        return updateNote(editId, payload);
+      }
       return createNote(payload);
     }
 
@@ -603,6 +688,9 @@ export default function UploadPage() {
       return createHostelListing(payload);
     }
 
+    if (isEditMode && editId) {
+      return updateQuestion(editId, payload);
+    }
     return createQuestion(payload);
   };
 
@@ -611,6 +699,16 @@ export default function UploadPage() {
 
     if (!profile?.uid) {
       setError('Please login first.');
+      return;
+    }
+
+    if (!canCreateCurrentResource) {
+      setError(uploadType === 'question' ? 'Only admins can upload past questions.' : 'You do not have permission to upload this resource.');
+      return;
+    }
+
+    if (!canManageCurrentEdit) {
+      setError(uploadType === 'question' ? 'Only admins can edit past questions.' : 'You can only edit notes you uploaded.');
       return;
     }
 
@@ -668,6 +766,19 @@ export default function UploadPage() {
       }
 
       await submitToDatabase(payload);
+
+      if (isEditMode && RESOURCE_UPLOAD_TYPES.includes(uploadType) && uploadedAttachments.length) {
+        const newAssetKeys = new Set(uploadedAttachments.map(assetIdentity).filter(Boolean));
+        const replacedAssets = existingResourceAssets.filter((asset) => !newAssetKeys.has(assetIdentity(asset)));
+        if (replacedAssets.length) {
+          try {
+            await deleteCloudinaryAssets({ assets: replacedAssets });
+          } catch (cleanupError) {
+            setError(cleanupError?.message || 'Resource updated, but the old Cloudinary file could not be removed.');
+            return;
+          }
+        }
+      }
 
       const bareTitle = config.title.replace(/^Upload\s*/, '');
       setMessage(isEditMode ? `${bareTitle} updated.` : config.successMessage);
@@ -945,11 +1056,40 @@ export default function UploadPage() {
             </View>
           ) : null}
 
+          {isEditMode && existingResourceAssets.length > 0 ? (
+            <View style={styles.card}>
+              <SectionHeader
+                icon="document-attach-outline"
+                title="Current file"
+                subtitle="Upload a replacement only when you want to change the file"
+                styles={styles}
+                colors={colors}
+              />
+              <View style={styles.attachmentList}>
+                {existingResourceAssets.map((asset, index) => (
+                  <View key={`${assetIdentity(asset)}-${index}`} style={styles.attachmentItem}>
+                    <View style={styles.attachmentThumbPlaceholder}>
+                      <Ionicons name="document-text-outline" size={20} color={colors.brand} />
+                    </View>
+                    <View style={styles.attachmentMeta}>
+                      <Text style={styles.attachmentName} numberOfLines={1}>
+                        {asset.name || form.title || 'Attached resource'}
+                      </Text>
+                      <Text style={styles.attachmentSize} numberOfLines={1}>
+                        {asset.resourceType || 'raw'} file
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
           <View style={styles.card}>
             <SectionHeader
               step="2"
               icon="images-outline"
-              title={isEditMode && existingImages.length > 0 ? 'Add new photos (optional)' : config.attachmentLabel}
+              title={isEditMode && (existingImages.length > 0 || existingResourceAssets.length > 0) ? 'Add replacement files (optional)' : config.attachmentLabel}
               trailing={
                 attachments.length > 0 ? (
                   <Pressable onPress={clearAll} hitSlop={10} accessibilityRole="button" accessibilityLabel="Clear all selected files">
@@ -1120,7 +1260,11 @@ export default function UploadPage() {
             <View style={styles.helperRow}>
               <Ionicons name="information-circle-outline" size={14} color={colors.textSecondary} />
               <Text style={styles.helperText}>
-                {missingItems[0] || (!hasValidPrice ? 'Enter a valid price greater than zero' : !hasValidYear ? 'Use a four-digit year' : 'Upgrade to publish more items')}
+                {!canCreateCurrentResource
+                  ? 'Only admins can upload past questions'
+                  : !canManageCurrentEdit
+                    ? 'You do not have permission to edit this resource'
+                    : missingItems[0] || (!hasValidPrice ? 'Enter a valid price greater than zero' : !hasValidYear ? 'Use a four-digit year' : 'Upgrade to publish more items')}
               </Text>
             </View>
           ) : null}

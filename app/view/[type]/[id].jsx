@@ -7,13 +7,14 @@ import { Image } from 'expo-image';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../../src/shared/components/ScreenShell';
-import { fetchRecord } from '../../../services/firestoreSync';
+import { deleteNote, deleteQuestion, fetchRecord } from '../../../services/firestoreSync';
 import { COLLECTIONS } from '../../../src/shared/firestoreSchema';
 import { resolveDocumentAsset, formatDocumentMeta } from '../../../src/shared/utils/documentMedia';
 import { isPdfUrl, isPreviewImageUrl } from '../../../src/shared/services/cloudinary';
 import { useAuth } from '../../../context/AuthContext';
 import { startConversation, sendDirectMessage } from '../../../src/shared/services/community';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
+import { canManageResource } from '../../../src/shared/auth/resourcePermissions';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const SCREEN_PADDING = 18;
@@ -192,6 +193,7 @@ export default function RecordViewPage() {
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [contactSheetVisible, setContactSheetVisible] = useState(false);
   const [messaging, setMessaging] = useState(false);
+  const [deletingResource, setDeletingResource] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [lightboxVisible, setLightboxVisible] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -238,6 +240,8 @@ export default function RecordViewPage() {
   const canMessageInApp = Boolean(ownerId && user && ownerId !== user.uid);
   const canWhatsApp = Boolean(whatsAppNumber);
   const showContactCta = ['listing', 'hostel'].includes(type) && (canMessageInApp || canWhatsApp);
+  const canManageCurrentResource =
+    ['note', 'question'].includes(type) && canManageResource({ type, item, user, profile });
   const isCommerceType = ['listing', 'hostel'].includes(type);
   const isHostel = type === 'hostel';
   const isPremiumUser = Boolean(profile?.premium && profile?.subscriptionStatus !== 'expired');
@@ -438,6 +442,44 @@ export default function RecordViewPage() {
     }
   };
 
+  const deleteCurrentResource = async () => {
+    setDeletingResource(true);
+    try {
+      if (type === 'question') {
+        await deleteQuestion(id);
+      } else {
+        await deleteNote(id);
+      }
+      Alert.alert('Resource deleted', 'The resource and its Cloudinary file have been removed.', [
+        { text: 'OK', onPress: () => router.back() },
+      ]);
+    } catch (error) {
+      Alert.alert('Delete failed', error?.message || 'Unable to delete this resource.');
+    } finally {
+      setDeletingResource(false);
+    }
+  };
+
+  const openResourceActions = () => {
+    if (!canManageCurrentResource || deletingResource) return;
+    Alert.alert(title || 'Resource actions', 'Choose what you want to do.', [
+      {
+        text: 'Edit',
+        onPress: () => router.push({ pathname: '/upload', params: { type, editId: id } }),
+      },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () =>
+          Alert.alert('Delete resource?', 'This removes the Firestore record and its Cloudinary file.', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Delete', style: 'destructive', onPress: deleteCurrentResource },
+          ]),
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
   const mediaItems = useMemo(() => {
     if (!item) return [];
     const candidates = [];
@@ -541,6 +583,22 @@ export default function RecordViewPage() {
               <Text style={styles.typeBadgeText}>{typeMeta.label.toUpperCase()}</Text>
             </View>
             <View style={styles.topActions}>
+              {canManageCurrentResource ? (
+                <Pressable
+                  style={({ pressed }) => [styles.shareButton, pressed && styles.pressedSubtle]}
+                  onPress={openResourceActions}
+                  hitSlop={8}
+                  disabled={deletingResource}
+                  accessibilityRole="button"
+                  accessibilityLabel="Manage resource"
+                >
+                  {deletingResource ? (
+                    <ActivityIndicator size="small" color={colors.icon} />
+                  ) : (
+                    <Ionicons name="ellipsis-vertical" size={18} color={colors.icon} />
+                  )}
+                </Pressable>
+              ) : null}
               {canMessageInApp ? (
                 <Pressable
                   style={({ pressed }) => [styles.shareButton, pressed && styles.pressedSubtle]}
