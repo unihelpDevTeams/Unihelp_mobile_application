@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View, TextInput } from 'react-native';
+import { Pressable, Text, View, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
-import { colors, spacing, borderRadius, shadows } from '../../src/shared/theme';
+import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { useThemeStyles } from '../../src/shared/theme/createStyles';
+import { spacing, borderRadius } from '../../src/shared/theme';
 
 const FAQ_DATA = [
   {
@@ -79,18 +81,19 @@ const FAQ_DATA = [
   },
 ];
 
-const CATEGORY_ITEMS = [
-  { icon: 'school-outline', label: 'Getting Started', color: colors.brand },
-  { icon: 'book-outline', label: 'Study Tools', color: colors.teal },
-  { icon: 'people-outline', label: 'Community', color: colors.purple },
-  { icon: 'storefront-outline', label: 'Marketplace', color: colors.orange },
-  { icon: 'sparkles-outline', label: 'AI Features', color: colors.green },
-  { icon: 'shield-checkmark-outline', label: 'Account & Safety', color: colors.red },
-];
-
 export default function FAQPage() {
+  const { colors } = useTheme();
   const [expandedId, setExpandedId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  const CATEGORY_ITEMS = [
+    { icon: 'school-outline', label: 'Getting Started', color: colors.brand },
+    { icon: 'book-outline', label: 'Study Tools', color: colors.teal },
+    { icon: 'people-outline', label: 'Community', color: colors.purple },
+    { icon: 'storefront-outline', label: 'Marketplace', color: colors.orange },
+    { icon: 'sparkles-outline', label: 'AI Features', color: colors.green },
+    { icon: 'shield-checkmark-outline', label: 'Account & Safety', color: colors.red },
+  ];
 
   const filtered = FAQ_DATA.filter(
     (item) =>
@@ -102,22 +105,169 @@ export default function FAQPage() {
     setExpandedId(expandedId === index ? null : index);
   };
 
+  const styles = useThemeStyles((c, s, r) => ({
+    container: {
+      gap: s.lg,
+      paddingBottom: s['3xl'],
+    },
+    searchContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: c.surface,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      paddingHorizontal: s.md,
+      height: 48,
+    },
+    searchIcon: {
+      marginRight: s.sm,
+    },
+    searchInput: {
+      flex: 1,
+      fontSize: 14,
+      color: c.textPrimary,
+      paddingVertical: 0,
+    },
+    categoryRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: s.sm,
+    },
+    categoryChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      borderWidth: 1,
+      borderRadius: r.full,
+      paddingHorizontal: s.md,
+      paddingVertical: s.xs + 2,
+      backgroundColor: c.surface,
+    },
+    categoryChipText: {
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    faqList: {
+      gap: s.sm,
+    },
+    faqItem: {
+      backgroundColor: c.surface,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      padding: s.lg,
+    },
+    faqItemPressed: {
+      backgroundColor: c.surfaceSecondary,
+    },
+    faqItemOpen: {
+      borderColor: c.brand,
+    },
+    faqHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.md,
+    },
+    faqIconWrap: {
+      width: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    faqQuestion: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: '700',
+      color: c.textPrimary,
+      lineHeight: 20,
+    },
+    faqQuestionOpen: {
+      color: c.brand,
+    },
+    faqAnswerWrap: {
+      marginTop: s.md,
+      paddingTop: s.md,
+      borderTopWidth: 1,
+      borderTopColor: c.borderDefault,
+    },
+    faqAnswer: {
+      fontSize: 13,
+      color: c.textSecondary,
+      lineHeight: 21,
+    },
+    emptyState: {
+      alignItems: 'center',
+      paddingVertical: 40,
+      gap: s.sm,
+    },
+    emptyTitle: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: c.textPrimary,
+    },
+    emptyText: {
+      fontSize: 13,
+      color: c.textTertiary,
+    },
+    tipsSection: {
+      marginTop: s.sm,
+    },
+    tipsTitle: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: c.textPrimary,
+      marginBottom: s.md,
+    },
+    tipsGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: s.sm,
+    },
+    tipCard: {
+      width: '48%',
+      backgroundColor: c.surface,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      padding: s.lg,
+    },
+    tipIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: r.md,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: s.sm,
+    },
+    tipTitle: {
+      fontSize: 13,
+      fontWeight: '800',
+      color: c.textPrimary,
+      marginBottom: s.xs,
+    },
+    tipText: {
+      fontSize: 12,
+      color: c.textSecondary,
+      lineHeight: 17,
+    },
+  }));
+
   return (
     <ScreenShell title="FAQ" subtitle="Find answers to common questions" showBack scrollable>
       <View style={styles.container}>
         {/* Search */}
         <View style={styles.searchContainer}>
-          <Ionicons name="search-outline" size={18} color={colors.greyLight} style={styles.searchIcon} />
+          <Ionicons name="search-outline" size={18} color={colors.textTertiary} style={styles.searchIcon} />
           <TextInput
             placeholder="Search questions..."
-            placeholderTextColor={colors.greyLight}
+            placeholderTextColor={colors.textTertiary}
             style={styles.searchInput}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
           {searchQuery ? (
             <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
-              <Ionicons name="close-circle" size={18} color={colors.greyLight} />
+              <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
             </Pressable>
           ) : null}
         </View>
@@ -136,7 +286,7 @@ export default function FAQPage() {
         <View style={styles.faqList}>
           {filtered.length === 0 ? (
             <View style={styles.emptyState}>
-              <Ionicons name="search-outline" size={40} color={colors.greyLight} />
+              <Ionicons name="search-outline" size={40} color={colors.textTertiary} />
               <Text style={styles.emptyTitle}>No results found</Text>
               <Text style={styles.emptyText}>Try a different search term.</Text>
             </View>
@@ -158,7 +308,7 @@ export default function FAQPage() {
                       <Ionicons
                         name={isOpen ? 'remove-circle' : 'add-circle'}
                         size={20}
-                        color={isOpen ? colors.brand : colors.grey}
+                        color={isOpen ? colors.brand : colors.textTertiary}
                       />
                     </View>
                     <Text style={[styles.faqQuestion, isOpen && styles.faqQuestionOpen]}>{item.q}</Text>
@@ -220,153 +370,3 @@ export default function FAQPage() {
     </ScreenShell>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    gap: spacing.lg,
-    paddingBottom: spacing['3xl'],
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.xl,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    height: 48,
-    ...shadows.sm,
-  },
-  searchIcon: {
-    marginRight: spacing.sm,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: colors.ink,
-    paddingVertical: 0,
-  },
-  categoryRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  categoryChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    backgroundColor: colors.surface,
-  },
-  categoryChipText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  faqList: {
-    gap: spacing.sm,
-  },
-  faqItem: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.xl,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    ...shadows.sm,
-  },
-  faqItemPressed: {
-    backgroundColor: colors.canvasLight,
-  },
-  faqItemOpen: {
-    borderColor: colors.brandBorder,
-  },
-  faqHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  faqIconWrap: {
-    width: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  faqQuestion: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.ink,
-    lineHeight: 20,
-  },
-  faqQuestionOpen: {
-    color: colors.brandText,
-  },
-  faqAnswerWrap: {
-    marginTop: spacing.md,
-    paddingTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderLight,
-  },
-  faqAnswer: {
-    fontSize: 13,
-    color: colors.inkMuted,
-    lineHeight: 21,
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 40,
-    gap: spacing.sm,
-  },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: colors.ink,
-  },
-  emptyText: {
-    fontSize: 13,
-    color: colors.grey,
-  },
-  tipsSection: {
-    marginTop: spacing.sm,
-  },
-  tipsTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: colors.ink,
-    marginBottom: spacing.md,
-  },
-  tipsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  tipCard: {
-    width: '48%',
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.xl,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    ...shadows.sm,
-  },
-  tipIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.sm,
-  },
-  tipTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: colors.ink,
-    marginBottom: spacing.xs,
-  },
-  tipText: {
-    fontSize: 12,
-    color: colors.grey,
-    lineHeight: 17,
-  },
-});

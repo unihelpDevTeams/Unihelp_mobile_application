@@ -40,6 +40,7 @@ import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 
 const BIO_MAX_LENGTH = 160;
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
+const AVATAR_SIZE = 88;
 
 const updateProfilePhoto = async ({ kind = 'photo', uri }) => {
   if (!uri) {
@@ -163,8 +164,15 @@ export default function ProfileScreen() {
     },
     moreButtonPressed: { backgroundColor: c.canvasLight },
 
-    identity: { alignItems: 'center', paddingVertical: s.lg, marginBottom: s.md },
-    coverWrap: { width: '100%', height: 140, borderRadius: r['2xl'], overflow: 'hidden', marginBottom: s.md, position: 'absolute' },
+    // Identity header: cover photo sits in normal flow, avatar overlaps its
+    // bottom edge by exactly half its own height (classic profile layout).
+    identity: { alignItems: 'center', marginBottom: s.md },
+    coverWrap: {
+      width: '100%',
+      height: 140,
+      borderRadius: r['2xl'],
+      overflow: 'hidden',
+    },
     coverImage: { width: '100%', height: '100%' },
     coverPlaceholder: { width: '100%', height: '100%', backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
     coverBadge: {
@@ -172,19 +180,25 @@ export default function ProfileScreen() {
       backgroundColor: 'rgba(15, 23, 42, 0.5)', alignItems: 'center', justifyContent: 'center',
       borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)',
     },
-    avatarWrap: { position: 'relative', marginBottom: s.md },
+    avatarWrap: {
+      position: 'relative',
+      marginTop: -(AVATAR_SIZE / 2),
+      marginBottom: s.md,
+      zIndex: 2,
+    },
     avatar: {
-      width: 88, height: 88, borderRadius: 44, backgroundColor: c.brand,
+      width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2, backgroundColor: c.brand,
       alignItems: 'center', justifyContent: 'center',
+      borderWidth: 3, borderColor: c.canvasLight,
       ...Platform.select({
         ios: { shadowColor: c.brandText, shadowOpacity: 0.3, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
         android: { elevation: 4 },
       }),
     },
     avatarText: { color: c.onBrand, fontSize: 30, fontWeight: '800' },
-    avatarImage: { width: '100%', height: '100%', borderRadius: 44 },
+    avatarImage: { width: '100%', height: '100%', borderRadius: (AVATAR_SIZE - 6) / 2 },
     avatarSpinnerOverlay: {
-      ...StyleSheet.absoluteFillObject, borderRadius: 44,
+      ...StyleSheet.absoluteFillObject, borderRadius: (AVATAR_SIZE - 6) / 2,
       backgroundColor: 'rgba(15, 23, 42, 0.45)',
       alignItems: 'center', justifyContent: 'center',
     },
@@ -892,7 +906,8 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
 
-        {/* IDENTITY HEADER */}
+        {/* IDENTITY HEADER — cover photo in normal flow, avatar overlaps its
+            bottom edge by exactly half its own height. */}
         <Animated.View style={[styles.identity, { opacity: headerFade }]}>
           <Pressable
             style={styles.coverWrap}
@@ -914,6 +929,7 @@ export default function ProfileScreen() {
           <Pressable
             disabled={photoUploading}
             onPress={pickPhoto}
+            style={styles.avatarWrap}
             accessibilityRole="button"
             accessibilityLabel="Change profile photo"
           >
