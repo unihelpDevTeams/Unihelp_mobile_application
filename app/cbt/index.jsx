@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   Pressable,
   ScrollView,
-  ActivityIndicator,
   Animated,
   BackHandler,
   Modal,
@@ -15,6 +14,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ScreenShell from '../../src/shared/components/ScreenShell';
+import { PageLoader } from '../../src/shared/components/AILoaders';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 
 const STATUS = {
@@ -610,10 +610,7 @@ export default function CBTPracticeScreen() {
       <>
         <ScreenShell showBack title="CBT Terminal" onBack={() => router.back()}>
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 }}>
-            <ActivityIndicator size="large" color={T.indigo} />
-            <Text style={{ color: T.textMuted, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', fontSize: 12, marginTop: 16 }}>
-              Initializing Test Engine...
-            </Text>
+            <PageLoader label="Initializing test engine..." />
           </View>
         </ScreenShell>
         {dialogModal}
@@ -860,10 +857,7 @@ export default function CBTPracticeScreen() {
         <>
           <ScreenShell showBack title="Loading Room" onBack={() => finishExam(true)}>
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-              <ActivityIndicator size="large" color={T.indigo} />
-              <Text style={{ color: T.textMuted, marginTop: 16, fontFamily: 'monospace', textTransform: 'uppercase', fontSize: 12, letterSpacing: 1 }}>
-                Preparing Examination Paper...
-              </Text>
+              <PageLoader label="Preparing examination paper..." />
             </View>
           </ScreenShell>
           {dialogModal}

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
@@ -8,6 +8,7 @@ import ScreenShell from '../components/ScreenShell';
 import SectionHeader from '../components/SectionHeader';
 import EmptyState from '../components/EmptyState';
 import DocumentCard from '../components/DocumentCard';
+import { PageLoader } from '../components/AILoaders';
 
 const buildRoute = (template, params = {}) =>
   Object.entries(params).reduce((result, [key, value]) => result.replace(`[${key}]`, String(value)), template);
@@ -163,7 +164,7 @@ export default function DocumentLibraryScreen({
 
       {loading ? (
         <View style={styles.loading}>
-          <ActivityIndicator color={accent} />
+          <PageLoader label="Loading documents..." />
           <Text style={styles.loadingText}>Loading documents…</Text>
         </View>
       ) : filteredItems.length ? (

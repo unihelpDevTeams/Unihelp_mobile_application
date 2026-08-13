@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import ScreenShell from '../../src/shared/components/ScreenShell';
+import { PageLoader } from '../../src/shared/components/AILoaders';
 import EmptyState from '../../src/shared/components/EmptyState';
 import { fetchAnnouncementsPage } from '../../services/firestoreSync';
 
@@ -166,8 +167,7 @@ export default function AnnouncementsScreen() {
       {/* Content */}
       {loading ? (
         <View style={styles.loadingWrap}>
-          <ActivityIndicator size="large" color={colors.brand} />
-          <Text style={styles.loadingText}>Loading announcements...</Text>
+          <PageLoader label="Loading announcements..." />
           {[1, 2, 3].map((i) => (
             <View key={i} style={styles.skeleton} />
           ))}

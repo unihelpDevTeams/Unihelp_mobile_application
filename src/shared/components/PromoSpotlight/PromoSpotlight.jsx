@@ -32,6 +32,8 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
   const progress = useRef(new Animated.Value(0)).current;
   const [imageLoading, setImageLoading] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
+  const [countdown, setCountdown] = useState(5);
+  const [userDismissed, setUserDismissed] = useState(false);
 
   useEffect(() => {
     Animated.timing(progress, {
@@ -42,10 +44,33 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
   }, [progress, visible]);
 
   useEffect(() => {
-    if (visible) {
-      setImageFailed(false);
-      setImageLoading(Boolean(promo?.imageUrl));
+    if (!visible) {
+      setCountdown(5);
+      setUserDismissed(false);
+      return undefined;
     }
+
+    setImageFailed(false);
+    setImageLoading(Boolean(promo?.imageUrl));
+    setCountdown(5);
+    setUserDismissed(false);
+
+    const tick = setInterval(() => {
+      setCountdown((current) => {
+        if (current <= 1) return 0;
+        return current - 1;
+      });
+    }, 1000);
+
+    const timeout = setTimeout(() => {
+      setUserDismissed(false);
+      handleClose();
+    }, 5000);
+
+    return () => {
+      clearInterval(tick);
+      clearTimeout(timeout);
+    };
   }, [promo?.id, promo?.imageUrl, visible]);
 
   const sizing = useMemo(() => {
@@ -58,17 +83,24 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
 
   if (!promo) return null;
 
-  const handleClose = () => onDismiss?.();
+  const handleClose = () => {
+    setUserDismissed(true);
+    onDismiss?.();
+  };
 
   const handleAction = async () => {
-    await onAction?.();
     try {
+      setUserDismissed(true);
       if (promo.actionType === 'external_url' || promo.actionType === 'deep_link') {
-        if (promo.actionUrl) await Linking.openURL(promo.actionUrl);
+        if (promo.actionUrl) {
+          await Linking.openURL(promo.actionUrl);
+          await onAction?.();
+        }
         return;
       }
       if (promo.actionType === 'screen' && promo.actionUrl) {
         router.push(promo.actionUrl);
+        await onAction?.();
       }
     } catch (error) {
       console.log('PromoSpotlight action skipped:', error?.message);
@@ -77,6 +109,7 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
 
   const hasAction = Boolean(promo.actionType && promo.actionType !== 'none' && promo.actionUrl);
   const label = (promo.type && LABELS[promo.type]) || 'Announcement';
+  const countdownPercent = ((countdown || 0) / 4) * 100;
 
   // Dynamic Theme-based Badges & Overlays
   const isExternal = promo.type === 'external_ad';
@@ -206,6 +239,25 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
               </Text>
             ) : null}
 
+            {!userDismissed ? (
+              <View style={styles.countdownRow}>
+                <Text style={[styles.countdownText, { color: colors.textSecondary || '#6B7280' }]}>
+                  Auto-closing in {countdown}s
+                </Text>
+                <View style={[styles.countdownTrack, { backgroundColor: colors.borderDefault || colors.border || '#E5E7EB' }]}>
+                  <View
+                    style={[
+                      styles.countdownFill,
+                      {
+                        width: `${countdownPercent}%`,
+                        backgroundColor: isExternal ? colors.amber || '#F59E0B' : colors.brand || '#4F46E5',
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+            ) : null}
+
             <View style={styles.actions}>
               <Button
                 label={promo.buttonText || (hasAction ? 'Open' : 'Got it')}
@@ -304,6 +356,23 @@ const styles = StyleSheet.create({
   description: {
     fontSize: 13,
     lineHeight: 19,
+  },
+  countdownRow: {
+    gap: 6,
+  },
+  countdownText: {
+    fontSize: 10,
+    fontWeight: '700',
+    opacity: 0.8,
+  },
+  countdownTrack: {
+    height: 4,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  countdownFill: {
+    height: '100%',
+    borderRadius: 999,
   },
   actions: {
     marginTop: 2,

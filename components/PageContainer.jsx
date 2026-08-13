@@ -1,7 +1,7 @@
 import React from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { useTheme } from '../src/shared/theme/ThemeContext';
+import { StyleSheet, View } from 'react-native';
 import ScreenShell from '../src/shared/components/ScreenShell';
+import { PageLoader } from '../src/shared/components/AILoaders';
 
 export default function PageContainer({
   title = 'Unihelp',
@@ -16,12 +16,10 @@ export default function PageContainer({
   showFooter = false,
   footerProps = {},
 }) {
-  const { colors } = useTheme();
-
   const content = loading ? (
     loadingContent || (
-      <View style={[styles.loadingBox, { backgroundColor: colors.card, borderColor: colors.borderDefault }]}>
-        <ActivityIndicator color={colors.brand} />
+      <View style={styles.loadingBox}>
+        <PageLoader label="Loading..." />
       </View>
     )
   ) : (
@@ -52,9 +50,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   loadingBox: {
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
     alignItems: 'center',
   },
 });

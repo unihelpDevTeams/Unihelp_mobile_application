@@ -41,13 +41,6 @@ const ACTION_TYPES = [
   { key: 'deep_link', label: 'Deep Link' },
 ];
 
-const FREQUENCIES = [
-  { key: 'once', label: 'Once' },
-  { key: 'daily', label: 'Once per day' },
-  { key: 'every_3_days', label: 'Once every 3 days' },
-  { key: 'weekly', label: 'Once per week' },
-];
-
 const emptyForm = {
   type: 'external_ad',
   title: '',
@@ -59,15 +52,12 @@ const emptyForm = {
   actionUrl: '',
   advertiserName: '',
   advertiserLogoUrl: '',
-  frequency: 'daily',
   enabled: true,
   priority: '0',
   startAt: '',
   endAt: '',
   targetAudience: 'all',
 };
-
-const frequencyLabel = (frequency) => FREQUENCIES.find((option) => option.key === frequency)?.label || 'Once per day';
 
 const dateValue = (value) => {
   if (!value) return '';
@@ -412,8 +402,6 @@ export default function PromoSpotlightManager() {
           <Field label="Action Target (URL or Route)" value={form.actionUrl} onChangeText={(val) => updateField('actionUrl', val)} placeholder={form.actionType === 'external_url' ? 'https://example.com' : '/screens/home'} autoCapitalize="none" palette={palette} styles={styles} />
         )}
 
-        <Segmented label="Frequency" options={FREQUENCIES} value={form.frequency} onChange={(val) => updateField('frequency', val)} palette={palette} styles={styles} />
-
         {/* Schedule Inputs with Date Pickers */}
         <View style={styles.datePickerSection}>
           <Text style={styles.label}>Campaign Schedule</Text>
@@ -536,7 +524,7 @@ export default function PromoSpotlightManager() {
                     </View>
                   </View>
                   <Text style={styles.itemMeta}>
-                    Priority: {item.priority} - Type: {item.type} - {frequencyLabel(item.frequency)}
+                    Priority: {item.priority} - Type: {item.type}
                   </Text>
                   <Text style={styles.itemStats}>
                     {statsByPromoId[item.id]?.impressions || 0} views - {statsByPromoId[item.id]?.clicks || 0} clicks - {statsByPromoId[item.id]?.dismissals || 0} dismissals - {statsByPromoId[item.id]?.ctr || 0}% CTR

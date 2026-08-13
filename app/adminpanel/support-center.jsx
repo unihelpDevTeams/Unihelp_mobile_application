@@ -11,6 +11,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
+import { PageLoader } from '../../src/shared/components/AILoaders';
 import { useAuth } from '../../context/AuthContext';
 import {
   fetchContactMessages,
@@ -402,8 +403,7 @@ export default function AdminSupportCenter() {
       {/* Loading State */}
       {loading && !refreshing ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#6366F1" />
-          <Text style={styles.loadingText}>Loading...</Text>
+          <PageLoader label="Loading support queue..." />
         </View>
       ) : (
         <FlatList

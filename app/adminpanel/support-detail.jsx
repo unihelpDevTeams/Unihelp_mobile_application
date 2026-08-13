@@ -12,6 +12,7 @@ import {
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
+import { PageLoader } from '../../src/shared/components/AILoaders';
 import { useAuth } from '../../context/AuthContext';
 import {
   fetchSupportItem,
@@ -135,7 +136,7 @@ export default function SupportDetailPage() {
     return (
       <ScreenShell title="Loading..." showBack>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#6366F1" />
+          <PageLoader label="Loading support request..." />
         </View>
       </ScreenShell>
     );

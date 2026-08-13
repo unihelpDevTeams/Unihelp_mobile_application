@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
+import { PageLoader } from '../../src/shared/components/AILoaders';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../firebase/config';
 import { collection, getDocs, orderBy, query, limit } from 'firebase/firestore';
@@ -184,7 +185,7 @@ export default function AdminPanelPage() {
       ) : activeTab !== 'notifications' ? (
         loading ? (
           <View style={pageStyles.loadingContainer}>
-            <ActivityIndicator size="large" color={colors.brand} />
+            <PageLoader label="Loading admin records..." />
           </View>
         ) : items.length === 0 ? (
           <View style={pageStyles.emptyContainer}>
@@ -508,7 +509,7 @@ function UsersList({ colors }) {
 
       {loading ? (
         <View style={userStyles.loadingWrap}>
-          <ActivityIndicator size="large" color={colors.brand} />
+          <PageLoader label="Loading users..." />
           {[1, 2, 3].map((i) => (
             <View key={i} style={userStyles.skeleton} />
           ))}

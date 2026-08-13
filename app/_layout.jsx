@@ -2,9 +2,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import React, { useRef, useEffect } from 'react';
-import { View, Animated, Easing, StyleSheet, Text } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React from 'react';
 import '@/global.css';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { AIProvider } from '../src/shared/context/AIContext';
@@ -13,34 +11,12 @@ import { PushNotificationBootstrap } from '../hooks/usePushNotifications';
 import { ThemeProvider, useTheme, ThemeGate } from '../src/shared/theme/ThemeContext';
 import PromoSpotlight from '../src/shared/components/PromoSpotlight/PromoSpotlight';
 import { usePromoSpotlight } from '../src/shared/hooks/usePromoSpotlight';
-
-function BrandSpinner({ color, size = 24 }) {
-  const spinAnim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.timing(spinAnim, { toValue: 1, duration: 1200, easing: Easing.linear, useNativeDriver: true })
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [spinAnim]);
-  const rotate = spinAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
-  return (
-    <Animated.View style={{ transform: [{ rotate }] }}>
-      <Ionicons name="sync-outline" size={size} color={color} />
-    </Animated.View>
-  );
-}
+import { FullScreenLoader } from '../src/shared/components/AILoaders';
 
 function GlobalPreloader() {
   const { loading } = useAuth();
-  const { colors } = useTheme();
   if (!loading) return null;
-  return (
-    <View style={[styles.preloaderOverlay, { backgroundColor: colors.canvas }]}>
-      <BrandSpinner color={colors.brand} size={32} />
-      <Text style={[styles.preloaderText, { color: colors.grey }]}>Preparing Your Experience...</Text>
-    </View>
-  );
+  return <FullScreenLoader label="Preparing your experience..." />;
 }
 
 function AppContent() {
@@ -49,12 +25,7 @@ function AppContent() {
 
   // Prevent flash - don't render until theme is loaded
   if (!themeLoaded) {
-    return (
-      <View style={[styles.preloaderOverlay, { backgroundColor: colors.canvas }]}>
-        <BrandSpinner color={colors.brand} size={32} />
-        <Text style={[styles.preloaderText, { color: colors.grey }]}>Preparing Your Experience...</Text>
-      </View>
-    );
+    return <FullScreenLoader label="Preparing your experience..." />;
   }
 
   return (
@@ -152,17 +123,3 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   );
 }
-
-const styles = StyleSheet.create({
-  preloaderOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-    zIndex: 9999,
-  },
-  preloaderText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-});

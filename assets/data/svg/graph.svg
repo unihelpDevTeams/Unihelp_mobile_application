@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="240" height="200">
-<line x1="20" y1="180" x2="220" y2="180" stroke="black" stroke-width="2"/>
-<line x1="20" y1="180" x2="20" y2="20" stroke="black" stroke-width="2"/>
-<line x1="40" y1="160" x2="180" y2="40" stroke="blue" stroke-width="3"/>
-<text x="225" y="185">x</text>
-<text x="10" y="20">y</text>
-</svg>

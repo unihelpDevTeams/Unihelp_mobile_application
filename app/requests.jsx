@@ -6,6 +6,7 @@ import { collection, addDoc, getDocs, orderBy, query, serverTimestamp, Timestamp
 import { db } from '../firebase/config';
 import { colors, spacing, borderRadius, shadows } from '../src/shared/theme';
 import ScreenShell from '../src/shared/components/ScreenShell';
+import { PageLoader } from '../src/shared/components/AILoaders';
 import EmptyState from '../src/shared/components/EmptyState';
 import { useAuth } from '../context/AuthContext';
 
@@ -166,7 +167,7 @@ export default function RequestsPage() {
         <>
           {loading ? (
             <View style={styles.loadingWrap}>
-              <ActivityIndicator size="large" color={colors.brand} />
+              <PageLoader label="Loading requests..." />
               {[1,2,3].map(i => <View key={i} style={styles.skeleton} />)}
             </View>
           ) : requests.length > 0 ? (

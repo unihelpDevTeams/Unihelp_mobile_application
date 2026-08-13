@@ -14,6 +14,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
+import { PageLoader } from '../../src/shared/components/AILoaders';
 import { getUserProfile } from '../../services/firestoreSync';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
@@ -275,8 +276,7 @@ export default function ViewUserProfile() {
     <ScreenShell title="Profile" showBack loading={loading}>
       {loading ? (
         <View style={[styles.loadingCard, { backgroundColor: colors.card, borderColor: colors.borderDefault }] }>
-          <ActivityIndicator color={colors.brand} size="large" />
-          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Fetching student profile...</Text>
+          <PageLoader label="Fetching student profile..." />
         </View>
       ) : profile ? (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>

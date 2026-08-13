@@ -1,25 +1,4 @@
 export const CHALLENGE_DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
-
-// ──────────────────────────────────────────────
-//  NEW CATEGORY SYSTEM — Personalized & Engaging
-// ──────────────────────────────────────────────
-
-/**
- * Challenge categories designed for personalization.
- * Each user sees categories relevant to their profile
- * (studentType, department, faculty, level).
- *
- * The old department+level categories (e.g. "100L Science")
- * are now behind-the-scenes filters rather than visible cards.
- */
-
-/**
- * Returns categories ordered by personal relevance for the given user profile.
- * - University students -> department, level, faculty challenges first
- * - Everyone -> daily, weekly, speed quiz, general
- */
-
-
 export const CHALLENGE_CATEGORIES = [
   {
     id: 'daily',

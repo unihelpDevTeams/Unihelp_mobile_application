@@ -14,17 +14,28 @@ export function PageLoader({ label = 'Loading...' }) {
   const styles = useThemeStyles(buildStyles);
   const spin = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0.3)).current;
+  const orbit = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const spinLoop = Animated.loop(
       Animated.timing(spin, {
         toValue: 1,
-        duration: 1400,
-        easing: Easing.inOut(Easing.quad),
+        duration: 1800,
+        easing: Easing.linear,
         useNativeDriver: true,
       })
     );
     spinLoop.start();
+
+    const orbitLoop = Animated.loop(
+      Animated.timing(orbit, {
+        toValue: 1,
+        duration: 1200,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: true,
+      })
+    );
+    orbitLoop.start();
 
     const pulseLoop = Animated.loop(
       Animated.sequence([
@@ -46,9 +57,10 @@ export function PageLoader({ label = 'Loading...' }) {
 
     return () => {
       spinLoop.stop();
+      orbitLoop.stop();
       pulseLoop.stop();
     };
-  }, [spin, pulse]);
+  }, [spin, pulse, orbit]);
 
   const rotate = spin.interpolate({
     inputRange: [0, 1],
@@ -59,10 +71,17 @@ export function PageLoader({ label = 'Loading...' }) {
     inputRange: [0.3, 1],
     outputRange: [0.5, 1],
   });
+  const orbitScale = orbit.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0.86, 1.08, 0.86],
+  });
 
   return (
     <View style={styles.pageLoaderCard}>
+      <Animated.View style={[styles.loaderHalo, { opacity: pulse, transform: [{ scale: orbitScale }] }]} />
       <Animated.View style={[styles.logoRing, { transform: [{ rotate }] }]}>
+        <View style={styles.loaderSparkOne} />
+        <View style={styles.loaderSparkTwo} />
         <View style={styles.logoCore}>
           <Ionicons name="school" size={24} color={colors.brand} />
         </View>
@@ -105,6 +124,7 @@ export function FullScreenLoader({ label = 'Loading...' }) {
   const bounce1 = useRef(new Animated.Value(0)).current;
   const bounce2 = useRef(new Animated.Value(0)).current;
   const bounce3 = useRef(new Animated.Value(0)).current;
+  const halo = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const spinLoop = Animated.loop(
@@ -125,6 +145,14 @@ export function FullScreenLoader({ label = 'Loading...' }) {
     );
     pulseLoop.start();
 
+    const haloLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(halo, { toValue: 1, duration: 1200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+        Animated.timing(halo, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ])
+    );
+    haloLoop.start();
+
     const bounceFn = (anim, delay) => {
       const loop = Animated.loop(
         Animated.sequence([
@@ -144,21 +172,33 @@ export function FullScreenLoader({ label = 'Loading...' }) {
     return () => {
       spinLoop.stop();
       pulseLoop.stop();
+      haloLoop.stop();
       l1.stop();
       l2.stop();
       l3.stop();
     };
-  }, [spin, pulse, bounce1, bounce2, bounce3]);
+  }, [spin, pulse, bounce1, bounce2, bounce3, halo]);
 
   const rotate = spin.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
   });
+  const haloScale = halo.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.72, 1.38],
+  });
+  const haloOpacity = halo.interpolate({
+    inputRange: [0, 0.55, 1],
+    outputRange: [0.35, 0.18, 0],
+  });
 
   return (
     <View style={styles.fullScreen}>
       <View style={styles.fullScreenContent}>
+        <Animated.View style={[styles.fullHalo, { opacity: haloOpacity, transform: [{ scale: haloScale }] }]} />
         <Animated.View style={[styles.fullLogoRing, { transform: [{ rotate }] }]}>
+          <View style={styles.fullSparkOne} />
+          <View style={styles.fullSparkTwo} />
           <View style={styles.fullLogoCore}>
             <Ionicons name="school" size={32} color={colors.brand} />
           </View>
@@ -415,24 +455,52 @@ const buildStyles = (c) => {
     alignItems: 'center',
     justifyContent: 'center',
     gap: 16,
+    position: 'relative',
+  },
+  loaderHalo: {
+    position: 'absolute',
+    top: 29,
+    width: 86,
+    height: 86,
+    borderRadius: 43,
+    backgroundColor: COLORS.indigoSoft,
   },
   logoRing: {
     width: 62,
     height: 62,
-    borderRadius: 20,
+    borderRadius: 31,
     backgroundColor: COLORS.indigoSoft,
     borderWidth: 2,
     borderColor: COLORS.brandBorder,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
   },
   logoCore: {
     width: 42,
     height: 42,
-    borderRadius: 14,
+    borderRadius: 21,
     backgroundColor: COLORS.white,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  loaderSparkOne: {
+    position: 'absolute',
+    top: -2,
+    right: 10,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: COLORS.indigo,
+  },
+  loaderSparkTwo: {
+    position: 'absolute',
+    bottom: 7,
+    left: 0,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: COLORS.indigoDark,
   },
   pageLoaderText: {
     color: COLORS.inkSoft,
@@ -465,24 +533,52 @@ const buildStyles = (c) => {
   fullScreenContent: {
     alignItems: 'center',
     gap: 20,
+    position: 'relative',
+  },
+  fullHalo: {
+    position: 'absolute',
+    top: -10,
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    backgroundColor: COLORS.indigoSoft,
   },
   fullLogoRing: {
     width: 80,
     height: 80,
-    borderRadius: 26,
+    borderRadius: 40,
     backgroundColor: COLORS.indigoSoft,
     borderWidth: 3,
     borderColor: COLORS.brandBorder,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
   },
   fullLogoCore: {
     width: 54,
     height: 54,
-    borderRadius: 18,
+    borderRadius: 27,
     backgroundColor: COLORS.white,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  fullSparkOne: {
+    position: 'absolute',
+    top: 0,
+    right: 15,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: COLORS.indigo,
+  },
+  fullSparkTwo: {
+    position: 'absolute',
+    left: 5,
+    bottom: 12,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.indigoDark,
   },
   dotsRow: {
     flexDirection: 'row',
