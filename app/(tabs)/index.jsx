@@ -922,7 +922,7 @@ export default function HomeScreen() {
 
   return (
     <ScreenShell
-      showFooter
+      showFooter={false}
       overlayContent={
         <Animated.View
           onLayout={handleFabLayout}
