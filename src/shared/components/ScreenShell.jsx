@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNetInfo } from '@react-native-community/netinfo';
 import { FullScreenLoader } from './AILoaders';
@@ -309,26 +309,28 @@ export default function ScreenShell({
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <HeaderBar
-        title={title}
-        subtitle={subtitle}
-        showBack={showBack}
-        onBack={() => router.back()}
-        showSearch={showUniversityIcons}
-        onSearch={() => router.push('/search')}
-        showNotifications={showUniversityIcons}
-        hasUnreadNotifications={hasUnreadNotifications}
-        onNotifications={() => router.push('/notifications')}
-        showMenu={showMenu}
-        onMenu={() => setMenuOpen(true)}
-        actions={actions}
-        colors={colors}
-        styles={styles}
-      />
-      {content}
-      {overlayContent ? (
-        <View pointerEvents="box-none" style={styles.overlay}>{overlayContent}</View>
-      ) : null}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <HeaderBar
+          title={title}
+          subtitle={subtitle}
+          showBack={showBack}
+          onBack={() => router.back()}
+          showSearch={showUniversityIcons}
+          onSearch={() => router.push('/search')}
+          showNotifications={showUniversityIcons}
+          hasUnreadNotifications={hasUnreadNotifications}
+          onNotifications={() => router.push('/notifications')}
+          showMenu={showMenu}
+          onMenu={() => setMenuOpen(true)}
+          actions={actions}
+          colors={colors}
+          styles={styles}
+        />
+        {content}
+        {overlayContent ? (
+          <View pointerEvents="box-none" style={styles.overlay}>{overlayContent}</View>
+        ) : null}
+      </KeyboardAvoidingView>
       <MenuDrawer
         visible={menuOpen}
         onClose={() => setMenuOpen(false)}
