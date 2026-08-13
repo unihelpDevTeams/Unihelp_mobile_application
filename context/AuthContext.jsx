@@ -40,6 +40,17 @@ export function AuthProvider({ children }) {
 
   const signIn = async (email, password) => {
     const credential = await signInWithEmailAndPassword(auth, email, password);
+    
+    if (!credential.user.emailVerified) {
+      try {
+        await import('firebase/auth').then(m => m.sendEmailVerification(credential.user));
+      } catch (e) {
+        console.error(e);
+      }
+      await firebaseSignOut(auth);
+      throw new Error('Please verify your email before logging in. Check your inbox for a verification link.');
+    }
+    
     const profileData = await ensureCurrentUserProfile({ email: credential.user.email });
     setUser(credential.user);
     setProfile(profileData);
@@ -56,9 +67,14 @@ export function AuthProvider({ children }) {
       provider: 'email',
       photo: photoURL || '',
     });
-    setUser(credential.user);
-    setProfile(profileData);
-    await registerPushNotificationsForCurrentUser();
+    
+    try {
+      await import('firebase/auth').then(m => m.sendEmailVerification(credential.user));
+    } catch (e) {
+      console.error(e);
+    }
+    await firebaseSignOut(auth);
+    
     return credential;
   };
 
