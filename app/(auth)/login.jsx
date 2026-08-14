@@ -154,7 +154,7 @@ export default function Login() {
     } catch (submitError) {
       setError(
         submitError?.code === 'auth/invalid-credential' || submitError?.code === 'auth/wrong-password'
-          ? 'Incorrect email or password. Please try again.'
+          ? 'Incorrect email or password. If you signed up with Google, please use "Forgot password" to set a password.'
           : submitError?.code === 'auth/user-not-found'
           ? 'No account found with that email address.'
           : submitError?.code === 'auth/too-many-requests'
