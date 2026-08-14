@@ -171,7 +171,7 @@ export default function Login() {
       <LinearGradient colors={isDark ? darkGradients.auth : gradients.auth} style={StyleSheet.absoluteFillObject} />
       <KeyboardAvoidingView
         style={styles.keyboardView}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
         keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
       >
         <ScrollView

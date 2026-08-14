@@ -530,7 +530,7 @@ export default function ConversationPage() {
 
       {canChat ? (
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior="padding"
           keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}
           style={styles.composerContainer}
         >

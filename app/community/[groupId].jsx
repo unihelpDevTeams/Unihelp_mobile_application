@@ -1450,7 +1450,7 @@ export default function GroupDetailPage() {
           {/* Composer, pinned to bottom like WhatsApp */}
           {isMember ? (
             <KeyboardAvoidingView
-              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              behavior="padding"
               keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}
               style={styles.composerOuter}
             >
@@ -1507,7 +1507,7 @@ export default function GroupDetailPage() {
       <Modal visible={editVisible} transparent animationType="slide" onRequestClose={() => setEditVisible(false)}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setEditVisible(false)} />
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior="padding"
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
           style={styles.sheetWrap}
         >

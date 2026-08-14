@@ -126,7 +126,7 @@ export default function SignupFlow() {
   return (
     <SafeAreaView style={styles.screen}>
       <LinearGradient colors={isDark ? darkGradients.auth : gradients.auth} style={StyleSheet.absoluteFillObject} />
-      <KeyboardAvoidingView style={styles.flexFill} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+      <KeyboardAvoidingView style={styles.flexFill} behavior="padding" keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
         <View style={styles.header}>
           <View style={styles.logoBadge}>
             <Image source={logo} style={styles.logoImage} contentFit="contain" />

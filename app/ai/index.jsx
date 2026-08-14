@@ -349,7 +349,7 @@ export default function AiPage() {
   return (
     <ScreenShell title="AI Assistant" subtitle="Your academic workspace" showBack scrollable={false}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior="padding"
         keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}
         style={styles.container}
       >
