@@ -20,12 +20,12 @@ import { isRouteAllowedForRole } from '../../src/shared/navigation/routePermissi
 // Master list of all tools categorized
 const ALL_TOOLS = [
   {
-    category: 'Academic Performance',
+    category: 'Academic Tools',
     tools: [
       {
-        id: 'cgpa',
-        title: 'CGPA Tracker',
-        sub: 'Track overall degree progress',
+        id: 'gpa-cgpa',
+        title: 'GPA & CGPA',
+        sub: 'Calculate terms and track progress',
         icon: 'stats-chart',
         color: '#4F46E5',
         bgColor: '#EEF2FF',
@@ -33,19 +33,19 @@ const ALL_TOOLS = [
         badge: 'POPULAR',
       },
       {
-        id: 'gpa',
-        title: 'GPA Calculator',
-        sub: 'Estimate current term grades',
-        icon: 'calculator',
-        color: '#EA580C',
-        bgColor: '#FFF7ED',
-        route: '/gpa',
-        badge: 'QUICK',
-      }
+        id: 'cbt',
+        title: 'CBT practice',
+        sub: 'Live mock exams & quizzes',
+        icon: 'school',
+        color: '#DC2626',
+        bgColor: '#FEE2E2',
+        route: '/cbt',
+        badge: 'NEW',
+      },
     ],
   },
   {
-    category: 'Study & Reference',
+    category: 'Study & Learning',
     tools: [
       {
         id: 'timetable',
@@ -58,14 +58,14 @@ const ALL_TOOLS = [
         badge: 'LIVE',
       },
       {
-        id: 'cbt',
-        title: 'CBT practice',
-        sub: 'Live mock exams & quizzes',
-        icon: 'school',
-        color: '#DC2626',
-        bgColor: '#FEE2E2',
-        route: '/cbt',
-        badge: 'NEW',
+        id: 'newsfeed',
+        title: 'News Feed',
+        sub: 'Latest updates',
+        icon: 'newspaper',
+        color: '#3B82F6',
+        bgColor: '#ECFDF5',
+        route: '/newsfeed',
+        badge: 'TRENDING',
       },
       {
         id: 'formula',

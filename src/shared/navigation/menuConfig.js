@@ -22,8 +22,7 @@ export const headerMenuSections = [
   {
     title: 'Tools',
     items: [
-      { label: 'CGPA Tracker', route: '/cgpa' },
-      { label: 'GPA Calculator', route: '/gpa' },
+      { label: 'GPA & CGPA', route: '/cgpa', icon: 'stats-chart-outline' },
       { label: 'Tasks', route: '/tasks' },
       { label: 'Smart Timetable', route: '/smart-timetable' },
     ],

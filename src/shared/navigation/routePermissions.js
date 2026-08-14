@@ -1,6 +1,5 @@
 const universityOnlyRoutes = [
   '/cgpa',
-  '/gpa',
   '/tasks',
   '/smart-timetable',
   '/create-tutorial',

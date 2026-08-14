@@ -19,8 +19,8 @@ export default function NewsFeedPage() {
   const styles = useThemeStyles((c, s, r) => ({
     hero: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: c.brand, borderRadius: r['3xl'], padding: s.lg, marginBottom: s.md },
     heroCopy: { flex: 1 },
-    heroTitle: { color: c.onBrand, fontSize: 16, fontWeight: '800' },
-    heroText: { marginTop: 4, color: c.brandGlow, fontSize: 13, lineHeight: 18, fontWeight: '600' },
+    heroTitle: { color: c.onBrand, fontSize: 20, fontWeight: '800' },
+    heroText: { marginTop: 4, color: c.onBrand, fontSize: 12, lineHeight: 18, fontWeight: '500' },
     searchWrap: {
       flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.surfacePrimary,
       borderWidth: 1, borderColor: c.borderDefault, borderRadius: r.xl, paddingHorizontal: s.md, paddingVertical: s.md, marginBottom: s.md,

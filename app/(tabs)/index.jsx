@@ -871,24 +871,14 @@ export default function HomeScreen() {
       badge: 'PRO',
     },
     {
-      id: 'cgpa',
-      title: 'CGPA Tracker',
-      sub: 'Monitor progress',
+      id: 'gpa-cgpa',
+      title: 'GPA & CGPA',
+      sub: 'Grades & progress',
       icon: 'stats-chart',
       color: '#4F46E5',
       bgColor: '#EEF2FF',
       route: '/cgpa',
       badge: 'POPULAR',
-    },
-    {
-      id: 'gpa',
-      title: 'GPA Calculator',
-      sub: 'Estimate semester',
-      icon: 'calculator',
-      color: '#EA580C',
-      bgColor: '#FFF7ED',
-      route: '/gpa',
-      badge: 'QUICK',
     },
     {
       id: 'timetable',
@@ -920,12 +910,22 @@ export default function HomeScreen() {
       route: '/pomodoroScreen',
       badge: 'FOCUS',
     },
+    {
+      id: 'newsfeed',
+      title: 'News Feed',
+      sub: 'Latest updates',
+      icon: 'newspaper',
+      color: '#3B82F6',
+      bgColor: '#ECFDF5',
+      route: '/newsfeed',
+      badge: 'TRENDING',
+    },
   ].filter((tool) => isRouteAllowedForRole(tool.route, profile?.role));
 
   const streakSubtitle =
     streakCount > 0
       ? `You have ${streakCount} consecutive study day${streakCount === 1 ? '' : 's'} logged. Keep the momentum going!`
-      : 'Log today\u2019s study session to start your streak.';
+      : 'Log today\u2019s study session to start your streak.'
 
   return (
     <ScreenShell

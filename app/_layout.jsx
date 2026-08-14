@@ -53,7 +53,6 @@ function AppContent() {
           <Stack.Screen name="community" />
           <Stack.Screen name="community/[groupId]" />
           <Stack.Screen name="community-settings" />
-          <Stack.Screen name="gpa" />
           <Stack.Screen name="help-center" />
           <Stack.Screen name="myhostels" />
           <Stack.Screen name="myproducts" />
