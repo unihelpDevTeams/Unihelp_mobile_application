@@ -1,17 +1,46 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View, TextInput } from 'react-native';
+import { FlatList, Pressable, ScrollView, Text, View, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import ScreenShell from '../../src/shared/components/ScreenShell';
-import ShimmerListItem from '../../src/shared/components/ShimmerSkeleton';
+import { ShimmerListItem } from '../../src/shared/components/ShimmerSkeleton';
 import EmptyState from '../../src/shared/components/EmptyState';
 import { Chip } from '../../src/shared/components/Button';
 import { fetchNotes, fetchQuestions, fetchHostels, fetchStudentListings, fetchFormulas } from '../../services/firestoreSync';
 
 const SEARCH_HISTORY_KEY = '@unihelp_search_history';
+
+const FEATURE_SHORTCUTS = [
+  { title: 'Study Materials', subtitle: 'Notes and past questions', icon: 'library-outline', route: '/(tabs)/studyMaterials', colorKey: 'brand' },
+  { title: 'Formula Hub', subtitle: 'Math, physics and chemistry', icon: 'calculator-outline', route: '/formula-hub', colorKey: 'purple' },
+  { title: 'GPA & CGPA', subtitle: 'Calculate and track grades', icon: 'stats-chart-outline', route: '/cgpa', colorKey: 'blue' },
+  { title: 'AI Study Assistant', subtitle: 'Solve, explain, summarize', icon: 'sparkles-outline', route: '/ai', colorKey: 'brand' },
+  { title: 'Daily Challenge', subtitle: 'Practice and leaderboard', icon: 'flash-outline', route: '/challenge', colorKey: 'orange' },
+  { title: 'Smart Schedule', subtitle: 'Classes and reminders', icon: 'calendar-number-outline', route: '/smart-timetable', colorKey: 'green' },
+];
+
+const FORMULA_TOPICS = [
+  'Quadratic formula',
+  'Ohm law',
+  'Kinematics',
+  'Differentiation',
+  'Integration',
+  'Molarity',
+  'Trigonometry',
+  'Probability',
+];
+
+const SUGGESTED_SEARCHES = [
+  'MTH 101',
+  'GST past questions',
+  'Physics formulas',
+  'Chemistry notes',
+  'Hostels near campus',
+  'Calculus',
+];
 
 const formatPrice = (price) => {
   const n = Number(price);
@@ -46,6 +75,7 @@ export default function SearchScreen() {
     loadingContainer: { paddingTop: s.md },
     sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: s.sm, marginTop: s.lg },
     sectionTitle: { fontSize: 13, fontWeight: '800', color: c.textTertiary, letterSpacing: 0.5, marginBottom: s.sm, marginTop: s.lg },
+    sectionSubtitle: { fontSize: 12, color: c.textSecondary, marginTop: -4, marginBottom: s.sm },
     clearText: { fontSize: 12, fontWeight: '700', color: c.brandText },
     historyItem: {
       flexDirection: 'row', alignItems: 'center', gap: s.sm, backgroundColor: c.card,
@@ -54,6 +84,50 @@ export default function SearchScreen() {
     historyItemPressed: { backgroundColor: c.surfaceSecondary },
     historyText: { flex: 1, fontSize: 14, color: c.textPrimary, fontWeight: '600' },
     trendingContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: s.xs },
+    shortcutGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: s.sm,
+    },
+    shortcutCard: {
+      width: '48%',
+      minHeight: 108,
+      backgroundColor: c.card,
+      borderRadius: r['2xl'],
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      padding: s.md,
+      justifyContent: 'space-between',
+    },
+    shortcutCardPressed: { backgroundColor: c.surfaceSecondary },
+    shortcutIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: r.lg,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: s.sm,
+    },
+    shortcutTitle: { fontSize: 13.5, fontWeight: '800', color: c.textPrimary },
+    shortcutSubtitle: { fontSize: 11.5, color: c.textSecondary, marginTop: 2, lineHeight: 16 },
+    topicRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: s.xs,
+    },
+    topicChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: s.md,
+      paddingVertical: 8,
+      borderRadius: r.full,
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+    },
+    topicChipPressed: { backgroundColor: c.surfaceSecondary },
+    topicText: { fontSize: 12.5, fontWeight: '700', color: c.textPrimary },
     resultsList: { paddingBottom: s['3xl'] },
     resultCard: {
       flexDirection: 'row', alignItems: 'center', gap: s.md, backgroundColor: c.card,
@@ -176,6 +250,16 @@ export default function SearchScreen() {
     if (query.trim()) saveToHistory(query.trim());
   };
 
+  const applySuggestedSearch = (term) => {
+    setActiveType('all');
+    setQuery(term);
+    saveToHistory(term);
+  };
+
+  const openFeature = (route) => {
+    router.push(route);
+  };
+
   const renderResult = ({ item }) => {
     const resultType = RESULT_TYPES[item.resultType] || RESULT_TYPES.notes;
     return (
@@ -259,7 +343,66 @@ export default function SearchScreen() {
           />
         )
       ) : (
-        <View>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.resultsList}>
+          <Text style={styles.sectionTitle}>Popular features</Text>
+          <Text style={styles.sectionSubtitle}>Jump straight into the tools students use most.</Text>
+          <View style={styles.shortcutGrid}>
+            {FEATURE_SHORTCUTS.map((feature) => {
+              const tone = colors[feature.colorKey] || colors.brand;
+              return (
+                <Pressable
+                  key={feature.title}
+                  onPress={() => openFeature(feature.route)}
+                  style={({ pressed }) => [styles.shortcutCard, pressed && styles.shortcutCardPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${feature.title}`}
+                >
+                  <View>
+                    <View style={[styles.shortcutIcon, { backgroundColor: `${tone}18` }]}>
+                      <Ionicons name={feature.icon} size={19} color={tone} />
+                    </View>
+                    <Text style={styles.shortcutTitle} numberOfLines={1}>{feature.title}</Text>
+                    <Text style={styles.shortcutSubtitle} numberOfLines={2}>{feature.subtitle}</Text>
+                  </View>
+                  <Ionicons name="arrow-forward" size={15} color={colors.textTertiary} />
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <Text style={styles.sectionTitle}>Formula shortcuts</Text>
+          <Text style={styles.sectionSubtitle}>Tap a topic to search formula sheets and references.</Text>
+          <View style={styles.topicRow}>
+            {FORMULA_TOPICS.map((topic) => (
+              <Pressable
+                key={topic}
+                onPress={() => applySuggestedSearch(topic)}
+                style={({ pressed }) => [styles.topicChip, pressed && styles.topicChipPressed]}
+                accessibilityRole="button"
+                accessibilityLabel={`Search ${topic}`}
+              >
+                <Ionicons name="calculator-outline" size={14} color={colors.purple || colors.brand} />
+                <Text style={styles.topicText}>{topic}</Text>
+              </Pressable>
+            ))}
+          </View>
+
+          <Text style={styles.sectionTitle}>Try searching</Text>
+          <View style={styles.topicRow}>
+            {SUGGESTED_SEARCHES.map((term) => (
+              <Pressable
+                key={term}
+                onPress={() => applySuggestedSearch(term)}
+                style={({ pressed }) => [styles.topicChip, pressed && styles.topicChipPressed]}
+                accessibilityRole="button"
+                accessibilityLabel={`Search ${term}`}
+              >
+                <Ionicons name="search-outline" size={14} color={colors.brand} />
+                <Text style={styles.topicText}>{term}</Text>
+              </Pressable>
+            ))}
+          </View>
+
           {/* Search History from AsyncStorage */}
           {searchHistory.length > 0 && (
             <>
@@ -282,7 +425,7 @@ export default function SearchScreen() {
               ))}
             </>
           )}
-        </View>
+        </ScrollView>
       )}
     </ScreenShell>
   );
