@@ -100,7 +100,7 @@ export default function ConversationPage() {
       alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.borderDefault,
     },
     headerActionPressed: { opacity: 0.82 },
-    messagesPane: { flex: 1, backgroundColor: c.canvasLight },
+    messagesPane: { flex: 1 },
     listContent: { paddingTop: 20, paddingBottom: 16, paddingHorizontal: 12 },
     bubble: { 
       paddingVertical: 10, paddingHorizontal: 14, marginBottom: 12, 
