@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Image,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -42,6 +44,8 @@ import { uploadToCloudinary } from '../../services/cloudinary'; // see note at b
 const CATEGORIES = ['Academics', 'Career', 'Health', 'Social', 'Tech', 'Other'];
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 const REACTION_ERROR_AUTO_DISMISS_MS = 3000;
+const SWIPE_REPLY_MAX = 88;
+const SWIPE_REPLY_THRESHOLD = 56;
 
 // Deterministic pastel palette so each sender gets a consistent avatar/name colour
 const AVATAR_PALETTE = ['#4F46E5', '#0EA5E9', '#F59E0B', '#EF4444', '#10B981', '#EC4899', '#8B5CF6'];
@@ -57,6 +61,33 @@ const initialsForName = (name = '') =>
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join('') || '?';
+
+// Shared drag-to-dismiss behaviour for bottom sheets. Attach `panHandlers` to
+// the sheet's handle/header only, and wrap the sheet body in an Animated.View
+// using `translateY` as its transform so a downward drag past the threshold
+// dismisses it, otherwise it springs back to the open position.
+function useDraggableSheet(onDismiss) {
+  const translateY = useRef(new Animated.Value(0)).current;
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gesture) => gesture.dy > 6 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+      onPanResponderMove: (_, gesture) => {
+        if (gesture.dy > 0) translateY.setValue(gesture.dy);
+      },
+      onPanResponderRelease: (_, gesture) => {
+        if (gesture.dy > 110 || gesture.vy > 0.9) {
+          Animated.timing(translateY, { toValue: 700, duration: 180, useNativeDriver: true }).start(() => {
+            translateY.setValue(0);
+            onDismiss();
+          });
+        } else {
+          Animated.spring(translateY, { toValue: 0, useNativeDriver: true, bounciness: 6 }).start();
+        }
+      },
+    })
+  ).current;
+  return { translateY, panHandlers: panResponder.panHandlers };
+}
 
 export default function GroupDetailPage() {
   const { groupId } = useLocalSearchParams();
@@ -81,8 +112,17 @@ export default function GroupDetailPage() {
   const [reactionError, setReactionError] = useState('');
   const reactionErrorTimer = useRef(null);
 
+  // Per-message "more actions" sheet (the ellipsis menu)
+  const [activeMessageActions, setActiveMessageActions] = useState(null);
+  const messageActionsSheet = useDraggableSheet(() => setActiveMessageActions(null));
+
+  // Group options sheet (replaces the always-visible links list)
+  const [groupOptionsVisible, setGroupOptionsVisible] = useState(false);
+  const groupOptionsSheet = useDraggableSheet(() => setGroupOptionsVisible(false));
+
   // Admin management state
   const [editVisible, setEditVisible] = useState(false);
+  const editSheet = useDraggableSheet(() => setEditVisible(false));
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editCategory, setEditCategory] = useState('Academics');
@@ -126,23 +166,22 @@ export default function GroupDetailPage() {
       padding: 16,
       marginBottom: 12,
     },
-    manageButton: {
+    heroActionsRow: {
       position: 'absolute',
       top: 14,
       right: 14,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 5,
-      backgroundColor: 'rgba(255,255,255,0.18)',
-      borderRadius: 999,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
+      gap: 8,
       zIndex: 2,
     },
-    manageButtonText: {
-      color: '#FFFFFF',
-      fontSize: 11,
-      fontWeight: '800',
+    heroIconButton: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(255,255,255,0.18)',
     },
     heroTopRow: {
       flexDirection: 'row',
@@ -256,6 +295,26 @@ export default function GroupDetailPage() {
     rowGrouped: {
       marginTop: -2,
     },
+    swipeReplyIconTheirs: {
+      position: 'absolute',
+      left: 2,
+      top: '50%',
+      marginTop: -12,
+      width: 24,
+      height: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    swipeReplyIconMine: {
+      position: 'absolute',
+      right: 2,
+      top: '50%',
+      marginTop: -12,
+      width: 24,
+      height: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     avatarSlot: {
       width: 30,
       alignItems: 'center',
@@ -324,6 +383,11 @@ export default function GroupDetailPage() {
     messageTimeMine: {
       color: c.brandGlow,
     },
+    kebabButton: {
+      marginLeft: 8,
+      paddingHorizontal: 2,
+      paddingVertical: 2,
+    },
 
     replyBlock: {
       borderLeftWidth: 3,
@@ -391,7 +455,7 @@ export default function GroupDetailPage() {
       color: c.brandDark,
     },
 
-    /* Quick reaction picker */
+    /* Quick reaction picker (long-press) */
     quickReactionBar: {
       flexDirection: 'row',
       alignSelf: 'flex-start',
@@ -427,34 +491,90 @@ export default function GroupDetailPage() {
       fontSize: 18,
     },
 
-    messageActions: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 6,
-      marginTop: 6,
-      marginLeft: 4,
-    },
-    messageActionsMine: {
+    /* Ellipsis "more actions" sheet, per message */
+    actionSheetBackdrop: {
+      flex: 1,
+      backgroundColor: c.overlay,
       justifyContent: 'flex-end',
-      marginLeft: 0,
-      marginRight: 4,
     },
-    actionButton: {
+    actionSheetCard: {
+      backgroundColor: c.surface,
+      borderTopLeftRadius: 22,
+      borderTopRightRadius: 22,
+      paddingHorizontal: 10,
+      paddingTop: 8,
+      paddingBottom: 24,
+    },
+    actionSheetHandleWrap: {
+      paddingVertical: 10,
+      alignItems: 'center',
+    },
+    actionSheetHandle: {
+      width: 40,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: c.borderDefault,
+    },
+    actionSheetRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 3,
-      paddingVertical: 4,
-      paddingHorizontal: 8,
-      backgroundColor: c.brandLight,
-      borderRadius: 999,
+      gap: 12,
+      paddingVertical: 13,
+      paddingHorizontal: 10,
     },
-    actionText: {
-      color: c.brandDark,
-      fontSize: 11,
+    actionSheetIconWrap: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: c.brandLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    actionSheetLabel: {
+      fontSize: 14.5,
       fontWeight: '700',
+      color: c.textPrimary,
     },
 
-    /* Links */
+    /* Group options / links */
+    groupOptionsPreview: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingHorizontal: 10,
+      paddingBottom: 12,
+      marginBottom: 4,
+      borderBottomWidth: 1,
+      borderBottomColor: c.borderDefault,
+    },
+    groupOptionsAvatar: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: c.brandLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    groupOptionsAvatarImage: {
+      width: 40,
+      height: 40,
+    },
+    groupOptionsAvatarText: {
+      color: c.brandDark,
+      fontWeight: '800',
+      fontSize: 15,
+    },
+    groupOptionsName: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: c.textPrimary,
+    },
+    groupOptionsMeta: {
+      fontSize: 12,
+      color: c.textSecondary,
+      marginTop: 1,
+    },
     requestsCard: {
       backgroundColor: c.surface,
       borderRadius: 16,
@@ -526,21 +646,13 @@ export default function GroupDetailPage() {
       fontSize: 11,
       fontWeight: '700',
     },
-    linksWrap: {
-      marginTop: 8,
-      marginBottom: 4,
-    },
     linkCard: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 10,
-      backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.borderDefault,
       borderRadius: 14,
       paddingVertical: 12,
-      paddingHorizontal: 12,
-      marginBottom: 8,
+      paddingHorizontal: 10,
     },
     linkIconWrap: {
       width: 30,
@@ -556,10 +668,7 @@ export default function GroupDetailPage() {
       fontWeight: '700',
       fontSize: 13,
     },
-    dangerLinkCard: {
-      borderColor: c.dangerBorder,
-      backgroundColor: c.dangerLight,
-    },
+    dangerLinkCard: {},
     dangerIconWrap: {
       backgroundColor: c.redLight,
     },
@@ -655,7 +764,7 @@ export default function GroupDetailPage() {
       backgroundColor: c.brandGlow,
     },
 
-    /* Manage group modal */
+    /* Bottom sheets (manage group / group options) */
     sheetBackdrop: {
       flex: 1,
       backgroundColor: c.overlay,
@@ -672,13 +781,15 @@ export default function GroupDetailPage() {
       paddingBottom: 28,
       maxHeight: '88%',
     },
+    sheetHandleWrap: {
+      paddingVertical: 8,
+      alignItems: 'center',
+    },
     sheetHandle: {
       width: 40,
       height: 4,
       borderRadius: 2,
       backgroundColor: c.borderDefault,
-      alignSelf: 'center',
-      marginBottom: 12,
     },
     sheetTitle: {
       fontSize: 17,
@@ -1010,6 +1121,11 @@ export default function GroupDetailPage() {
     }
   };
 
+  const setReplyFromSwipe = (message) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setReplyTo(message);
+  };
+
   const openEdit = () => {
     if (!group) return;
     setEditName(group.name || '');
@@ -1021,6 +1137,7 @@ export default function GroupDetailPage() {
     setEditWelcomeMessage(group.welcomeMessage || '');
     setEditPhotoUri(null);
     setEditMessage('');
+    setGroupOptionsVisible(false);
     setEditVisible(true);
   };
 
@@ -1105,6 +1222,30 @@ export default function GroupDetailPage() {
     }
   };
 
+  const confirmLeaveGroup = () => {
+    setGroupOptionsVisible(false);
+    Alert.alert('Leave group', 'Are you sure you want to leave this group?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Leave',
+        style: 'destructive',
+        onPress: async () => {
+          setBusy(true);
+          try {
+            await leaveGroup(group, user.uid);
+            router.replace('/community');
+          } catch (error) {
+            Alert.alert('Error', error?.message || 'Unable to leave group.');
+          } finally {
+            setBusy(false);
+          }
+        },
+      },
+    ]);
+  };
+
+  const activeMine = activeMessageActions && user?.uid && activeMessageActions.senderId === user.uid;
+
   return (
     <ScreenShell title="Group" subtitle={group?.name || groupId} showBack loading={loading} scrollable={false}>
       {group ? (
@@ -1119,12 +1260,18 @@ export default function GroupDetailPage() {
           >
             {/* Group info card */}
             <View style={styles.hero}>
-              {isAdmin ? (
-                <Pressable style={styles.manageButton} onPress={openEdit} hitSlop={8}>
-                  <Ionicons name="create-outline" size={16} color="#FFFFFF" />
-                  <Text style={styles.manageButtonText}>Manage</Text>
-                </Pressable>
-              ) : null}
+              <View style={styles.heroActionsRow}>
+                {isAdmin ? (
+                  <Pressable style={styles.heroIconButton} onPress={openEdit} hitSlop={8}>
+                    <Ionicons name="create-outline" size={16} color="#FFFFFF" />
+                  </Pressable>
+                ) : null}
+                {isMember ? (
+                  <Pressable style={styles.heroIconButton} onPress={() => setGroupOptionsVisible(true)} hitSlop={8}>
+                    <Ionicons name="ellipsis-horizontal" size={16} color="#FFFFFF" />
+                  </Pressable>
+                ) : null}
+              </View>
               <View style={styles.heroTopRow}>
                 <View style={styles.heroAvatar}>
                   {groupPhotoUrl ? (
@@ -1198,144 +1345,30 @@ export default function GroupDetailPage() {
                   const reactionEntries = Object.entries(message.reactions || {})
                     .filter(([, uids]) => Array.isArray(uids) && uids.length)
                     .sort((a, b) => b[1].length - a[1].length);
-                  const pickerOpen = reactionPickerFor === message.id;
-                  const isReacting = reactingMessageId === message.id;
 
                   return (
-                    <View
+                    <MessageRow
                       key={message.id}
-                      style={[
-                        styles.row,
-                        mine ? styles.rowMine : styles.rowTheirs,
-                        isGroupedWithPrev ? styles.rowGrouped : null,
-                      ]}
-                    >
-                      {!mine ? (
-                        <Pressable
-                          style={styles.avatarSlot}
-                          onPress={() => message.senderId && router.push(`/view-user-profile/${message.senderId}`)}
-                          disabled={!message.senderId}
-                        >
-                          {showHeader ? (
-                            <View style={[styles.avatar, { backgroundColor: senderColor }]}>
-                              <Text style={styles.avatarText}>{initialsForName(message.senderName || 'S')}</Text>
-                            </View>
-                          ) : null}
-                        </Pressable>
-                      ) : null}
-
-                      <View style={styles.bubbleColumn}>
-                        <Pressable
-                          onLongPress={() => openReactionPicker(message)}
-                          delayLongPress={320}
-                          disabled={!isMember}
-                          style={[
-                            styles.bubble,
-                            mine ? styles.bubbleMine : styles.bubbleTheirs,
-                            mine
-                              ? isGroupedWithPrev && styles.bubbleMineGrouped
-                              : isGroupedWithPrev && styles.bubbleTheirsGrouped,
-                          ]}
-                        >
-                          {showHeader ? (
-                            <Text style={[styles.messageAuthor, { color: senderColor }]}>
-                              {message.senderName || 'Student'}
-                            </Text>
-                          ) : null}
-
-                          {message.replyTo ? (
-                            <View
-                              style={[
-                                styles.replyBlock,
-                                mine ? styles.replyBlockMine : styles.replyBlockTheirs,
-                              ]}
-                            >
-                              <Text style={styles.replyAuthor}>{message.replyTo.senderName || 'Student'}</Text>
-                              <Text style={styles.replyText} numberOfLines={2}>
-                                {message.replyTo.text || ''}
-                              </Text>
-                            </View>
-                          ) : null}
-
-                          <Text style={[styles.messageBody, mine && styles.messageBodyMine]}>
-                            {message.text || 'Attachment'}
-                          </Text>
-
-                          <View style={styles.bubbleFooter}>
-                            {isReacting ? (
-                              <ActivityIndicator size="small" color={mine ? colors.brandGlow : colors.brand} style={{ marginRight: 6 }} />
-                            ) : null}
-                            <Text style={[styles.messageTime, mine && styles.messageTimeMine]}>
-                              {formatShortTime(message.createdAt)}
-                            </Text>
-                            {mine ? (
-                              <Ionicons name="checkmark-done" size={14} color={colors.brandGlow} style={{ marginLeft: 4 }} />
-                            ) : null}
-                          </View>
-                        </Pressable>
-
-                        {reactionEntries.length ? (
-                          <View style={[styles.reactionsRow, mine && styles.reactionsRowMine]}>
-                            {reactionEntries.map(([emoji, uids]) => {
-                              const reactedByMe = user?.uid ? uids.includes(user.uid) : false;
-                              return (
-                                <Pressable
-                                  key={emoji}
-                                  style={[styles.reactionPill, reactedByMe && styles.reactionPillActive]}
-                                  onPress={() => toggleReaction(message, emoji)}
-                                  hitSlop={4}
-                                >
-                                  <Text style={styles.reactionEmoji}>{emoji}</Text>
-                                  <Text style={[styles.reactionCount, reactedByMe && styles.reactionCountActive]}>
-                                    {uids.length}
-                                  </Text>
-                                </Pressable>
-                              );
-                            })}
-                          </View>
-                        ) : null}
-
-                        {pickerOpen ? (
-                          <View style={[styles.quickReactionBar, mine && styles.quickReactionBarMine]}>
-                            {QUICK_REACTIONS.map((emoji) => (
-                              <Pressable
-                                key={emoji}
-                                style={({ pressed }) => [styles.quickReactionButton, pressed && styles.quickReactionButtonPressed]}
-                                onPress={() => toggleReaction(message, emoji)}
-                                hitSlop={4}
-                              >
-                                <Text style={styles.quickReactionEmoji}>{emoji}</Text>
-                              </Pressable>
-                            ))}
-                          </View>
-                        ) : null}
-
-                        <View style={[styles.messageActions, mine && styles.messageActionsMine]}>
-                          <Pressable style={styles.actionButton} onPress={() => setReplyTo(message)}>
-                            <Ionicons name="arrow-undo-outline" size={12} color={colors.brandDark} />
-                            <Text style={styles.actionText}>Reply</Text>
-                          </Pressable>
-                          {isMember ? (
-                            <Pressable style={styles.actionButton} onPress={() => openReactionPicker(message)}>
-                              <Ionicons name="happy-outline" size={12} color={colors.brandDark} />
-                              <Text style={styles.actionText}>React</Text>
-                            </Pressable>
-                          ) : null}
-                          {message.senderId && !mine ? (
-                            <Pressable style={styles.actionButton} onPress={() => openDm(message)}>
-                              <Ionicons name="chatbubble-ellipses-outline" size={12} color={colors.brandDark} />
-                              <Text style={styles.actionText}>DM</Text>
-                            </Pressable>
-                          ) : null}
-                          {message.senderName ? (
-                            <Pressable style={styles.actionButton} onPress={() => insertMention(message.senderName)}>
-                              <Ionicons name="at-outline" size={12} color={colors.brandDark} />
-                              <Text style={styles.actionText}>Tag</Text>
-                            </Pressable>
-                          ) : null}
-                        </View>
-                      </View>
-                    </View>
+                      message={message}
+                      mine={mine}
+                      showHeader={showHeader}
+                      isGroupedWithPrev={isGroupedWithPrev}
+                      senderColor={senderColor}
+                      reactionEntries={reactionEntries}
+                      pickerOpen={reactionPickerFor === message.id}
+                      isReacting={reactingMessageId === message.id}
+                      isMember={isMember}
+                      colors={colors}
+                      styles={styles}
+                      user={user}
+                      router={router}
+                      formatShortTime={formatShortTime}
+                      initialsForName={initialsForName}
+                      onOpenReactionPicker={openReactionPicker}
+                      onToggleReaction={toggleReaction}
+                      onSwipeReply={setReplyFromSwipe}
+                      onOpenActions={setActiveMessageActions}
+                    />
                   );
                 })
               ) : (
@@ -1378,76 +1411,6 @@ export default function GroupDetailPage() {
                 ))}
               </View>
             ) : null}
-
-            <View style={styles.linksWrap}>
-              <Pressable style={styles.linkCard} onPress={() => router.push('/messages')}>
-                <View style={styles.linkIconWrap}>
-                  <Ionicons name="mail-outline" size={16} color={colors.brand} />
-                </View>
-                <Text style={styles.linkText}>Open messages</Text>
-                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-              </Pressable>
-              <Pressable style={styles.linkCard} onPress={() => router.push({ pathname: '/community-settings', params: { groupId } })}>
-                <View style={styles.linkIconWrap}>
-                  <Ionicons name="settings-outline" size={16} color={colors.brand} />
-                </View>
-                <Text style={styles.linkText}>Group settings</Text>
-                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-              </Pressable>
-              {isAdmin ? (
-                <Pressable style={styles.linkCard} onPress={openEdit}>
-                  <View style={styles.linkIconWrap}>
-                    <Ionicons name="create-outline" size={16} color={colors.brand} />
-                  </View>
-                  <Text style={styles.linkText}>Manage this group</Text>
-                  <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-                </Pressable>
-              ) : null}
-              {isAdmin ? (
-                <Pressable
-                  style={[styles.linkCard, styles.dangerLinkCard]}
-                  onPress={() => router.push({ pathname: '/community-settings', params: { groupId } })}
-                >
-                  <View style={[styles.linkIconWrap, styles.dangerIconWrap]}>
-                    <Ionicons name="person-remove-outline" size={16} color={colors.danger} />
-                  </View>
-                  <Text style={styles.dangerLinkText}>Remove member</Text>
-                  <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-                </Pressable>
-              ) : null}
-              {membership && !isAdmin ? (
-                <Pressable
-                  style={[styles.linkCard, styles.dangerLinkCard]}
-                  onPress={() => {
-                    Alert.alert('Leave group', 'Are you sure you want to leave this group?', [
-                      { text: 'Cancel', style: 'cancel' },
-                      {
-                        text: 'Leave',
-                        style: 'destructive',
-                        onPress: async () => {
-                          setBusy(true);
-                          try {
-                            await leaveGroup(group, user.uid);
-                            router.replace('/community');
-                          } catch (error) {
-                            Alert.alert('Error', error?.message || 'Unable to leave group.');
-                          } finally {
-                            setBusy(false);
-                          }
-                        },
-                      },
-                    ]);
-                  }}
-                  disabled={busy}
-                >
-                  <View style={[styles.linkIconWrap, styles.dangerIconWrap]}>
-                    <Ionicons name="exit-outline" size={16} color={colors.danger} />
-                  </View>
-                  <Text style={styles.dangerLinkText}>Leave group</Text>
-                  <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-                </Pressable>
-              ) : null}
-            </View>
           </ScrollView>
 
           {/* Composer, pinned to bottom like WhatsApp */}
@@ -1506,7 +1469,174 @@ export default function GroupDetailPage() {
         <EmptyState title="Group not found" description="This group may have been deleted or is unavailable." />
       )}
 
-      {/* Admin: manage group modal */}
+      {/* Per-message "more" sheet, opened from the bubble's ellipsis */}
+      <Modal
+        visible={Boolean(activeMessageActions)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActiveMessageActions(null)}
+      >
+        <Pressable style={styles.actionSheetBackdrop} onPress={() => setActiveMessageActions(null)}>
+          <Animated.View
+            style={[styles.actionSheetCard, { transform: [{ translateY: messageActionsSheet.translateY }] }]}
+            onStartShouldSetResponder={() => true}
+          >
+            <View style={styles.actionSheetHandleWrap} {...messageActionsSheet.panHandlers}>
+              <View style={styles.actionSheetHandle} />
+            </View>
+            <Pressable
+              style={styles.actionSheetRow}
+              onPress={() => {
+                setReplyTo(activeMessageActions);
+                setActiveMessageActions(null);
+              }}
+            >
+              <View style={styles.actionSheetIconWrap}>
+                <Ionicons name="arrow-undo-outline" size={16} color={colors.brandDark} />
+              </View>
+              <Text style={styles.actionSheetLabel}>Reply</Text>
+            </Pressable>
+            <Pressable
+              style={styles.actionSheetRow}
+              onPress={() => {
+                const message = activeMessageActions;
+                setActiveMessageActions(null);
+                if (message) openReactionPicker(message);
+              }}
+            >
+              <View style={styles.actionSheetIconWrap}>
+                <Ionicons name="happy-outline" size={16} color={colors.brandDark} />
+              </View>
+              <Text style={styles.actionSheetLabel}>React</Text>
+            </Pressable>
+            {activeMessageActions?.senderName ? (
+              <Pressable
+                style={styles.actionSheetRow}
+                onPress={() => {
+                  insertMention(activeMessageActions.senderName);
+                  setActiveMessageActions(null);
+                }}
+              >
+                <View style={styles.actionSheetIconWrap}>
+                  <Ionicons name="at-outline" size={16} color={colors.brandDark} />
+                </View>
+                <Text style={styles.actionSheetLabel}>Tag {activeMessageActions.senderName}</Text>
+              </Pressable>
+            ) : null}
+            {activeMessageActions?.senderId && !activeMine ? (
+              <Pressable
+                style={styles.actionSheetRow}
+                onPress={() => {
+                  const message = activeMessageActions;
+                  setActiveMessageActions(null);
+                  if (message) openDm(message);
+                }}
+              >
+                <View style={styles.actionSheetIconWrap}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.brandDark} />
+                </View>
+                <Text style={styles.actionSheetLabel}>Message privately</Text>
+              </Pressable>
+            ) : null}
+          </Animated.View>
+        </Pressable>
+      </Modal>
+
+      {/* Group options sheet - navigation & membership actions, draggable */}
+      <Modal
+        visible={groupOptionsVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setGroupOptionsVisible(false)}
+      >
+        <Pressable style={styles.sheetBackdrop} onPress={() => setGroupOptionsVisible(false)} />
+        <View style={styles.sheetWrap}>
+          <Animated.View style={[styles.sheet, { transform: [{ translateY: groupOptionsSheet.translateY }] }]}>
+            <View style={styles.sheetHandleWrap} {...groupOptionsSheet.panHandlers}>
+              <View style={styles.sheetHandle} />
+            </View>
+            <View style={styles.groupOptionsPreview}>
+              <View style={styles.groupOptionsAvatar}>
+                {groupPhotoUrl ? (
+                  <Image source={{ uri: groupPhotoUrl }} style={styles.groupOptionsAvatarImage} />
+                ) : (
+                  <Text style={styles.groupOptionsAvatarText}>{initialsForName(group?.name)}</Text>
+                )}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.groupOptionsName}>{group?.name}</Text>
+                <Text style={styles.groupOptionsMeta}>{group?.memberCount || 0} members</Text>
+              </View>
+            </View>
+
+            <Pressable
+              style={styles.linkCard}
+              onPress={() => {
+                setGroupOptionsVisible(false);
+                router.push('/messages');
+              }}
+            >
+              <View style={styles.linkIconWrap}>
+                <Ionicons name="mail-outline" size={16} color={colors.brand} />
+              </View>
+              <Text style={styles.linkText}>Open messages</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+            </Pressable>
+
+            <Pressable
+              style={styles.linkCard}
+              onPress={() => {
+                setGroupOptionsVisible(false);
+                router.push({ pathname: '/community-settings', params: { groupId } });
+              }}
+            >
+              <View style={styles.linkIconWrap}>
+                <Ionicons name="settings-outline" size={16} color={colors.brand} />
+              </View>
+              <Text style={styles.linkText}>Group settings</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+            </Pressable>
+
+            {isAdmin ? (
+              <Pressable style={styles.linkCard} onPress={openEdit}>
+                <View style={styles.linkIconWrap}>
+                  <Ionicons name="create-outline" size={16} color={colors.brand} />
+                </View>
+                <Text style={styles.linkText}>Manage this group</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+              </Pressable>
+            ) : null}
+
+            {isAdmin ? (
+              <Pressable
+                style={[styles.linkCard, styles.dangerLinkCard]}
+                onPress={() => {
+                  setGroupOptionsVisible(false);
+                  router.push({ pathname: '/community-settings', params: { groupId } });
+                }}
+              >
+                <View style={[styles.linkIconWrap, styles.dangerIconWrap]}>
+                  <Ionicons name="person-remove-outline" size={16} color={colors.danger} />
+                </View>
+                <Text style={styles.dangerLinkText}>Remove member</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+              </Pressable>
+            ) : null}
+
+            {membership && !isAdmin ? (
+              <Pressable style={[styles.linkCard, styles.dangerLinkCard]} onPress={confirmLeaveGroup} disabled={busy}>
+                <View style={[styles.linkIconWrap, styles.dangerIconWrap]}>
+                  <Ionicons name="exit-outline" size={16} color={colors.danger} />
+                </View>
+                <Text style={styles.dangerLinkText}>Leave group</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+              </Pressable>
+            ) : null}
+          </Animated.View>
+        </View>
+      </Modal>
+
+      {/* Admin: manage group modal, draggable */}
       <Modal visible={editVisible} transparent animationType="slide" onRequestClose={() => setEditVisible(false)}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setEditVisible(false)} />
         <KeyboardAvoidingView
@@ -1514,8 +1644,10 @@ export default function GroupDetailPage() {
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
           style={styles.sheetWrap}
         >
-          <View style={styles.sheet}>
-            <View style={styles.sheetHandle} />
+          <Animated.View style={[styles.sheet, { transform: [{ translateY: editSheet.translateY }] }]}>
+            <View style={styles.sheetHandleWrap} {...editSheet.panHandlers}>
+              <View style={styles.sheetHandle} />
+            </View>
             <Text style={styles.sheetTitle}>Manage group</Text>
 
             <ScrollView showsVerticalScrollIndicator={false}>
@@ -1659,9 +1791,188 @@ export default function GroupDetailPage() {
                 <Text style={styles.cancelText}>Cancel</Text>
               </Pressable>
             </ScrollView>
-          </View>
+          </Animated.View>
         </KeyboardAvoidingView>
       </Modal>
     </ScreenShell>
+  );
+}
+
+// Extracted so every bubble owns its own PanResponder / Animated.Value pair
+// (swipe-to-reply + press scale) without recreating them on every parent render.
+function MessageRow({
+  message,
+  mine,
+  showHeader,
+  isGroupedWithPrev,
+  senderColor,
+  reactionEntries,
+  pickerOpen,
+  isReacting,
+  isMember,
+  colors,
+  styles,
+  user,
+  router,
+  formatShortTime,
+  initialsForName,
+  onOpenReactionPicker,
+  onToggleReaction,
+  onSwipeReply,
+  onOpenActions,
+}) {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const swipeX = useRef(new Animated.Value(0)).current;
+  const hasFiredHaptic = useRef(false);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gesture) =>
+        Math.abs(gesture.dx) > 10 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.5,
+      onPanResponderMove: (_, gesture) => {
+        const dx = mine ? Math.min(0, gesture.dx) : Math.max(0, gesture.dx);
+        const clamped = Math.max(-SWIPE_REPLY_MAX, Math.min(dx, SWIPE_REPLY_MAX));
+        swipeX.setValue(clamped);
+        const pastThreshold = Math.abs(clamped) >= SWIPE_REPLY_THRESHOLD;
+        if (pastThreshold && !hasFiredHaptic.current) {
+          hasFiredHaptic.current = true;
+          Haptics.selectionAsync();
+        } else if (!pastThreshold) {
+          hasFiredHaptic.current = false;
+        }
+      },
+      onPanResponderRelease: (_, gesture) => {
+        const dx = mine ? Math.min(0, gesture.dx) : Math.max(0, gesture.dx);
+        if (Math.abs(dx) >= SWIPE_REPLY_THRESHOLD) {
+          onSwipeReply(message);
+        }
+        hasFiredHaptic.current = false;
+        Animated.spring(swipeX, { toValue: 0, useNativeDriver: true, bounciness: 8, speed: 16 }).start();
+      },
+      onPanResponderTerminate: () => {
+        hasFiredHaptic.current = false;
+        Animated.spring(swipeX, { toValue: 0, useNativeDriver: true }).start();
+      },
+    })
+  ).current;
+
+  const handlePressIn = () => {
+    Animated.spring(scaleAnim, { toValue: 0.97, useNativeDriver: true, speed: 40, bounciness: 6 }).start();
+  };
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 30, bounciness: 6 }).start();
+  };
+
+  const replyIconOpacity = swipeX.interpolate({
+    inputRange: mine ? [-SWIPE_REPLY_THRESHOLD, 0] : [0, SWIPE_REPLY_THRESHOLD],
+    outputRange: mine ? [1, 0] : [0, 1],
+    extrapolate: 'clamp',
+  });
+
+  return (
+    <View
+      style={[styles.row, mine ? styles.rowMine : styles.rowTheirs, isGroupedWithPrev ? styles.rowGrouped : null]}
+      {...panResponder.panHandlers}
+    >
+      <Animated.View
+        pointerEvents="none"
+        style={[mine ? styles.swipeReplyIconMine : styles.swipeReplyIconTheirs, { opacity: replyIconOpacity }]}
+      >
+        <Ionicons name="arrow-undo" size={18} color={colors.brand} />
+      </Animated.View>
+
+      {!mine ? (
+        <Pressable
+          style={styles.avatarSlot}
+          onPress={() => message.senderId && router.push(`/view-user-profile/${message.senderId}`)}
+          disabled={!message.senderId}
+        >
+          {showHeader ? (
+            <View style={[styles.avatar, { backgroundColor: senderColor }]}>
+              <Text style={styles.avatarText}>{initialsForName(message.senderName || 'S')}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      ) : null}
+
+      <Animated.View style={[styles.bubbleColumn, { transform: [{ translateX: swipeX }, { scale: scaleAnim }] }]}>
+        <Pressable
+          onLongPress={() => onOpenReactionPicker(message)}
+          onPressIn={handlePressIn}
+          onPressOut={handlePressOut}
+          delayLongPress={280}
+          disabled={!isMember}
+          style={[
+            styles.bubble,
+            mine ? styles.bubbleMine : styles.bubbleTheirs,
+            mine ? (isGroupedWithPrev && styles.bubbleMineGrouped) : (isGroupedWithPrev && styles.bubbleTheirsGrouped),
+          ]}
+        >
+          {showHeader ? (
+            <Text style={[styles.messageAuthor, { color: senderColor }]}>{message.senderName || 'Student'}</Text>
+          ) : null}
+
+          {message.replyTo ? (
+            <View style={[styles.replyBlock, mine ? styles.replyBlockMine : styles.replyBlockTheirs]}>
+              <Text style={styles.replyAuthor}>{message.replyTo.senderName || 'Student'}</Text>
+              <Text style={styles.replyText} numberOfLines={2}>
+                {message.replyTo.text || ''}
+              </Text>
+            </View>
+          ) : null}
+
+          <Text style={[styles.messageBody, mine && styles.messageBodyMine]}>{message.text || 'Attachment'}</Text>
+
+          <View style={styles.bubbleFooter}>
+            {isReacting ? (
+              <ActivityIndicator size="small" color={mine ? colors.brandGlow : colors.brand} style={{ marginRight: 6 }} />
+            ) : null}
+            <Text style={[styles.messageTime, mine && styles.messageTimeMine]}>{formatShortTime(message.createdAt)}</Text>
+            {mine ? <Ionicons name="checkmark-done" size={14} color={colors.brandGlow} style={{ marginLeft: 4 }} /> : null}
+            <Pressable onPress={() => onOpenActions(message)} hitSlop={8} style={styles.kebabButton}>
+              <Ionicons
+                name="ellipsis-vertical"
+                size={13}
+                color={mine ? 'rgba(255,255,255,0.85)' : colors.textTertiary}
+              />
+            </Pressable>
+          </View>
+        </Pressable>
+
+        {reactionEntries.length ? (
+          <View style={[styles.reactionsRow, mine && styles.reactionsRowMine]}>
+            {reactionEntries.map(([emoji, uids]) => {
+              const reactedByMe = user?.uid ? uids.includes(user.uid) : false;
+              return (
+                <Pressable
+                  key={emoji}
+                  style={[styles.reactionPill, reactedByMe && styles.reactionPillActive]}
+                  onPress={() => onToggleReaction(message, emoji)}
+                  hitSlop={4}
+                >
+                  <Text style={styles.reactionEmoji}>{emoji}</Text>
+                  <Text style={[styles.reactionCount, reactedByMe && styles.reactionCountActive]}>{uids.length}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
+
+        {pickerOpen ? (
+          <View style={[styles.quickReactionBar, mine && styles.quickReactionBarMine]}>
+            {QUICK_REACTIONS.map((emoji) => (
+              <Pressable
+                key={emoji}
+                style={({ pressed }) => [styles.quickReactionButton, pressed && styles.quickReactionButtonPressed]}
+                onPress={() => onToggleReaction(message, emoji)}
+                hitSlop={4}
+              >
+                <Text style={styles.quickReactionEmoji}>{emoji}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+      </Animated.View>
+    </View>
   );
 }

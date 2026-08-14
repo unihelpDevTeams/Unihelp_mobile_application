@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
-  Alert,
   Animated,
   Easing,
   KeyboardAvoidingView,
@@ -33,6 +32,7 @@ import { db } from "../../firebase/config";
 import { useAuth } from "../../context/AuthContext";
 import { useTheme } from "../../src/shared/theme/ThemeContext";
 import { useThemeStyles } from "../../src/shared/theme/createStyles";
+import ConfirmDialog from "../../src/shared/components/ConfirmDialog";
 import ScreenShell from "../../src/shared/components/ScreenShell";
 import EmptyState from "../../src/shared/components/EmptyState";
 import { Image } from "expo-image";
@@ -93,6 +93,7 @@ export default function CgpaPage() {
   const [editingId, setEditingId] = useState(null);
   const [sortBy, setSortBy] = useState("recent");
   const [banner, setBanner] = useState(null); // { type: 'success' | 'error', message }
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const scrollRef = useRef(null);
   const bannerAnim = useRef(new Animated.Value(0)).current;
@@ -403,14 +404,7 @@ export default function CgpaPage() {
   }
 
   function confirmDelete(item) {
-    Alert.alert(
-      "Delete this record?",
-      `CGPA ${Number(item.cgpa || 0).toFixed(2)} will be permanently removed. This can't be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => removeRecord(item.id) },
-      ]
-    );
+    setDeleteTarget(item);
   }
 
   async function removeRecord(id) {
@@ -418,6 +412,7 @@ export default function CgpaPage() {
       await deleteDoc(doc(db, "cgpaTracker", id));
       setRecords((prev) => prev.filter((record) => record.id !== id));
       if (editingId === id) cancelEdit();
+      setDeleteTarget(null);
       showBanner("success", "Record deleted");
     } catch (e) {
       console.log(e);
@@ -447,6 +442,15 @@ export default function CgpaPage() {
 
   return (
     <ScreenShell title="CGPA Tracker" subtitle="Track your academic journey" showBack loading={loading}>
+      <ConfirmDialog
+        visible={Boolean(deleteTarget)}
+        title="Delete this record?"
+        message={deleteTarget ? `CGPA ${Number(deleteTarget.cgpa || 0).toFixed(2)} will be permanently removed. This can't be undone.` : ""}
+        confirmLabel="Delete"
+        variant="destructive"
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && removeRecord(deleteTarget.id)}
+      />
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>

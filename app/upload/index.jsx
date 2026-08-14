@@ -32,6 +32,7 @@ import {
 import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { canManageResource, canUploadResource } from '../../src/shared/auth/resourcePermissions';
+import { COMMERCE_UPLOAD_LIMITS, isPremiumActive } from '../../src/shared/services/premium';
 
 const SPACE = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 28 };
 const RADIUS = { sm: 10, md: 14, lg: 18, xl: 22, pill: 999 };
@@ -337,8 +338,10 @@ export default function UploadPage() {
   // dependency array is evaluated synchronously during render, unlike the
   // effect body itself which only runs after render completes.)
   const isLimitRestricted = uploadType === 'marketplace' || uploadType === 'hostel';
-  const isFreeUser = !profile?.premium;
-  const freeLimit = 5;
+  const uploadOwnerId = profile?.uid || user?.uid;
+  const premiumActive = isPremiumActive(profile);
+  const isFreeUser = !premiumActive;
+  const uploadLimit = premiumActive ? COMMERCE_UPLOAD_LIMITS.premium : COMMERCE_UPLOAD_LIMITS.free;
   const postedBy =
     profile?.username ||
     profile?.fullName ||
@@ -363,21 +366,21 @@ export default function UploadPage() {
   }, [config.defaultForm, config.key]);
 
   useEffect(() => {
-    if (!profile?.uid || !isLimitRestricted) return;
+    if (!uploadOwnerId || !isLimitRestricted) return;
     let cancelled = false;
     (async () => {
       try {
         const collectionName = uploadType === 'marketplace' ? 'studentMarketplace' : 'hostels';
-        const count = await countUserUploads(collectionName, profile.uid, 'userId');
+        const count = await countUserUploads(collectionName, uploadOwnerId, 'userId');
         if (!cancelled) {
-          setLimitInfo({ count, limit: freeLimit, isFree: !profile?.premium });
+          setLimitInfo({ count, limit: uploadLimit, isFree: isFreeUser });
         }
       } catch {
-        if (!cancelled) setLimitInfo({ count: 0, limit: freeLimit, isFree: !profile?.premium });
+        if (!cancelled) setLimitInfo({ count: 0, limit: uploadLimit, isFree: isFreeUser });
       }
     })();
     return () => { cancelled = true; };
-  }, [isLimitRestricted, profile?.premium, profile?.uid, uploadType]);
+  }, [isFreeUser, isLimitRestricted, uploadLimit, uploadOwnerId, uploadType]);
 
   useEffect(() => {
     if (!editId || !EDIT_COLLECTIONS[uploadType]) {
@@ -467,7 +470,7 @@ export default function UploadPage() {
   const normalizedPrice = Number(String(form.price || '').replace(/[^\d.]/g, ''));
   const hasValidPrice = !['marketplace', 'hostel'].includes(uploadType) || (Number.isFinite(normalizedPrice) && normalizedPrice > 0);
   const hasValidYear = uploadType !== 'question' || !form.year || /^\d{4}$/.test(String(form.year).trim());
-  const canUploadMore = !isLimitRestricted || !isFreeUser || (limitInfo?.count ?? 0) < freeLimit;
+  const canUploadMore = !isLimitRestricted || isEditMode || (limitInfo?.count ?? 0) < uploadLimit;
   const uploadReady = validation && hasValidPrice && hasValidYear && canUploadMore && canCreateCurrentResource && canManageCurrentEdit;
   const primaryAttachment = attachments[0] || null;
   const previewSource = previewItem || primaryAttachment;
@@ -626,8 +629,8 @@ export default function UploadPage() {
         ownerName: postedBy,
         postedBy,
         status: 'pending',
-        verified: Boolean(profile?.premium),
-        premiumUser: Boolean(profile?.premium),
+        verified: premiumActive,
+        premiumUser: premiumActive,
       };
       if (uploadedAttachments.length) {
         return {
@@ -654,8 +657,8 @@ export default function UploadPage() {
         sellerName: postedBy,
         postedBy,
         status: 'pending',
-        verified: Boolean(profile?.premium),
-        premiumUser: Boolean(profile?.premium),
+        verified: premiumActive,
+        premiumUser: premiumActive,
       };
       if (uploadedAttachments.length) {
         return {
@@ -741,8 +744,12 @@ export default function UploadPage() {
       return;
     }
 
-    if (isLimitRestricted && isFreeUser && !canUploadMore) {
-      setError(`Free users can upload up to ${freeLimit} ${uploadType === 'marketplace' ? 'products' : 'hostels'}. Upgrade to Premium to publish more.`);
+    if (isLimitRestricted && !isEditMode && !canUploadMore) {
+      setError(
+        premiumActive
+          ? `Premium users can upload up to ${uploadLimit} ${uploadType === 'marketplace' ? 'products' : 'hostels'}.`
+          : `Free users can upload up to ${uploadLimit} ${uploadType === 'marketplace' ? 'products' : 'hostels'}. Upgrade to Premium for up to ${COMMERCE_UPLOAD_LIMITS.premium}.`
+      );
       return;
     }
 
@@ -1021,15 +1028,17 @@ export default function UploadPage() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          {isLimitRestricted && limitInfo ? (
+          {isLimitRestricted && !isEditMode && limitInfo ? (
             <View style={styles.limitBanner}>
               <View style={styles.limitBannerIcon}>
-                <Ionicons name="lock-open-outline" size={16} color={colors.brand} />
+                <Ionicons name={premiumActive ? 'sparkles-outline' : 'lock-open-outline'} size={16} color={colors.brand} />
               </View>
               <View style={styles.limitBannerCopy}>
-                <Text style={styles.limitBannerTitle}>Free-user upload limit</Text>
+                <Text style={styles.limitBannerTitle}>{premiumActive ? 'Premium upload plan' : 'Free-user upload limit'}</Text>
                 <Text style={styles.limitBannerText}>
-                  {limitInfo.count}/{freeLimit} {uploadType === 'marketplace' ? 'products' : 'hostels'} used. Premium unlocks unlimited publishing.
+                  {premiumActive
+                    ? `${limitInfo.count}/${uploadLimit} ${uploadType === 'marketplace' ? 'products' : 'hostels'} used on your Premium plan.`
+                    : `${limitInfo.count}/${uploadLimit} ${uploadType === 'marketplace' ? 'products' : 'hostels'} used. Premium raises this to ${COMMERCE_UPLOAD_LIMITS.premium}.`}
                 </Text>
               </View>
             </View>

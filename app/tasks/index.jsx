@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { addDoc, collection, deleteDoc, doc, getDocs, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
+import ConfirmDialog from '../../src/shared/components/ConfirmDialog';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
@@ -49,6 +50,7 @@ export default function TasksPage() {
   const [saving, setSaving] = useState(false);
   const [titleError, setTitleError] = useState(false);
   const [pendingIds, setPendingIds] = useState(() => new Set());
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const { colors } = useTheme();
   const isMounted = useRef(true);
 
@@ -348,7 +350,7 @@ export default function TasksPage() {
     return groups;
   }, [tasks]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!profile?.uid) {
       if (isMounted.current) setLoading(false);
       return;
@@ -359,11 +361,11 @@ export default function TasksPage() {
     } finally {
       if (isMounted.current) setLoading(false);
     }
-  };
+  }, [profile?.uid]);
 
   useEffect(() => {
     load().catch(() => { if (isMounted.current) setLoading(false); });
-  }, [profile?.uid]);
+  }, [load]);
 
   const isFormDirty = useMemo(
     () => Object.keys(form).some((key) => form[key] !== emptyTask[key]),
@@ -437,14 +439,7 @@ export default function TasksPage() {
   };
 
   const confirmDelete = (task) => {
-    Alert.alert(
-      'Delete task',
-      `Delete "${task.title}"? This can't be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => removeTask(task) },
-      ]
-    );
+    setDeleteTarget(task);
   };
 
   const renderTask = (task) => {
@@ -510,6 +505,21 @@ export default function TasksPage() {
 
   return (
     <ScreenShell title="Tasks" subtitle="Everything due this semester, in one place." showBack loading={loading}>
+      <ConfirmDialog
+        visible={Boolean(deleteTarget)}
+        title="Delete task?"
+        message={deleteTarget ? `Delete "${deleteTarget.title}"? This can't be undone.` : ''}
+        confirmLabel="Delete"
+        variant="destructive"
+        loading={Boolean(deleteTarget?.id && pendingIds.has(deleteTarget.id))}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          const task = deleteTarget;
+          setDeleteTarget(null);
+          removeTask(task);
+        }}
+      />
       <Text style={styles.eyebrow}>YOUR SEMESTER</Text>
 
       <View style={styles.progressCard}>

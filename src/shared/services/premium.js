@@ -14,9 +14,14 @@ export const PREMIUM_PLAN = {
     'Verified student badge',
     'Higher AI response limit',
     'Reduced ads experience',
-    'More hostel and product uploads',
+    'Up to 10 hostel and 10 product uploads',
     'Early access to new tools',
   ],
+};
+
+export const COMMERCE_UPLOAD_LIMITS = {
+  free: 5,
+  premium: 10,
 };
 
 export const getPremiumAmount = (billing) => (billing === 'yearly' ? PREMIUM_PLAN.yearly : PREMIUM_PLAN.monthly);
@@ -33,6 +38,21 @@ export const getDaysLeft = (expiresAt) => {
   if (!expiry) return null;
   const diff = expiry.getTime() - Date.now();
   return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+};
+
+export const isPremiumActive = (profile = {}) => {
+  if (!profile?.premium) return false;
+
+  const status = String(profile.subscriptionStatus || '').trim().toLowerCase();
+  if (status === 'expired') return false;
+
+  const expiry = getSubscriptionExpiry(
+    profile.subscriptionExpiresAt ||
+      profile.premiumExpiresAt ||
+      profile.expiresAt
+  );
+
+  return !expiry || expiry.getTime() > Date.now();
 };
 
 const parseReturnUrl = (url = '') => {

@@ -5,13 +5,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, borderRadius, shadows } from '../../src/shared/theme';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
-import { Button } from '../../src/shared/components/Button';
+import ConfirmDialog from '../../src/shared/components/ConfirmDialog';
 import { fetchDownloadedItems, deleteDownload } from '../../services/firestoreSync';
 
 export default function DownloadsScreen() {
   const router = useRouter();
   const [downloads, setDownloads] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadDownloads = useCallback(async () => {
     setLoading(true);
@@ -29,26 +31,22 @@ export default function DownloadsScreen() {
     loadDownloads();
   }, [loadDownloads]);
 
-  const handleDelete = async (item) => {
-    Alert.alert(
-      'Delete Download',
-      `Remove "${item.title}" from your downloads?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteDownload(item.id);
-              setDownloads((prev) => prev.filter((d) => d.id !== item.id));
-            } catch {
-              Alert.alert('Error', 'Could not delete the download.');
-            }
-          },
-        },
-      ]
-    );
+  const handleDelete = (item) => {
+    setDeleteTarget(item);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deleteDownload(deleteTarget.id);
+      setDownloads((prev) => prev.filter((d) => d.id !== deleteTarget.id));
+      setDeleteTarget(null);
+    } catch {
+      Alert.alert('Error', 'Could not delete the download.');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const handleOpen = (item) => {
@@ -108,6 +106,16 @@ export default function DownloadsScreen() {
 
   return (
     <ScreenShell title="Downloads" subtitle="Access your offline study materials" showBack>
+      <ConfirmDialog
+        visible={Boolean(deleteTarget)}
+        title="Delete download?"
+        message={deleteTarget ? `Remove "${deleteTarget.title}" from your downloads?` : ''}
+        confirmLabel="Delete"
+        variant="destructive"
+        loading={deleting}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={confirmDelete}
+      />
       {headerContent}
 
       {loading ? (

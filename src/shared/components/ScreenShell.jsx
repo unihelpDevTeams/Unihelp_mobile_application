@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions, KeyboardAvoidingView, Platform } from 'react-native';
+import { Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNetInfo } from '@react-native-community/netinfo';
 import { FullScreenLoader } from './AILoaders';
@@ -11,6 +11,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { useThemeStyles } from '../theme/createStyles';
 import { headerMenuSections } from '../navigation/menuConfig';
 import ThemeToggle from './ThemeToggle';
+import ConfirmDialog from './ConfirmDialog';
 import { useAuth } from '../../../context/AuthContext';
 import { filterMenuSectionsByRole } from '../navigation/routePermissions';
 import { countUserUploads, fetchNotifications } from '../../../services/firestoreSync';
@@ -61,6 +62,7 @@ export default function ScreenShell({
   const { colors } = useTheme();
   const { isConnected } = useNetInfo();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
   const [uploadCounts, setUploadCounts] = useState({ hostels: 0, listings: 0, stories: 0 });
   const uid = profile?.uid || user?.uid;
@@ -311,11 +313,8 @@ export default function ScreenShell({
 
   const confirmLogout = useCallback(() => {
     setMenuOpen(false);
-    Alert.alert('Sign out', 'You will need to sign back in to access your account.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', style: 'destructive', onPress: logout },
-    ]);
-  }, [logout]);
+    setLogoutConfirmOpen(true);
+  }, []);
 
   const content = scrollable ? (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -366,6 +365,19 @@ export default function ScreenShell({
         footerNote={menuFooterNote}
         colors={colors}
         styles={styles}
+      />
+      <ConfirmDialog
+        visible={logoutConfirmOpen}
+        title="Sign out?"
+        message="You will need to sign back in to access your account."
+        confirmLabel="Sign out"
+        variant="destructive"
+        icon="log-out-outline"
+        onCancel={() => setLogoutConfirmOpen(false)}
+        onConfirm={() => {
+          setLogoutConfirmOpen(false);
+          logout();
+        }}
       />
     </SafeAreaView>
   );

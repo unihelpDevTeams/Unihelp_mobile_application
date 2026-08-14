@@ -4,13 +4,15 @@ import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { useAuth } from '../../context/AuthContext';
 import {
+  COMMERCE_UPLOAD_LIMITS,
   getDaysLeft,
   getPremiumAmount,
   getSubscriptionExpiry,
+  isPremiumActive,
   PREMIUM_PLAN,
   startPremiumCheckout,
 } from '../../src/shared/services/premium';
-import { colors, spacing, borderRadius, shadows, typography } from '../../src/shared/theme';
+import { colors, spacing, borderRadius, shadows } from '../../src/shared/theme';
 
 export default function PremiumPage() {
   const { user, profile, refreshProfile } = useAuth();
@@ -19,7 +21,7 @@ export default function PremiumPage() {
   const [message, setMessage] = useState('');
   const [planLoading, setPlanLoading] = useState(true);
 
-  const premiumActive = Boolean(profile?.premium && profile?.subscriptionStatus !== 'expired');
+  const premiumActive = isPremiumActive(profile);
 
   useEffect(() => {
     let active = true;
@@ -29,7 +31,7 @@ export default function PremiumPage() {
     };
     load();
     return () => { active = false; };
-  }, []);
+  }, [refreshProfile]);
 
   const amount = getPremiumAmount(billing);
   const daysLeft = useMemo(() => getDaysLeft(profile?.subscriptionExpiresAt), [profile?.subscriptionExpiresAt]);
@@ -72,7 +74,9 @@ export default function PremiumPage() {
             <Ionicons name="diamond-outline" size={40} color={colors.gold} />
           </View>
           <Text style={styles.heroTitle}>Premium Active</Text>
-          <Text style={styles.heroText}>{daysLeft ?? 'Active'} days remaining on your current subscription.</Text>
+          <Text style={styles.heroText}>
+            {daysLeft ?? 'Active'} days remaining. Your plan includes up to {COMMERCE_UPLOAD_LIMITS.premium} hostel and {COMMERCE_UPLOAD_LIMITS.premium} product uploads.
+          </Text>
         </View>
       ) : (
         <View style={styles.hero}>
@@ -80,7 +84,7 @@ export default function PremiumPage() {
             <Ionicons name="diamond-outline" size={40} color={colors.gold} />
           </View>
           <Text style={styles.heroTitle}>Unlock Student Premium</Text>
-          <Text style={styles.heroText}>Get more downloads, stronger AI help, a verified badge, and bigger upload limits.</Text>
+          <Text style={styles.heroText}>Get more downloads, stronger AI help, a verified badge, and up to {COMMERCE_UPLOAD_LIMITS.premium} hostel plus {COMMERCE_UPLOAD_LIMITS.premium} product uploads.</Text>
         </View>
       )}
 

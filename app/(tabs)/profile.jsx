@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Platform,
   Pressable,
@@ -23,6 +22,7 @@ import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import DailyStreakBanner from '../../src/shared/components/DailyStreakBanner';
+import ConfirmDialog from '../../src/shared/components/ConfirmDialog';
 import DraggableBottomSheet from '../../src/shared/components/DraggableBottomSheet';
 import SchoolTypeFilter from '../../src/shared/components/SchoolTypeFilter';
 import SearchableDropdown from '../../src/signup/components/SearchableDropdown';
@@ -140,6 +140,7 @@ export default function ProfileScreen() {
   const [streakDates, setStreakDates] = useState([]);
   const [challengeStats, setChallengeStats] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const headerFade = useRef(new Animated.Value(0)).current;
   const isMountedRef = useRef(true);
@@ -570,10 +571,7 @@ export default function ProfileScreen() {
 
   const confirmSignOut = () => {
     closeSheet();
-    Alert.alert('Sign out', 'You\u2019ll need to sign back in to access your account.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', style: 'destructive', onPress: logout },
-    ]);
+    setSignOutConfirmOpen(true);
   };
 
   const shareProfile = async () => {
@@ -1059,6 +1057,19 @@ export default function ProfileScreen() {
         {sheet === SHEET.EDIT_PROFILE && renderEditProfileSheet()}
         {sheet === SHEET.EDIT_FIELD && renderFieldEditor()}
       </DraggableBottomSheet>
+      <ConfirmDialog
+        visible={signOutConfirmOpen}
+        title="Sign out?"
+        message="You'll need to sign back in to access your account."
+        confirmLabel="Sign out"
+        variant="destructive"
+        icon="log-out-outline"
+        onCancel={() => setSignOutConfirmOpen(false)}
+        onConfirm={() => {
+          setSignOutConfirmOpen(false);
+          logout();
+        }}
+      />
     </ScreenShell>
   );
 }

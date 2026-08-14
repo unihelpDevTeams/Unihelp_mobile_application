@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
+import ConfirmDialog from '../../src/shared/components/ConfirmDialog';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
@@ -195,6 +196,7 @@ export default function SmartTimetablePage() {
   const [courses, setCourses] = useState([]);
   const [schedule, setSchedule] = useState(null); // { entries, unscheduled, generatedAt }
   const [scheduleStale, setScheduleStale] = useState(false);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
 
   const [titleDraft, setTitleDraft] = useState('');
   const [colorDraft, setColorDraft] = useState(COLOR_OPTIONS[0]);
@@ -290,19 +292,15 @@ export default function SmartTimetablePage() {
   };
 
   const clearAll = () => {
-    Alert.alert('Clear everything?', 'This removes all courses and your generated timetable from this device.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Clear all',
-        style: 'destructive',
-        onPress: () => {
-          setCourses([]);
-          setSchedule(null);
-          setScheduleStale(false);
-          persist({ courses: [], schedule: null });
-        },
-      },
-    ]);
+    setClearConfirmOpen(true);
+  };
+
+  const confirmClearAll = () => {
+    setClearConfirmOpen(false);
+    setCourses([]);
+    setSchedule(null);
+    setScheduleStale(false);
+    persist({ courses: [], schedule: null });
   };
 
   const handleGenerate = () => {
@@ -380,6 +378,15 @@ export default function SmartTimetablePage() {
       showBack
       loading={loading}
     >
+      <ConfirmDialog
+        visible={clearConfirmOpen}
+        title="Clear everything?"
+        message="This removes all courses and your generated timetable from this device."
+        confirmLabel="Clear all"
+        variant="destructive"
+        onCancel={() => setClearConfirmOpen(false)}
+        onConfirm={confirmClearAll}
+      />
       {status ? (
         <View style={[styles.statusPill, status.type === 'error' ? styles.statusError : styles.statusInfo]}>
           <Ionicons

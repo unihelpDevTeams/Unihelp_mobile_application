@@ -252,7 +252,12 @@ export const leaveGroup = async (group, uid) => {
   await batch.commit();
 };
 
-export const removeGroupMember = async (group, memberId) => {
+export const removeGroupMember = async (groupOrId, memberId) => {
+  const group =
+    typeof groupOrId === 'string'
+      ? await getGroup(groupOrId)
+      : groupOrId;
+
   if (!group?.id || !memberId) throw new Error('Missing group or member details.');
   if (group.ownerId === memberId) throw new Error('Owners cannot be removed. Transfer ownership first.');
   const batch = writeBatch(db);
@@ -523,4 +528,46 @@ export async function deleteDirectMessage(conversationId, messageId, options = {
     attachments: [],
     deletedAt: serverTimestamp(),
   });
+}
+
+/**
+ * Demotes an admin back to a standard member.
+ * Only the group owner is authorized to perform this action.
+ */
+export async function demoteGroupAdminToMember(groupId, memberId, currentUserId) {
+  if (!groupId || !memberId || !currentUserId) {
+    throw new Error('Missing required arguments for demoting admin.');
+  }
+
+  const groupRef = doc(db, 'groups', groupId);
+  const groupSnap = await getDoc(groupRef);
+
+  if (!groupSnap.exists()) {
+    throw new Error('Group not found.');
+  }
+
+  const groupData = groupSnap.data();
+
+  if (groupData.ownerId !== currentUserId) {
+    throw new Error('Only the group owner can remove admin privileges.');
+  }
+
+  if (memberId === groupData.ownerId) {
+    throw new Error('Group owner role cannot be removed.');
+  }
+
+  await Promise.all([
+    updateDoc(groupRef, {
+      adminIds: arrayRemove(memberId),
+      updatedAt: serverTimestamp(),
+    }),
+    updateDoc(doc(db, 'groups', groupId, 'members', memberId), {
+      role: 'member',
+      demotedBy: currentUserId,
+      demotedAt: serverTimestamp(),
+    }),
+    updateDoc(doc(db, 'users', memberId, 'groups', groupId), {
+      role: 'member',
+    }),
+  ]);
 }

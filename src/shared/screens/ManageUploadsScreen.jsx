@@ -1,10 +1,11 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import ScreenShell from '../components/ScreenShell';
 import EmptyState from '../components/EmptyState';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { shadows } from '../theme';
 import { useTheme } from '../theme/ThemeContext';
 import { useThemeStyles } from '../theme/createStyles';
@@ -92,6 +93,7 @@ export default function ManageUploadsScreen({ type }) {
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [deletingId, setDeletingId] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [notice, setNotice] = useState('');
   const uid = profile?.uid || user?.uid;
   const accentColor = colors[config.accent] || colors.brand;
@@ -209,14 +211,7 @@ export default function ManageUploadsScreen({ type }) {
   }, [items, query, statusFilter]);
 
   const confirmDelete = (item) => {
-    Alert.alert(
-      'Delete upload?',
-      'This removes the document and its media. This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => handleDelete(item) },
-      ]
-    );
+    setDeleteTarget(item);
   };
 
   const handleDelete = async (item) => {
@@ -227,6 +222,7 @@ export default function ManageUploadsScreen({ type }) {
       await config.deleteItem(item.id);
       setItems((current) => current.filter((entry) => entry.id !== item.id));
       setNotice('Item Deleted successfully.');
+      setDeleteTarget(null);
     } catch (deleteError) {
       setError(deleteError?.message || 'Could not delete this upload.');
     } finally {
@@ -236,6 +232,16 @@ export default function ManageUploadsScreen({ type }) {
 
   return (
     <ScreenShell title={config.title} subtitle={config.subtitle} showBack loading={loading}>
+      <ConfirmDialog
+        visible={Boolean(deleteTarget)}
+        title="Delete upload?"
+        message="This removes the document and its media. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="destructive"
+        loading={Boolean(deleteTarget?.id && deletingId === deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
+      />
       {notice ? (
         <View style={styles.notice}>
           <Ionicons name="checkmark-circle-outline" size={16} color={colors.green} />
