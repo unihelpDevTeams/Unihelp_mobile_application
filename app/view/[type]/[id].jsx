@@ -13,6 +13,7 @@ import { resolveDocumentAsset, formatDocumentMeta } from '../../../src/shared/ut
 import { isPdfUrl, isPreviewImageUrl } from '../../../src/shared/services/cloudinary';
 import { useAuth } from '../../../context/AuthContext';
 import { startConversation, sendDirectMessage } from '../../../src/shared/services/community';
+import { getUserProfileById } from '../../../src/shared/services/friendships';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
 import { canManageResource } from '../../../src/shared/auth/resourcePermissions';
 
@@ -193,6 +194,7 @@ export default function RecordViewPage() {
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [contactSheetVisible, setContactSheetVisible] = useState(false);
   const [messaging, setMessaging] = useState(false);
+  const [ownerProfile, setOwnerProfile] = useState(null);
   const [deletingResource, setDeletingResource] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [lightboxVisible, setLightboxVisible] = useState(false);
@@ -232,9 +234,25 @@ export default function RecordViewPage() {
     item?.authorId ||
     item?.tutorId ||
     null;
-  const ownerName = item?.sellerName || item?.ownerName || item?.postedBy || 'the owner';
-  const ownerEmail = item?.sellerEmail || item?.ownerEmail || '';
-  const ownerPhoto = item?.sellerAvatar || item?.ownerAvatar || item?.sellerPhoto || null;
+  const ownerName =
+    item?.sellerName ||
+    item?.ownerName ||
+    item?.postedBy ||
+    item?.uploaderName ||
+    item?.authorName ||
+    item?.username ||
+    item?.displayName ||
+    item?.userName ||
+    ownerProfile?.username ||
+    ownerProfile?.fullName ||
+    ownerProfile?.name ||
+    ownerProfile?.displayName ||
+    ownerProfile?.email ||
+    item?.sellerEmail ||
+    item?.ownerEmail ||
+    (['listing', 'hostel'].includes(type) ? (type === 'hostel' ? 'Hostel uploader' : 'Marketplace uploader') : 'Uploader');
+  const ownerEmail = item?.sellerEmail || item?.ownerEmail || ownerProfile?.email || '';
+  const ownerPhoto = item?.sellerAvatar || item?.ownerAvatar || item?.sellerPhoto || ownerProfile?.photo || ownerProfile?.photoURL || null;
   const ownerPhone = item?.sellerPhone || item?.contactPhone || item?.phone || null;
   const whatsAppNumber = toWhatsAppNumber(ownerPhone);
   const canMessageInApp = Boolean(ownerId && user && ownerId !== user.uid);
@@ -278,6 +296,26 @@ export default function RecordViewPage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (!ownerId || !['listing', 'hostel'].includes(type)) {
+      setOwnerProfile(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    getUserProfileById(ownerId)
+      .then((data) => {
+        if (!cancelled) setOwnerProfile(data || null);
+      })
+      .catch(() => {
+        if (!cancelled) setOwnerProfile(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ownerId, type]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await load();
@@ -298,7 +336,7 @@ export default function RecordViewPage() {
     descriptionIsLong && !descriptionExpanded ? `${description.slice(0, 220).trim()}...` : description;
 
   const createdDate = formatDate(item?.createdAt || item?.postedAt || item?.publishedAt);
-  const ownerLabel = ownerName && ownerName !== 'the owner' ? `by ${ownerName}` : '';
+  const ownerLabel = ownerName ? `by ${ownerName}` : '';
   const recordMeta = [createdDate, ownerLabel].filter(Boolean).join(' • ');
 
   const fields = useMemo(() => buildFields(item, type), [item, type]);

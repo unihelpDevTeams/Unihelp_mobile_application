@@ -155,7 +155,7 @@ const CONFIGS = {
     cardIcon: 'document-text-outline',
     submitLabel: 'Compress & upload',
     successMessage: 'Question uploaded successfully.',
-    routeAfter: '/(tabs)/pastQuestions',
+    routeAfter: '/(tabs)/studyMaterials?tab=questions',
     pickerTypes: QUESTION_TYPES,
     multiple: true,
     attachmentLabel: 'Selected files',
@@ -182,7 +182,7 @@ const CONFIGS = {
     cardIcon: 'library-outline',
     submitLabel: 'Upload PDF',
     successMessage: 'PDF uploaded successfully.',
-    routeAfter: '/lecturenotesmarketplace',
+    routeAfter: '/(tabs)/studyMaterials?tab=notes',
     pickerTypes: PDF_TYPES,
     multiple: false,
     attachmentLabel: 'Selected PDF',
@@ -339,7 +339,15 @@ export default function UploadPage() {
   const isLimitRestricted = uploadType === 'marketplace' || uploadType === 'hostel';
   const isFreeUser = !profile?.premium;
   const freeLimit = 5;
-  const postedBy = profile?.username || profile?.fullName;
+  const postedBy =
+    profile?.username ||
+    profile?.fullName ||
+    profile?.name ||
+    profile?.displayName ||
+    user?.displayName ||
+    profile?.email ||
+    user?.email ||
+    '';
   const canCreateCurrentResource = canUploadResource({ type: uploadType, user, profile });
 
   useEffect(() => {
@@ -614,6 +622,9 @@ export default function UploadPage() {
         availability: form.availability.trim(),
         phone: form.phone.trim(),
         description: form.description.trim(),
+        sellerName: postedBy,
+        ownerName: postedBy,
+        postedBy,
         status: 'pending',
         verified: Boolean(profile?.premium),
         premiumUser: Boolean(profile?.premium),
@@ -639,6 +650,9 @@ export default function UploadPage() {
         availability: form.availability.trim(),
         phone: form.phone.trim(),
         description: form.description.trim(),
+        ownerName: postedBy,
+        sellerName: postedBy,
+        postedBy,
         status: 'pending',
         verified: Boolean(profile?.premium),
         premiumUser: Boolean(profile?.premium),

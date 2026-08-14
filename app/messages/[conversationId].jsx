@@ -1,5 +1,17 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -13,6 +25,8 @@ import {
   listenConversationMessages,
   sendDirectMessage,
   deleteDirectMessage,
+  clearConversationForUser,
+  deleteConversationForUser,
 } from '../../src/shared/services/community';
 import {
   RELATIONSHIP,
@@ -39,11 +53,18 @@ const formatShortTime = (value) => {
   return date.toLocaleDateString([], { hour: 'numeric', minute: '2-digit' });
 };
 
+const toMillis = (value) => {
+  if (!value) return 0;
+  const date = typeof value === 'string' ? new Date(value) : value?.toDate ? value.toDate() : value;
+  return Number.isNaN(date?.getTime?.()) ? 0 : date.getTime();
+};
+
 export default function ConversationPage() {
   const router = useRouter();
   const { conversationId } = useLocalSearchParams();
   const { user, profile } = useAuth();
   const { colors } = useTheme();
+
   const [conversation, setConversation] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -53,13 +74,19 @@ export default function ConversationPage() {
   const [activeMessage, setActiveMessage] = useState(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [roomBusy, setRoomBusy] = useState('');
   const [relationship, setRelationship] = useState({ state: RELATIONSHIP.NONE });
   const [pendingMessageRequest, setPendingMessageRequest] = useState(null);
   const [relationshipBusy, setRelationshipBusy] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
+
+  // Modal UI States
+  const [showOptionsSheet, setShowOptionsSheet] = useState(false);
+  const [dialogConfig, setDialogConfig] = useState(null);
+
   const listRef = useRef(null);
 
-  const styles = useThemeStyles((c, s, r) => ({
+  const styles = useThemeStyles((c) => ({
     headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16, paddingHorizontal: 2 },
     avatarWrapper: { width: 56, height: 56, borderRadius: 18, overflow: 'hidden', backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
     avatar: { width: 56, height: 56 },
@@ -68,6 +95,11 @@ export default function ConversationPage() {
     headerMeta: { flex: 1 },
     headerName: { fontSize: 16, fontWeight: '800', color: c.textPrimary },
     headerHint: { marginTop: 4, color: c.textSecondary, fontSize: 13 },
+    headerAction: {
+      width: 38, height: 38, borderRadius: 14, backgroundColor: c.surfaceSecondary,
+      alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.borderDefault,
+    },
+    headerActionPressed: { opacity: 0.82 },
     messagesPane: { flex: 1, backgroundColor: c.canvasLight },
     listContent: { paddingTop: 20, paddingBottom: 16, paddingHorizontal: 12 },
     bubble: { 
@@ -129,12 +161,14 @@ export default function ConversationPage() {
       alignItems: 'center', justifyContent: 'center',
     },
     buttonDisabled: { backgroundColor: c.brandGlow, opacity: 0.6 },
-    sheetBackdrop: { flex: 1, backgroundColor: c.overlay },
+    modalOverlay: { flex: 1, backgroundColor: c.overlay, justifyContent: 'flex-end' },
     sheet: {
       backgroundColor: c.bottomSheetBackground, borderTopLeftRadius: 24, borderTopRightRadius: 24,
       paddingHorizontal: 18, paddingTop: 10, paddingBottom: 28,
     },
     sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: c.borderDefault, alignSelf: 'center', marginBottom: 14 },
+    sheetTitle: { fontSize: 17, fontWeight: '800', color: c.textPrimary, textAlign: 'center', marginBottom: 2 },
+    sheetSubtitle: { fontSize: 13, color: c.textSecondary, textAlign: 'center', marginBottom: 14 },
     sheetPreview: {
       fontSize: 12.5, color: c.textSecondary, backgroundColor: c.surfaceSecondary,
       borderRadius: 12, padding: 10, marginBottom: 10,
@@ -143,11 +177,13 @@ export default function ConversationPage() {
     sheetOptionText: { fontSize: 15, fontWeight: '700', color: c.textPrimary },
     sheetCancel: { marginTop: 6, paddingVertical: 13, alignItems: 'center', borderTopWidth: 1, borderTopColor: c.borderDefault },
     sheetCancelText: { fontSize: 15, fontWeight: '700', color: c.textSecondary },
-    confirmIconWrap: { alignSelf: 'center', width: 44, height: 44, borderRadius: 22, backgroundColor: c.dangerLight, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
-    confirmTitle: { fontSize: 16, fontWeight: '800', color: c.textPrimary, textAlign: 'center', marginBottom: 6 },
-    confirmSubtitle: { fontSize: 13, color: c.textSecondary, textAlign: 'center', lineHeight: 18, marginBottom: 16, paddingHorizontal: 8 },
+    confirmIconWrap: { alignSelf: 'center', width: 48, height: 48, borderRadius: 24, backgroundColor: c.dangerLight, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+    confirmTitle: { fontSize: 17, fontWeight: '800', color: c.textPrimary, textAlign: 'center', marginBottom: 6 },
+    confirmSubtitle: { fontSize: 13.5, color: c.textSecondary, textAlign: 'center', lineHeight: 19, marginBottom: 20, paddingHorizontal: 8 },
     confirmDeleteButton: { backgroundColor: c.error, borderRadius: 14, paddingVertical: 13, alignItems: 'center' },
     confirmDeleteText: { color: c.onBrand, fontWeight: '800', fontSize: 14 },
+    dialogPrimaryBtn: { borderRadius: 14, paddingVertical: 13, alignItems: 'center' },
+    dialogPrimaryText: { color: c.onBrand, fontWeight: '800', fontSize: 14.5 },
     relationshipCard: {
       flexDirection: 'row', alignItems: 'center', gap: 12,
       backgroundColor: c.brandLight, borderWidth: 1, borderColor: c.borderDefault,
@@ -169,10 +205,64 @@ export default function ConversationPage() {
     relationshipButtonTextMuted: { color: c.textSecondary },
   }));
 
+  const currentUid = user?.uid || profile?.uid;
+  const otherId = conversation?.memberIds?.find((id) => id !== currentUid);
+  const otherUser = conversation?.memberInfo?.[otherId] || {};
+  const headerTitle = otherUser.name || 'Chat';
+  const headerSubtitle = otherUser.email || 'Direct message';
+
+  const areFriends = relationship.state === RELATIONSHIP.FRIENDS;
+  const isBlocked = relationship.state === RELATIONSHIP.BLOCKED;
+  const mySentMessages = messages.filter((m) => m.senderId === currentUid);
+  const hasSentIntro = mySentMessages.length > 0;
+
+  const canChat = !isBlocked && (areFriends || !hasSentIntro);
+
+  const visibleMessages = messages.filter((message) => {
+    const clearedAt = toMillis(conversation?.clearedFor?.[currentUid]);
+    return !clearedAt || toMillis(message.createdAt) > clearedAt;
+  });
+
   const messagePreview = (message) => {
     if (!message?.text) return '';
     const text = message.text.trim();
     return text.length > 80 ? `${text.slice(0, 80).trim()}…` : text;
+  };
+
+  const scrollToBottom = (animated = true) => {
+    setTimeout(() => listRef.current?.scrollToEnd?.({ animated }), 100);
+  };
+
+  // Helper dialog handlers
+  const showAlertDialog = (title, subtitle, icon = 'alert-circle-outline', iconBgColor = colors.dangerLight, iconColor = colors.error) => {
+    setDialogConfig({
+      title,
+      subtitle,
+      icon,
+      iconBgColor,
+      iconColor,
+      primaryText: 'OK',
+      primaryStyle: 'brand',
+      onPrimary: () => setDialogConfig(null),
+    });
+  };
+
+  const showConfirmDialog = ({ title, subtitle, icon, iconBgColor, iconColor, primaryText, primaryStyle = 'danger', onPrimary }) => {
+    setDialogConfig({
+      title,
+      subtitle,
+      icon: icon || 'help-circle-outline',
+      iconBgColor: iconBgColor || (primaryStyle === 'danger' ? colors.dangerLight : colors.brandLight),
+      iconColor: iconColor || (primaryStyle === 'danger' ? colors.error : colors.brand),
+      primaryText: primaryText || 'Confirm',
+      primaryStyle,
+      onPrimary: async () => {
+        setDialogConfig(null);
+        await onPrimary?.();
+      },
+      secondaryText: 'Cancel',
+      onSecondary: () => setDialogConfig(null),
+    });
   };
 
   useEffect(() => {
@@ -192,10 +282,13 @@ export default function ConversationPage() {
   }, [conversationId]);
 
   useEffect(() => {
-    if (messages.length) {
-      setTimeout(() => listRef.current?.scrollToEnd?.({ animated: true }), 120);
-    }
+    if (messages.length) scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', () => scrollToBottom(true));
+    return () => showSub.remove();
+  }, []);
 
   useEffect(() => {
     if (conversationId && user?.uid) {
@@ -203,98 +296,91 @@ export default function ConversationPage() {
     }
   }, [conversationId, user?.uid, messages]);
 
-  const otherId = conversation?.memberIds?.find((id) => id !== profile?.uid);
-  const otherUser = conversation?.memberInfo?.[otherId] || {};
-  const headerTitle = otherUser.name || 'Chat';
-  const headerSubtitle = otherUser.email || 'Direct message';
-  const areFriends = relationship.state === RELATIONSHIP.FRIENDS;
-  const canChat = !otherId || areFriends;
-
   useEffect(() => {
     setAvatarFailed(false);
   }, [otherUser.avatar]);
 
   useEffect(() => {
-    if (!profile?.uid || !otherId) {
+    if (!currentUid || !otherId) {
       setRelationship({ state: RELATIONSHIP.NONE });
       return undefined;
     }
 
-    return listenRelationship(profile.uid, otherId, setRelationship);
-  }, [profile?.uid, otherId]);
+    return listenRelationship(currentUid, otherId, setRelationship);
+  }, [currentUid, otherId]);
 
   useEffect(() => {
-    if (!profile?.uid || !otherId) {
+    if (!currentUid || !otherId) {
       setPendingMessageRequest(null);
       return undefined;
     }
 
-    return listenIncomingMessageRequests(profile.uid, (rows) => {
+    return listenIncomingMessageRequests(currentUid, (rows) => {
       const request = rows.find((item) => item.from === otherId && item.status === 'pending');
       setPendingMessageRequest(request || null);
     });
-  }, [profile?.uid, otherId]);
+  }, [currentUid, otherId]);
 
   const handleAddFriend = async () => {
-    if (!profile?.uid || !otherId) return;
+    if (!currentUid || !otherId) return;
     setRelationshipBusy(true);
     try {
       await sendFriendRequest({
-        currentUid: profile.uid,
+        currentUid,
         targetUid: otherId,
         currentProfile: profile,
         targetProfile: { ...otherUser, uid: otherId },
       });
     } catch (error) {
-      Alert.alert('Friend request', error.message || 'Could not send friend request.');
+      showAlertDialog('Friend request', error.message || 'Could not send friend request.');
     } finally {
       setRelationshipBusy(false);
     }
   };
 
   const handleAcceptMessageRequest = async () => {
-    if (!pendingMessageRequest || !profile?.uid) return;
+    if (!pendingMessageRequest || !currentUid) return;
     setRelationshipBusy(true);
     try {
       await acceptMessageRequest({
         request: pendingMessageRequest,
-        currentUid: profile.uid,
+        currentUid,
         currentProfile: profile,
       });
     } catch (error) {
-      Alert.alert('Message request', error.message || 'Could not accept request.');
+      showAlertDialog('Message request', error.message || 'Could not accept request.');
     } finally {
       setRelationshipBusy(false);
     }
   };
 
   const handleDeclineMessageRequest = async () => {
-    if (!pendingMessageRequest || !profile?.uid) return;
+    if (!pendingMessageRequest || !currentUid) return;
     setRelationshipBusy(true);
     try {
       await declineMessageRequest({
         request: pendingMessageRequest,
-        currentUid: profile.uid,
+        currentUid,
         currentProfile: profile,
       });
     } catch (error) {
-      Alert.alert('Message request', error.message || 'Could not decline request.');
+      showAlertDialog('Message request', error.message || 'Could not decline request.');
     } finally {
       setRelationshipBusy(false);
     }
   };
 
   const handleAcceptFriend = async () => {
-    if (!relationship.request || !profile?.uid) return;
+    if (!relationship.request || !currentUid) return;
     setRelationshipBusy(true);
     try {
       await acceptFriendRequest({
         request: relationship.request,
-        currentUid: profile.uid,
+        currentUid,
         currentProfile: profile,
       });
     } catch (error) {
-      Alert.alert('Friend request', error.message || 'Could not accept friend request.');
+      showAlertDialog('Friend request', error.message || 'Could not accept friend request.');
     } finally {
       setRelationshipBusy(false);
     }
@@ -305,7 +391,6 @@ export default function ConversationPage() {
 
     const isReceived = relationship.state === RELATIONSHIP.RECEIVED;
     const isSent = relationship.state === RELATIONSHIP.SENT;
-    const isBlocked = relationship.state === RELATIONSHIP.BLOCKED;
     const hasIntroRequest = !!pendingMessageRequest;
 
     const title = hasIntroRequest
@@ -317,6 +402,7 @@ export default function ConversationPage() {
           : isBlocked
             ? 'Chat unavailable'
             : 'Add friend to keep chatting';
+
     const text = hasIntroRequest
       ? `${headerTitle} sent you an introductory message. Accept to become friends and continue this chat.`
       : isReceived
@@ -325,7 +411,9 @@ export default function ConversationPage() {
           ? 'You can continue chatting after the request is accepted.'
           : isBlocked
             ? 'Messaging is unavailable for this student.'
-            : 'You can only send one intro message before you become friends.';
+            : hasSentIntro
+              ? 'You have sent an intro message. Add them as a friend to continue chatting.'
+              : 'You can send one intro message before becoming friends.';
 
     return (
       <View style={styles.relationshipCard}>
@@ -386,7 +474,7 @@ export default function ConversationPage() {
       });
       setDraft('');
       setReplyTo(null);
-      setTimeout(() => listRef.current?.scrollToEnd?.({ animated: true }), 100);
+      scrollToBottom();
     } catch (error) {
       showSendError(error);
     } finally {
@@ -395,7 +483,7 @@ export default function ConversationPage() {
   };
 
   const showSendError = (error) => {
-    Alert.alert('Message not sent', error.message || 'You can only send direct messages to friends.');
+    showAlertDialog('Message not sent', error.message || 'You can only send direct messages to friends.');
   };
 
   const sendVoiceMessage = useCallback(async (voiceResult) => {
@@ -415,7 +503,7 @@ export default function ConversationPage() {
         } : null,
       });
       setReplyTo(null);
-      setTimeout(() => listRef.current?.scrollToEnd?.({ animated: true }), 100);
+      scrollToBottom();
     } catch (err) {
       showSendError(err);
     }
@@ -444,11 +532,79 @@ export default function ConversationPage() {
     try {
       await deleteDirectMessage(conversationId, activeMessage.id, { voice: activeMessage.type === 'voice' });
     } catch (error) {
-      Alert.alert('Delete failed', error.message || 'Unable to delete this message.');
+      showAlertDialog('Delete failed', error.message || 'Unable to delete this message.');
     } finally {
       setDeletingId(null);
       closeSheet();
     }
+  };
+
+  const clearChat = async () => {
+    if (!conversationId || !currentUid) return;
+    setRoomBusy('clear');
+    try {
+      await clearConversationForUser(conversationId, currentUid);
+      setReplyTo(null);
+      setActiveMessage(null);
+      setConversation((current) => ({
+        ...current,
+        clearedFor: { ...(current?.clearedFor || {}), [currentUid]: new Date() },
+        unread: { ...(current?.unread || {}), [currentUid]: 0 },
+      }));
+    } catch (error) {
+      showAlertDialog('Clear chat failed', error.message || 'Unable to clear this chat.');
+    } finally {
+      setRoomBusy('');
+    }
+  };
+
+  const deleteChat = async () => {
+    if (!conversationId || !currentUid) return;
+    setRoomBusy('delete');
+    try {
+      await deleteConversationForUser(conversationId, currentUid);
+      router.back();
+    } catch (error) {
+      showAlertDialog('Delete chat failed', error.message || 'Unable to delete this chat.');
+      setRoomBusy('');
+    }
+  };
+
+  const showChatOptions = () => {
+    if (roomBusy) return;
+    setShowOptionsSheet(true);
+  };
+
+  const handlePromptClearChat = () => {
+    setShowOptionsSheet(false);
+    setTimeout(() => {
+      showConfirmDialog({
+        title: 'Clear this chat?',
+        subtitle: 'Messages will be removed from your view only.',
+        icon: 'brush-outline',
+        iconBgColor: colors.brandLight,
+        iconColor: colors.brand,
+        primaryText: 'Clear chat',
+        primaryStyle: 'danger',
+        onPrimary: clearChat,
+      });
+    }, 200);
+  };
+
+  const handlePromptDeleteChat = () => {
+    setShowOptionsSheet(false);
+    setTimeout(() => {
+      showConfirmDialog({
+        title: 'Delete this chat?',
+        subtitle: 'This chat room will disappear from your list until a new message arrives.',
+        icon: 'trash-outline',
+        iconBgColor: colors.dangerLight,
+        iconColor: colors.error,
+        primaryText: 'Delete chat',
+        primaryStyle: 'danger',
+        onPrimary: deleteChat,
+      });
+    }, 200);
   };
 
   const isMine = (item) => item.senderId === user?.uid;
@@ -473,13 +629,22 @@ export default function ConversationPage() {
           <Text style={styles.headerName}>{headerTitle}</Text>
           <Text style={styles.headerHint}>{conversation?.lastMessage ? `Last seen ${formatShortTime(conversation.updatedAt)}` : 'Send a message to start'}</Text>
         </View>
+        <Pressable
+          style={({ pressed }) => [styles.headerAction, pressed && styles.headerActionPressed]}
+          onPress={showChatOptions}
+          disabled={!!roomBusy}
+          accessibilityRole="button"
+          accessibilityLabel="Open chat options"
+        >
+          {roomBusy ? <ActivityIndicator size="small" color={colors.brand} /> : <Ionicons name="ellipsis-vertical" size={18} color={colors.textPrimary} />}
+        </Pressable>
       </View>
 
       <View style={styles.messagesPane}>
-        {messages.length ? (
+        {visibleMessages.length ? (
           <FlatList
             ref={listRef}
-            data={messages}
+            data={visibleMessages}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => {
               const mine = isMine(item);
@@ -536,7 +701,7 @@ export default function ConversationPage() {
         ) : (
           <EmptyState
             title="No messages yet"
-            description="Send the first message in this chat."
+            description="Send a message to start this chat again."
           />
         )}
       </View>
@@ -545,8 +710,8 @@ export default function ConversationPage() {
 
       {canChat ? (
         <KeyboardAvoidingView
-          behavior="padding"
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
           style={styles.composerContainer}
         >
           {replyTo ? (
@@ -584,56 +749,116 @@ export default function ConversationPage() {
         </KeyboardAvoidingView>
       ) : null}
 
+      {/* Message Context Actions Sheet */}
       <Modal visible={!!activeMessage} transparent animationType="fade" onRequestClose={closeSheet}>
-        <Pressable style={styles.sheetBackdrop} onPress={closeSheet} />
-        <View style={styles.sheet}>
-          <View style={styles.sheetHandle} />
+        <Pressable style={styles.modalOverlay} onPress={closeSheet}>
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.sheetHandle} />
 
-          {!confirmingDelete ? (
-            <>
-              <Text style={styles.sheetPreview} numberOfLines={2}>
-                {activeMessage ? messagePreview(activeMessage) : ''}
-              </Text>
+            {!confirmingDelete ? (
+              <>
+                <Text style={styles.sheetPreview} numberOfLines={2}>
+                  {activeMessage ? messagePreview(activeMessage) : ''}
+                </Text>
 
-              <Pressable style={styles.sheetOption} onPress={handleReplyFromSheet}>
-                <Ionicons name="arrow-undo-outline" size={18} color={colors.textPrimary} />
-                <Text style={styles.sheetOptionText}>Reply</Text>
-              </Pressable>
-
-              <Pressable style={styles.sheetOption} onPress={handleCopyFromSheet}>
-                <Ionicons name="copy-outline" size={18} color={colors.textPrimary} />
-                <Text style={styles.sheetOptionText}>Copy text</Text>
-              </Pressable>
-
-              {activeMessage && isMine(activeMessage) ? (
-                <Pressable style={styles.sheetOption} onPress={() => setConfirmingDelete(true)}>
-                  <Ionicons name="trash-outline" size={18} color={colors.error} />
-                  <Text style={[styles.sheetOptionText, { color: colors.error }]}>Delete message</Text>
+                <Pressable style={styles.sheetOption} onPress={handleReplyFromSheet}>
+                  <Ionicons name="arrow-undo-outline" size={18} color={colors.textPrimary} />
+                  <Text style={styles.sheetOptionText}>Reply</Text>
                 </Pressable>
-              ) : null}
 
-              <Pressable style={styles.sheetCancel} onPress={closeSheet}>
-                <Text style={styles.sheetCancelText}>Cancel</Text>
-              </Pressable>
-            </>
-          ) : (
-            <>
-              <View style={styles.confirmIconWrap}>
-                <Ionicons name="trash" size={20} color={colors.error} />
+                <Pressable style={styles.sheetOption} onPress={handleCopyFromSheet}>
+                  <Ionicons name="copy-outline" size={18} color={colors.textPrimary} />
+                  <Text style={styles.sheetOptionText}>Copy text</Text>
+                </Pressable>
+
+                {activeMessage && isMine(activeMessage) ? (
+                  <Pressable style={styles.sheetOption} onPress={() => setConfirmingDelete(true)}>
+                    <Ionicons name="trash-outline" size={18} color={colors.error} />
+                    <Text style={[styles.sheetOptionText, { color: colors.error }]}>Delete message</Text>
+                  </Pressable>
+                ) : null}
+
+                <Pressable style={styles.sheetCancel} onPress={closeSheet}>
+                  <Text style={styles.sheetCancelText}>Cancel</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <View style={styles.confirmIconWrap}>
+                  <Ionicons name="trash" size={22} color={colors.error} />
+                </View>
+                <Text style={styles.confirmTitle}>Delete this message?</Text>
+                <Text style={styles.confirmSubtitle}>
+                  It will be replaced with &#34;This message was deleted&#34; for everyone in this chat.
+                </Text>
+                <Pressable style={styles.confirmDeleteButton} onPress={handleConfirmDelete}>
+                  <Text style={styles.confirmDeleteText}>Delete</Text>
+                </Pressable>
+                <Pressable style={styles.sheetCancel} onPress={() => setConfirmingDelete(false)}>
+                  <Text style={styles.sheetCancelText}>Cancel</Text>
+                </Pressable>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Chat Options Sheet */}
+      <Modal visible={showOptionsSheet} transparent animationType="fade" onRequestClose={() => setShowOptionsSheet(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowOptionsSheet(false)}>
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Chat options</Text>
+            <Text style={styles.sheetSubtitle}>Changes only affect your side of this chat.</Text>
+
+            <Pressable style={styles.sheetOption} onPress={handlePromptClearChat}>
+              <Ionicons name="brush-outline" size={20} color={colors.textPrimary} />
+              <Text style={styles.sheetOptionText}>Clear chat</Text>
+            </Pressable>
+
+            <Pressable style={styles.sheetOption} onPress={handlePromptDeleteChat}>
+              <Ionicons name="trash-outline" size={20} color={colors.error} />
+              <Text style={[styles.sheetOptionText, { color: colors.error }]}>Delete chat</Text>
+            </Pressable>
+
+            <Pressable style={styles.sheetCancel} onPress={() => setShowOptionsSheet(false)}>
+              <Text style={styles.sheetCancelText}>Cancel</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Custom Universal Confirmation & Error Dialog Modal */}
+      <Modal visible={!!dialogConfig} transparent animationType="fade" onRequestClose={() => setDialogConfig(null)}>
+        <Pressable style={styles.modalOverlay} onPress={() => dialogConfig?.onSecondary ? dialogConfig.onSecondary() : setDialogConfig(null)}>
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.sheetHandle} />
+            {dialogConfig?.icon ? (
+              <View style={[styles.confirmIconWrap, { backgroundColor: dialogConfig.iconBgColor }]}>
+                <Ionicons name={dialogConfig.icon} size={24} color={dialogConfig.iconColor} />
               </View>
-              <Text style={styles.confirmTitle}>Delete this message?</Text>
-              <Text style={styles.confirmSubtitle}>
-                It will be replaced with This message was deleted for everyone in this chat.
-              </Text>
-              <Pressable style={styles.confirmDeleteButton} onPress={handleConfirmDelete}>
-                <Text style={styles.confirmDeleteText}>Delete</Text>
+            ) : null}
+
+            {dialogConfig?.title ? <Text style={styles.confirmTitle}>{dialogConfig.title}</Text> : null}
+            {dialogConfig?.subtitle ? <Text style={styles.confirmSubtitle}>{dialogConfig.subtitle}</Text> : null}
+
+            <Pressable
+              style={[
+                styles.dialogPrimaryBtn,
+                { backgroundColor: dialogConfig?.primaryStyle === 'danger' ? colors.error : colors.brand },
+              ]}
+              onPress={dialogConfig?.onPrimary}
+            >
+              <Text style={styles.dialogPrimaryText}>{dialogConfig?.primaryText || 'OK'}</Text>
+            </Pressable>
+
+            {dialogConfig?.secondaryText ? (
+              <Pressable style={styles.sheetCancel} onPress={dialogConfig.onSecondary}>
+                <Text style={styles.sheetCancelText}>{dialogConfig.secondaryText}</Text>
               </Pressable>
-              <Pressable style={styles.sheetCancel} onPress={() => setConfirmingDelete(false)}>
-                <Text style={styles.sheetCancelText}>Cancel</Text>
-              </Pressable>
-            </>
-          )}
-        </View>
+            ) : null}
+          </Pressable>
+        </Pressable>
       </Modal>
     </ScreenShell>
   );

@@ -151,7 +151,7 @@ const VoiceMessageBubble = memo(({ message, isMine, onLongPress }) => {
               <ActivityIndicator color={isMine ? COLORS.white : COLORS.indigo} size="small" />
             ) : (
               <Ionicons
-                name={isPlaying ? 'pause-fill' : (isPaused ? 'play-fill' : 'play-fill')}
+                name={isPlaying ? 'pause-fill' : (isPaused ? 'play' : 'play')}
                 size={18}
                 color={isMine ? COLORS.white : COLORS.indigo}
               />

@@ -284,6 +284,11 @@ export async function fetchConversations(uid = auth.currentUser?.uid) {
   const snapshot = await getDocs(query(collection(db, COLLECTIONS.conversations)));
   return mapDocs(snapshot)
     .filter((item) => Array.isArray(item.memberIds) && item.memberIds.includes(uid))
+    .filter((item) => {
+      const deletedAt = item.deletedFor?.[uid]?.toDate?.()?.getTime?.() || 0;
+      const updatedAt = item.updatedAt?.toDate?.()?.getTime?.() || 0;
+      return !deletedAt || updatedAt > deletedAt;
+    })
     .sort((left, right) => {
       const leftTime = left.updatedAt?.toDate?.()?.getTime?.() || 0;
       const rightTime = right.updatedAt?.toDate?.()?.getTime?.() || 0;

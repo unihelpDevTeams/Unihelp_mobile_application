@@ -8,7 +8,16 @@ import {
 } from '../services/pushNotifications';
 
 const getRouteTarget = (data = {}) => {
+  const conversationId = data?.conversationId || data?.data?.conversationId;
+  if (conversationId) {
+    return `/messages/${conversationId}`;
+  }
+
   if (typeof data?.route === 'string' && data.route.startsWith('/')) {
+    if (data.route.startsWith('/messages?conversationId=')) {
+      const convId = data.route.split('=')[1];
+      if (convId) return `/messages/${convId}`;
+    }
     return {
       pathname: data.route,
       params: data.params || {},
@@ -16,6 +25,10 @@ const getRouteTarget = (data = {}) => {
   }
 
   if (typeof data?.url === 'string' && data.url.startsWith('/')) {
+    if (data.url.startsWith('/messages?conversationId=')) {
+      const convId = data.url.split('=')[1];
+      if (convId) return `/messages/${convId}`;
+    }
     return {
       pathname: data.url,
       params: data.params || {},

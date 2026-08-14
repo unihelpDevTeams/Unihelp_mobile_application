@@ -68,7 +68,8 @@ const getDateGroup = (value) => {
 const GROUP_ORDER = ['Today', 'Yesterday', 'This week', 'Earlier'];
 
 const resolveNotificationRoute = (item) => {
-  if (item.conversationId) return `/messages/${item.conversationId}`;
+  const conversationId = item.conversationId || item.data?.conversationId;
+  if (conversationId) return `/messages/${conversationId}`;
   if (item.route && item.route !== '/notifications') {
     if (item.route.startsWith('/messages?conversationId=')) {
       const convId = item.route.split('=')[1];

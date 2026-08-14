@@ -12,7 +12,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
@@ -40,12 +40,19 @@ const SORT_OPTIONS = [
 
 export default function StudyMaterials() {
   const router = useRouter();
+  const { tab } = useLocalSearchParams();
   const { user, profile } = useAuth();
   const { colors } = useTheme();
   const { width } = useWindowDimensions();
 
   // Active Tab ('questions' | 'notes')
   const [activeTab, setActiveTab] = useState('questions');
+
+  useEffect(() => {
+    if (tab === 'notes' || tab === 'questions') {
+      setActiveTab(tab);
+    }
+  }, [tab]);
 
   // Shared Data & Pagination States
   const [items, setItems] = useState([]);

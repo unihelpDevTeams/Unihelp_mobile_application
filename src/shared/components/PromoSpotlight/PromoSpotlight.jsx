@@ -23,6 +23,8 @@ const LABELS = {
   unihelp_promotion: 'UniHelp',
 };
 
+const AUTO_CLOSE_MS = 5000;
+
 export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -30,47 +32,66 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
   const { width, height } = useWindowDimensions();
 
   const progress = useRef(new Animated.Value(0)).current;
+  const countdownAnim = useRef(new Animated.Value(1)).current; // 1 -> 0 over AUTO_CLOSE_MS
+  const imageOpacity = useRef(new Animated.Value(0)).current;
+  const closeScale = useRef(new Animated.Value(1)).current;
+  const actionScale = useRef(new Animated.Value(1)).current;
+
   const [imageLoading, setImageLoading] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const [countdown, setCountdown] = useState(5);
   const [userDismissed, setUserDismissed] = useState(false);
 
+  const closeTimerRef = useRef(null);
+
   useEffect(() => {
-    Animated.timing(progress, {
+    Animated.spring(progress, {
       toValue: visible ? 1 : 0,
-      duration: visible ? 260 : 180,
       useNativeDriver: true,
+      speed: visible ? 16 : 20,
+      bounciness: visible ? 6 : 0,
     }).start();
   }, [progress, visible]);
 
   useEffect(() => {
     if (!visible) {
+      countdownAnim.stopAnimation();
+      countdownAnim.setValue(1);
       setCountdown(5);
       setUserDismissed(false);
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
       return undefined;
     }
 
     setImageFailed(false);
     setImageLoading(Boolean(promo?.imageUrl));
+    imageOpacity.setValue(0);
     setCountdown(5);
     setUserDismissed(false);
 
-    const tick = setInterval(() => {
-      setCountdown((current) => {
-        if (current <= 1) return 0;
-        return current - 1;
-      });
-    }, 1000);
+    countdownAnim.setValue(1);
+    const anim = Animated.timing(countdownAnim, {
+      toValue: 0,
+      duration: AUTO_CLOSE_MS,
+      useNativeDriver: false, // width interpolation isn't supported by the native driver
+    });
+    anim.start();
 
-    const timeout = setTimeout(() => {
-      setUserDismissed(false);
+    const listenerId = countdownAnim.addListener(({ value }) => {
+      const secondsLeft = Math.max(0, Math.ceil(value * 5));
+      setCountdown((prev) => (prev !== secondsLeft ? secondsLeft : prev));
+    });
+
+    closeTimerRef.current = setTimeout(() => {
       handleClose();
-    }, 5000);
+    }, AUTO_CLOSE_MS);
 
     return () => {
-      clearInterval(tick);
-      clearTimeout(timeout);
+      anim.stop();
+      countdownAnim.removeListener(listenerId);
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [promo?.id, promo?.imageUrl, visible]);
 
   const sizing = useMemo(() => {
@@ -107,11 +128,18 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
     }
   };
 
+  const animatePress = (animValue, toValue) => {
+    Animated.spring(animValue, {
+      toValue,
+      useNativeDriver: true,
+      speed: 24,
+      bounciness: 10,
+    }).start();
+  };
+
   const hasAction = Boolean(promo.actionType && promo.actionType !== 'none' && promo.actionUrl);
   const label = (promo.type && LABELS[promo.type]) || 'Announcement';
-  const countdownPercent = ((countdown || 0) / 4) * 100;
 
-  // Dynamic Theme-based Badges & Overlays
   const isExternal = promo.type === 'external_ad';
   const badgeBg = isExternal
     ? colors.amberLight || colors.warningLight || 'rgba(245, 158, 11, 0.15)'
@@ -125,6 +153,11 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
   const closeBtnBg = isDark
     ? colors.surfaceSecondary || 'rgba(255, 255, 255, 0.12)'
     : colors.whiteTransparent || 'rgba(255, 255, 255, 0.85)';
+
+  const countdownWidth = countdownAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0%', '100%'],
+  });
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
@@ -152,8 +185,8 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
               borderColor: colors.borderDefault || colors.border || '#E5E7EB',
               opacity: progress,
               transform: [
-                { scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
-                { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) },
+                { scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }) },
+                { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) },
               ],
             },
           ]}
@@ -170,13 +203,18 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
             ]}
           >
             {promo.imageUrl && !imageFailed ? (
-              <Image
+              <Animated.Image
                 source={{ uri: promo.imageUrl }}
-                style={styles.image}
-                contentFit="contain"
-                cachePolicy="disk"
-                transition={160}
-                onLoadEnd={() => setImageLoading(false)}
+                style={[styles.image, { opacity: imageOpacity }]}
+                resizeMode="contain"
+                onLoadEnd={() => {
+                  setImageLoading(false);
+                  Animated.timing(imageOpacity, {
+                    toValue: 1,
+                    duration: 220,
+                    useNativeDriver: true,
+                  }).start();
+                }}
                 onError={() => {
                   setImageLoading(false);
                   setImageFailed(true);
@@ -199,12 +237,20 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
 
             <Pressable
               onPress={handleClose}
-              style={({ pressed }) => [styles.closeButton, { backgroundColor: closeBtnBg }, pressed && styles.pressed]}
+              onPressIn={() => animatePress(closeScale, 0.88)}
+              onPressOut={() => animatePress(closeScale, 1)}
               accessibilityRole="button"
               accessibilityLabel="Close promotion"
               hitSlop={8}
             >
-              <Ionicons name="close" size={20} color={colors.textPrimary || '#111827'} />
+              <Animated.View
+                style={[
+                  styles.closeButton,
+                  { backgroundColor: closeBtnBg, transform: [{ scale: closeScale }] },
+                ]}
+              >
+                <Ionicons name="close" size={20} color={colors.textPrimary || '#111827'} />
+              </Animated.View>
             </Pressable>
           </View>
 
@@ -244,12 +290,17 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
                 <Text style={[styles.countdownText, { color: colors.textSecondary || '#6B7280' }]}>
                   Auto-closing in {countdown}s
                 </Text>
-                <View style={[styles.countdownTrack, { backgroundColor: colors.borderDefault || colors.border || '#E5E7EB' }]}>
-                  <View
+                <View
+                  style={[
+                    styles.countdownTrack,
+                    { backgroundColor: colors.borderDefault || colors.border || '#E5E7EB' },
+                  ]}
+                >
+                  <Animated.View
                     style={[
                       styles.countdownFill,
                       {
-                        width: `${countdownPercent}%`,
+                        width: countdownWidth,
                         backgroundColor: isExternal ? colors.amber || '#F59E0B' : colors.brand || '#4F46E5',
                       },
                     ]}
@@ -259,13 +310,21 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
             ) : null}
 
             <View style={styles.actions}>
-              <Button
-                label={promo.buttonText || (hasAction ? 'Open' : 'Got it')}
+              <Pressable
                 onPress={hasAction ? handleAction : handleClose}
-                icon={hasAction ? 'arrow-forward-outline' : 'checkmark-outline'}
-                iconPosition="right"
-                fullWidth
-              />
+                onPressIn={() => animatePress(actionScale, 0.97)}
+                onPressOut={() => animatePress(actionScale, 1)}
+              >
+                <Animated.View style={{ transform: [{ scale: actionScale }] }}>
+                  <Button
+                    label={promo.buttonText || (hasAction ? 'Open' : 'Got it')}
+                    onPress={hasAction ? handleAction : handleClose}
+                    icon={hasAction ? 'arrow-forward-outline' : 'checkmark-outline'}
+                    iconPosition="right"
+                    fullWidth
+                  />
+                </Animated.View>
+              </Pressable>
             </View>
           </View>
         </Animated.View>
@@ -321,9 +380,6 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  pressed: {
-    opacity: 0.82,
   },
   content: {
     padding: 18,

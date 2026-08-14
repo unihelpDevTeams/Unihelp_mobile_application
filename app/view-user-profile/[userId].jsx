@@ -80,12 +80,18 @@ export default function ViewUserProfile() {
   }, [profile]);
 
   const avatarUrl = typeof profile?.photo === 'string' ? profile.photo.trim() : profile?.photo || '';
+  const coverUrl = String(profile?.coverPhoto || profile?.cover || profile?.coverUrl || profile?.banner || '').trim();
   const [avatarFailed, setAvatarFailed] = useState(false);
+  const [coverFailed, setCoverFailed] = useState(false);
   const isSelf = user?.uid === targetUid;
 
   useEffect(() => {
     setAvatarFailed(false);
   }, [avatarUrl]);
+
+  useEffect(() => {
+    setCoverFailed(false);
+  }, [coverUrl]);
 
   const runAction = async (key, task, success) => {
     setBusy(key);
@@ -282,7 +288,26 @@ export default function ViewUserProfile() {
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           {/* Header Cover & Avatar */}
           <View style={styles.headerContainer}>
-            <View style={[styles.coverBanner, { backgroundColor: colors.brandLight }]} />
+            <View style={[styles.coverBanner, { backgroundColor: colors.brandLight }]}>
+              {coverUrl && !coverFailed ? (
+                <Image
+                  source={{ uri: coverUrl }}
+                  style={styles.coverImage}
+                  contentFit="cover"
+                  cachePolicy="disk"
+                  transition={220}
+                  onError={() => setCoverFailed(true)}
+                />
+              ) : (
+                <View style={styles.coverFallback}>
+                  <Ionicons name="school-outline" size={30} color={colors.brand} />
+                  <Text style={[styles.coverFallbackText, { color: colors.brand }]}>
+                    {profile?.school || profile?.department || 'UniHelp Student'}
+                  </Text>
+                </View>
+              )}
+              <View style={styles.coverScrim} />
+            </View>
             <View style={styles.avatarWrapper}>
               <View style={[styles.avatarBorder, { backgroundColor: colors.surfacePrimary, shadowColor: colors.shadow }]}>
                 {avatarUrl && !avatarFailed ? (
@@ -513,22 +538,40 @@ const styles = StyleSheet.create({
   /* Header / Avatar */
   headerContainer: {
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   coverBanner: {
-    height: 90,
+    height: 150,
     width: '100%',
     backgroundColor: '#EEF2FF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderRadius: 22,
+    overflow: 'hidden',
+  },
+  coverImage: {
+    width: '100%',
+    height: '100%',
+  },
+  coverFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  coverFallbackText: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  coverScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.08)',
   },
   avatarWrapper: {
-    marginTop: -45,
+    marginTop: -48,
   },
   avatarBorder: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    width: 104,
+    height: 104,
+    borderRadius: 52,
     backgroundColor: '#FFFFFF',
     padding: 4,
     shadowColor: '#0F172A',
@@ -540,12 +583,12 @@ const styles = StyleSheet.create({
   avatarImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 44,
+    borderRadius: 48,
   },
   avatarFallback: {
     width: '100%',
     height: '100%',
-    borderRadius: 44,
+    borderRadius: 48,
     backgroundColor: '#4F46E5',
     alignItems: 'center',
     justifyContent: 'center',

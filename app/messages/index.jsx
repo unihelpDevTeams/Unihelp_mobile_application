@@ -1,11 +1,26 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FlatList, Image, Modal, Pressable, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  Image,
+  Modal,
+  Pressable,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
 import { fetchConversations } from '../../services/firestoreSync';
-import { searchUsers } from '../../src/shared/services/community';
+import {
+  clearConversationForUser,
+  deleteConversationForUser,
+  searchUsers,
+} from '../../src/shared/services/community';
 import {
   listenFriends,
   listenIncomingFriendRequests,
@@ -32,6 +47,12 @@ const formatShortTime = (value) => {
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 };
 
+const toMillis = (value) => {
+  if (!value) return 0;
+  const date = typeof value === 'string' ? new Date(value) : value?.toDate ? value.toDate() : value;
+  return Number.isNaN(date?.getTime?.()) ? 0 : date.getTime();
+};
+
 const getPeerInfo = (item, currentUid) => {
   const peerId = item.memberIds?.find((memberId) => memberId !== currentUid);
   return { peerId, peerInfo: item.memberInfo?.[peerId] || {} };
@@ -45,11 +66,15 @@ function ConversationItem({
   styles,
   getConversationRelationshipLabel,
   getPeerInfo,
+  onLongPress,
 }) {
   const { peerId, peerInfo } = getPeerInfo(item, currentUid);
   const unread = item.unread?.[currentUid] || 0;
   const relationshipLabel = getConversationRelationshipLabel(peerId);
   const avatar = typeof peerInfo.avatar === 'string' ? peerInfo.avatar.trim() : peerInfo.avatar || '';
+  const clearedAt = toMillis(item.clearedFor?.[currentUid]);
+  const lastMessageAt = toMillis(item.lastMessageAt || item.updatedAt);
+  const visibleLastMessage = clearedAt && lastMessageAt <= clearedAt ? '' : item.lastMessage;
   const [avatarFailed, setAvatarFailed] = useState(false);
 
   useEffect(() => {
@@ -57,7 +82,12 @@ function ConversationItem({
   }, [avatar]);
 
   return (
-    <Pressable style={styles.chatCard} onPress={() => router.push(`/messages/${item.id}`)}>
+    <Pressable
+      style={({ pressed }) => [styles.chatCard, pressed && styles.cardPressed]}
+      onPress={() => router.push(`/messages/${item.id}`)}
+      onLongPress={() => onLongPress?.(item)}
+      delayLongPress={240}
+    >
       <View style={styles.avatarWrapper}>
         {avatar && !avatarFailed ? (
           <Image source={{ uri: avatar }} style={styles.avatar} onError={() => setAvatarFailed(true)} />
@@ -69,24 +99,30 @@ function ConversationItem({
       </View>
       <View style={styles.chatCopy}>
         <View style={styles.chatHeaderRow}>
-          <Text style={styles.chatTitle}>{peerInfo.name || 'Student'}</Text>
+          <Text style={styles.chatTitle} numberOfLines={1}>{peerInfo.name || 'Student'}</Text>
           <Text style={styles.chatTime}>{formatShortTime(item.updatedAt)}</Text>
         </View>
-        <Text style={styles.chatMessage} numberOfLines={1}>{item.lastMessage || 'Start the conversation.'}</Text>
+        <Text style={styles.chatMessage} numberOfLines={1}>
+          {visibleLastMessage || 'Start the conversation.'}
+        </Text>
         {relationshipLabel ? (
-          <View style={[
-            styles.relationshipPill,
-            relationshipLabel.tone === 'warning' && styles.relationshipPillWarning,
-          ]}>
+          <View
+            style={[
+              styles.relationshipPill,
+              relationshipLabel.tone === 'warning' && styles.relationshipPillWarning,
+            ]}
+          >
             <Ionicons
               name={relationshipLabel.icon}
               size={12}
               color={relationshipLabel.tone === 'warning' ? colors.error : colors.brandText}
             />
-            <Text style={[
-              styles.relationshipPillText,
-              relationshipLabel.tone === 'warning' && styles.relationshipPillTextWarning,
-            ]}>
+            <Text
+              style={[
+                styles.relationshipPillText,
+                relationshipLabel.tone === 'warning' && styles.relationshipPillTextWarning,
+              ]}
+            >
               {relationshipLabel.text}
             </Text>
           </View>
@@ -126,38 +162,79 @@ export default function MessagesPage() {
   const [matches, setMatches] = useState([]);
   const [searching, setSearching] = useState(false);
 
+  // Custom UI Action Sheet State
+  const [selectedConversation, setSelectedConversation] = useState(null);
+  const [optionsModalVisible, setOptionsModalVisible] = useState(false);
+  const [confirmationMode, setConfirmationMode] = useState(null); // 'clear' | 'delete' | null
+  const [actionLoading, setActionLoading] = useState(false);
+
   const styles = useThemeStyles((c, s, r) => ({
     tabBar: {
-      flexDirection: 'row', backgroundColor: c.surfacePrimary, borderRadius: 16,
-      padding: 4, marginBottom: 16, borderWidth: 1, borderColor: c.borderDefault,
+      flexDirection: 'row',
+      backgroundColor: c.surfacePrimary,
+      borderRadius: 16,
+      padding: 4,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
     },
     tab: {
-      flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-      paddingVertical: 10, borderRadius: 12, gap: 6, position: 'relative',
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 10,
+      borderRadius: 12,
+      gap: 6,
+      position: 'relative',
     },
     tabActive: { backgroundColor: c.brandLight },
     tabLabel: { fontSize: 13, fontWeight: '600', color: c.textTertiary },
     tabLabelActive: { color: c.brandText, fontWeight: '700' },
     tabBadge: {
-      position: 'absolute', top: 4, right: 4, minWidth: 18, height: 18, borderRadius: 9,
-      backgroundColor: c.red, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4,
+      position: 'absolute',
+      top: 4,
+      right: 4,
+      minWidth: 18,
+      height: 18,
+      borderRadius: 9,
+      backgroundColor: c.red,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 4,
     },
     tabBadgeText: { color: c.onBrand, fontSize: 10, fontWeight: '800' },
     tabContent: { flex: 1 },
     listContent: { paddingBottom: 24 },
     sectionLabel: {
-      fontSize: 13, fontWeight: '800', color: c.textSecondary,
-      textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12, marginTop: 4,
+      fontSize: 12,
+      fontWeight: '800',
+      color: c.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+      marginBottom: 10,
+      marginTop: 6,
     },
+    cardPressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
     chatCard: {
-      flexDirection: 'row', alignItems: 'center', backgroundColor: c.card,
-      borderWidth: 1, borderColor: c.borderDefault, borderRadius: 18, padding: 14, marginBottom: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      borderRadius: 18,
+      padding: 14,
+      marginBottom: 10,
     },
     avatarWrapper: { width: 48, height: 48, marginRight: 12 },
     avatar: { width: 48, height: 48, borderRadius: 16 },
     avatarFallback: {
-      width: 48, height: 48, borderRadius: 16, backgroundColor: c.brandLight,
-      alignItems: 'center', justifyContent: 'center',
+      width: 48,
+      height: 48,
+      borderRadius: 16,
+      backgroundColor: c.brandLight,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     avatarInitial: { color: c.brandDark, fontWeight: '800', fontSize: 18 },
     chatCopy: { flex: 1 },
@@ -166,72 +243,139 @@ export default function MessagesPage() {
     chatTime: { color: c.textSecondary, fontSize: 11 },
     chatMessage: { color: c.textSecondary, fontSize: 13, lineHeight: 18 },
     relationshipPill: {
-      alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4,
-      marginTop: 7, paddingHorizontal: 8, paddingVertical: 4,
-      borderRadius: 999, backgroundColor: c.brandLight,
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      marginTop: 7,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 999,
+      backgroundColor: c.brandLight,
     },
     relationshipPillWarning: { backgroundColor: c.dangerLight },
     relationshipPillText: { color: c.brandText, fontSize: 11, fontWeight: '800' },
     relationshipPillTextWarning: { color: c.error },
     unreadBadge: {
-      marginLeft: 12, minWidth: 26, paddingHorizontal: 8, backgroundColor: c.brand,
-      borderRadius: 999, alignItems: 'center', justifyContent: 'center', height: 26,
+      marginLeft: 12,
+      minWidth: 24,
+      paddingHorizontal: 7,
+      backgroundColor: c.brand,
+      borderRadius: 999,
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: 24,
     },
-    unreadText: { color: c.onBrand, fontWeight: '800', fontSize: 12 },
+    unreadText: { color: c.onBrand, fontWeight: '800', fontSize: 11 },
     findFriendBtn: {
-      flexDirection: 'row', alignItems: 'center', backgroundColor: c.card,
-      borderWidth: 1, borderColor: c.borderDefault, borderRadius: 18, padding: 14, marginBottom: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      borderRadius: 18,
+      padding: 14,
+      marginBottom: 16,
     },
     findFriendIconWrap: {
-      width: 44, height: 44, borderRadius: 14, backgroundColor: c.brand,
-      alignItems: 'center', justifyContent: 'center', marginRight: 12,
+      width: 42,
+      height: 42,
+      borderRadius: 14,
+      backgroundColor: c.brand,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 12,
     },
     findFriendTextWrap: { flex: 1 },
     findFriendTitle: { fontSize: 15, fontWeight: '800', color: c.textPrimary },
     findFriendSubtitle: { fontSize: 12, color: c.textSecondary, marginTop: 2 },
     friendCard: {
-      flexDirection: 'row', alignItems: 'center', backgroundColor: c.card,
-      borderWidth: 1, borderColor: c.borderDefault, borderRadius: 18, padding: 14, marginBottom: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      borderRadius: 18,
+      padding: 14,
+      marginBottom: 10,
     },
     friendInfo: { flex: 1, marginRight: 8 },
     friendName: { fontSize: 15, fontWeight: '800', color: c.textPrimary },
     friendDetail: { fontSize: 12, color: c.textSecondary, marginTop: 2 },
     messageBtn: {
-      width: 38, height: 38, borderRadius: 12, backgroundColor: c.brandLight,
-      alignItems: 'center', justifyContent: 'center',
+      width: 38,
+      height: 38,
+      borderRadius: 12,
+      backgroundColor: c.brandLight,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     requestSection: { marginBottom: 20 },
     requestCard: {
-      flexDirection: 'row', alignItems: 'center', backgroundColor: c.card,
-      borderWidth: 1, borderColor: c.borderDefault, borderRadius: 18, padding: 14, marginBottom: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      borderRadius: 18,
+      padding: 14,
+      marginBottom: 10,
     },
     requestInfo: { flex: 1, marginRight: 8 },
     requestName: { fontSize: 15, fontWeight: '800', color: c.textPrimary },
     requestLabel: { fontSize: 12, color: c.textSecondary, marginTop: 2 },
     requestActions: { flexDirection: 'row', gap: 8 },
     acceptBtn: {
-      width: 38, height: 38, borderRadius: 12, backgroundColor: c.success,
-      alignItems: 'center', justifyContent: 'center',
+      width: 38,
+      height: 38,
+      borderRadius: 12,
+      backgroundColor: c.success,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     declineBtn: {
-      width: 38, height: 38, borderRadius: 12, backgroundColor: c.dangerLight,
-      borderWidth: 1, borderColor: c.dangerBorder, alignItems: 'center', justifyContent: 'center',
+      width: 38,
+      height: 38,
+      borderRadius: 12,
+      backgroundColor: c.dangerLight,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     cancelBtn: {
-      paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10,
-      backgroundColor: c.skeleton, borderWidth: 1, borderColor: c.borderDefault,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 10,
+      backgroundColor: c.skeleton,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
     },
     cancelBtnText: { fontSize: 12, fontWeight: '700', color: c.textSecondary },
-    modalOverlay: { flex: 1, backgroundColor: c.overlay, justifyContent: 'flex-end' },
+    
+    // Modal & Sheet Common
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.55)', justifyContent: 'flex-end' },
     modalContainer: {
-      backgroundColor: c.modalBackground, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-      paddingTop: 20, paddingHorizontal: 20, paddingBottom: 40, maxHeight: '85%', minHeight: '60%',
+      backgroundColor: c.modalBackground,
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
+      paddingTop: 20,
+      paddingHorizontal: 20,
+      paddingBottom: 36,
+      maxHeight: '85%',
+      minHeight: '55%',
     },
     modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
     modalTitle: { fontSize: 20, fontWeight: '800', color: c.textPrimary },
     modalSearchWrap: {
-      flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBackground,
-      borderWidth: 1, borderColor: c.borderDefault, borderRadius: 14, paddingHorizontal: 12, marginBottom: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: c.inputBackground,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      borderRadius: 14,
+      paddingHorizontal: 12,
+      marginBottom: 16,
     },
     modalSearchIcon: { marginRight: 8 },
     modalSearchInput: { flex: 1, color: c.textPrimary, paddingVertical: 12, fontSize: 15 },
@@ -239,31 +383,134 @@ export default function MessagesPage() {
     modalEmpty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40, gap: 12 },
     modalEmptyText: { fontSize: 14, color: c.textTertiary, textAlign: 'center' },
     searchResultCard: {
-      flexDirection: 'row', alignItems: 'center', backgroundColor: c.card,
-      borderWidth: 1, borderColor: c.borderDefault, borderRadius: 16, padding: 12, marginBottom: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      borderRadius: 16,
+      padding: 12,
+      marginBottom: 10,
     },
     searchResultInfo: { flex: 1, marginRight: 8 },
     searchResultName: { fontSize: 14, fontWeight: '800', color: c.textPrimary },
     searchResultDetail: { fontSize: 12, color: c.textSecondary, marginTop: 2 },
     addFriendBtn: {
-      flexDirection: 'row', alignItems: 'center', backgroundColor: c.brand,
-      paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, gap: 4,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: c.brand,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 10,
+      gap: 4,
     },
     addFriendBtnText: { color: c.onBrand, fontSize: 12, fontWeight: '700' },
+
+    // Custom Options Sheet
+    sheetHandle: {
+      width: 36,
+      height: 4,
+      backgroundColor: c.borderDefault,
+      borderRadius: 2,
+      alignSelf: 'center',
+      marginBottom: 16,
+    },
+    sheetContent: {
+      backgroundColor: c.modalBackground,
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
+      paddingHorizontal: 20,
+      paddingTop: 12,
+      paddingBottom: 36,
+    },
+    sheetHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 12 },
+    sheetPeerName: { fontSize: 17, fontWeight: '800', color: c.textPrimary },
+    sheetSubtext: { fontSize: 12, color: c.textSecondary, marginTop: 2 },
+    actionOption: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      borderRadius: 16,
+      padding: 14,
+      marginBottom: 10,
+      gap: 12,
+    },
+    actionOptionDanger: {
+      backgroundColor: c.dangerLight,
+      borderColor: c.dangerBorder,
+    },
+    actionIconWrap: {
+
+      width: 40,
+      height: 40,
+      borderRadius: 12,
+      backgroundColor: c.surfacePrimary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    actionIconWrapDanger: {
+      backgroundColor: c.error + '18',
+    },
+    actionTitle: { fontSize: 15, fontWeight: '700', color: c.textPrimary },
+    actionTitleDanger: { color: c.error },
+    actionSubtitle: { fontSize: 12, color: c.textSecondary, marginTop: 2 },
+    
+    // Confirmation State Box
+    confirmBox: {
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      borderRadius: 20,
+      padding: 18,
+      alignItems: 'center',
+    },
+    confirmIconWrap: {
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      backgroundColor: c.dangerLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 12,
+    },
+    confirmTitle: { fontSize: 16, fontWeight: '800', color: c.textPrimary, textAlign: 'center' },
+    confirmDesc: { fontSize: 13, color: c.textSecondary, textAlign: 'center', marginTop: 6, lineHeight: 18 },
+    confirmButtonsRow: { flexDirection: 'row', gap: 12, marginTop: 20, width: '100%' },
+    confirmBtnCancel: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: 14,
+      backgroundColor: c.surfacePrimary,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      alignItems: 'center',
+    },
+    confirmBtnCancelText: { fontSize: 14, fontWeight: '700', color: c.textPrimary },
+    confirmBtnDanger: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: 14,
+      backgroundColor: c.error,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    confirmBtnDangerText: { fontSize: 14, fontWeight: '800', color: c.onBrand },
   }));
 
   // Load conversations
   const loadConversations = useCallback(async () => {
-    const data = await fetchConversations(profile?.uid);
+    const data = await fetchConversations(user?.uid || profile?.uid);
     setItems(data);
     setLoading(false);
-  }, [profile?.uid]);
+  }, [profile?.uid, user?.uid]);
 
   useEffect(() => {
     loadConversations().catch(() => setLoading(false));
   }, [loadConversations]);
 
-  // Listen to friends
+  // Listeners
   useEffect(() => {
     if (!profile?.uid) return;
     setFriendsLoading(true);
@@ -274,7 +521,6 @@ export default function MessagesPage() {
     return unsub;
   }, [profile?.uid]);
 
-  // Listen to incoming requests
   useEffect(() => {
     if (!profile?.uid) return;
     const unsub = listenIncomingFriendRequests(profile.uid, (data) => {
@@ -284,7 +530,6 @@ export default function MessagesPage() {
     return unsub;
   }, [profile?.uid]);
 
-  // Listen to outgoing requests
   useEffect(() => {
     if (!profile?.uid) return;
     const unsub = listenOutgoingFriendRequests(profile.uid, (data) => {
@@ -293,7 +538,7 @@ export default function MessagesPage() {
     return unsub;
   }, [profile?.uid]);
 
-  // Search users for find friend
+  // Search users
   useEffect(() => {
     const run = async () => {
       if (!search.trim() || !profile?.uid) {
@@ -362,25 +607,6 @@ export default function MessagesPage() {
     }
   };
 
-  const handleRemoveFriend = async (friend) => {
-    const otherUid = friend.users?.find((id) => id !== profile?.uid);
-    if (!otherUid) return;
-    try {
-      await removeFriend({
-        currentUid: profile?.uid,
-        friendUid: otherUid,
-        currentProfile: profile,
-      });
-    } catch (err) {
-      console.log('Remove friend error:', err.message);
-    }
-  };
-
-  const openConversation = async (person) => {
-    if (!user || !person?.id) return;
-    router.push(`/view-user-profile/${person.id}`);
-  };
-
   const openFriendChat = (friend) => {
     const otherUid = friend.users?.find((id) => id !== profile?.uid);
     if (!otherUid) return;
@@ -422,16 +648,185 @@ export default function MessagesPage() {
     return { text: 'Not friends yet', icon: 'alert-circle-outline', tone: 'warning' };
   };
 
+  // Modern UI Action Sheet Trigger & Actions
+  const handleOpenConversationOptions = (conversation) => {
+    setSelectedConversation(conversation);
+    setConfirmationMode(null);
+    setOptionsModalVisible(true);
+  };
+
+  const handleCloseOptionsModal = () => {
+    if (actionLoading) return;
+    setOptionsModalVisible(false);
+    setSelectedConversation(null);
+    setConfirmationMode(null);
+  };
+
+  const executeClearConversation = async () => {
+    const uid = user?.uid || profile?.uid;
+    if (!selectedConversation?.id || !uid) return;
+    setActionLoading(true);
+    try {
+      await clearConversationForUser(selectedConversation.id, uid);
+      setItems((current) =>
+        current.map((item) =>
+          item.id === selectedConversation.id
+            ? {
+                ...item,
+                clearedFor: { ...(item.clearedFor || {}), [uid]: new Date() },
+                unread: { ...(item.unread || {}), [uid]: 0 },
+              }
+            : item
+        )
+      );
+      handleCloseOptionsModal();
+    } catch (err) {
+      console.log('Clear error:', err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const executeDeleteConversation = async () => {
+    const uid = user?.uid || profile?.uid;
+    if (!selectedConversation?.id || !uid) return;
+    setActionLoading(true);
+    try {
+      await deleteConversationForUser(selectedConversation.id, uid);
+      setItems((current) => current.filter((item) => item.id !== selectedConversation.id));
+      handleCloseOptionsModal();
+    } catch (err) {
+      console.log('Delete error:', err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // --- Custom Action Sheet UI Card ---
+  const renderConversationOptionsModal = () => {
+    if (!selectedConversation) return null;
+    const { peerInfo } = getPeerInfo(selectedConversation, user?.uid || profile?.uid);
+    const peerName = peerInfo.name || 'Student';
+    const avatar = peerInfo.avatar || '';
+
+    return (
+      <Modal
+        visible={optionsModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseOptionsModal}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={handleCloseOptionsModal}
+        >
+          <TouchableOpacity activeOpacity={1} style={styles.sheetContent}>
+            <View style={styles.sheetHandle} />
+
+            {/* Selected Peer Header */}
+            <View style={styles.sheetHeader}>
+              <View style={styles.avatarWrapper}>
+                {avatar ? (
+                  <Image source={{ uri: avatar }} style={styles.avatar} />
+                ) : (
+                  <View style={styles.avatarFallback}>
+                    <Text style={styles.avatarInitial}>{peerName[0].toUpperCase()}</Text>
+                  </View>
+                )}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sheetPeerName}>{peerName}</Text>
+                <Text style={styles.sheetSubtext}>Chat Options • Affects your view only</Text>
+              </View>
+            </View>
+
+            {/* Confirmation Overlay State */}
+            {confirmationMode ? (
+              <View style={styles.confirmBox}>
+                <View style={styles.confirmIconWrap}>
+                  <Ionicons name="alert-circle-outline" size={28} color={colors.error} />
+                </View>
+                <Text style={styles.confirmTitle}>
+                  {confirmationMode === 'clear' ? 'Clear this chat?' : 'Delete this chat?'}
+                </Text>
+                <Text style={styles.confirmDesc}>
+                  {confirmationMode === 'clear'
+                    ? 'All previous messages will be hidden from your view. The other student will keep their history.'
+                    : 'This room will disappear from your chat list until a new message is received.'}
+                </Text>
+
+                <View style={styles.confirmButtonsRow}>
+                  <TouchableOpacity
+                    style={styles.confirmBtnCancel}
+                    onPress={() => setConfirmationMode(null)}
+                    disabled={actionLoading}
+                  >
+                    <Text style={styles.confirmBtnCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.confirmBtnDanger}
+                    onPress={confirmationMode === 'clear' ? executeClearConversation : executeDeleteConversation}
+                    disabled={actionLoading}
+                  >
+                    {actionLoading ? (
+                      <ActivityIndicator color={colors.onBrand} size="small" />
+                    ) : (
+                      <Text style={styles.confirmBtnDangerText}>
+                        {confirmationMode === 'clear' ? 'Yes, Clear' : 'Yes, Delete'}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              /* Menu Options */
+              <View>
+                <TouchableOpacity
+                  style={styles.actionOption}
+                  onPress={() => setConfirmationMode('clear')}
+                >
+                  <View style={styles.actionIconWrap}>
+                    <Ionicons name="trash-outline" size={20} color={colors.textPrimary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.actionTitle}>Clear Chat History</Text>
+                    <Text style={styles.actionSubtitle}>Remove messages from your view</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionOption, styles.actionOptionDanger]}
+                  onPress={() => setConfirmationMode('delete')}>
+                  <View style={[styles.actionIconWrap, styles.actionIconWrapDanger]}>
+                    <Ionicons name="trash-outline" size={20} color={colors.error} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.actionTitle, styles.actionTitleDanger]}>Delete Chat</Text>
+                    <Text style={styles.actionSubtitle}>Remove this room from your chat list</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.error} />
+                </TouchableOpacity>
+              </View>
+            )}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+    );
+  };
+
   // --- Render: Chats Tab ---
   const renderConversation = ({ item }) => (
     <ConversationItem
       item={item}
-      currentUid={profile?.uid}
+      currentUid={user?.uid || profile?.uid}
       router={router}
       colors={colors}
       styles={styles}
       getConversationRelationshipLabel={getConversationRelationshipLabel}
       getPeerInfo={getPeerInfo}
+      onLongPress={handleOpenConversationOptions}
     />
   );
 
@@ -446,10 +841,7 @@ export default function MessagesPage() {
           showsVerticalScrollIndicator={false}
         />
       ) : (
-        <EmptyState
-          title="No conversations yet"
-          description={emptyMessage}
-        />
+        <EmptyState title="No conversations yet" description={emptyMessage} />
       )}
     </View>
   );
@@ -468,7 +860,7 @@ export default function MessagesPage() {
     const department = friendProfile.department || '';
 
     return (
-      <Pressable style={styles.friendCard} onPress={() => openFriendChat(item)}>
+      <Pressable style={({ pressed }) => [styles.friendCard, pressed && styles.cardPressed]} onPress={() => openFriendChat(item)}>
         <View style={styles.avatarWrapper}>
           {avatar ? (
             <Image source={{ uri: avatar }} style={styles.avatar} />
@@ -667,6 +1059,7 @@ export default function MessagesPage() {
             ListEmptyComponent={
               searching ? (
                 <View style={styles.modalEmpty}>
+                  <ActivityIndicator color={colors.brand} />
                   <Text style={styles.modalEmptyText}>Searching...</Text>
                 </View>
               ) : search.length >= 2 ? (
@@ -717,10 +1110,9 @@ export default function MessagesPage() {
     </Modal>
   );
 
-  // --- Main Render ---
   return (
     <ScreenShell title="Messenger" subtitle="Direct messages" showBack loading={loading} scrollable={false}>
-      {/* Tab Bar */}
+      {/* Segmented Control Tabs */}
       <View style={styles.tabBar}>
         {TABS.map((tab) => {
           const isActive = activeTab === tab.key;
@@ -751,13 +1143,16 @@ export default function MessagesPage() {
         })}
       </View>
 
-      {/* Tab Content */}
+      {/* Tab Panels */}
       {activeTab === 'chats' && renderChatsTab()}
       {activeTab === 'friends' && renderFriendsTab()}
       {activeTab === 'requests' && renderRequestsTab()}
 
       {/* Find Friend Modal */}
       {renderFindFriendModal()}
+
+      {/* Custom Bottom Action Sheet Options */}
+      {renderConversationOptionsModal()}
     </ScreenShell>
   );
 }

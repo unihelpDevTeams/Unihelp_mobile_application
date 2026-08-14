@@ -479,6 +479,23 @@ export const markConversationRead = async (conversationId, uid) => {
   await setDoc(doc(db, 'conversations', conversationId), { unread: { [uid]: 0 }, readAt: { [uid]: serverTimestamp() } }, { merge: true });
 };
 
+export const clearConversationForUser = async (conversationId, uid = auth.currentUser?.uid) => {
+  if (!conversationId || !uid) throw new Error('Missing chat details.');
+  await setDoc(doc(db, 'conversations', conversationId), {
+    clearedFor: { [uid]: serverTimestamp() },
+    unread: { [uid]: 0 },
+  }, { merge: true });
+};
+
+export const deleteConversationForUser = async (conversationId, uid = auth.currentUser?.uid) => {
+  if (!conversationId || !uid) throw new Error('Missing chat details.');
+  await setDoc(doc(db, 'conversations', conversationId), {
+    clearedFor: { [uid]: serverTimestamp() },
+    deletedFor: { [uid]: serverTimestamp() },
+    unread: { [uid]: 0 },
+  }, { merge: true });
+};
+
 export async function deleteDirectMessage(conversationId, messageId, options = {}) {
   const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
   if (options.voice) {
