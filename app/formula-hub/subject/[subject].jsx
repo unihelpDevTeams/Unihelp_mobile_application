@@ -12,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 // Shared UI & Services
 import CollectionListScreen from '../../../src/shared/screens/CollectionListScreen';
-import { fetchFormulas } from '../../../services/firestoreSync';
+import { useFormulas } from '../../../hooks/useFormulas';
 import ScreenShell from '../../../src/shared/components/ScreenShell';
 
 // Theme Context & Design System
@@ -39,12 +39,9 @@ export default function FormulaSubjectPage() {
     [subject]
   );
 
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [reloadKey, setReloadKey] = useState(0);
+  const { formulas: items, loading, error } = useFormulas();
 
   // Subject-specific icon & theme resolution
   const subjectConfig = useMemo(() => {
@@ -229,32 +226,7 @@ export default function FormulaSubjectPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Fetch formulas on load or retry
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setError('');
-
-    fetchFormulas()
-      .then((result) => {
-        if (!active) return;
-        setItems(Array.isArray(result) ? result : []);
-      })
-      .catch((fetchError) => {
-        if (!active) return;
-        setError(
-          fetchError?.message ||
-            'Could not load formulas. Check your connection and try again.'
-        );
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [reloadKey]);
+  // Fetch logic is handled by useFormulas hook
 
   // Filter items by subject and query
   const filtered = useMemo(() => {
@@ -360,7 +332,6 @@ export default function FormulaSubjectPage() {
                   styles.retryButton,
                   pressed && styles.retryButtonPressed,
                 ]}
-              >
                 <Ionicons name="refresh" size={14} color={colors.onBrand} />
                 <Text style={styles.retryText}>Retry</Text>
               </Pressable>

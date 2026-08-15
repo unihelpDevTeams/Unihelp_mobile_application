@@ -12,7 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { fetchFormulas } from '../../services/firestoreSync';
+import { useFormulas } from '../../hooks/useFormulas';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 
 import {
@@ -26,26 +26,7 @@ import {
 import { router } from 'expo-router';
 
 export default function FormulaHubHome({ navigation }) {
-  const [formulas, setFormulas] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let isMounted = true;
-    fetchFormulas()
-      .then((data) => {
-        if (isMounted) {
-          setFormulas(data || []);
-        }
-      })
-      .catch((err) => console.error('Failed to fetch formulas:', err))
-      .finally(() => {
-        if (isMounted) setLoading(false);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  const { formulas, loading } = useFormulas();
 
   const bookmarksCount = useMemo(() => {
     return formulas.filter((f) => f.isBookmarked).length;
@@ -75,6 +56,15 @@ export default function FormulaHubHome({ navigation }) {
       gradient: [colors.orange, '#EA580C'],
       iconName: 'bookmark-outline',
       badgeText: `${bookmarksCount} Saved`,
+    },
+    {
+      id: 'flashcards',
+      title: 'Flash Cards',
+      description: 'Test your formula memory with 3D interactive flash cards.',
+      route: '/formula-hub/flashcards',
+      gradient: [colors.green, '#059669'],
+      iconName: 'albums-outline',
+      badgeText: 'Interactive',
     },
   ];
 

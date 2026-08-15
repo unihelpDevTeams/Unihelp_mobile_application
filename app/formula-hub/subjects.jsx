@@ -13,7 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 // Custom Services & UI Components
 import ScreenShell from '../../src/shared/components/ScreenShell';
-import { formulas as sampleFormulas } from '../../assets/data/sampleFormulas';
+import { useFormulas } from '../../hooks/useFormulas';
 
 // Design System Tokens
 import {
@@ -27,6 +27,8 @@ import {
 import { router } from 'expo-router';
 
 export default function FormulaSubjectsPage({ navigation }) {
+  const { formulas: sampleFormulas, loading } = useFormulas();
+
   // Subject Theme Resolver using design system tokens
   const getSubjectConfig = (subject) => {
     switch (subject) {
@@ -101,9 +103,9 @@ export default function FormulaSubjectsPage({ navigation }) {
         ...config,
       };
     });
-  }, []);
+  }, [sampleFormulas]);
 
-  const totalFormulas = useMemo(() => sampleFormulas.length, []);
+  const totalFormulas = useMemo(() => sampleFormulas.length, [sampleFormulas]);
 
   return (
     <SafeAreaView style={styles.container}>
