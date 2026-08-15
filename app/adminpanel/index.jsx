@@ -189,7 +189,7 @@ export default function AdminPanelPage() {
           </View>
         ) : items.length === 0 ? (
           <View style={pageStyles.emptyContainer}>
-            <Ionicons name="folder-open-outline" size={40} color={colors.textSecondary} />
+            <Ionicons name="information-circle-outline" size={40} color={colors.textSecondary} />
             <Text style={pageStyles.emptyText}>No listings found</Text>
           </View>
         ) : (

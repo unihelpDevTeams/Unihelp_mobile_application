@@ -665,7 +665,7 @@ export default function StudyMaterials() {
         text: 'Delete',
         style: 'destructive',
         onPress: () =>
-          Alert.alert('Delete resource?', 'This removes the Firestore record and its Cloudinary file.', [
+          Alert.alert('Delete resource?', 'This removes the file permanently and cannot be reversed.', [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Delete', style: 'destructive', onPress: () => deleteResource(item) },
           ]),
@@ -913,7 +913,7 @@ export default function StudyMaterials() {
           }
           ListEmptyComponent={
             <EmptyState
-              icon={hasAnyRefinement ? 'search-outline' : 'folder-open-outline'}
+              icon={hasAnyRefinement ? 'search-outline' : ''}
               title={hasAnyRefinement ? 'No matching resources' : `No ${resourceNoun} found`}
               description={
                 hasAnyRefinement
