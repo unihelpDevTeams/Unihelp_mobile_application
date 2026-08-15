@@ -16,7 +16,6 @@ import {
   where,
 } from 'firebase/firestore';
 import { auth, db } from '../../../firebase/config';
-import { formulas as sampleFormulas } from '../../../assets/data/sampleFormulas';
 import { COLLECTIONS, conversationSubcollections, groupSubcollections, profileDefaults, userSubcollections } from '../firestoreSchema';
 import { sendAppNotification } from './backend';
 
@@ -186,19 +185,6 @@ export async function fetchStoriesPage({ pageSize = 20, cursor = null } = {}) {
   return orderedPage(COLLECTIONS.stories, 'createdAt', 'desc', pageSize, cursor);
 }
 
-export async function fetchFormulas() {
-  try {
-    const formulas = await orderedList(COLLECTIONS.formulas);
-    if (formulas.length) {
-      return formulas;
-    }
-  } catch (error) {
-    console.warn('Falling back to local formulas data:', error);
-  }
-
-  return sampleFormulas.map((item) => ({ ...item, id: String(item.id) }));
-}
-
 export async function fetchHostels() {
   return orderedList(COLLECTIONS.hostels);
 }
@@ -213,32 +199,6 @@ export async function fetchStudentListings() {
 
 export async function fetchStudentListingsPage({ pageSize = 20, cursor = null } = {}) {
   return orderedPage(COLLECTIONS.studentMarketplace, 'createdAt', 'desc', pageSize, cursor);
-}
-
-export async function fetchTutorials() {
-  return orderedList(COLLECTIONS.tutorials, 'createdAt', 'desc', 100);
-}
-
-export async function fetchTutorialsPage({ pageSize = 20, cursor = null } = {}) {
-  return orderedPage(COLLECTIONS.tutorials, 'createdAt', 'desc', pageSize, cursor);
-}
-
-export async function fetchStudyMaterials() {
-  return orderedList(COLLECTIONS.studyMaterials, 'createdAt', 'desc', 100);
-}
-
-export async function fetchStudyMaterialsPage({ pageSize = 20, cursor = null } = {}) {
-  return orderedPage(COLLECTIONS.studyMaterials, 'createdAt', 'desc', pageSize, cursor);
-}
-
-export async function fetchTutorialPurchases(uid = auth.currentUser?.uid) {
-  if (!uid) return [];
-  const snapshot = await getDocs(query(collection(db, COLLECTIONS.purchases), orderBy('createdAt', 'desc')));
-  return mapDocs(snapshot).filter((item) => item.userId === uid || !item.userId);
-}
-
-export async function fetchAllTutorialPurchases() {
-  return orderedList(COLLECTIONS.purchases, 'createdAt', 'desc', 100);
 }
 
 export async function fetchTasks(uid = auth.currentUser?.uid) {
