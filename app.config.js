@@ -30,6 +30,8 @@ const extra = {
   },
 };
 
+const easProjectId = extra.eas.projectId;
+
 module.exports = {
   expo: {
     name: "UniHelp",
@@ -60,7 +62,7 @@ module.exports = {
       package: "com.zenithdev.unihelp",
       softwareKeyboardLayoutMode: "resize",
       versionCode: 2,
-      permissions: ["RECORD_AUDIO"],
+      permissions: ["RECORD_AUDIO", "POST_NOTIFICATIONS"],
       adaptiveIcon: {
         foregroundImage: "./assets/images/icon-square.png",
         backgroundColor: "#ffffff",
@@ -75,7 +77,14 @@ module.exports = {
     },
     plugins: [
       "expo-router",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          icon: "./assets/images/icon-square.png",
+          color: "#ffffff",
+          defaultChannel: "default",
+        },
+      ],
       "@react-native-community/datetimepicker",
       [
         "expo-splash-screen",
@@ -92,7 +101,7 @@ module.exports = {
       reactCompiler: true,
     },
     updates: {
-      url: "https://u.expo.dev/42510ca2-86e1-425d-a072-16c0a5c2feb4",
+      url: `https://u.expo.dev/${easProjectId}`,
     },
     runtimeVersion: {
       policy: "appVersion",

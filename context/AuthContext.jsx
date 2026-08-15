@@ -10,7 +10,6 @@ import {
 import { auth, db } from '../firebase/config';
 import { ensureCurrentUserProfile } from '../src/shared/services/firestore';
 import { doc, setDoc } from 'firebase/firestore';
-import { registerPushNotificationsForCurrentUser } from '../utils/notificationPermission';
 
 const AuthContext = createContext(null);
 
@@ -26,7 +25,6 @@ export function AuthProvider({ children }) {
         const profileData = await ensureCurrentUserProfile({ provider });
         setUser(firebaseUser);
         setProfile(profileData);
-        await registerPushNotificationsForCurrentUser();
       } else {
         setUser(null);
         setProfile(null);
@@ -54,14 +52,13 @@ export function AuthProvider({ children }) {
     const profileData = await ensureCurrentUserProfile({ email: credential.user.email });
     setUser(credential.user);
     setProfile(profileData);
-    await registerPushNotificationsForCurrentUser();
     return { credential, profile: profileData };
   };
 
   const signUp = async ({ username, email, password, photoURL }) => {
     const credential = await createUserWithEmailAndPassword(auth, email, password);
     await updateFirebaseAuthProfile(credential.user, { displayName: username, photoURL: photoURL || null });
-    const profileData = await ensureCurrentUserProfile({
+    await ensureCurrentUserProfile({
       username,
       email,
       provider: 'email',

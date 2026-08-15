@@ -3,4 +3,6 @@ export {
   registerPushNotificationsForCurrentUser,
   listenToForegroundMessages,
   listenToNotificationResponses,
+  listenToPushTokenChanges,
+  configureAndroidNotificationChannels,
 } from '../utils/notificationPermission';

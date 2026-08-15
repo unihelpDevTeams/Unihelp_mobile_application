@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   listenToForegroundMessages,
   listenToNotificationResponses,
+  listenToPushTokenChanges,
   registerPushNotificationsForCurrentUser,
 } from '../services/pushNotifications';
 
@@ -53,6 +54,7 @@ const getRouteTarget = (data = {}) => {
 export function PushNotificationBootstrap() {
   const router = useRouter();
   const { user, loading } = useAuth();
+  const userId = user?.uid;
 
   useEffect(() => {
     const removeForeground = listenToForegroundMessages((notification) => {
@@ -68,14 +70,17 @@ export function PushNotificationBootstrap() {
       }
     });
 
+    const removeTokenChangeHandler = listenToPushTokenChanges();
+
     return () => {
       removeForeground.remove();
       removeResponseHandler.remove();
+      removeTokenChangeHandler.remove();
     };
   }, [router]);
 
   useEffect(() => {
-    if (loading || !user) {
+    if (loading || !userId) {
       return;
     }
 
@@ -97,7 +102,7 @@ export function PushNotificationBootstrap() {
     return () => {
       active = false;
     };
-  }, [loading, user?.uid]);
+  }, [loading, userId]);
 
   return null;
 }
