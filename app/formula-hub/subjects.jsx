@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,27 +10,28 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
 
 // Custom Services & UI Components
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { useFormulas } from '../../hooks/useFormulas';
+import { useTheme } from '../../src/shared/theme/ThemeContext';
 
 // Design System Tokens
 import {
-  colors,
   spacing,
   borderRadius,
   shadows,
   typography,
-  gradients,
 } from './../../src/shared/theme/index'; // Adjust relative path as needed
-import { router } from 'expo-router';
 
-export default function FormulaSubjectsPage({ navigation }) {
-  const { formulas: sampleFormulas, loading } = useFormulas();
+export default function FormulaSubjectsPage() {
+  const { colors, gradients } = useTheme();
+  const { formulas: sampleFormulas } = useFormulas();
+  const styles = createStyles(colors);
 
   // Subject Theme Resolver using design system tokens
-  const getSubjectConfig = (subject) => {
+  const getSubjectConfig = useCallback((subject) => {
     switch (subject) {
       case 'Mathematics':
         return {
@@ -82,7 +83,7 @@ export default function FormulaSubjectsPage({ navigation }) {
           icon: 'library-outline',
         };
     }
-  };
+  }, [colors, gradients]);
 
   // Group and compute metrics dynamically
   const subjects = useMemo(() => {
@@ -103,7 +104,7 @@ export default function FormulaSubjectsPage({ navigation }) {
         ...config,
       };
     });
-  }, [sampleFormulas]);
+  }, [sampleFormulas, getSubjectConfig]);
 
   const totalFormulas = useMemo(() => sampleFormulas.length, [sampleFormulas]);
 
@@ -188,7 +189,7 @@ export default function FormulaSubjectsPage({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -250,7 +251,7 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
   },
   card: {
-    backgroundColor: colors.suface,
+    backgroundColor: colors.surfacePrimary,
     borderRadius: borderRadius['2xl'],
     padding: spacing.xl,
     borderWidth: 1,

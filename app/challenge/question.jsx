@@ -8,8 +8,8 @@ import { Button } from '../../src/shared/components/Button';
 import { colors, spacing, borderRadius, shadows } from '../../src/shared/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useChallengeSession } from '../../src/shared/challenge/useChallengeSession';
-import { AnswerOption, ChallengeBadge, ProgressBar } from '../../src/shared/challenge/components/ChallengePieces';
 import { CHALLENGE_CATEGORIES } from '../../src/shared/challenge/data';
+import { AnswerOption, ChallengeBadge, ProgressBar } from '../../src/shared/challenge/components/ChallengePieces';
 
 export default function ChallengeQuestionScreen() {
   const params = useLocalSearchParams();
@@ -22,7 +22,7 @@ export default function ChallengeQuestionScreen() {
     opacity: session.transition.value,
     transform: [{ translateY: (1 - session.transition.value) * 14 }],
   }));
-
+  
   const categoryTitle = CHALLENGE_CATEGORIES.find((item) => item.id === category)?.title || 'Daily Challenge';
   const timerTone = session.secondsLeft <= 8 ? colors.red : session.secondsLeft <= 15 ? colors.orange : colors.brand;
 

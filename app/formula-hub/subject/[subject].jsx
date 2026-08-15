@@ -41,7 +41,9 @@ export default function FormulaSubjectPage() {
 
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const { formulas: items, loading, error } = useFormulas();
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const { formulas: items, loading, error } = useFormulas(reloadKey);
 
   // Subject-specific icon & theme resolution
   const subjectConfig = useMemo(() => {
@@ -49,7 +51,7 @@ export default function FormulaSubjectPage() {
       case 'Mathematics':
         return {
           icon: 'calculator-outline',
-          colors: [colors.brand || '#4F46E5', '#7C3AED'],
+          colors: [colors.brand || '#4F46E5', colors.brandDark || '#3730A3'],
         };
       case 'Physics':
         return {
@@ -79,7 +81,7 @@ export default function FormulaSubjectPage() {
       default:
         return {
           icon: 'library-outline',
-          colors: [colors.brand || '#4F46E5', '#7C3AED'],
+          colors: [colors.brand || '#4F46E5', colors.brandDark || '#3730A3'],
         };
     }
   }, [subjectLabel, colors]);
@@ -97,7 +99,7 @@ export default function FormulaSubjectPage() {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      backgroundColor: c.surfacePrimary,
+      backgroundColor: c.surfacePrimary || c.surface,
       borderRadius: borderRadius['2xl'],
       padding: spacing.lg,
       marginTop: spacing.sm,
@@ -125,33 +127,33 @@ export default function FormulaSubjectPage() {
     heroLabel: {
       ...typography.xs,
       ...typography.bold,
-      color: c.textTertiary,
+      color: c.textTertiary || c.textSecondary,
       letterSpacing: 0.5,
       textTransform: 'uppercase',
     },
     heroSubject: {
       ...typography['2xl'],
       ...typography.extrabold,
-      color: c.textPrimary,
+      color: c.textPrimary || c.ink,
     },
     countBadge: {
-      backgroundColor: c.brandLight,
+      backgroundColor: c.brandLight || `${c.brand}15`,
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.xs,
       borderRadius: borderRadius.full,
       borderWidth: 1,
-      borderColor: c.brandBorder,
+      borderColor: c.brandBorder || `${c.brand}30`,
     },
     countBadgeText: {
       ...typography.xs,
       ...typography.extrabold,
-      color: c.brandText,
+      color: c.brandText || c.brand,
     },
     searchWrap: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.md,
-      backgroundColor: c.inputBackground || c.surfacePrimary,
+      backgroundColor: c.inputBackground || c.surfaceSecondary || c.surface,
       borderWidth: 1,
       borderColor: c.inputBorder || c.borderDefault,
       borderRadius: borderRadius.xl,
@@ -162,7 +164,7 @@ export default function FormulaSubjectPage() {
     },
     input: {
       flex: 1,
-      color: c.textPrimary,
+      color: c.textPrimary || c.ink,
       ...typography.md,
       paddingVertical: 0,
     },
@@ -170,16 +172,16 @@ export default function FormulaSubjectPage() {
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.sm,
-      backgroundColor: c.dangerLight,
+      backgroundColor: c.dangerLight || `${c.red || '#DC2626'}15`,
       borderRadius: borderRadius.lg,
       borderWidth: 1,
-      borderColor: c.dangerBorder,
+      borderColor: c.dangerBorder || `${c.red || '#DC2626'}30`,
       padding: spacing.lg,
       marginBottom: spacing.lg,
     },
     errorText: {
       flex: 1,
-      color: c.danger,
+      color: c.danger || c.red || '#DC2626',
       ...typography.sm,
       ...typography.semibold,
     },
@@ -187,7 +189,7 @@ export default function FormulaSubjectPage() {
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.xs,
-      backgroundColor: c.danger,
+      backgroundColor: c.danger || c.red || '#DC2626',
       borderRadius: borderRadius.md,
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.sm,
@@ -196,12 +198,12 @@ export default function FormulaSubjectPage() {
       opacity: 0.85,
     },
     retryText: {
-      color: c.onBrand,
+      color: c.onBrand || '#FFFFFF',
       ...typography.xs,
       ...typography.bold,
     },
     loadingCard: {
-      backgroundColor: c.surfacePrimary,
+      backgroundColor: c.surfacePrimary || c.surface,
       borderRadius: borderRadius.xl,
       borderWidth: 1,
       borderColor: c.borderDefault,
@@ -226,14 +228,12 @@ export default function FormulaSubjectPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Fetch logic is handled by useFormulas hook
-
   // Filter items by subject and query
   const filtered = useMemo(() => {
     const query = debouncedSearch.trim().toLowerCase();
     const normalizedSubject = String(subject || '').trim().toLowerCase();
 
-    return items.filter((item) => {
+    return (items || []).filter((item) => {
       const subjectMatch =
         !normalizedSubject ||
         String(item.subject || '')
@@ -280,7 +280,7 @@ export default function FormulaSubjectPage() {
                 <Ionicons
                   name={subjectConfig.icon}
                   size={20}
-                  color={colors.onBrand}
+                  color={colors.onBrand || '#FFFFFF'}
                 />
               </LinearGradient>
 
@@ -308,7 +308,7 @@ export default function FormulaSubjectPage() {
               value={search}
               onChangeText={setSearch}
               placeholder={`Search ${subjectLabel.toLowerCase()} formulas...`}
-              placeholderTextColor={colors.placeholder}
+              placeholderTextColor={colors.placeholder || colors.grey}
               style={styles.input}
               autoCapitalize="none"
               autoCorrect={false}
@@ -316,7 +316,7 @@ export default function FormulaSubjectPage() {
             />
             {search ? (
               <Pressable onPress={() => setSearch('')} hitSlop={8}>
-                <Ionicons name="close-circle" size={18} color={colors.greyLight} />
+                <Ionicons name="close-circle" size={18} color={colors.greyLight || colors.grey} />
               </Pressable>
             ) : null}
           </View>
@@ -324,7 +324,7 @@ export default function FormulaSubjectPage() {
           {/* Error Banner */}
           {error ? (
             <View style={styles.errorBox}>
-              <Ionicons name="alert-circle-outline" size={18} color={colors.danger} />
+              <Ionicons name="alert-circle-outline" size={18} color={colors.danger || colors.red || '#DC2626'} />
               <Text style={styles.errorText}>{error}</Text>
               <Pressable
                 onPress={retry}
@@ -332,7 +332,8 @@ export default function FormulaSubjectPage() {
                   styles.retryButton,
                   pressed && styles.retryButtonPressed,
                 ]}
-                <Ionicons name="refresh" size={14} color={colors.onBrand} />
+              >
+                <Ionicons name="refresh" size={14} color={colors.onBrand || '#FFFFFF'} />
                 <Text style={styles.retryText}>Retry</Text>
               </Pressable>
             </View>

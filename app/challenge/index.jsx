@@ -9,7 +9,7 @@ import { Button } from '../../src/shared/components/Button';
 import { spacing, borderRadius, shadows } from '../../src/shared/theme';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import { CHALLENGE_CATEGORIES, getTodayKey, getRecommendedCategories } from '../../src/shared/challenge/data';
+import { getTodayKey, getRecommendedCategories } from '../../src/shared/challenge/data';
 import { fetchChallengeDashboard } from '../../src/shared/challenge/service';
 import { AnimatedPressable, ChallengeBadge, ProgressBar, StatCard } from '../../src/shared/challenge/components/ChallengePieces';
 

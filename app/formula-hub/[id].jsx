@@ -5,30 +5,24 @@ import {
   RefreshControl,
   ScrollView,
   Share,
-  StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import Katex from 'react-native-katex';
 
 // Shared UI Components & Services
 import ScreenShell from '../../src/shared/components/ScreenShell';
-import { fetchRecord } from '../../services/firestoreSync';
-import { COLLECTIONS } from '../../src/shared/firestoreSchema';
+import { fetchFormulaByIdFromApi } from '../../hooks/useFormulas';
+import { isFormulaBookmarked, toggleFormulaBookmark } from '../../src/shared/services/formulaBookmarks';
 
 // Theme Context & Design System
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { shadows, typography } from '../../src/shared/theme';
 
-import FormulaMath, { toKatexSource } from '../../src/shared/components/FormulaMath';
-
-// Card-shaped skeleton shown while the formula record loads — mirrors the
-// real hero/info card layout instead of a generic spinner, matching the
-// loading pattern used across the rest of the app.
+import FormulaMath from '../../src/shared/components/FormulaMath';
 function FormulaSkeleton() {
   const styles = useThemeStyles((c, s, r) => ({
     wrap: { padding: s.xl, gap: s.lg },
@@ -72,6 +66,8 @@ export default function FormulaDetails() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [bookmarked, setBookmarked] = useState(false);
+  const [bookmarkSaving, setBookmarkSaving] = useState(false);
   const isMountedRef = useRef(true);
   const copyTimerRef = useRef(null);
 
@@ -101,6 +97,10 @@ export default function FormulaDetails() {
       width: 32, height: 32, borderRadius: r.md, backgroundColor: c.surfacePrimary,
       alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.brandBorder,
     },
+    bookmarkButtonActive: {
+      backgroundColor: c.orangeLight,
+      borderColor: c.orange,
+    },
     shareButtonPressed: { opacity: 0.7 },
     heroTitle: { ...typography['3xl'], ...typography.extrabold, color: c.textPrimary, letterSpacing: -0.3 },
     formulaBox: {
@@ -108,6 +108,7 @@ export default function FormulaDetails() {
       borderColor: c.brandBorder, minHeight: 130, paddingVertical: s.md, paddingHorizontal: s.md,
       position: 'relative', overflow: 'hidden', ...shadows.sm,
     },
+    formulaMathFrame: { height: 120, paddingRight: 34 },
     formulaEmptyWrap: { flexDirection: 'row', alignItems: 'center', gap: s.sm, paddingVertical: s.sm },
     formulaEmptyText: { flex: 1, ...typography.sm, ...typography.medium, color: c.textSecondary },
     copyButton: {
@@ -173,9 +174,11 @@ export default function FormulaDetails() {
       setError('');
 
       try {
-        const result = await fetchRecord(COLLECTIONS.formulas, id);
+        const result = await fetchFormulaByIdFromApi(id);
         if (!isMountedRef.current) return;
         setFormula(result || null);
+        const nextBookmarked = await isFormulaBookmarked(result?.id || id);
+        if (isMountedRef.current) setBookmarked(nextBookmarked);
       } catch (fetchError) {
         if (isMountedRef.current) setError(fetchError?.message || 'Could not load this formula.');
       } finally {
@@ -210,13 +213,8 @@ export default function FormulaDetails() {
 
     return list;
   }, [formula]);
-
-  // LEGIBILITY FIX: when a record has no real `formula` string, the old code
-  // fell back to running the plain title (or "Untitled") through KaTeX, which
-  // renders ordinary words in italic math font with odd letter-spacing —
-  // illegible and confusing, not a graceful fallback. Now we only hand real
-  // expressions to KaTeX and show a plain message otherwise.
-  const hasFormulaExpression = !!formula?.formula;
+  
+  const hasFormulaExpression = !!String(formula?.formula || '').trim();
   const formulaDisplay = formula?.formula || formula?.title || 'Untitled';
 
   const copyFormula = async () => {
@@ -239,6 +237,19 @@ export default function FormulaDetails() {
       });
     } catch {
       // user cancelled — nothing to do
+    }
+  };
+
+  const toggleBookmark = async () => {
+    if (!formula || bookmarkSaving) return;
+    setBookmarkSaving(true);
+    try {
+      const result = await toggleFormulaBookmark(formula);
+      if (isMountedRef.current) setBookmarked(result.bookmarked);
+    } catch {
+      // Keep current state if local storage fails.
+    } finally {
+      if (isMountedRef.current) setBookmarkSaving(false);
     }
   };
 
@@ -292,6 +303,28 @@ export default function FormulaDetails() {
                   </View>
                 ) : null}
                 <Pressable
+                  onPress={toggleBookmark}
+                  disabled={bookmarkSaving}
+                  hitSlop={8}
+                  style={({ pressed }) => [
+                    styles.shareButton,
+                    bookmarked && styles.bookmarkButtonActive,
+                    pressed && styles.shareButtonPressed,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={bookmarked ? 'Remove formula bookmark' : 'Save formula bookmark'}
+                >
+                  {bookmarkSaving ? (
+                    <ActivityIndicator size="small" color={bookmarked ? colors.orange : colors.brand} />
+                  ) : (
+                    <Ionicons
+                      name={bookmarked ? 'bookmark' : 'bookmark-outline'}
+                      size={15}
+                      color={bookmarked ? colors.orange : colors.brand}
+                    />
+                  )}
+                </Pressable>
+                <Pressable
                   onPress={shareFormula}
                   hitSlop={8}
                   style={({ pressed }) => [styles.shareButton, pressed && styles.shareButtonPressed]}
@@ -309,7 +342,9 @@ export default function FormulaDetails() {
             <View style={styles.formulaBox}>
               {hasFormulaExpression ? (
                 <>
-                  <FormulaMath source={formulaDisplay} color={colors.brand} />
+                  <View style={styles.formulaMathFrame}>
+                    <FormulaMath source={formulaDisplay} color={colors.textPrimary} backgroundColor={colors.surfacePrimary} />
+                  </View>
                   <Pressable
                     onPress={copyFormula}
                     hitSlop={8}
@@ -352,7 +387,7 @@ export default function FormulaDetails() {
                 {formula.variables.map((variable, index) => (
                   <View key={`${variable.symbol || 'var'}-${index}`} style={styles.variableChip}>
                     <View style={styles.variableSymbolBadge}>
-                      <FormulaMath source={variable.symbol || '?'} color={colors.brand} size="compact" />
+                      <FormulaMath source={variable.symbol || '?'} color={colors.brand} backgroundColor={colors.brandLight} size="compact" />
                     </View>
                     <Text style={styles.variableMeaning} numberOfLines={2}>{variable.meaning || 'Meaning'}</Text>
                   </View>

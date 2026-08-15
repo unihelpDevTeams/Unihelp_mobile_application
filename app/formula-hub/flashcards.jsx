@@ -5,26 +5,25 @@ import {
   TouchableOpacity,
   Animated,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   StatusBar,
-  Dimensions,
+  ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 
 import { useFormulas } from '../../hooks/useFormulas';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import FormulaMath from '../../src/shared/components/FormulaMath';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
-import { spacing, typography, borderRadius, shadows } from '../../src/shared/theme';
-
-const { width } = Dimensions.get('window');
+import { typography, borderRadius, shadows } from '../../src/shared/theme';
 
 export default function FlashCardsPage() {
   const { colors } = useTheme();
-  const { formulas, loading } = useFormulas();
+  const { width } = useWindowDimensions();
+  const [reloadKey, setReloadKey] = useState(0);
+  const { formulas, loading, error } = useFormulas(reloadKey);
 
   const [activeSubject, setActiveSubject] = useState('All');
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -62,6 +61,14 @@ export default function FlashCardsPage() {
     setIsFlipped(false);
     flipAnim.setValue(0);
   }, [activeSubject, isShuffled, flipAnim]);
+
+  useEffect(() => {
+    if (currentIndex >= activeFormulas.length) {
+      setCurrentIndex(Math.max(activeFormulas.length - 1, 0));
+      setIsFlipped(false);
+      flipAnim.setValue(0);
+    }
+  }, [activeFormulas.length, currentIndex, flipAnim]);
 
   const flipCard = () => {
     if (isFlipped) {
@@ -116,7 +123,7 @@ export default function FlashCardsPage() {
   const styles = useThemeStyles((c, s) => ({
     container: {
       flex: 1,
-      backgroundColor: c.canvasDefault,
+      backgroundColor: c.background,
     },
     filterScroll: {
       paddingHorizontal: s.md,
@@ -180,7 +187,7 @@ export default function FlashCardsPage() {
     card: {
       ...StyleSheet.absoluteFillObject,
       backgroundColor: c.surfacePrimary,
-      borderRadius: borderRadius.2xl,
+      borderRadius: borderRadius['2xl'],
       ...shadows.md,
       padding: s.xl,
       backfaceVisibility: 'hidden',
@@ -202,7 +209,7 @@ export default function FlashCardsPage() {
       top: s.lg,
     },
     formulaTitle: {
-      ...typography.2xl,
+      ...typography['2xl'],
       ...typography.bold,
       color: c.textPrimary,
       textAlign: 'center',
@@ -265,25 +272,62 @@ export default function FlashCardsPage() {
       ...typography.lg,
       color: c.textSecondary,
       marginTop: s.md,
-    }
-  }));
+      textAlign: 'center',
+    },
+    errorCard: {
+      backgroundColor: c.dangerLight,
+      borderWidth: 1,
+      borderColor: c.dangerBorder,
+      borderRadius: borderRadius.xl,
+      padding: s.lg,
+      marginHorizontal: s.lg,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.sm,
+    },
+    errorText: {
+      flex: 1,
+      ...typography.sm,
+      ...typography.semibold,
+      color: c.danger,
+    },
+    retryButton: {
+      backgroundColor: c.danger,
+      borderRadius: borderRadius.md,
+      paddingHorizontal: s.md,
+      paddingVertical: s.sm,
+    },
+    retryText: {
+      ...typography.xs,
+      ...typography.bold,
+      color: c.onBrand,
+    },
+    cardStage: {
+      flex: 1,
+      marginTop: s.md,
+    },
+    formulaWrap: {
+      height: 120,
+      width: '100%',
+      justifyContent: 'center',
+    },
+  }), [isShuffled, width]);
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <ScreenShell title="Flash Cards" subtitle="Master formulas quickly." showBack>
+      <ScreenShell title="Flash Cards" subtitle="Master formulas quickly." showBack scrollable={false}>
           <View style={styles.emptyState}>
+            <ActivityIndicator color={colors.brand} />
             <Text style={styles.emptyText}>Loading cards...</Text>
           </View>
-        </ScreenShell>
-      </SafeAreaView>
+      </ScreenShell>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <StatusBar barStyle={colors.statusBar === 'light' ? 'light-content' : 'dark-content'} />
-      <ScreenShell title="Flash Cards" subtitle="Test your formula memory." showBack>
+      <ScreenShell title="Flash Cards" subtitle="Test your formula memory." showBack scrollable={false}>
         
         {/* Subjects Filter */}
         <View>
@@ -314,8 +358,16 @@ export default function FlashCardsPage() {
           </ScrollView>
         </View>
 
-        {activeFormulas.length > 0 ? (
-          <View style={{ flex: 1, marginTop: spacing.md }}>
+        {error ? (
+          <View style={styles.errorCard}>
+            <Ionicons name="alert-circle-outline" size={18} color={colors.danger} />
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={() => setReloadKey((key) => key + 1)}>
+              <Text style={styles.retryText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : activeFormulas.length > 0 ? (
+          <View style={styles.cardStage}>
             <View style={styles.controlsRow}>
               <Text style={styles.progressText}>
                 {currentIndex + 1} of {activeFormulas.length}
@@ -338,8 +390,8 @@ export default function FlashCardsPage() {
               {/* Front side */}
               <Animated.View style={[styles.card, frontAnimatedStyle]}>
                 <Text style={styles.cardLabel}>Question</Text>
-                <Text style={styles.formulaTitle}>{currentFormula?.title}</Text>
-                <Text style={styles.formulaSubject}>{currentFormula?.subject}</Text>
+                <Text style={styles.formulaTitle}>{currentFormula?.title || 'Untitled Formula'}</Text>
+                <Text style={styles.formulaSubject}>{currentFormula?.subject || 'General'}</Text>
               </Animated.View>
 
               {/* Back side */}
@@ -348,8 +400,17 @@ export default function FlashCardsPage() {
               >
                 <Text style={styles.cardLabel}>Answer</Text>
                 {/* MathRenderer handles the Katex display */}
-                <View style={{ height: 120, width: '100%', justifyContent: 'center' }}>
-                   <FormulaMath source={currentFormula?.formula} size="display" />
+                <View style={styles.formulaWrap}>
+                  {currentFormula?.formula ? (
+                    <FormulaMath
+                      source={currentFormula.formula}
+                      color={colors.textPrimary}
+                      backgroundColor={colors.brandLight}
+                      size="display"
+                    />
+                  ) : (
+                    <Text style={styles.explanation}>No formula expression was provided.</Text>
+                  )}
                 </View>
                 {currentFormula?.explanation && (
                    <Text style={styles.explanation} numberOfLines={3}>
@@ -393,6 +454,6 @@ export default function FlashCardsPage() {
           </View>
         )}
       </ScreenShell>
-    </SafeAreaView>
+    </View>
   );
 }

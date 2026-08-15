@@ -3,7 +3,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import Katex from 'react-native-katex';
 import { useTheme } from '../theme/ThemeContext';
 import { useThemeStyles } from '../theme/createStyles';
-import { typography, spacing } from '../theme';
+import { typography } from '../theme';
 
 // Helper to convert plain formula strings to KaTeX TeX format
 export const toKatexSource = (raw) => {
@@ -15,27 +15,29 @@ export const toKatexSource = (raw) => {
     .replace(/([a-zA-Z0-9)\]])_(-?[a-zA-Z0-9]+)(?![a-zA-Z0-9{])/g, '$1_{$2}');
 };
 
-export default function FormulaMath({ source, color, size = 'display' }) {
+export default function FormulaMath({ source, color, backgroundColor, size = 'display' }) {
   const { colors } = useTheme();
   const [status, setStatus] = useState('loading');
   const expression = useMemo(() => toKatexSource(source), [source]);
   const isCompact = size === 'compact';
+  const resolvedBackground = backgroundColor || 'transparent';
 
   useEffect(() => {
     setStatus('loading');
   }, [expression]);
 
   const fontSize = useMemo(() => {
-    if (isCompact) return '1.15em';
+    if (isCompact) return '5.5em';
     const len = expression.length;
-    if (len > 70) return '1.1em';
-    if (len > 45) return '1.4em';
-    if (len > 25) return '1.7em';
-    return '2em';
+    if (len > 90) return '4.35em';
+    if (len > 70) return '4.55em';
+    if (len > 45) return '4.85em';
+    if (len > 25) return '4.2em';
+    return '3.6em';
   }, [isCompact, expression]);
 
   const katexInlineStyle = useMemo(() => {
-    const textColor = color || colors.brand;
+    const textColor = color || colors.textPrimary;
     const justify = isCompact ? 'center' : 'flex-start';
     return `
       html, body {
@@ -47,7 +49,9 @@ export default function FormulaMath({ source, color, size = 'display' }) {
         justify-content: ${justify};
         overflow-x: ${isCompact ? 'hidden' : 'auto'};
         overflow-y: hidden;
-        background-color: transparent;
+        background: ${resolvedBackground};
+        background-color: ${resolvedBackground};
+        color: ${textColor};
       }
       body {
         padding: ${isCompact ? '0' : '0 44px 0 12px'};
@@ -64,17 +68,17 @@ export default function FormulaMath({ source, color, size = 'display' }) {
         justify-content: ${justify};
       }
     `;
-  }, [color, colors.brand, fontSize, isCompact]);
+  }, [color, colors.textPrimary, fontSize, isCompact, resolvedBackground]);
 
   const styles = useThemeStyles((c, s) => ({
-    katexShell: { flex: 1, justifyContent: 'center' },
-    katex: { flex: 1 },
+    katexShell: { flex: 1, justifyContent: 'center', backgroundColor: resolvedBackground },
+    katex: { flex: 1, backgroundColor: resolvedBackground },
     katexOverlay: {
       ...StyleSheet.absoluteFillObject,
       alignItems: isCompact ? 'center' : 'flex-start',
       justifyContent: 'center',
       paddingHorizontal: isCompact ? 0 : s.md,
-      backgroundColor: 'transparent',
+      backgroundColor: resolvedBackground,
     },
     katexFallbackScroll: { maxWidth: '100%' },
     katexFallbackText: {
@@ -82,9 +86,9 @@ export default function FormulaMath({ source, color, size = 'display' }) {
       textAlign: isCompact ? 'center' : 'left',
       ...(isCompact ? typography.sm : typography.xl),
       ...(isCompact ? typography.bold : typography.extrabold),
-      color: c.brand,
+      color: color || c.textPrimary,
     },
-  }));
+  }), [color, isCompact, resolvedBackground]);
 
   return (
     <View style={styles.katexShell}>
@@ -107,6 +111,11 @@ export default function FormulaMath({ source, color, size = 'display' }) {
           inlineStyle={katexInlineStyle}
           displayMode
           throwOnError={false}
+          androidLayerType="software"
+          containerStyle={styles.katex}
+          scrollEnabled={!isCompact}
+          showsHorizontalScrollIndicator={false}
+          showsVerticalScrollIndicator={false}
           onLoad={() => setStatus('ready')}
           onError={() => setStatus('error')}
         />

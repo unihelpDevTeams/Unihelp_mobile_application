@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../../../firebase/config';
 import { CHALLENGE_ACHIEVEMENTS, FALLBACK_QUESTIONS, calculateChallengeScore, getRankForXp, getTodayKey } from './data';
+import { getJson } from '../services/backend';
 
 const COLLECTION = 'challenges';
 const USERS_COLLECTION = 'challengeUsers';
@@ -20,6 +21,35 @@ const QUESTIONS_COLLECTION = 'challengeQuestions';
 const ATTEMPTS_COLLECTION = 'attempts';
 
 const mapDocs = (snapshot) => snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+
+const normalizeQuestion = (item = {}) => {
+  const answers = item.answers || item.options || item.choices || [];
+  const correctIndex =
+    typeof item.correctIndex === 'number'
+      ? item.correctIndex
+      : typeof item.answerIndex === 'number'
+        ? item.answerIndex
+        : answers.findIndex((answer) => answer === item.correctAnswer || answer === item.answer);
+
+  return {
+    ...item,
+    id: String(item.id || item._id || item.prompt || item.question || ''),
+    prompt: item.prompt || item.question || '',
+    answers,
+    correctIndex: correctIndex >= 0 ? correctIndex : 0,
+    category: item.category || 'daily',
+    subject: item.subject || item.course || 'Challenge',
+    difficulty: item.difficulty || 'Easy',
+    explanation: item.explanation || item.reason || '',
+  };
+};
+
+const unwrapQuestions = (data) => {
+  const list = Array.isArray(data) ? data : data?.questions || data?.data || data?.items || [];
+  return Array.isArray(list)
+    ? list.map(normalizeQuestion).filter((item) => item.id && item.prompt && Array.isArray(item.answers) && item.answers.length >= 2)
+    : [];
+};
 
 const asDateKey = (value) => {
   if (!value) return '';
@@ -106,6 +136,22 @@ function filterFallbackByProfile(questions, category, profile = {}) {
 }
 
 export async function fetchChallengeQuestions({ category, count = 8, profile = {} } = {}) {
+  try {
+    let apiQuestions = unwrapQuestions(await getJson('/api/challenge-questions'));
+
+    if (category && category !== 'random') {
+      apiQuestions = apiQuestions.filter((item) => item.category === category);
+    }
+
+    apiQuestions = filterFallbackByProfile(apiQuestions, category, profile);
+
+    if (apiQuestions.length) {
+      return [...apiQuestions].sort(() => Math.random() - 0.5).slice(0, count);
+    }
+  } catch (err) {
+    console.warn('Failed to fetch challenge questions from API:', err?.message);
+  }
+
   try {
     const userLevel = profile?.level?.toLowerCase().replace('l', '') || '';
     const userDept = (profile?.department || '').trim().toLowerCase();

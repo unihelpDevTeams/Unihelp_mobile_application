@@ -401,6 +401,140 @@ export default function HomeScreen() {
       fontWeight: '500',
       marginTop: 2,
     },
+    flashBanner: {
+      borderRadius: r['3xl'],
+      marginBottom: s.xl,
+      overflow: 'hidden',
+      shadowColor: c.brand,
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.16,
+      shadowRadius: 22,
+      elevation: 7,
+    },
+    flashBannerGradient: {
+      minHeight: 164,
+      padding: s.xl,
+      position: 'relative',
+      overflow: 'hidden',
+    },
+    flashBannerHalo: {
+      position: 'absolute',
+      width: 150,
+      height: 150,
+      borderRadius: 75,
+      right: -34,
+      top: -44,
+      backgroundColor: 'rgba(255,255,255,0.17)',
+    },
+    flashBannerOrbit: {
+      position: 'absolute',
+      width: 108,
+      height: 108,
+      borderRadius: 54,
+      left: 88,
+      bottom: -46,
+      backgroundColor: 'rgba(255,255,255,0.1)',
+    },
+    flashBannerContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: s.md,
+    },
+    flashBannerCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    flashBannerPill: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: s.md,
+      paddingVertical: 5,
+      borderRadius: 999,
+      backgroundColor: 'rgba(255,255,255,0.17)',
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.24)',
+      marginBottom: s.md,
+    },
+    flashBannerPillText: {
+      color: c.onBrand,
+      fontSize: 10,
+      fontWeight: '900',
+      letterSpacing: 0.8,
+    },
+    flashBannerTitle: {
+      color: c.onBrand,
+      fontSize: 23,
+      fontWeight: '900',
+      letterSpacing: -0.4,
+    },
+    flashBannerSubtitle: {
+      color: 'rgba(255,255,255,0.84)',
+      fontSize: 12.5,
+      fontWeight: '600',
+      lineHeight: 18,
+      marginTop: 4,
+      maxWidth: 190,
+    },
+    flashBannerAction: {
+      marginTop: s.lg,
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: c.surface,
+      paddingHorizontal: s.lg,
+      paddingVertical: s.sm,
+      borderRadius: 999,
+    },
+    flashBannerActionText: {
+      color: c.brandText,
+      fontSize: 12,
+      fontWeight: '900',
+    },
+    flashDeck: {
+      width: 110,
+      height: 124,
+      flexShrink: 0,
+      position: 'relative',
+    },
+    flashMiniCard: {
+      position: 'absolute',
+      width: 88,
+      height: 106,
+      borderRadius: r.xl,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: s.sm,
+      borderWidth: 1,
+    },
+    flashMiniCardBack: {
+      right: 0,
+      top: 0,
+      transform: [{ rotate: '10deg' }],
+      backgroundColor: 'rgba(255,255,255,0.22)',
+      borderColor: 'rgba(255,255,255,0.28)',
+    },
+    flashMiniCardFront: {
+      left: 0,
+      bottom: 0,
+      transform: [{ rotate: '-8deg' }],
+      backgroundColor: c.surface,
+      borderColor: c.borderLight || c.border,
+    },
+    flashMiniFormulaLight: {
+      color: c.onBrand,
+      fontSize: 15,
+      fontWeight: '900',
+    },
+    flashMiniFormulaDark: {
+      color: c.ink,
+      fontSize: 12,
+      fontWeight: '900',
+      marginTop: s.xs,
+    },
 
     // Horizontal Carousel Strip
     horizontalScroll: {
@@ -1046,6 +1180,52 @@ export default function HomeScreen() {
           onStudyNow={handleStudyNow}
         />
       </View>
+
+      <Pressable
+        style={({ pressed }) => [
+          styles.flashBanner,
+          pressed && { opacity: 0.92, transform: [{ scale: 0.99 }] },
+        ]}
+        onPress={() => router.push('/formula-hub/flashcards')}
+        accessibilityRole="button"
+        accessibilityLabel="Open formula flash cards"
+      >
+        <LinearGradient
+          colors={[colors.brand, colors.purple, colors.teal]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.flashBannerGradient}
+        >
+          <View style={styles.flashBannerHalo} />
+          <View style={styles.flashBannerOrbit} />
+          <View style={styles.flashBannerContent}>
+            <View style={styles.flashBannerCopy}>
+              <View style={styles.flashBannerPill}>
+                <Ionicons name="sparkles" size={13} color={colors.onBrand} />
+                <Text style={styles.flashBannerPillText}>FORMULA RECALL</Text>
+              </View>
+              <Text style={styles.flashBannerTitle}>Flash Card Sprint</Text>
+              <Text style={styles.flashBannerSubtitle}>
+                Flip equations into fast memory before your next test.
+              </Text>
+              <View style={styles.flashBannerAction}>
+                <Text style={styles.flashBannerActionText}>Start practice</Text>
+                <Ionicons name="arrow-forward" size={14} color={colors.brandText} />
+              </View>
+            </View>
+
+            <View style={styles.flashDeck}>
+              <View style={[styles.flashMiniCard, styles.flashMiniCardBack]}>
+                <Text style={styles.flashMiniFormulaLight}>V = IR</Text>
+              </View>
+              <View style={[styles.flashMiniCard, styles.flashMiniCardFront]}>
+                <Ionicons name="albums-outline" size={19} color={colors.brand} />
+                <Text style={styles.flashMiniFormulaDark}>x = -b/2a</Text>
+              </View>
+            </View>
+          </View>
+        </LinearGradient>
+      </Pressable>
 
       {/* REDESIGNED ACADEMIC TOOLKIT SECTION */}
       <View>

@@ -102,7 +102,7 @@ const ALL_TOOLS = [
         icon: 'layers',
         color: '#EC4899',
         bgColor: '#FDF2F8',
-        route: '/flashcards',
+        route: '/formula-hub/flashcards',
         badge: 'AI',
       },
     ],
