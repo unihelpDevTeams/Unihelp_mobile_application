@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -31,6 +31,9 @@ export default function FlashCardsPage() {
   const [isShuffled, setIsShuffled] = useState(false);
 
   const flipAnim = useRef(new Animated.Value(0)).current;
+  const cardEntranceAnim = useRef(new Animated.Value(1)).current;
+  const pressAnim = useRef(new Animated.Value(1)).current;
+  const shuffleAnim = useRef(new Animated.Value(0)).current;
 
   // Subjects for the filter
   const subjects = useMemo(() => {
@@ -54,13 +57,25 @@ export default function FlashCardsPage() {
   }, [formulas, activeSubject, isShuffled]);
 
   const currentFormula = activeFormulas[currentIndex];
+  const progress = activeFormulas.length > 0 ? (currentIndex + 1) / activeFormulas.length : 0;
+
+  const animateCardIn = useCallback((direction = 1) => {
+    cardEntranceAnim.setValue(direction);
+    Animated.spring(cardEntranceAnim, {
+      toValue: 0,
+      friction: 8,
+      tension: 80,
+      useNativeDriver: true,
+    }).start();
+  }, [cardEntranceAnim]);
 
   // Reset index when changing subjects or shuffling
   useEffect(() => {
     setCurrentIndex(0);
     setIsFlipped(false);
     flipAnim.setValue(0);
-  }, [activeSubject, isShuffled, flipAnim]);
+    animateCardIn(0.5);
+  }, [activeSubject, isShuffled, flipAnim, animateCardIn]);
 
   useEffect(() => {
     if (currentIndex >= activeFormulas.length) {
@@ -71,6 +86,20 @@ export default function FlashCardsPage() {
   }, [activeFormulas.length, currentIndex, flipAnim]);
 
   const flipCard = () => {
+    Animated.sequence([
+      Animated.timing(pressAnim, {
+        toValue: 0.98,
+        duration: 90,
+        useNativeDriver: true,
+      }),
+      Animated.spring(pressAnim, {
+        toValue: 1,
+        friction: 5,
+        tension: 120,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
     if (isFlipped) {
       Animated.timing(flipAnim, {
         toValue: 0,
@@ -91,6 +120,7 @@ export default function FlashCardsPage() {
       setIsFlipped(false);
       flipAnim.setValue(0);
       setCurrentIndex((prev) => prev + 1);
+      animateCardIn(1);
     }
   };
 
@@ -99,7 +129,19 @@ export default function FlashCardsPage() {
       setIsFlipped(false);
       flipAnim.setValue(0);
       setCurrentIndex((prev) => prev - 1);
+      animateCardIn(-1);
     }
+  };
+
+  const toggleShuffle = () => {
+    shuffleAnim.setValue(0);
+    Animated.spring(shuffleAnim, {
+      toValue: 1,
+      friction: 5,
+      tension: 120,
+      useNativeDriver: true,
+    }).start();
+    setIsShuffled((value) => !value);
   };
 
   const frontInterpolate = flipAnim.interpolate({
@@ -113,11 +155,52 @@ export default function FlashCardsPage() {
   });
 
   const frontAnimatedStyle = {
-    transform: [{ rotateY: frontInterpolate }],
+    transform: [{ perspective: 1000 }, { rotateY: frontInterpolate }],
   };
 
   const backAnimatedStyle = {
-    transform: [{ rotateY: backInterpolate }],
+    transform: [{ perspective: 1000 }, { rotateY: backInterpolate }],
+  };
+
+  const cardMotionStyle = {
+    opacity: cardEntranceAnim.interpolate({
+      inputRange: [-1, 0, 1],
+      outputRange: [0, 1, 0],
+    }),
+    transform: [
+      {
+        translateX: cardEntranceAnim.interpolate({
+          inputRange: [-1, 0, 1],
+          outputRange: [-44, 0, 44],
+        }),
+      },
+      {
+        scale: Animated.multiply(
+          pressAnim,
+          cardEntranceAnim.interpolate({
+            inputRange: [-1, 0, 1],
+            outputRange: [0.96, 1, 0.96],
+          })
+        ),
+      },
+    ],
+  };
+
+  const shuffleIconStyle = {
+    transform: [
+      {
+        rotate: shuffleAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: ['0deg', '180deg'],
+        }),
+      },
+      {
+        scale: shuffleAnim.interpolate({
+          inputRange: [0, 0.5, 1],
+          outputRange: [1, 1.18, 1],
+        }),
+      },
+    ],
   };
 
   const styles = useThemeStyles((c, s) => ({
@@ -158,20 +241,40 @@ export default function FlashCardsPage() {
       justifyContent: 'space-between',
       alignItems: 'center',
       paddingHorizontal: s.lg,
-      marginBottom: s.lg,
+      marginBottom: s.md,
+    },
+    progressGroup: {
+      flex: 1,
+      marginRight: s.md,
     },
     progressText: {
       ...typography.sm,
-      ...typography.medium,
+      ...typography.bold,
       color: c.textSecondary,
+    },
+    progressTrack: {
+      height: 6,
+      borderRadius: borderRadius.full,
+      backgroundColor: c.surfaceSecondary,
+      overflow: 'hidden',
+      marginTop: s.sm,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+    },
+    progressFill: {
+      height: '100%',
+      borderRadius: borderRadius.full,
+      backgroundColor: c.brand,
     },
     shuffleBtn: {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: isShuffled ? c.brandLight : c.surfaceSecondary,
       paddingHorizontal: s.md,
-      paddingVertical: s.xs,
-      borderRadius: borderRadius.md,
+      paddingVertical: s.sm,
+      borderRadius: borderRadius.full,
+      borderWidth: 1,
+      borderColor: isShuffled ? c.brandBorder : c.borderDefault,
     },
     shuffleText: {
       ...typography.sm,
@@ -181,57 +284,112 @@ export default function FlashCardsPage() {
     },
     cardContainer: {
       width: width - s.lg * 2,
-      height: 350,
+      height: Math.min(390, Math.max(330, width * 0.92)),
       alignSelf: 'center',
     },
     card: {
       ...StyleSheet.absoluteFillObject,
       backgroundColor: c.surfacePrimary,
-      borderRadius: borderRadius['2xl'],
-      ...shadows.md,
-      padding: s.xl,
+      borderRadius: borderRadius['3xl'],
+      ...shadows.lg,
+      padding: s['2xl'],
       backfaceVisibility: 'hidden',
-      justifyContent: 'center',
+      justifyContent: 'space-between',
       alignItems: 'center',
       borderColor: c.borderDefault,
       borderWidth: 1,
+      overflow: 'hidden',
     },
     cardBack: {
       backgroundColor: c.brandLight,
+      borderColor: c.brandBorder,
     },
     cardLabel: {
-      ...typography.sm,
-      ...typography.medium,
-      color: c.textTertiary,
+      ...typography.xs,
+      ...typography.bold,
+      color: c.brandText,
       textTransform: 'uppercase',
       letterSpacing: 1,
-      position: 'absolute',
-      top: s.lg,
+    },
+    cardTopRow: {
+      width: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    cardBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.xs,
+      paddingHorizontal: s.md,
+      paddingVertical: s.xs,
+      borderRadius: borderRadius.full,
+      backgroundColor: c.brandLight,
+      borderWidth: 1,
+      borderColor: c.brandBorder,
+    },
+    cardBadgeBack: {
+      backgroundColor: c.surfacePrimary,
+    },
+    cardCounter: {
+      ...typography.xs,
+      ...typography.bold,
+      color: c.textTertiary,
+    },
+    cardBody: {
+      width: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flex: 1,
+      paddingVertical: s.lg,
     },
     formulaTitle: {
-      ...typography['2xl'],
+      ...typography['5xl'],
       ...typography.bold,
       color: c.textPrimary,
       textAlign: 'center',
+      lineHeight: 30,
     },
     formulaSubject: {
       ...typography.sm,
-      color: c.textSecondary,
-      marginTop: s.sm,
+      ...typography.semibold,
+      color: c.brandText,
+      marginTop: s.md,
+      paddingHorizontal: s.md,
+      paddingVertical: s.xs,
+      borderRadius: borderRadius.full,
+      backgroundColor: c.brandLight,
+      overflow: 'hidden',
     },
     explanation: {
       ...typography.md,
       color: c.textPrimary,
       textAlign: 'center',
       lineHeight: 24,
-      marginTop: s.xl,
+      marginTop: s.lg,
+    },
+    hintRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.xs,
+      paddingHorizontal: s.md,
+      paddingVertical: s.sm,
+      borderRadius: borderRadius.full,
+      backgroundColor: c.surfaceSecondary,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+    },
+    hintText: {
+      ...typography.xs,
+      ...typography.semibold,
+      color: c.textSecondary,
     },
     navRow: {
       flexDirection: 'row',
       justifyContent: 'center',
       alignItems: 'center',
-      marginTop: s['2xl'],
-      gap: s.xl,
+      marginTop: s.xl,
+      gap: s.md,
     },
     navButton: {
       width: 56,
@@ -240,7 +398,7 @@ export default function FlashCardsPage() {
       backgroundColor: c.surfacePrimary,
       justifyContent: 'center',
       alignItems: 'center',
-      ...shadows.sm,
+      ...shadows.md,
       borderWidth: 1,
       borderColor: c.borderDefault,
     },
@@ -254,7 +412,9 @@ export default function FlashCardsPage() {
       backgroundColor: c.brand,
       flexDirection: 'row',
       alignItems: 'center',
-      ...shadows.sm,
+      ...shadows.brandLight,
+      minWidth: 148,
+      justifyContent: 'center',
     },
     flipText: {
       ...typography.md,
@@ -307,9 +467,14 @@ export default function FlashCardsPage() {
       marginTop: s.md,
     },
     formulaWrap: {
-      height: 120,
+      minHeight: 118,
       width: '100%',
       justifyContent: 'center',
+      borderRadius: borderRadius.xl,
+      backgroundColor: c.surfacePrimary,
+      borderWidth: 1,
+      borderColor: c.brandBorder,
+      paddingHorizontal: s.md,
     },
   }), [isShuffled, width]);
 
@@ -369,56 +534,88 @@ export default function FlashCardsPage() {
         ) : activeFormulas.length > 0 ? (
           <View style={styles.cardStage}>
             <View style={styles.controlsRow}>
-              <Text style={styles.progressText}>
-                {currentIndex + 1} of {activeFormulas.length}
-              </Text>
+              <View style={styles.progressGroup}>
+                <Text style={styles.progressText}>
+                  {currentIndex + 1} of {activeFormulas.length}
+                </Text>
+                <View style={styles.progressTrack}>
+                  <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+                </View>
+              </View>
               <TouchableOpacity
                 style={styles.shuffleBtn}
-                onPress={() => setIsShuffled(!isShuffled)}
+                onPress={toggleShuffle}
               >
-                <Ionicons
-                  name="shuffle"
-                  size={16}
-                  color={isShuffled ? colors.brand : colors.textSecondary}
-                />
+                <Animated.View style={shuffleIconStyle}>
+                  <Ionicons
+                    name="shuffle"
+                    size={16}
+                    color={isShuffled ? colors.brand : colors.textSecondary}
+                  />
+                </Animated.View>
                 <Text style={styles.shuffleText}>Shuffle</Text>
               </TouchableOpacity>
             </View>
 
             {/* Flash Card */}
-            <View style={styles.cardContainer}>
+            <Animated.View style={[styles.cardContainer, cardMotionStyle]}>
               {/* Front side */}
-              <Animated.View style={[styles.card, frontAnimatedStyle]}>
-                <Text style={styles.cardLabel}>Question</Text>
-                <Text style={styles.formulaTitle}>{currentFormula?.title || 'Untitled Formula'}</Text>
-                <Text style={styles.formulaSubject}>{currentFormula?.subject || 'General'}</Text>
+              <Animated.View pointerEvents={isFlipped ? 'none' : 'auto'} style={[styles.card, frontAnimatedStyle]}>
+                <View style={styles.cardTopRow}>
+                  <View style={styles.cardBadge}>
+                    <Ionicons name="help-circle-outline" size={15} color={colors.brand} />
+                    <Text style={styles.cardLabel}>Question</Text>
+                  </View>
+                  <Text style={styles.cardCounter}>{currentIndex + 1}/{activeFormulas.length}</Text>
+                </View>
+                <TouchableOpacity activeOpacity={0.92} onPress={flipCard} style={styles.cardBody}>
+                  <Text style={styles.formulaTitle}>{currentFormula?.title || 'Untitled Formula'}</Text>
+                  <Text style={styles.formulaSubject}>{currentFormula?.subject || 'General'}</Text>
+                </TouchableOpacity>
+                <View style={styles.hintRow}>
+                  <Ionicons name="finger-print-outline" size={14} color={colors.textSecondary} />
+                  <Text style={styles.hintText}>Tap card to reveal answer</Text>
+                </View>
               </Animated.View>
 
               {/* Back side */}
               <Animated.View
+                pointerEvents={isFlipped ? 'auto' : 'none'}
                 style={[styles.card, styles.cardBack, backAnimatedStyle]}
               >
-                <Text style={styles.cardLabel}>Answer</Text>
-                {/* MathRenderer handles the Katex display */}
-                <View style={styles.formulaWrap}>
-                  {currentFormula?.formula ? (
-                    <FormulaMath
-                      source={currentFormula.formula}
-                      color={colors.textPrimary}
-                      backgroundColor={colors.brandLight}
-                      size="display"
-                    />
-                  ) : (
-                    <Text style={styles.explanation}>No formula expression was provided.</Text>
-                  )}
+                <View style={styles.cardTopRow}>
+                  <View style={[styles.cardBadge, styles.cardBadgeBack]}>
+                    <Ionicons name="checkmark-circle-outline" size={15} color={colors.brand} />
+                    <Text style={styles.cardLabel}>Answer</Text>
+                  </View>
+                  <Text style={styles.cardCounter}>{currentIndex + 1}/{activeFormulas.length}</Text>
                 </View>
-                {currentFormula?.explanation && (
-                   <Text style={styles.explanation} numberOfLines={3}>
-                     {currentFormula.explanation}
-                   </Text>
-                )}
+                <TouchableOpacity activeOpacity={0.92} onPress={flipCard} style={styles.cardBody}>
+                  {/* MathRenderer handles the Katex display */}
+                  <View style={styles.formulaWrap}>
+                    {currentFormula?.formula ? (
+                      <FormulaMath
+                        source={currentFormula.formula}
+                        color={colors.textPrimary}
+                        backgroundColor={colors.surfacePrimary}
+                        size="display"
+                      />
+                    ) : (
+                      <Text style={styles.explanation}>No formula expression was provided.</Text>
+                    )}
+                  </View>
+                  {currentFormula?.explanation && (
+                     <Text style={styles.explanation} numberOfLines={3}>
+                       {currentFormula.explanation}
+                     </Text>
+                  )}
+                </TouchableOpacity>
+                <View style={styles.hintRow}>
+                  <Ionicons name="refresh-outline" size={14} color={colors.textSecondary} />
+                  <Text style={styles.hintText}>Tap card to return</Text>
+                </View>
               </Animated.View>
-            </View>
+            </Animated.View>
 
             {/* Navigation Controls */}
             <View style={styles.navRow}>
