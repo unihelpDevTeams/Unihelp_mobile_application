@@ -36,10 +36,7 @@ export default function ChallengeHomeScreen() {
       };
     }, [profile])
   );
-
-  // Styles are built per-render from the live theme colors, so this screen
-  // actually responds to a dark/light mode switch (previous version imported
-  // a static `colors` object at module scope and never re-rendered on toggle).
+  
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const stats = dashboard.stats || {};

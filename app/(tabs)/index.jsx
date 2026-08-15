@@ -997,7 +997,7 @@ export default function HomeScreen() {
     {
       id: 'cbt',
       title: 'CBT Practice',
-      sub: 'Jamb & Post UTME',
+      sub: 'Mock exams & quizzes',
       icon: 'school',
       color: '#10B981',
       bgColor: '#ECFDF5',
