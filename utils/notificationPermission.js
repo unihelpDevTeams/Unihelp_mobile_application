@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 
 const DEFAULT_API_URL = 'https://unihelp-backend-vdps.onrender.com';
@@ -108,6 +108,9 @@ export const requestNotificationPermission = async () => {
   }
 };
 
+let pushRegistrationPromise = null;
+let tokenListenerSubscription = null;
+
 export const registerPushNotificationsForCurrentUser = async () => {
   const currentUser = auth.currentUser;
   if (!currentUser) {
@@ -115,56 +118,74 @@ export const registerPushNotificationsForCurrentUser = async () => {
     return null;
   }
 
-  const token = await requestNotificationPermission();
-  if (!token) {
-    return null;
+  if (pushRegistrationPromise) {
+    return pushRegistrationPromise;
   }
 
-  try {
-    await setDoc(
-      doc(db, 'users', currentUser.uid),
-      {
-        expoPushToken: token,
-        pushNotificationsEnabled: true,
-        pushTokenUpdatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
-
-    const idToken = await currentUser.getIdToken();
-
-    const response = await fetch(getApiUrl('/api/notifications/push-token'), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${idToken}`,
-      },
-      body: JSON.stringify({
-        expoPushToken: token,
-        deviceType: Platform.OS,
-      }),
-    });
-
-    const responseBody = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      console.log('[push-debug] Backend push token save failed:', {
-        status: response.status,
-        response: responseBody,
-      });
-    } else {
-      console.log('[push-debug] Push token saved for authenticated user:', {
-        uid: currentUser.uid,
-        deviceType: Platform.OS,
-        backend: getApiBaseUrl(),
-      });
+  pushRegistrationPromise = (async () => {
+    const token = await requestNotificationPermission();
+    if (!token) {
+      return null;
     }
 
-    return token;
-  } catch (error) {
-    console.log('Failed to register push token:', error);
-    return token;
-  }
+    try {
+      const userSnap = await getDoc(doc(db, 'users', currentUser.uid));
+      const existingToken = userSnap.exists() ? userSnap.data()?.expoPushToken : null;
+
+      if (existingToken === token) {
+        console.log('[push-debug] Push token unchanged; skipping Firestore write.', { uid: currentUser.uid });
+        return token;
+      }
+
+      await setDoc(
+        doc(db, 'users', currentUser.uid),
+        {
+          expoPushToken: token,
+          pushNotificationsEnabled: true,
+          pushTokenUpdatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      const idToken = await currentUser.getIdToken();
+
+      const response = await fetch(getApiUrl('/api/notifications/push-token'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          expoPushToken: token,
+          deviceType: Platform.OS,
+        }),
+      });
+
+      const responseBody = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        console.log('[push-debug] Backend push token save failed:', {
+          status: response.status,
+          response: responseBody,
+        });
+      } else {
+        console.log('[push-debug] Push token saved for authenticated user:', {
+          uid: currentUser.uid,
+          deviceType: Platform.OS,
+          backend: getApiBaseUrl(),
+        });
+      }
+
+      return token;
+    } catch (error) {
+      console.log('Failed to register push token:', error);
+      return token;
+    } finally {
+      pushRegistrationPromise = null;
+    }
+  })();
+
+  return pushRegistrationPromise;
 };
 
 export const listenToPushTokenChanges = () => {
@@ -172,10 +193,21 @@ export const listenToPushTokenChanges = () => {
     return { remove: () => {} };
   }
 
-  return Notifications.addPushTokenListener(async () => {
+  if (tokenListenerSubscription) {
+    return tokenListenerSubscription;
+  }
+
+  tokenListenerSubscription = Notifications.addPushTokenListener(async () => {
     console.log('[push-debug] Native push token changed; refreshing Expo push token registration.');
     await registerPushNotificationsForCurrentUser();
   });
+
+  return {
+    remove: () => {
+      tokenListenerSubscription?.remove?.();
+      tokenListenerSubscription = null;
+    },
+  };
 };
 
 export const listenToForegroundMessages = (handler) => {

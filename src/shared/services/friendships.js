@@ -378,7 +378,14 @@ export const createOrOpenFriendConversation = async ({ currentUser, otherUser, c
   const currentUid = currentUser?.uid || currentProfile?.uid;
   const otherUid = otherUser?.id || otherUser?.uid;
   if (!currentUid || !otherUid) throw new Error('Missing conversation details.');
-  const friendshipSnap = await getDoc(doc(db, COLLECTIONS.friends, pairId(currentUid, otherUid)));
+  const [friendshipSnap, currentBlocks, otherBlocks] = await Promise.all([
+    getDoc(doc(db, COLLECTIONS.friends, pairId(currentUid, otherUid))),
+    getDoc(doc(db, COLLECTIONS.blockedUsers, directedId(currentUid, otherUid))),
+    getDoc(doc(db, COLLECTIONS.blockedUsers, directedId(otherUid, currentUid))),
+  ]);
+  if (currentBlocks.exists() || otherBlocks.exists()) {
+    throw new Error('You cannot message this student while either of you has blocked the other.');
+  }
   if (!friendshipSnap.exists()) throw new Error('Become friends before chatting freely.');
 
   const memberIds = [currentUid, otherUid].sort();

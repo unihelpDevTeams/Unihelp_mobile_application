@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -55,6 +55,7 @@ export function PushNotificationBootstrap() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const userId = user?.uid;
+  const registrationKeyRef = useRef(null);
 
   useEffect(() => {
     const removeForeground = listenToForegroundMessages((notification) => {
@@ -81,8 +82,15 @@ export function PushNotificationBootstrap() {
 
   useEffect(() => {
     if (loading || !userId) {
+      registrationKeyRef.current = null;
       return;
     }
+
+    if (registrationKeyRef.current === userId) {
+      return;
+    }
+
+    registrationKeyRef.current = userId;
 
     let active = true;
 
@@ -101,6 +109,7 @@ export function PushNotificationBootstrap() {
 
     return () => {
       active = false;
+      registrationKeyRef.current = null;
     };
   }, [loading, userId]);
 

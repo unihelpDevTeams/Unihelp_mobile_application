@@ -292,7 +292,7 @@ const createStyles = (c, s, r) => ({
     fontWeight: '900',
   },
   filterTextActive: {
-    color: c.onBrandText,
+    color: c.onBrand,
   },
   sectionTitle: {
     color: c.ink,
@@ -397,7 +397,7 @@ const createStyles = (c, s, r) => ({
     paddingHorizontal: s.sm,
   },
   smallButtonText: {
-    color: c.brandText,
+    color: c.onBrand,
     fontSize: 12,
     fontWeight: '900',
   },

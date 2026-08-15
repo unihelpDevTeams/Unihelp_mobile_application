@@ -291,23 +291,51 @@ export async function fetchUserActivity(uid = auth.currentUser?.uid) {
   return mapDocs(snapshot);
 }
 
+const dailyActivityWriteCache = new Map();
+const dailyStreakWriteCache = new Map();
+
 export async function addUserActivity(payload) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
 
-  await setDoc(
-    doc(db, COLLECTIONS.users, auth.currentUser.uid),
-    {
-      lastActiveAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true }
-  );
+  const dateKey = new Date().toISOString().slice(0, 10);
+  const activityKey = `${auth.currentUser.uid}:${payload?.type || 'activity'}:${dateKey}`;
+  const cached = dailyActivityWriteCache.get(activityKey);
+  if (cached === dateKey) {
+    return null;
+  }
 
-  const ref = await addDoc(collection(db, COLLECTIONS.users, auth.currentUser.uid, 'activity'), {
+  const userRef = doc(db, COLLECTIONS.users, auth.currentUser.uid);
+  const userSnap = await getDoc(userRef);
+  const userData = userSnap.exists() ? userSnap.data() : {};
+  const lastActiveAt = userData.lastActiveAt?.toDate?.() || userData.lastActive?.toDate?.();
+  const now = new Date();
+
+  if (!lastActiveAt || now.getTime() - lastActiveAt.getTime() > 5 * 60 * 1000) {
+    await setDoc(
+      userRef,
+      {
+        lastActiveAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  }
+
+  const activityRef = doc(db, COLLECTIONS.users, auth.currentUser.uid, 'activity', `${payload?.type || 'activity'}_${dateKey}`);
+  const activitySnap = await getDoc(activityRef);
+  if (activitySnap.exists()) {
+    dailyActivityWriteCache.set(activityKey, dateKey);
+    return activityRef.id;
+  }
+
+  await setDoc(activityRef, {
     ...payload,
+    activityKey,
     createdAt: serverTimestamp(),
   });
-  return ref.id;
+
+  dailyActivityWriteCache.set(activityKey, dateKey);
+  return activityRef.id;
 }
 
 export async function notifyInactiveUsers() {
@@ -607,11 +635,6 @@ export async function fetchRecord(collectionName, id) {
     console.warn('Unable to fetch record from Firestore, using local fallback:', error);
   }
 
-  if (collectionName === COLLECTIONS.formulas) {
-    const match = sampleFormulas.find((item) => String(item.id) === String(id));
-    return match ? { ...match, id: String(match.id) } : null;
-  }
-
   return null;
 }
 
@@ -805,21 +828,28 @@ export async function unblockUser(uid) {
 export async function recordDailyStreak() {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
 
-  const userRef = doc(db, COLLECTIONS.users, auth.currentUser.uid);
+  const userId = auth.currentUser.uid;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const cacheKey = `${userId}:${todayKey}`;
+  if (dailyStreakWriteCache.has(cacheKey)) {
+    return {
+      streakCount: dailyStreakWriteCache.get(cacheKey),
+      streakDates: [],
+      todayKey,
+    };
+  }
+
+  const userRef = doc(db, COLLECTIONS.users, userId);
   const snap = await getDoc(userRef);
   const userData = snap.exists() ? snap.data() : {};
 
-  const todayKey = new Date().toISOString().slice(0, 10);
   const yesterdayKey = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 
   let streakCount = userData.streakCount || 0;
   let streakDates = userData.streakDates || [];
 
   if (streakDates.includes(todayKey)) {
-    await updateDoc(userRef, {
-      lastActiveAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    dailyStreakWriteCache.set(cacheKey, streakCount);
     return { streakCount, streakDates, todayKey };
   }
 
@@ -840,6 +870,7 @@ export async function recordDailyStreak() {
     updatedAt: serverTimestamp(),
   });
 
+  dailyStreakWriteCache.set(cacheKey, streakCount);
   return { streakCount, streakDates, todayKey };
 }
 

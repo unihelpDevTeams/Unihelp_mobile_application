@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -14,6 +13,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
+import ConfirmDialog from '../../src/shared/components/ConfirmDialog';
 import { PageLoader } from '../../src/shared/components/AILoaders';
 import { getUserProfile } from '../../services/firestoreSync';
 import { useAuth } from '../../context/AuthContext';
@@ -29,6 +29,7 @@ import {
   removeFriend,
   sendFriendRequest,
   sendMessageRequest,
+  unblockStudent,
 } from '../../src/shared/services/friendships';
 
 export default function ViewUserProfile() {
@@ -44,6 +45,8 @@ export default function ViewUserProfile() {
   const [busy, setBusy] = useState('');
   const [messageModal, setMessageModal] = useState(false);
   const [intro, setIntro] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const [feedback, setFeedback] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +87,8 @@ export default function ViewUserProfile() {
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [coverFailed, setCoverFailed] = useState(false);
   const isSelf = user?.uid === targetUid;
+  const isBlocked = relationship.state === RELATIONSHIP.BLOCKED;
+  const blockedByMe = isBlocked && relationship.blockedByMe;
 
   useEffect(() => {
     setAvatarFailed(false);
@@ -95,11 +100,12 @@ export default function ViewUserProfile() {
 
   const runAction = async (key, task, success) => {
     setBusy(key);
+    setFeedback(null);
     try {
       await task();
-      if (success) Alert.alert('Done', success);
+      if (success) setFeedback({ type: 'success', text: success });
     } catch (error) {
-      Alert.alert('Action unavailable', error.message || 'Please try again.');
+      setFeedback({ type: 'error', text: error.message || 'Please try again.' });
     } finally {
       setBusy('');
     }
@@ -132,40 +138,51 @@ export default function ViewUserProfile() {
   };
 
   const confirmRemove = () => {
-    Alert.alert('Remove friend?', 'This student will no longer be able to chat with you freely.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: () =>
-          runAction('remove', () =>
-            removeFriend({ currentUid: user.uid, friendUid: targetUid, currentProfile })
-          ),
-      },
-    ]);
+    setConfirmDialog({
+      title: 'Remove friend?',
+      message: 'This student will no longer be able to chat with you freely.',
+      confirmLabel: 'Remove',
+      variant: 'destructive',
+      icon: 'person-remove-outline',
+      onConfirm: () =>
+        runAction('remove', () =>
+          removeFriend({ currentUid: user.uid, friendUid: targetUid, currentProfile })
+        ),
+    });
   };
 
   const confirmBlock = () => {
-    Alert.alert('Block this student?', 'They will not be able to send requests or message you.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Block',
-        style: 'destructive',
-        onPress: () =>
-          runAction('block', () =>
+    setConfirmDialog({
+      title: 'Block this student?',
+      message: 'They will not be able to send requests or message you until you unblock them.',
+      confirmLabel: 'Block',
+      variant: 'destructive',
+      icon: 'ban-outline',
+      onConfirm: () =>
+        runAction(
+          'block',
+          () =>
             blockStudent({
               currentUid: user.uid,
               targetUid,
               currentProfile,
               targetProfile: profile,
-            })
-          ),
-      },
-    ]);
+            }),
+          'Student blocked.'
+        ),
+    });
+  };
+
+  const handleUnblock = () => {
+    runAction(
+      'unblock',
+      () => unblockStudent({ currentUid: user.uid, targetUid }),
+      'Student unblocked.'
+    );
   };
 
   const renderActions = () => {
-    if (isSelf || relationship.state === RELATIONSHIP.BLOCKED) return null;
+    if (isSelf || isBlocked) return null;
     const request = relationship.request;
 
     if (relationship.state === RELATIONSHIP.SENT) {
@@ -289,7 +306,7 @@ export default function ViewUserProfile() {
           {/* Header Cover & Avatar */}
           <View style={styles.headerContainer}>
             <View style={[styles.coverBanner, { backgroundColor: colors.brandLight }]}>
-              {coverUrl && !coverFailed ? (
+              {coverUrl && !coverFailed && !isBlocked ? (
                 <Image
                   source={{ uri: coverUrl }}
                   style={styles.coverImage}
@@ -300,9 +317,9 @@ export default function ViewUserProfile() {
                 />
               ) : (
                 <View style={styles.coverFallback}>
-                  <Ionicons name="school-outline" size={30} color={colors.brand} />
-                  <Text style={[styles.coverFallbackText, { color: colors.brand }]}>
-                    {profile?.school || profile?.department || 'UniHelp Student'}
+                  <Ionicons name={isBlocked ? 'ban-outline' : 'school-outline'} size={30} color={isBlocked ? colors.error : colors.brand} />
+                  <Text style={[styles.coverFallbackText, { color: isBlocked ? colors.error : colors.brand }]}>
+                    {isBlocked ? 'Profile hidden' : (profile?.school || profile?.department || 'UniHelp Student')}
                   </Text>
                 </View>
               )}
@@ -310,7 +327,7 @@ export default function ViewUserProfile() {
             </View>
             <View style={styles.avatarWrapper}>
               <View style={[styles.avatarBorder, { backgroundColor: colors.surfacePrimary, shadowColor: colors.shadow }]}>
-                {avatarUrl && !avatarFailed ? (
+                {avatarUrl && !avatarFailed && !isBlocked ? (
                   <Image
                     source={{ uri: avatarUrl }}
                     style={styles.avatarImage}
@@ -318,8 +335,12 @@ export default function ViewUserProfile() {
                     onError={() => setAvatarFailed(true)}
                   />
                 ) : (
-                  <View style={[styles.avatarFallback, { backgroundColor: colors.brand }]}>
-                    <Text style={[styles.avatarText, { color: colors.onBrand }]}>{initials}</Text>
+                  <View style={[styles.avatarFallback, { backgroundColor: isBlocked ? colors.dangerLight : colors.brand }]}>
+                    {isBlocked ? (
+                      <Ionicons name="ban-outline" size={34} color={colors.error} />
+                    ) : (
+                      <Text style={[styles.avatarText, { color: colors.onBrand }]}>{initials}</Text>
+                    )}
                   </View>
                 )}
               </View>
@@ -328,58 +349,106 @@ export default function ViewUserProfile() {
 
           {/* User Basic Info */}
           <View style={styles.profileMeta}>
-            <Text style={[styles.name, { color: colors.textPrimary }]}>{profile?.username || 'Student'}</Text>
-            {profile?.email ? <Text style={[styles.email, { color: colors.textSecondary }]}>{profile.email}</Text> : null}
+            <Text style={[styles.name, { color: colors.textPrimary }]}>{isBlocked ? 'Blocked student' : (profile?.username || 'Student')}</Text>
+            {!isBlocked && profile?.email ? <Text style={[styles.email, { color: colors.textSecondary }]}>{profile.email}</Text> : null}
           </View>
 
-          {/* Action Row */}
-          {renderActions()}
+          {feedback ? (
+            <View
+              style={[
+                styles.feedbackBox,
+                {
+                  backgroundColor: feedback.type === 'error' ? colors.dangerLight : (colors.successLight || colors.brandLight),
+                  borderColor: feedback.type === 'error' ? colors.error : colors.success,
+                },
+              ]}
+            >
+              <Ionicons
+                name={feedback.type === 'error' ? 'alert-circle-outline' : 'checkmark-circle-outline'}
+                size={17}
+                color={feedback.type === 'error' ? colors.error : colors.success}
+              />
+              <Text style={[styles.feedbackText, { color: feedback.type === 'error' ? colors.error : colors.success }]}>
+                {feedback.text}
+              </Text>
+            </View>
+          ) : null}
 
-          {/* Mutual Friends Stat Bar */}
-          {!isSelf && relationship.state !== RELATIONSHIP.BLOCKED ? (
-            <View style={[styles.statsCard, { backgroundColor: colors.card, borderColor: colors.borderDefault, shadowColor: colors.shadow }]}>
-              <View style={styles.statItem}>
-                <Ionicons name="people" size={20} color={colors.brand} />
-                <Text style={[styles.statNumber, { color: colors.textPrimary }]}>{relationship.mutualCount || 0}</Text>
-                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Mutual Friends</Text>
+          {isBlocked ? (
+            <View style={[styles.blockedCard, { backgroundColor: colors.card, borderColor: colors.borderDefault, shadowColor: colors.shadow }]}>
+              <View style={[styles.blockedIcon, { backgroundColor: colors.dangerLight }]}>
+                <Ionicons name="ban-outline" size={28} color={colors.error} />
               </View>
+              <Text style={[styles.blockedTitle, { color: colors.textPrimary }]}>
+                {blockedByMe ? 'You blocked this student' : 'Profile unavailable'}
+              </Text>
+              <Text style={[styles.blockedText, { color: colors.textSecondary }]}>
+                {blockedByMe
+                  ? 'Profile details and messaging are hidden until you unblock this student.'
+                  : 'You cannot view this profile or start a chat right now.'}
+              </Text>
+              {blockedByMe ? (
+                <ActionButton
+                  label="Unblock"
+                  icon="lock-open-outline"
+                  variant="primary"
+                  loading={busy === 'unblock'}
+                  onPress={handleUnblock}
+                />
+              ) : null}
             </View>
-          ) : null}
+          ) : (
+            <>
+              {/* Action Row */}
+              {renderActions()}
 
-          {/* Academic Info Grid */}
-          <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.borderDefault, shadowColor: colors.shadow }]}>
-            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Academic Profile</Text>
-            <View style={styles.infoGrid}>
-              <InfoTile
-                icon="school-outline"
-                label="Institution"
-                value={profile?.school}
-              />
-              <InfoTile
-                icon="library-outline"
-                label="Department"
-                value={profile?.department}
-              />
-              <InfoTile
-                icon="ribbon-outline"
-                label="Level"
-                value={profile?.level}
-              />
-              <InfoTile
-                icon="location-outline"
-                label="Location"
-                value={profile?.location}
-              />
-            </View>
-          </View>
+              {/* Mutual Friends Stat Bar */}
+              {!isSelf ? (
+                <View style={[styles.statsCard, { backgroundColor: colors.card, borderColor: colors.borderDefault, shadowColor: colors.shadow }]}>
+                  <View style={styles.statItem}>
+                    <Ionicons name="people" size={20} color={colors.brand} />
+                    <Text style={[styles.statNumber, { color: colors.textPrimary }]}>{relationship.mutualCount || 0}</Text>
+                    <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Mutual Friends</Text>
+                  </View>
+                </View>
+              ) : null}
 
-          {/* Bio Section */}
-          {profile?.bio ? (
-            <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.borderDefault, shadowColor: colors.shadow }]}>
-              <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>About</Text>
-              <Text style={[styles.bioText, { color: colors.textSecondary }]}>{profile.bio}</Text>
-            </View>
-          ) : null}
+              {/* Academic Info Grid */}
+              <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.borderDefault, shadowColor: colors.shadow }]}>
+                <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Academic Profile</Text>
+                <View style={styles.infoGrid}>
+                  <InfoTile
+                    icon="school-outline"
+                    label="Institution"
+                    value={profile?.school}
+                  />
+                  <InfoTile
+                    icon="library-outline"
+                    label="Department"
+                    value={profile?.department}
+                  />
+                  <InfoTile
+                    icon="ribbon-outline"
+                    label="Level"
+                    value={profile?.level}
+                  />
+                  <InfoTile
+                    icon="location-outline"
+                    label="Location"
+                    value={profile?.location}
+                  />
+                </View>
+              </View>
+
+              {/* Bio Section */}
+              {profile?.bio ? (
+                <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.borderDefault, shadowColor: colors.shadow }]}>
+                  <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>About</Text>
+                  <Text style={[styles.bioText, { color: colors.textSecondary }]}>{profile.bio}</Text>
+                </View>
+              ) : null}
+            </>
+          )}
         </ScrollView>
       ) : (
         <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.borderDefault, shadowColor: colors.shadow }]}>
@@ -429,6 +498,21 @@ export default function ViewUserProfile() {
           </View>
         </View>
       </Modal>
+      <ConfirmDialog
+        visible={!!confirmDialog}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        variant={confirmDialog?.variant}
+        icon={confirmDialog?.icon}
+        loading={!!busy && ['remove', 'block'].includes(busy)}
+        onCancel={() => setConfirmDialog(null)}
+        onConfirm={async () => {
+          const action = confirmDialog?.onConfirm;
+          setConfirmDialog(null);
+          await action?.();
+        }}
+      />
     </ScreenShell>
   );
 }
@@ -714,6 +798,54 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#64748B',
     fontWeight: '600',
+  },
+  feedbackBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 14,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  feedbackText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  blockedCard: {
+    borderRadius: 20,
+    padding: 22,
+    marginHorizontal: 16,
+    marginBottom: 18,
+    borderWidth: 1,
+    alignItems: 'center',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  blockedIcon: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  blockedTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  blockedText: {
+    fontSize: 13.5,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginTop: 6,
+    marginBottom: 18,
   },
 
   /* Academic Grid Section */

@@ -418,6 +418,16 @@ export const startConversation = async (currentUser, otherUser, profile) => {
 export const sendDirectMessage = async (conversation, user, profile, payload) => {
   const allowed = await canSendDirectMessage(conversation, user.uid);
   if (!allowed) {
+    const otherUid = conversation?.memberIds?.find((id) => id !== user.uid);
+    if (otherUid) {
+      const [currentBlocks, otherBlocks] = await Promise.all([
+        getDoc(doc(db, 'blockedUsers', `${user.uid}_${otherUid}`)),
+        getDoc(doc(db, 'blockedUsers', `${otherUid}_${user.uid}`)),
+      ]);
+      if (currentBlocks.exists() || otherBlocks.exists()) {
+        throw new Error('You cannot message this student while either of you has blocked the other.');
+      }
+    }
     throw new Error('You can only send messages after becoming friends.');
   }
   const summary = userSummary(user, profile);
