@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNetInfo } from '@react-native-community/netinfo';
 import { Ionicons } from '@expo/vector-icons';
@@ -367,16 +367,29 @@ export default function OfflineCenterScreen() {
     }
   }, [premiumUnlocked, router]);
 
+  // Track last load time to debounce frequent loads (max once per 30 seconds)
+  const lastLoadTimeRef = useRef(0);
+  const LOAD_DEBOUNCE_MS = 30000; // 30 seconds
+
+  const debouncedLoad = useCallback(() => {
+    const now = Date.now();
+    if (now - lastLoadTimeRef.current >= LOAD_DEBOUNCE_MS) {
+      loadData();
+      lastLoadTimeRef.current = now;
+    }
+  }, [loadData]);
+
   useFocusEffect(
     useCallback(() => {
-      loadData();
-    }, [loadData])
+      debouncedLoad();
+    }, [debouncedLoad])
   );
 
   useEffect(() => {
-    refreshProfile?.().catch(() => {});
-    validateOfflineEntitlement({ force: true }).catch(() => null).finally(loadData);
-  }, [loadData, refreshProfile]);
+    // Run once on mount, but don't re-validate entitlement on every dependency change
+    if (!premiumUnlocked) return;
+    debouncedLoad();
+  }, [premiumUnlocked, debouncedLoad]);
 
   const summary = useMemo(() => {
     const totals = DOWNLOADABLE_TYPES.reduce((acc, item) => {

@@ -40,12 +40,63 @@ import { isPremiumActive } from '../../src/shared/services/premium';
 
 // Curated high-res imagery for top-tier visual hierarchy
 const IMAGES = {
-  heroMesh: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=800&auto=format&fit=crop',
   hostel: 'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?q=80&w=600&auto=format&fit=crop',
   marketplace: 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?q=80&w=600&auto=format&fit=crop',
   stories: 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?q=80&w=600&auto=format&fit=crop',
   community: 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?q=80&w=600&auto=format&fit=crop',
 };
+
+// Curated hero background images for premium visual rotation
+const HERO_BACKGROUNDS = [
+  'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=800&auto=format&fit=crop', // Abstract mesh
+  'https://images.unsplash.com/photo-1516321318423-f06f70259c13?q=80&w=800&auto=format&fit=crop', // Laptop & books
+  'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=800&auto=format&fit=crop', // Mobile study
+  'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?q=80&w=800&auto=format&fit=crop', // Workspace
+  'https://images.unsplash.com/photo-1519389950473-47ba0277781c?q=80&w=800&auto=format&fit=crop', // Collaboration
+  'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=800&auto=format&fit=crop', // Tech focus
+];
+
+// Hero content slides that sync with background rotation
+const HERO_CONTENT = [
+  {
+    title: "Ready to crush today's goals?",
+    subtitle: 'Build your daily momentum with focused study',
+    primaryCta: { label: 'Study Vault', route: '/(tabs)/studyMaterials', icon: 'library' },
+    secondaryCta: { label: '', route: '/tasks', icon: 'checkmark-done' },
+  },
+  {
+    title: 'Master the subjects you need',
+    subtitle: 'Learn at your own pace with expert materials',
+    primaryCta: { label: 'Explore', route: '/(tabs)/studyMaterials', icon: 'school' },
+    secondaryCta: { label: '', route: '/tasks', icon: 'checkmark-done' },
+  },
+  {
+    title: 'Study anytime, anywhere',
+    subtitle: 'Download your materials and go offline',
+    primaryCta: { label: 'Save Offline', route: '/offline-center', icon: 'cloud-download' },
+    secondaryCta: { label: '', route: '/tasks', icon: 'checkmark-done' },
+  },
+  {
+    title: 'Organize your study space',
+    subtitle: 'Create tasks and stay on top of deadlines',
+    primaryCta: { label: 'My Tasks', route: '/tasks', icon: 'checkmark-done' },
+    secondaryCta: { label: '', route: '/(tabs)/studyMaterials', icon: 'library' },
+  },
+  {
+    title: 'Connect with your peers',
+    subtitle: 'Find friends and study together',
+    primaryCta: { label: 'Find Friends', route: '/find-friends', icon: 'people' },
+    secondaryCta: { label: '', route: '/tasks', icon: 'checkmark-done' },
+  },
+  {
+    title: 'Stay ahead of the curve',
+    subtitle: 'Get premium access to unlimited resources',
+    primaryCta: { label: 'Go Premium', route: '/premium', icon: 'sparkles' },
+    secondaryCta: { label: '', route: '/tasks', icon: 'checkmark-done' },
+  },
+];
+
+const HERO_ROTATION_INTERVAL = 8000; // Change image every 8 seconds
 
 const FAB_SIZE = 56;
 const MARQUEE_PX_PER_SECOND = 46;
@@ -223,6 +274,9 @@ export default function HomeScreen() {
   const [streakDates, setStreakDates] = useState([]);
   const [, setIsFabDragging] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
+  const [heroImageIndex, setHeroImageIndex] = useState(0);
+  const [heroFadeAnim] = useState(new Animated.Value(1));
+  const [heroContentFadeAnim] = useState(new Animated.Value(1));
   const [discoverData, setDiscoverData] = useState({
     hostels: [],
     friends: [],
@@ -236,6 +290,41 @@ export default function HomeScreen() {
   useEffect(() => {
     setAvatarFailed(false);
   }, [profile?.photoURL]);
+
+  // Auto-rotate hero background image with fade transition
+  useEffect(() => {
+    const interval = setInterval(() => {
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(heroFadeAnim, {
+            toValue: 0,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+          Animated.timing(heroContentFadeAnim, {
+            toValue: 0,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(heroFadeAnim, {
+            toValue: 1,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+          Animated.timing(heroContentFadeAnim, {
+            toValue: 1,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]).start();
+      setHeroImageIndex((prev) => (prev + 1) % HERO_BACKGROUNDS.length);
+    }, HERO_ROTATION_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [heroFadeAnim, heroContentFadeAnim]);
 
   // Floating Action Button Physics
   const fabPan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
@@ -1238,52 +1327,56 @@ export default function HomeScreen() {
       {/* DYNAMIC FOCUS ZONE HERO CARD */}
       <View style={styles.focusCardShadowWrap}>
         <View style={styles.focusCard}>
-          <ImageBackground
-            source={{ uri: IMAGES.heroMesh }}
-            style={styles.focusImageBg}
-            resizeMode="cover"
-          >
-            <LinearGradient
-              colors={['rgba(15, 23, 42, 0.4)', 'rgba(15, 23, 42, 0.92)']}
-              style={styles.focusGradient}
+          <Animated.View style={{ opacity: heroFadeAnim }}>
+            <ImageBackground
+              source={{ uri: HERO_BACKGROUNDS[heroImageIndex] }}
+              style={styles.focusImageBg}
+              resizeMode="cover"
             >
-              <View style={styles.focusHeaderRow}>
-                <View style={styles.focusTag}>
-                  <View style={styles.liveDot} />
-                  <Text style={styles.focusTagText}>ACADEMIC COCKPIT</Text>
+              <LinearGradient
+                colors={['rgba(15, 23, 42, 0.4)', 'rgba(15, 23, 42, 0.92)']}
+                style={styles.focusGradient}
+              >
+                <View style={styles.focusHeaderRow}>
+                  <View style={styles.focusTag}>
+                    <View style={styles.liveDot} />
+                    <Text style={styles.focusTagText}>ACADEMIC COCKPIT</Text>
+                  </View>
+                  <Ionicons name="compass" size={22} color={colors.onBrand} />
                 </View>
-                <Ionicons name="compass" size={22} color={colors.onBrand} />
-              </View>
 
-              <View style={styles.focusBody}>
-                <Text style={styles.focusTitle}>Ready to crush today&apos;s goals?</Text>
-                <Text style={styles.focusSubtitle}>{streakSubtitle}</Text>
-              </View>
+                <Animated.View style={{ opacity: heroContentFadeAnim }}>
+                  <View style={styles.focusBody}>
+                    <Text style={styles.focusTitle}>{HERO_CONTENT[heroImageIndex].title}</Text>
+                    <Text style={styles.focusSubtitle}>{HERO_CONTENT[heroImageIndex].subtitle}</Text>
+                  </View>
 
-              <View style={styles.focusFooterRow}>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.btnFocusPrimary,
-                    pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] },
-                  ]}
-                  onPress={() => router.push('/(tabs)/studyMaterials')}
-                >
-                  <Ionicons name="library" size={18} color={colors.brandText} />
-                  <Text style={styles.btnFocusPrimaryText}>Study Vault</Text>
-                </Pressable>
+                  <View style={styles.focusFooterRow}>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.btnFocusPrimary,
+                        pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] },
+                      ]}
+                      onPress={() => router.push(HERO_CONTENT[heroImageIndex].primaryCta.route)}
+                    >
+                      <Ionicons name={HERO_CONTENT[heroImageIndex].primaryCta.icon} size={18} color={colors.brandText} />
+                      <Text style={styles.btnFocusPrimaryText}>{HERO_CONTENT[heroImageIndex].primaryCta.label}</Text>
+                    </Pressable>
 
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.btnFocusIcon,
-                    pressed && { opacity: 0.9 },
-                  ]}
-                  onPress={() => router.push('/tasks')}
-                >
-                  <Ionicons name="checkmark-done" size={20} color={colors.onBrand} />
-                </Pressable>
-              </View>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.btnFocusIcon,
+                        pressed && { opacity: 0.9 },
+                      ]}
+                      onPress={() => router.push('/tasks')}
+                    >
+                      <Ionicons name="checkmark-done" size={20} color={colors.onBrand} />
+                    </Pressable>
+                  </View>
+                </Animated.View>
             </LinearGradient>
           </ImageBackground>
+            </Animated.View>
         </View>
       </View>
 

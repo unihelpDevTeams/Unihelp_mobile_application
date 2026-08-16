@@ -7,8 +7,15 @@ import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { getJson, postJson } from '../services/backend';
 import { resolveDocumentAsset } from '../utils/documentMedia';
 
-const LEARNING_STORAGE_KEY = '@unihelp_learning_offline_v2';
-const LEGACY_STORAGE_KEY = '@unihelp_learning_offline_v1';
+// ATOMIC STORAGE KEYS (optimized for independent updates)
+const LEARNING_STORAGE_KEY = '@unihelp_learning_offline_v2'; // Legacy - kept for migration
+const LEGACY_STORAGE_KEY = '@unihelp_learning_offline_v1'; // Legacy
+const DOWNLOADS_KEY = '@unihelp_downloads_v3'; // Atomic downloads array
+const ENTITLEMENT_KEY = '@unihelp_entitlement_v3'; // Atomic entitlement object
+const SYNC_QUEUE_KEY = '@unihelp_syncQueue_v3'; // Atomic sync queue
+const PROGRESS_KEY = '@unihelp_progress_v3'; // Atomic progress tracking
+const METADATA_KEY = '@unihelp_metadata_v3'; // Atomic metadata
+
 const OFFLINE_ROOT = `${FileSystem.documentDirectory || ''}unihelp-offline/`;
 const OFFLINE_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -38,20 +45,97 @@ const ensureStoreShape = (value) => {
   };
 };
 
-async function readStore() {
-  const raw = (await AsyncStorage.getItem(LEARNING_STORAGE_KEY)) || (await AsyncStorage.getItem(LEGACY_STORAGE_KEY));
-  if (!raw) return emptyStore();
+// Migrate from legacy monolithic storage to atomic keys (runs once)
+async function migrateToAtomicStorage() {
   try {
-    return ensureStoreShape(JSON.parse(raw));
+    const hasAtomic = await AsyncStorage.getItem(DOWNLOADS_KEY);
+    if (hasAtomic) return; // Already migrated
+
+    const legacyRaw = (await AsyncStorage.getItem(LEARNING_STORAGE_KEY)) || (await AsyncStorage.getItem(LEGACY_STORAGE_KEY));
+    if (!legacyRaw) return; // Nothing to migrate
+
+    const legacyStore = ensureStoreShape(JSON.parse(legacyRaw));
+    
+    // Write each part to atomic keys
+    await Promise.all([
+      AsyncStorage.setItem(DOWNLOADS_KEY, JSON.stringify(legacyStore.downloads)),
+      AsyncStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(legacyStore.syncQueue)),
+      AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify(legacyStore.progress)),
+      AsyncStorage.setItem(ENTITLEMENT_KEY, JSON.stringify(legacyStore.entitlement)),
+      AsyncStorage.setItem(METADATA_KEY, JSON.stringify(legacyStore.metadata)),
+    ]);
+  } catch {
+    // Silent fail - migration issues shouldn't break the app
+  }
+}
+
+// Read from atomic keys with fallback to legacy
+async function readStore() {
+  try {
+    const [downloads, syncQueue, progress, entitlement, metadata] = await Promise.all([
+      AsyncStorage.getItem(DOWNLOADS_KEY),
+      AsyncStorage.getItem(SYNC_QUEUE_KEY),
+      AsyncStorage.getItem(PROGRESS_KEY),
+      AsyncStorage.getItem(ENTITLEMENT_KEY),
+      AsyncStorage.getItem(METADATA_KEY),
+    ]);
+
+    // If all atomic keys exist, use them
+    if (downloads || syncQueue || progress || entitlement || metadata) {
+      return {
+        downloads: downloads ? JSON.parse(downloads) : [],
+        syncQueue: syncQueue ? JSON.parse(syncQueue) : [],
+        progress: progress ? JSON.parse(progress) : { pastQuestions: {}, notes: {}, gpa: {} },
+        entitlement: entitlement ? JSON.parse(entitlement) : null,
+        metadata: metadata ? JSON.parse(metadata) : { lastSyncedAt: null },
+      };
+    }
+
+    // Fallback to legacy storage
+    const legacyRaw = (await AsyncStorage.getItem(LEARNING_STORAGE_KEY)) || (await AsyncStorage.getItem(LEGACY_STORAGE_KEY));
+    if (!legacyRaw) return emptyStore();
+    
+    const store = ensureStoreShape(JSON.parse(legacyRaw));
+    // Migrate in background
+    migrateToAtomicStorage().catch(() => {});
+    return store;
   } catch {
     return emptyStore();
   }
 }
 
+// Write individual components to atomic keys (no full store rewrite)
 async function writeStore(nextStore) {
   const normalized = ensureStoreShape(nextStore);
-  await AsyncStorage.setItem(LEARNING_STORAGE_KEY, JSON.stringify(normalized));
+  
+  // Write each part independently
+  await Promise.all([
+    AsyncStorage.setItem(DOWNLOADS_KEY, JSON.stringify(normalized.downloads)),
+    AsyncStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(normalized.syncQueue)),
+    AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify(normalized.progress)),
+    AsyncStorage.setItem(ENTITLEMENT_KEY, JSON.stringify(normalized.entitlement)),
+    AsyncStorage.setItem(METADATA_KEY, JSON.stringify(normalized.metadata)),
+  ]);
+
   return normalized;
+}
+
+// Optimized: Write only downloads without rewriting everything
+async function writeDownloads(downloads = []) {
+  await AsyncStorage.setItem(DOWNLOADS_KEY, JSON.stringify(downloads));
+  return downloads;
+}
+
+// Optimized: Write only entitlement without rewriting everything
+async function writeEntitlement(entitlement) {
+  await AsyncStorage.setItem(ENTITLEMENT_KEY, JSON.stringify(entitlement));
+  return entitlement;
+}
+
+// Optimized: Write only sync queue without rewriting everything
+async function writeSyncQueue(syncQueue = []) {
+  await AsyncStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(syncQueue));
+  return syncQueue;
 }
 
 const normalizeType = (type = '') => {
@@ -128,7 +212,8 @@ export async function validateOfflineEntitlement({ force = false } = {}) {
 
   const data = await getJson('/api/offline-library/entitlement');
   const entitlement = data.entitlement || { premium: false, userId: uid };
-  await writeStore({ ...store, entitlement });
+  // Only write entitlement, not entire store
+  await writeEntitlement(entitlement);
   return entitlement;
 }
 
@@ -204,8 +289,9 @@ export async function setDownloadState(type, id, update = {}) {
   if (existingIndex >= 0) nextDownloads[existingIndex] = entry;
   else nextDownloads.push(entry);
 
-  const nextStore = await writeStore({ ...store, downloads: nextDownloads });
-  return nextStore.downloads.find((item) => item.type === normalizedType && String(item.id) === normalizedId) || entry;
+  // Only write downloads, not entire store
+  await writeDownloads(nextDownloads);
+  return entry;
 }
 
 export async function isContentDownloaded(type, id) {
@@ -235,8 +321,8 @@ export async function saveResourceForOffline({ resourceType, resourceId, resourc
     const authResult = await postJson('/api/offline-library/authorize', { resourceType: type, resourceId: id });
     const entitlement = authResult.entitlement;
     const authorized = authResult.resource || {};
-    const store = await readStore();
-    await writeStore({ ...store, entitlement });
+    // Only write entitlement, not entire store
+    await writeEntitlement(entitlement);
     if (!isEntitlementUsable(entitlement, uid)) throw new Error('Offline Library is available with UniHelp Premium.');
 
     const title = authorized.title || resource?.title || resource?.name || 'Offline resource';
@@ -310,8 +396,9 @@ export async function removeDownload(type, id) {
   const nextDownloads = store.downloads.filter((item) =>
     !(item.type === normalizedType && String(item.id) === String(id) && (!uid || !item.userId || item.userId === uid))
   );
-  const nextStore = await writeStore({ ...store, downloads: nextDownloads });
-  return nextStore.downloads;
+  // Only write downloads, not entire store
+  await writeDownloads(nextDownloads);
+  return nextDownloads;
 }
 
 export async function clearOfflineDownloads() {
@@ -362,8 +449,9 @@ export async function queueLearningSync(entry = {}) {
   const nextQueue = [...store.syncQueue];
   if (existingIndex >= 0) nextQueue[existingIndex] = syncItem;
   else nextQueue.unshift(syncItem);
-  const nextStore = await writeStore({ ...store, syncQueue: nextQueue });
-  return nextStore.syncQueue[0] || syncItem;
+  // Only write sync queue, not entire store
+  await writeSyncQueue(nextQueue);
+  return nextQueue[0] || syncItem;
 }
 
 export async function getSyncQueue() {
@@ -374,7 +462,10 @@ export async function getSyncQueue() {
 export async function markSyncSuccess(id) {
   const store = await readStore();
   const queue = store.syncQueue.map((item) => (item.id === id ? { ...item, status: 'synced', updatedAt: new Date().toISOString() } : item));
-  return writeStore({ ...store, syncQueue: queue.filter((item) => item.id !== id), metadata: { ...store.metadata, lastSyncedAt: new Date().toISOString() } });
+  const nextQueue = queue.filter((item) => item.id !== id);
+  // Only write sync queue, not entire store
+  await writeSyncQueue(nextQueue);
+  return nextQueue;
 }
 
 export async function markSyncFailed(id, reason = '') {
@@ -384,14 +475,15 @@ export async function markSyncFailed(id, reason = '') {
     const retryCount = Math.max(0, Number(item.retryCount || 0) + 1);
     return { ...item, status: retryCount >= 4 ? 'failed' : 'queued', retryCount, reason, updatedAt: new Date().toISOString() };
   });
-  await writeStore({ ...store, syncQueue: nextQueue });
+  // Only write sync queue, not entire store
+  await writeSyncQueue(nextQueue);
   return nextQueue;
 }
 
 export async function clearSyncQueue() {
-  const store = await readStore();
-  const nextStore = await writeStore({ ...store, syncQueue: [] });
-  return nextStore.syncQueue;
+  // Only write sync queue, not entire store
+  await writeSyncQueue([]);
+  return [];
 }
 
 export async function getLocalStudyProgress(scope = 'challenge') {

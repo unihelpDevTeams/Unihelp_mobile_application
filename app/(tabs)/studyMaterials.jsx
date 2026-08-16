@@ -71,6 +71,12 @@ export default function StudyMaterials() {
   // Ref flag to handle rapid tab switching safely
   const isMountedRef = useRef(true);
 
+  // Memoize fetcher function to prevent unnecessary re-renders
+  const fetcher = useMemo(
+    () => isQuestions ? fetchQuestionsPage : fetchNotesPage,
+    [isQuestions]
+  );
+
   // Dynamic Accents
   const isQuestions = activeTab === 'questions';
   const activeTone = isQuestions ? colors.blue : colors.brand;
@@ -482,7 +488,6 @@ export default function StudyMaterials() {
       }
 
       try {
-        const fetcher = isQuestions ? fetchQuestionsPage : fetchNotesPage;
         const page = await fetcher({
           pageSize: PAGE_SIZE,
           cursor: isReset ? null : cursor,
@@ -509,7 +514,7 @@ export default function StudyMaterials() {
         }
       }
     },
-    [cursor, hasMore, isQuestions, loadingMore]
+    [cursor, fetcher, hasMore, loadingMore]
   );
 
   // Primary Fetch Handler
@@ -519,8 +524,6 @@ export default function StudyMaterials() {
     setItems([]);
     setCursor(null);
     setHasMore(false);
-
-    const fetcher = isQuestions ? fetchQuestionsPage : fetchNotesPage;
 
     fetcher({ pageSize: PAGE_SIZE })
       .then((page) => {
@@ -539,7 +542,7 @@ export default function StudyMaterials() {
     return () => {
       isMountedRef.current = false;
     };
-  }, [activeTab, isQuestions]);
+  }, [activeTab, fetcher]);
 
   // Extract distinct subjects dynamically
   const subjects = useMemo(() => {
