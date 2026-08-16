@@ -20,7 +20,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { auth, db } from '../../../firebase/config';
-import { getApiUrl, sendAppNotification } from './backend';
+import { getApiUrl, sendAppNotification, postJson } from './backend';
 import { canSendDirectMessage, createOrOpenFriendConversation } from './friendships';
 
 export const PAGE_SIZE = 20;
@@ -430,64 +430,14 @@ export const sendDirectMessage = async (conversation, user, profile, payload) =>
     }
     throw new Error('You can only send messages after becoming friends.');
   }
+
   const summary = userSummary(user, profile);
-  const receiverId = conversation.memberIds.find((id) => id !== user.uid);
-  const batch = writeBatch(db);
-  const messageRef = doc(collection(db, 'conversations', conversation.id, 'messages'));
-  const now = serverTimestamp();
-
-  // Determine message type and last message text
-  const messageType = payload.type || 'text';
-  const lastMessageText = messageType === 'voice'
-    ? '🎤 Voice message'
-    : (payload.text || payload.attachments?.[0]?.name || 'Attachment');
-
-  batch.set(messageRef, {
+  
+  await postJson(`/api/chat/${conversation.id}/messages`, {
     ...payload,
-    senderId: user.uid,
     senderName: summary.name,
     senderAvatar: summary.avatar,
-    deliveredTo: [user.uid],
-    readBy: [user.uid],
-    reactions: {},
-    createdAt: now,
   });
-  batch.update(doc(db, 'conversations', conversation.id), {
-    lastMessage: lastMessageText,
-    lastSenderId: user.uid,
-    updatedAt: now,
-    [`unread.${receiverId}`]: increment(1),
-  });
-  if (receiverId) {
-    const notifBody = messageType === 'voice' ? '🎤 Sent a voice message' : (payload.text || 'Sent an attachment');
-    batch.set(doc(collection(db, 'notifications', receiverId, 'items')), {
-      type: 'direct_message',
-      title: summary.name,
-      body: notifBody,
-      conversationId: conversation.id,
-      route: `/messages?conversationId=${conversation.id}`,
-      read: false,
-      createdAt: now,
-    });
-  }
-  await batch.commit();
-
-  if (receiverId) {
-    try {
-      const pushBody = messageType === 'voice' ? '🎤 Sent a voice message' : (payload.text || 'Sent an attachment');
-      await sendAppNotification({
-        userIds: [receiverId],
-        title: summary.name,
-        body: pushBody,
-        type: 'message',
-        category: 'Message',
-        url: `/messages?conversationId=${conversation.id}`,
-        data: { conversationId: conversation.id },
-      });
-    } catch (notificationError) {
-      console.log('Direct message push notification failed:', notificationError);
-    }
-  }
 };
 
 export const markConversationRead = async (conversationId, uid) => {

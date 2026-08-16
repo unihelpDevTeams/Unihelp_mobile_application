@@ -22,7 +22,6 @@ import VoiceRecorderBar from '../../src/shared/components/VoiceRecorderBar';
 import { fetchRecord } from '../../services/firestoreSync';
 import {
   markConversationRead,
-  listenConversationMessages,
   sendDirectMessage,
   deleteDirectMessage,
   clearConversationForUser,
@@ -40,6 +39,8 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
+import { getSocket } from '../../src/shared/services/socket';
+import { getJson } from '../../src/shared/services/backend';
 
 const formatTime = (value) => {
   if (!value) return '';
@@ -79,6 +80,9 @@ export default function ConversationPage() {
   const [pendingMessageRequest, setPendingMessageRequest] = useState(null);
   const [relationshipBusy, setRelationshipBusy] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const [typingName, setTypingName] = useState('');
+  let typingTimeout = useRef(null);
 
   // Modal UI States
   const [showOptionsSheet, setShowOptionsSheet] = useState(false);
@@ -277,8 +281,37 @@ export default function ConversationPage() {
 
   useEffect(() => {
     if (!conversationId) return undefined;
-    const unsubscribe = listenConversationMessages(conversationId, setMessages);
-    return () => unsubscribe?.();
+    
+    // Initial load via REST API
+    getJson(`/api/chat/${conversationId}/messages`)
+      .then(data => {
+        if (data?.success) setMessages(data.messages || []);
+      })
+      .catch(err => console.log('Failed to fetch messages', err));
+
+    const socket = getSocket();
+    socket.emit("join_conversation", conversationId);
+    
+    const handleReceiveMessage = (newMessage) => {
+      setMessages((prev) => {
+        if (prev.find(m => m.id === newMessage.id)) return prev;
+        return [...prev, newMessage];
+      });
+    };
+    
+    const handleTyping = ({ userId, isTyping, name }) => {
+      if (userId === user?.uid) return;
+      setIsTyping(isTyping);
+      if (isTyping && name) setTypingName(name);
+    };
+
+    socket.on("receive_message", handleReceiveMessage);
+    socket.on("typing_update", handleTyping);
+
+    return () => {
+      socket.off("receive_message", handleReceiveMessage);
+      socket.off("typing_update", handleTyping);
+    };
   }, [conversationId]);
 
   useEffect(() => {
@@ -475,6 +508,7 @@ export default function ConversationPage() {
       setDraft('');
       setReplyTo(null);
       scrollToBottom();
+      getSocket().emit("typing", { conversationId, userId: currentUid, isTyping: false });
     } catch (error) {
       showSendError(error);
     } finally {
@@ -627,7 +661,9 @@ export default function ConversationPage() {
         </Pressable>
         <View style={styles.headerMeta}>
           <Text style={styles.headerName}>{headerTitle}</Text>
-          <Text style={styles.headerHint}>{conversation?.lastMessage ? `Last seen ${formatShortTime(conversation.updatedAt)}` : 'Send a message to start'}</Text>
+          <Text style={styles.headerHint}>
+            {isTyping ? `${typingName || 'Student'} is typing...` : (conversation?.lastMessage ? `Last seen ${formatShortTime(conversation.updatedAt)}` : 'Send a message to start')}
+          </Text>
         </View>
         <Pressable
           style={({ pressed }) => [styles.headerAction, pressed && styles.headerActionPressed]}
@@ -732,7 +768,15 @@ export default function ConversationPage() {
             />
             <TextInput
               value={draft}
-              onChangeText={setDraft}
+              onChangeText={(text) => {
+                setDraft(text);
+                const socket = getSocket();
+                socket.emit("typing", { conversationId, userId: currentUid, isTyping: true, name: profile?.name || user?.displayName || 'Student' });
+                if (typingTimeout.current) clearTimeout(typingTimeout.current);
+                typingTimeout.current = setTimeout(() => {
+                  socket.emit("typing", { conversationId, userId: currentUid, isTyping: false });
+                }, 2000);
+              }}
               placeholder="Type a message..."
               placeholderTextColor={colors.placeholder}
               style={[styles.input, Platform.OS !== 'ios' && styles.inputAndroid]}
