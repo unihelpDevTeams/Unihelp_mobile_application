@@ -5,6 +5,7 @@ import {
   Image,
   Modal,
   Pressable,
+  RefreshControl,
   Text,
   TextInput,
   TouchableOpacity,
@@ -142,6 +143,7 @@ export default function MessagesPage() {
   const { user, profile } = useAuth();
   const { colors } = useTheme();
   const [activeTab, setActiveTab] = useState('chats');
+  const [refreshing, setRefreshing] = useState(false);
 
   // Chats state
   const [items, setItems] = useState([]);
@@ -518,7 +520,18 @@ export default function MessagesPage() {
     const data = await fetchConversations(user?.uid || profile?.uid);
     setItems(data);
     setLoading(false);
+    return data;
   }, [profile?.uid, user?.uid]);
+
+  const handlePullToRefresh = useCallback(async () => {
+    if (!user?.uid && !profile?.uid) return;
+    setRefreshing(true);
+    try {
+      await loadConversations();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadConversations, profile?.uid, user?.uid]);
 
   useEffect(() => {
     loadConversations().catch(() => setLoading(false));
@@ -853,6 +866,14 @@ export default function MessagesPage() {
           renderItem={renderConversation}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handlePullToRefresh}
+              tintColor={colors.brand}
+              colors={[colors.brand]}
+            />
+          }
         />
       ) : (
         <EmptyState title="No conversations yet" description={emptyMessage} />
@@ -937,6 +958,14 @@ export default function MessagesPage() {
           renderItem={renderFriendItem}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handlePullToRefresh}
+              tintColor={colors.brand}
+              colors={[colors.brand]}
+            />
+          }
         />
       ) : (
         <EmptyState
