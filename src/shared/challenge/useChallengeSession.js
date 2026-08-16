@@ -10,6 +10,7 @@ export function useChallengeSession({ category, profile }) {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState([]);
   const answersRef = useRef([]);
+  const lastLoadKeyRef = useRef('');
   const [index, setIndex] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(null);
   const [revealed, setRevealed] = useState(false);
@@ -21,7 +22,14 @@ export function useChallengeSession({ category, profile }) {
   const transition = useSharedValue(1);
 
   useEffect(() => {
+    const loadKey = `${category || 'daily'}:${profile?.uid || 'guest'}`;
+    if (lastLoadKeyRef.current === loadKey && questions.length) {
+      return undefined;
+    }
+    lastLoadKeyRef.current = loadKey;
+
     let cancelled = false;
+    setLoading(true);
     fetchChallengeQuestions({ category, count: 8, profile })
       .then((items) => {
         if (!cancelled) {
@@ -37,7 +45,7 @@ export function useChallengeSession({ category, profile }) {
     return () => {
       cancelled = true;
     };
-  }, [category]);
+  }, [category, profile?.uid, questions.length]);
 
   const currentQuestion = questions[index];
   const progress = questions.length ? (index + 1) / questions.length : 0;

@@ -423,6 +423,7 @@ export default function RecordViewPage() {
       setOfflineRecord(saved);
       Alert.alert('Available Offline', 'This resource is saved inside UniHelp and can be opened from Offline Library.');
     } catch (error) {
+      setOfflineRecord((current) => ({ ...(current || {}), status: 'failed', reason: error?.message || 'Save failed' }));
       Alert.alert('Save failed', error?.message || 'We could not save this resource right now.');
     } finally {
       if (isMounted.current) setSavingOffline(false);
@@ -915,20 +916,25 @@ export default function RecordViewPage() {
                 accessibilityLabel="Save resource for offline"
               >
                 {savingOffline ? (
-                  <ActivityIndicator color={colors.brandDark} />
+                  <>
+                    <ActivityIndicator color={colors.brandDark} />
+                    <Text style={styles.stickyDownloadText}>Saving...</Text>
+                  </>
                 ) : (
                   <>
-                    <Ionicons name={offlineRecord?.status === 'downloaded' ? 'checkmark-circle-outline' : 'cloud-download-outline'} size={16} color={colors.brandDark} />
+                    <Ionicons
+                      name={isDownloadRestricted ? 'lock-closed-outline' : offlineRecord?.status === 'downloaded' ? 'checkmark-circle-outline' : 'cloud-download-outline'}
+                      size={16}
+                      color={colors.brandDark}
+                    />
                     <Text style={styles.stickyDownloadText}>
                       {isDownloadRestricted
                         ? 'Premium required'
                         : offlineRecord?.status === 'downloaded'
-                          ? 'Available Offline'
-                          : savingOffline && offlineProgress
-                            ? `Saving ${offlineProgress}%`
-                            : offlineRecord?.status === 'failed'
-                              ? 'Save Failed - Retry'
-                              : 'Save for Offline'}
+                          ? '✓ Available Offline'
+                          : offlineRecord?.status === 'failed'
+                            ? 'Save Failed • Retry'
+                            : `Save for Offline`}
                     </Text>
                   </>
                 )}

@@ -8,14 +8,54 @@ export const PREMIUM_PLAN = {
   monthly: 1000,
   yearly: 10000,
   features: [
-    'Voice messages in chat',
-    'Past question downloads',
-    'Lecture note downloads',
-    'Verified student badge',
-    'Higher AI response limit',
-    'Reduced ads experience',
-    'Up to 10 hostel and 10 product uploads',
-    'Early access to new tools',
+    {
+      key: 'offline-library',
+      icon: 'cloud-download-outline',
+      title: 'Offline Learning Library',
+      description: 'Save your favorite learning resources and study without internet.',
+    },
+    {
+      key: 'voice-messages',
+      icon: 'mic-outline',
+      title: 'Voice messages in chat',
+      description: 'Get richer conversations and faster explanations.',
+    },
+    {
+      key: 'downloads',
+      icon: 'download-outline',
+      title: 'Past question & lecture downloads',
+      description: 'Keep the study materials you need on hand.',
+    },
+    {
+      key: 'verified-badge',
+      icon: 'shield-checkmark-outline',
+      title: 'Verified student badge',
+      description: 'Stand out with a trusted profile and premium perks.',
+    },
+    {
+      key: 'ai-limit',
+      icon: 'sparkles-outline',
+      title: 'Higher AI response limit',
+      description: 'Get more support during busy study weeks.',
+    },
+    {
+      key: 'ads',
+      icon: 'remove-circle-outline',
+      title: 'Reduced ads experience',
+      description: 'Stay focused with fewer distractions.',
+    },
+    {
+      key: 'uploads',
+      icon: 'storefront-outline',
+      title: 'Up to 10 hostel and 10 product uploads',
+      description: 'Grow your campus listings without the free limits.',
+    },
+    {
+      key: 'early-access',
+      icon: 'rocket-outline',
+      title: 'Early access to new tools',
+      description: 'Try the newest UniHelp features before everyone else.',
+    },
   ],
 };
 

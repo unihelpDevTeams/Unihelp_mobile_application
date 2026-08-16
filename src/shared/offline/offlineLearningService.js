@@ -16,9 +16,6 @@ const emptyStore = () => ({
   downloads: [],
   syncQueue: [],
   progress: {
-    formulas: {},
-    flashcards: {},
-    challenge: {},
     pastQuestions: {},
     notes: {},
     gpa: {},
@@ -61,8 +58,6 @@ const normalizeType = (type = '') => {
   const value = String(type || '').trim();
   if (['question', 'questions', 'pastQuestion', 'pastQuestions'].includes(value)) return 'pastQuestions';
   if (['note', 'notes', 'studyMaterial', 'studyMaterials'].includes(value)) return 'notes';
-  if (['formula', 'formulas', 'flashcards'].includes(value)) return value === 'flashcards' ? 'flashcards' : 'formulas';
-  if (['challenge', 'challenges'].includes(value)) return 'challenge';
   return value || 'resource';
 };
 
@@ -107,6 +102,19 @@ const withoutRemoteDocumentUrls = (metadata = {}) => {
     acc[key] = value;
     return acc;
   }, {});
+};
+
+const MAX_PAYLOAD_BYTES = 900 * 1024;
+
+const safePayloadForStorage = (value) => {
+  if (value == null) return value;
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized.length <= MAX_PAYLOAD_BYTES) return value;
+    return null;
+  } catch {
+    return null;
+  }
 };
 
 export async function validateOfflineEntitlement({ force = false } = {}) {
@@ -179,14 +187,18 @@ export async function setDownloadState(type, id, update = {}) {
   const normalizedType = normalizeType(type);
   const normalizedId = String(id);
   const uid = update.userId || getCurrentUid() || 'offline-user';
+  const sanitizedUpdate = {
+    ...update,
+    payload: safePayloadForStorage(update.payload),
+  };
   const existingIndex = store.downloads.findIndex((item) =>
     item.type === normalizedType &&
     String(item.id) === normalizedId &&
     (!item.userId || item.userId === uid)
   );
   const entry = existingIndex >= 0
-    ? { ...store.downloads[existingIndex], ...update, updatedAt: new Date().toISOString() }
-    : createDownloadEntry(normalizedType, normalizedId, { ...update, userId: uid });
+    ? { ...store.downloads[existingIndex], ...sanitizedUpdate, updatedAt: new Date().toISOString() }
+    : createDownloadEntry(normalizedType, normalizedId, { ...sanitizedUpdate, userId: uid });
 
   const nextDownloads = [...store.downloads];
   if (existingIndex >= 0) nextDownloads[existingIndex] = entry;
@@ -257,6 +269,7 @@ export async function saveResourceForOffline({ resourceType, resourceId, resourc
       size = JSON.stringify(payload || {}).length;
     }
 
+    const safePayload = safePayloadForStorage(payload);
     return setDownloadState(type, id, {
       userId: uid,
       status: 'downloaded',
@@ -267,8 +280,14 @@ export async function saveResourceForOffline({ resourceType, resourceId, resourc
       downloadedAt: new Date().toISOString(),
       size,
       localReference,
-      payload,
-      meta: { ...withoutRemoteDocumentUrls(meta), title, resourceType: type, contentKind },
+      payload: safePayload,
+      meta: {
+        ...withoutRemoteDocumentUrls(meta),
+        title,
+        resourceType: type,
+        contentKind,
+        payloadTruncated: safePayload === null && payload != null,
+      },
     });
   } catch (error) {
     await setDownloadState(type, id, { userId: uid, status: 'failed', reason: error?.message || 'Save failed' });

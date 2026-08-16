@@ -15,6 +15,7 @@ import ConfirmDialog from './ConfirmDialog';
 import { useAuth } from '../../../context/AuthContext';
 import { filterMenuSectionsByRole } from '../navigation/routePermissions';
 import { countUserUploads, fetchNotifications } from '../../../services/firestoreSync';
+import { isPremiumActive } from '../services/premium';
 import { COLLECTIONS } from '../firestoreSchema';
 import logo from '../../../assets/images/favicon.png';
 
@@ -297,15 +298,17 @@ export default function ScreenShell({
 
   const filteredMenuSections = useMemo(() => {
     const roleFilteredSections = profile?.role ? filterMenuSectionsByRole(menuSections, profile.role) : menuSections;
+    const premiumUnlocked = isPremiumActive(profile);
     return roleFilteredSections
       .map((section) => ({
         ...section,
         items: section.items
           .filter((item) => !item.requiresUpload || uploadCounts[item.requiresUpload] > 0)
+          .filter((item) => !item.requiresPremium || premiumUnlocked)
           .map((item) => (item.requiresUpload ? { ...item, count: uploadCounts[item.requiresUpload] } : item)),
       }))
       .filter((section) => section.items.length > 0);
-  }, [menuSections, profile?.role, uploadCounts]);
+  }, [menuSections, profile, profile?.role, uploadCounts]);
 
   const showUniversityIcons = !profile?.role || profile?.role === 'university';
   const body = loading ? <FullScreenLoader label="Loading..." /> : children;

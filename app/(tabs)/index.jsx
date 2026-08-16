@@ -35,6 +35,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { isRouteAllowedForRole } from '../../src/shared/navigation/routePermissions';
 import { listSuggestedFriends } from '../../src/shared/services/friendships';
+import { isPremiumActive } from '../../src/shared/services/premium';
 
 // Curated high-res imagery for top-tier visual hierarchy
 const IMAGES = {
@@ -106,6 +107,7 @@ export default function HomeScreen() {
   const { profile } = useAuth();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const premiumUnlocked = isPremiumActive(profile);
 
   const [streakCount, setStreakCount] = useState(0);
   const [streakDates, setStreakDates] = useState([]);
@@ -400,6 +402,61 @@ export default function HomeScreen() {
       color: c.grey,
       fontWeight: '500',
       marginTop: 2,
+    },
+    premiumBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.md,
+      backgroundColor: c.surface,
+      borderRadius: r['2xl'],
+      borderWidth: 1,
+      borderColor: c.borderLight || c.border,
+      padding: s.md,
+      marginBottom: s.xl,
+      shadowColor: c.shadow,
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.06,
+      shadowRadius: 10,
+      elevation: 3,
+    },
+    premiumBannerIconWrap: {
+      width: 42,
+      height: 42,
+      borderRadius: r.lg,
+      backgroundColor: c.brandLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    premiumBannerCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    premiumBannerTitle: {
+      color: c.ink,
+      fontSize: 15,
+      fontWeight: '900',
+      letterSpacing: -0.2,
+    },
+    premiumBannerSubtitle: {
+      color: c.grey,
+      fontSize: 12,
+      fontWeight: '600',
+      lineHeight: 18,
+      marginTop: 2,
+    },
+    premiumBannerCta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: c.brandLight,
+      borderRadius: 999,
+      paddingHorizontal: s.md,
+      paddingVertical: 8,
+    },
+    premiumBannerCtaText: {
+      color: c.brandText,
+      fontSize: 12,
+      fontWeight: '800',
     },
     flashBanner: {
       borderRadius: r['3xl'],
@@ -1180,6 +1237,30 @@ export default function HomeScreen() {
           onStudyNow={handleStudyNow}
         />
       </View>
+
+      {!premiumUnlocked ? (
+        <Pressable
+          style={({ pressed }) => [
+            styles.premiumBanner,
+            pressed && { opacity: 0.96 },
+          ]}
+          onPress={() => router.push('/premium')}
+          accessibilityRole="button"
+          accessibilityLabel="Upgrade to premium"
+        >
+          <View style={styles.premiumBannerIconWrap}>
+            <Ionicons name="cloud-download-outline" size={18} color={colors.brand} />
+          </View>
+          <View style={styles.premiumBannerCopy}>
+            <Text style={styles.premiumBannerTitle}>Study Beyond Internet</Text>
+            <Text style={styles.premiumBannerSubtitle}>Save resources and keep learning offline with Premium.</Text>
+          </View>
+          <View style={styles.premiumBannerCta}>
+            <Text style={styles.premiumBannerCtaText}>Unlock Premium</Text>
+            <Ionicons name="arrow-forward" size={14} color={colors.brandText} />
+          </View>
+        </Pressable>
+      ) : null}
 
       <Pressable
         style={({ pressed }) => [

@@ -360,6 +360,7 @@ export default function FormulaSubjectPage() {
                 detailParams={(item) => ({ id: item.id })}
                 titleKey="title"
                 subtitleKey="explanation"
+                pageSize={10}
               />
             </View>
           )}

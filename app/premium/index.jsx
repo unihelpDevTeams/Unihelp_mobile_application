@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -15,6 +16,7 @@ import {
 import { colors, spacing, borderRadius, shadows } from '../../src/shared/theme';
 
 export default function PremiumPage() {
+  const router = useRouter();
   const { user, profile, refreshProfile } = useAuth();
   const [billing, setBilling] = useState('monthly');
   const [loading, setLoading] = useState(false);
@@ -145,11 +147,14 @@ export default function PremiumPage() {
 
           <View style={styles.featureList}>
             {PREMIUM_PLAN.features.map((feature) => (
-              <View key={feature} style={styles.featureRow}>
+              <View key={feature.key || feature.title} style={styles.featureRow}>
                 <View style={styles.checkIcon}>
                   <Ionicons name="checkmark" size={14} color={colors.teal} />
                 </View>
-                <Text style={styles.featureText}>{feature}</Text>
+                <View style={styles.featureCopy}>
+                  <Text style={styles.featureText}>{feature.title}</Text>
+                  {feature.description ? <Text style={styles.featureDescription}>{feature.description}</Text> : null}
+                </View>
               </View>
             ))}
           </View>
@@ -171,14 +176,56 @@ export default function PremiumPage() {
             disabled={loading}
           >
             {loading ? (
-              <ActivityIndicator color={colors.onBrand} />
+              <>
+                <ActivityIndicator color={colors.onBrand} />
+                <Text style={styles.subscribeText}>Opening Premium...</Text>
+              </>
             ) : (
-              <Ionicons name="sparkles" size={18} color={colors.onBrand} />
+              <>
+                <Ionicons name="sparkles" size={18} color={colors.onBrand} />
+                <Text style={styles.subscribeText}>Upgrade Now</Text>
+              </>
             )}
-            <Text style={styles.subscribeText}>Upgrade Now</Text>
           </Pressable>
         </View>
       )}
+
+      <View style={styles.featureActionCard}>
+        <View style={styles.featureActionHeader}>
+          <View style={styles.featureActionIcon}>
+            <Ionicons name="cloud-download-outline" size={18} color={colors.brand} />
+          </View>
+          <View style={styles.featureActionCopy}>
+            <Text style={styles.featureActionTitle}>Offline Learning Library</Text>
+            <Text style={styles.featureActionDescription}>
+              {premiumActive ? 'Your saved resources are ready when you are offline.' : 'Save study resources and keep learning without internet access.'}
+            </Text>
+          </View>
+        </View>
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.featureActionButton,
+            pressed && !loading && styles.featureActionButtonPressed,
+            loading && styles.subscribeButtonDisabled,
+          ]}
+          onPress={() => (premiumActive ? router.push('/offline-center') : subscribe())}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color={colors.onBrand} />
+          ) : (
+            <Ionicons
+              name={premiumActive ? 'library-outline' : 'lock-closed-outline'}
+              size={16}
+              color={colors.onBrand}
+            />
+          )}
+          <Text style={styles.featureActionButtonText}>
+            {premiumActive ? 'Open Offline Library' : 'Unlock with Premium'}
+          </Text>
+        </Pressable>
+      </View>
 
       <View style={styles.noteBox}>
         <Ionicons name="shield-checkmark-outline" size={18} color={colors.brand} />
