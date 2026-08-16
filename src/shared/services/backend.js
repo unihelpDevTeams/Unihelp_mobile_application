@@ -52,6 +52,39 @@ export async function postJson(path, payload) {
   return data;
 }
 
+export async function putJson(path, payload) {
+  const headers = await buildHeaders();
+  const response = await fetch(`${getApiUrl()}${path}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.message || data.error || 'Request failed');
+  }
+
+  return data;
+}
+
+export async function deleteJson(path) {
+  const headers = await buildHeaders();
+  const response = await fetch(`${getApiUrl()}${path}`, {
+    method: 'DELETE',
+    headers,
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.message || data.error || 'Request failed');
+  }
+
+  return data;
+}
+
 export async function getJson(path) {
   const headers = await buildHeaders();
   const response = await fetch(`${getApiUrl()}${path}`, {
@@ -65,6 +98,39 @@ export async function getJson(path) {
     throw new Error(data.message || data.error || 'Request failed');
   }
 
+  return data;
+}
+
+export async function uploadFeatureMedia(file, { feature = 'stories', resourceType = 'auto', onProgress } = {}) {
+  const headers = await buildHeaders({});
+  delete headers['Content-Type'];
+
+  const formData = new FormData();
+  formData.append('feature', feature);
+  formData.append('resourceType', resourceType);
+  if (file?.uri && !file?.arrayBuffer) {
+    formData.append('file', {
+      uri: file.uri,
+      name: file.name || file.fileName || `${feature}-upload`,
+      type: file.type || file.mimeType || 'application/octet-stream',
+    });
+  } else {
+    formData.append('file', file);
+  }
+
+  const response = await fetch(`${getApiUrl()}/api/uploads`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.message || data.error || 'Upload failed');
+  }
+
+  if (onProgress) onProgress(100);
   return data;
 }
 

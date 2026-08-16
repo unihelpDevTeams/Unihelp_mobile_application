@@ -19,7 +19,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { createStory, fetchRecord, updateStory } from '../../services/firestoreSync';
 import { colors as themeColors } from '../../src/shared/theme';
-import { CLOUDINARY_BASE_URL, CLOUDINARY_CONFIG, isCloudinaryConfigured } from '../../config/cloudinary';
+import { uploadFeatureMedia } from '../../src/shared/services/backend';
 
 /* =========================================================================
    CONFIG
@@ -32,21 +32,14 @@ const WPM = 200; // words per minute, for reading time estimate
 const GENRE_SUGGESTIONS = ['Fantasy', 'Sci-Fi', 'Romance', 'Mystery', 'Horror', 'Drama'];
 
 async function uploadImageAsync(uri) {
-  if (!isCloudinaryConfigured()) {
-    throw new Error('Cloudinary is not configured.');
-  }
-
-  const formData = new FormData();
-  formData.append('file', { uri, type: 'image/jpeg', name: 'story-image.jpg' });
-  formData.append('upload_preset', CLOUDINARY_CONFIG.uploadPreset);
-
-  const res = await fetch(`${CLOUDINARY_BASE_URL}/image/upload`, {
-    method: 'POST',
-    body: formData,
+  return uploadFeatureMedia({
+    uri,
+    type: 'image/jpeg',
+    name: 'story-image.jpg',
+  }, {
+    feature: 'stories',
+    resourceType: 'image',
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error?.message || 'Image upload failed.');
-  return data;
 }
 
 const toStoryAsset = (uploaded) => ({

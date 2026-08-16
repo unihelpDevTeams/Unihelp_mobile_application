@@ -17,7 +17,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../../../firebase/config';
 import { COLLECTIONS, conversationSubcollections, groupSubcollections, profileDefaults, userSubcollections } from '../firestoreSchema';
-import { sendAppNotification } from './backend';
+import { deleteJson, getJson, postJson, putJson, sendAppNotification } from './backend';
 
 const mapDocs = (snapshot) => snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
 const RESOURCE_ADMIN_EMAILS = new Set(['iadejuwon77@gmail.com', 'onakomayaokiki@gmail.com']);
@@ -178,27 +178,48 @@ export async function fetchUserGroups(uid = auth.currentUser?.uid) {
 }
 
 export async function fetchStories() {
-  return orderedList(COLLECTIONS.stories);
+  const data = await getJson('/api/stories?limit=100');
+  return data.items || data || [];
 }
 
 export async function fetchStoriesPage({ pageSize = 20, cursor = null } = {}) {
-  return orderedPage(COLLECTIONS.stories, 'createdAt', 'desc', pageSize, cursor);
+  const page = Number(cursor?.page || cursor || 1);
+  const data = await getJson(`/api/stories?page=${page}&limit=${pageSize}`);
+  return {
+    items: data.items || [],
+    cursor: data.hasMore ? { page: page + 1 } : null,
+    hasMore: Boolean(data.hasMore),
+  };
 }
 
 export async function fetchHostels() {
-  return orderedList(COLLECTIONS.hostels);
+  const data = await getJson('/api/hostels?limit=100');
+  return data.items || data || [];
 }
 
 export async function fetchHostelsPage({ pageSize = 20, cursor = null } = {}) {
-  return orderedPage(COLLECTIONS.hostels, 'createdAt', 'desc', pageSize, cursor);
+  const page = Number(cursor?.page || cursor || 1);
+  const data = await getJson(`/api/hostels?page=${page}&limit=${pageSize}`);
+  return {
+    items: data.items || [],
+    cursor: data.hasMore ? { page: page + 1 } : null,
+    hasMore: Boolean(data.hasMore),
+  };
 }
 
 export async function fetchStudentListings() {
-  return orderedList(COLLECTIONS.studentMarketplace);
+  const data = await getJson('/api/marketplace?limit=100');
+  return data.items || data || [];
 }
 
 export async function fetchStudentListingsPage({ pageSize = 20, cursor = null } = {}) {
-  return orderedPage(COLLECTIONS.studentMarketplace, 'createdAt', 'desc', pageSize, cursor);
+  const page = Number(cursor?.page || cursor || 1);
+  const data = await getJson(`/api/marketplace?page=${page}&limit=${pageSize}`);
+  return {
+    items: data.items || [],
+    cursor: data.hasMore ? { page: page + 1 } : null,
+    hasMore: Boolean(data.hasMore),
+  };
 }
 
 export async function fetchTasks(uid = auth.currentUser?.uid) {
@@ -387,12 +408,36 @@ export async function notifyInactiveUsers() {
 
 export async function countUserUploads(collectionName, uid = auth.currentUser?.uid, field = 'userId') {
   if (!uid) return 0;
+  if (collectionName === COLLECTIONS.hostels || collectionName === 'hostels') {
+    const data = await getJson(`/api/hostels?userId=${encodeURIComponent(uid)}&limit=1`);
+    return data.total ?? data.items?.length ?? 0;
+  }
+  if (collectionName === COLLECTIONS.studentMarketplace || collectionName === 'studentMarketplace') {
+    const data = await getJson(`/api/marketplace?userId=${encodeURIComponent(uid)}&limit=1`);
+    return data.total ?? data.items?.length ?? 0;
+  }
+  if (collectionName === COLLECTIONS.stories || collectionName === 'stories') {
+    const data = await getJson(`/api/stories?authorId=${encodeURIComponent(uid)}&limit=1`);
+    return data.total ?? data.items?.length ?? 0;
+  }
   const snapshot = await getDocs(query(collection(db, collectionName), where(field, '==', uid)));
   return snapshot.size;
 }
 
 export async function fetchUserDocuments(collectionName, uid = auth.currentUser?.uid, field = 'userId') {
   if (!uid) return [];
+  if (collectionName === COLLECTIONS.hostels || collectionName === 'hostels') {
+    const data = await getJson(`/api/hostels?userId=${encodeURIComponent(uid)}&limit=100`);
+    return data.items || [];
+  }
+  if (collectionName === COLLECTIONS.studentMarketplace || collectionName === 'studentMarketplace') {
+    const data = await getJson(`/api/marketplace?userId=${encodeURIComponent(uid)}&limit=100`);
+    return data.items || [];
+  }
+  if (collectionName === COLLECTIONS.stories || collectionName === 'stories') {
+    const data = await getJson(`/api/stories?authorId=${encodeURIComponent(uid)}&limit=100`);
+    return data.items || [];
+  }
   const snapshot = await getDocs(query(collection(db, collectionName), where(field, '==', uid)));
   return mapDocs(snapshot).sort((left, right) => {
     const leftTime =
@@ -578,40 +623,28 @@ export async function createGroup(payload = {}) {
 
 export async function createHostelListing(payload) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
-  const ref = await addDoc(collection(db, COLLECTIONS.hostels), {
+  const created = await postJson('/api/hostels', {
     ...payload,
-    userId: auth.currentUser.uid,
-    ownerId: auth.currentUser.uid,
-    createdAt: serverTimestamp(),
   });
-  return { id: ref.id };
+  return { id: created.id };
 }
 
 export async function createStudentListing(payload) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
-  const ref = await addDoc(collection(db, COLLECTIONS.studentMarketplace), {
+  const created = await postJson('/api/marketplace', {
     ...payload,
-    userId: auth.currentUser.uid,
-    ownerId: auth.currentUser.uid,
-    createdAt: serverTimestamp(),
   });
-  return { id: ref.id };
+  return { id: created.id };
 }
 
 export async function updateHostelListing(id, payload) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
-  await updateDoc(doc(db, COLLECTIONS.hostels, id), {
-    ...payload,
-    updatedAt: serverTimestamp(),
-  });
+  await putJson(`/api/hostels/${encodeURIComponent(id)}`, payload);
 }
 
 export async function updateStudentListing(id, payload) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
-  await updateDoc(doc(db, COLLECTIONS.studentMarketplace, id), {
-    ...payload,
-    updatedAt: serverTimestamp(),
-  });
+  await putJson(`/api/marketplace/${encodeURIComponent(id)}`, payload);
 }
 
 export async function createTutorialListing(payload) {
@@ -627,6 +660,15 @@ export async function createTutorialListing(payload) {
 
 export async function fetchRecord(collectionName, id) {
   try {
+    if (collectionName === COLLECTIONS.hostels || collectionName === 'hostels') {
+      return getJson(`/api/hostels/${encodeURIComponent(id)}`);
+    }
+    if (collectionName === COLLECTIONS.studentMarketplace || collectionName === 'studentMarketplace') {
+      return getJson(`/api/marketplace/${encodeURIComponent(id)}`);
+    }
+    if (collectionName === COLLECTIONS.stories || collectionName === 'stories') {
+      return getJson(`/api/stories/${encodeURIComponent(id)}`);
+    }
     const snapshot = await getDoc(doc(db, collectionName, id));
     if (snapshot.exists()) {
       return { id: snapshot.id, ...snapshot.data() };
@@ -661,7 +703,7 @@ export async function createStory(payload) {
   const authorName = userData?.username || auth.currentUser.displayName || 'A student';
   const authorAvatar = userData?.photo || auth.currentUser.photoURL || '';
 
-  const ref = await addDoc(collection(db, COLLECTIONS.stories), {
+  const created = await postJson('/api/stories', {
     ...payload,
     authorId: auth.currentUser.uid,
     authorName,
@@ -672,8 +714,6 @@ export async function createStory(payload) {
     bookmarks: 0,
     chaptersCount: 0,
     commentCount: 0,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
   });
 
   if (payload.status === 'published') {
@@ -691,15 +731,12 @@ export async function createStory(payload) {
     }
   }
 
-  return { id: ref.id };
+  return { id: created.id };
 }
 
 export async function updateStory(id, payload) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
-  await updateDoc(doc(db, COLLECTIONS.stories, id), {
-    ...payload,
-    updatedAt: serverTimestamp(),
-  });
+  await putJson(`/api/stories/${encodeURIComponent(id)}`, payload);
 }
 
 /**
@@ -707,32 +744,7 @@ export async function updateStory(id, payload) {
  */
 export async function toggleStoryLike(storyId) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
-  const storyRef = doc(db, COLLECTIONS.stories, storyId);
-  const storySnap = await getDoc(storyRef);
-  if (!storySnap.exists()) throw new Error('Story not found');
-
-  const data = storySnap.data();
-  const likedBy = data.likedBy || {};
-  const userId = auth.currentUser.uid;
-  const alreadyLiked = !!likedBy[userId];
-
-  if (alreadyLiked) {
-    // Unlike
-    delete likedBy[userId];
-    await updateDoc(storyRef, {
-      likedBy,
-      likes: increment(-1),
-    });
-    return { liked: false, likes: Math.max(0, (data.likes || 0) - 1) };
-  } else {
-    // Like
-    likedBy[userId] = true;
-    await updateDoc(storyRef, {
-      likedBy,
-      likes: increment(1),
-    });
-    return { liked: true, likes: (data.likes || 0) + 1 };
-  }
+  return postJson(`/api/stories/${encodeURIComponent(storyId)}/like`, {});
 }
 
 /**
@@ -748,33 +760,20 @@ export async function addStoryComment(storyId, text) {
   const commenterName = userData?.username || auth.currentUser.displayName || 'Anonymous';
   const commenterAvatar = userData?.photo || auth.currentUser.photoURL || '';
 
-  // Add comment document
-  const commentRef = await addDoc(collection(db, COLLECTIONS.stories, storyId, 'comments'), {
+  const comment = await postJson(`/api/stories/${encodeURIComponent(storyId)}/comments`, {
     text: text.trim(),
     authorId: auth.currentUser.uid,
     authorName: commenterName,
     authorAvatar: commenterAvatar,
-    createdAt: serverTimestamp(),
   });
-
-  // Increment comment count on story
-  await updateDoc(doc(db, COLLECTIONS.stories, storyId), {
-    commentCount: increment(1),
-  });
-
-  return { id: commentRef.id };
+  return { id: comment.id };
 }
 
 /**
  * Fetch comments for a story, ordered by newest first
  */
 export async function fetchStoryComments(storyId) {
-  const q = query(
-    collection(db, COLLECTIONS.stories, storyId, 'comments'),
-    orderBy('createdAt', 'desc')
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return getJson(`/api/stories/${encodeURIComponent(storyId)}/comments`);
 }
 
 /**
@@ -782,9 +781,7 @@ export async function fetchStoryComments(storyId) {
  */
 export async function incrementStoryView(storyId) {
   try {
-    await updateDoc(doc(db, COLLECTIONS.stories, storyId), {
-      views: increment(1),
-    });
+    await postJson(`/api/stories/${encodeURIComponent(storyId)}/views`, {});
   } catch (error) {
     console.log('Failed to increment story view:', error?.message);
   }
@@ -792,20 +789,17 @@ export async function incrementStoryView(storyId) {
 
 export async function deleteHostelListing(id) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
-  const { deleteMediaDocument } = await import('../../../services/mediaCleanup');
-  await deleteMediaDocument('hostels', id);
+  await deleteJson(`/api/hostels/${encodeURIComponent(id)}`);
 }
 
 export async function deleteStudentListing(id) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
-  const { deleteMediaDocument } = await import('../../../services/mediaCleanup');
-  await deleteMediaDocument('studentMarketplace', id);
+  await deleteJson(`/api/marketplace/${encodeURIComponent(id)}`);
 }
 
 export async function deleteStory(id) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
-  const { deleteMediaDocument } = await import('../../../services/mediaCleanup');
-  await deleteMediaDocument('stories', id);
+  await deleteJson(`/api/stories/${encodeURIComponent(id)}`);
 }
 
 export async function createFormulaBookmark(payload) {

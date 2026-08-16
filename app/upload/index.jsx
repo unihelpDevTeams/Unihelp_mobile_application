@@ -29,6 +29,7 @@ import {
   uploadImage,
   uploadPDF,
 } from '../../services/cloudinary';
+import { uploadFeatureMedia } from '../../src/shared/services/backend';
 import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { canManageResource, canUploadResource } from '../../src/shared/auth/resourcePermissions';
@@ -568,6 +569,16 @@ export default function UploadPage() {
   };
 
   const uploadAttachment = async (file) => {
+    if (uploadType === 'hostel' || uploadType === 'marketplace') {
+      return uploadFeatureMedia(file, {
+        feature: uploadType === 'hostel' ? 'hostels' : 'marketplace',
+        resourceType: 'image',
+        onProgress: (percent) => {
+          setProgress((current) => ({ ...current, [file.name]: Math.round(percent) }));
+        },
+      });
+    }
+
     if (config.fileKind === 'pdf') {
       return uploadPDF(file, (percent) => {
         setProgress((current) => ({ ...current, [file.name]: Math.round(percent) }));
