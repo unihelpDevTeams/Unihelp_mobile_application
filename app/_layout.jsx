@@ -42,59 +42,16 @@ function AppContent() {
         >
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="ai" />
-          <Stack.Screen name="newsfeed" />
-          <Stack.Screen name="announcements" />
-          <Stack.Screen name="adminpanel" />
-          <Stack.Screen name="cgpa" />
-          <Stack.Screen name="create" />
-          <Stack.Screen name="create-story" />
-          <Stack.Screen name="create-chapter" />
-          <Stack.Screen name="community" />
-          <Stack.Screen name="community/[groupId]" />
-          <Stack.Screen name="community-settings" />
-          <Stack.Screen name="help-center" />
-          <Stack.Screen name="myhostels" />
-          <Stack.Screen name="myproducts" />
-          <Stack.Screen name="mystories" />
-          <Stack.Screen name="premium" options={{ presentation: 'card' }} />
-          <Stack.Screen name="smart-timetable" />
-          <Stack.Screen name="tasks" />
-          <Stack.Screen name="uploadquestion" />
-          <Stack.Screen name="lecturenotesmarketplace" />
-          <Stack.Screen name="hostelmarketplace" />
-          <Stack.Screen name="studentmarketplace" />
-          <Stack.Screen name="upload" />
-          <Stack.Screen name="messages" />
-          <Stack.Screen name="messages/[conversationId]" />
-          <Stack.Screen name="friends" />
-          <Stack.Screen name="find-friends" />
-          <Stack.Screen name="notifications" />
-          <Stack.Screen name="marketplace" />
-          <Stack.Screen name="stories" />
-          <Stack.Screen name="support" />
-          <Stack.Screen name="formula-hub" />
-          <Stack.Screen name="challenge" />
-          <Stack.Screen name="view" />
+          <Stack.Screen name="premium/index" options={{ presentation: 'card' }} />
           <Stack.Screen name="profile/danger" options={{ presentation: 'card' }} />
-          <Stack.Screen name="view-user-profile" />
-          <Stack.Screen name="faq" />
-          <Stack.Screen name="about" />
-          <Stack.Screen name="privacy" />
-          <Stack.Screen name="terms" />
-          <Stack.Screen name="contact" />
-          <Stack.Screen name="report" />
-          <Stack.Screen name="suggestion" />
-          <Stack.Screen name="requests" />
-          <Stack.Screen name="read-story" />
           <Stack.Screen name="splash" options={{ presentation: 'modal', gestureEnabled: false }} />
-          <Stack.Screen name="search" options={{ presentation: 'card' }} />
-          <Stack.Screen name="saved" options={{ presentation: 'card' }} />
-          <Stack.Screen name="downloads" options={{ presentation: 'card' }} />
+          <Stack.Screen name="search/index" options={{ presentation: 'card' }} />
+          <Stack.Screen name="saved/index" options={{ presentation: 'card' }} />
+          <Stack.Screen name="downloads/index" options={{ presentation: 'card' }} />
           <Stack.Screen name="offline-center" options={{ presentation: 'card' }} />
-          <Stack.Screen name="leaderboard" options={{ presentation: 'card' }} />
-          <Stack.Screen name="achievements" options={{ presentation: 'card' }} />
-          <Stack.Screen name="payment-success" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="leaderboard/index" options={{ presentation: 'card' }} />
+          <Stack.Screen name="achievements/index" options={{ presentation: 'card' }} />
+          <Stack.Screen name="payment-success/index" options={{ presentation: 'modal' }} />
         </Stack>
       </RoleGuard>
       <PromoSpotlight

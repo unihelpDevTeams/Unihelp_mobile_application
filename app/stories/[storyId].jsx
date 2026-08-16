@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Text, View, StyleSheet, Pressable, TextInput, ScrollView, Alert, ActivityIndicator, Share } from 'react-native';
+import { Text, View, StyleSheet, Pressable, TextInput, ScrollView, Alert, ActivityIndicator, Share, KeyboardAvoidingView, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
@@ -114,7 +114,12 @@ export default function StoryDetails() {
 
   return (
     <ScreenShell title="Story" subtitle={story?.title || 'Story details'} showBack loading={loading}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <KeyboardAvoidingView 
+        style={{ flex: 1 }} 
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContent}>
       {error ? (
         <ErrorState message={error} onRetry={load} />
       ) : story ? (
@@ -281,15 +286,16 @@ export default function StoryDetails() {
                       <Text style={styles.commentText}>{comment.text}</Text>
                     </View>
                   </View>
-                ))}
+                    ))}
+                  </View>
+                )}
               </View>
-            )}
-          </View>
-        </View>
-      ) : (
-        <NotFoundState />
-      )}
-      </ScrollView>
+            </View>
+          ) : (
+            <NotFoundState />
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </ScreenShell>
   );
 }
