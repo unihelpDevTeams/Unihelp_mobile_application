@@ -16,6 +16,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { auth, db } from '../../../firebase/config';
+
 import { COLLECTIONS, conversationSubcollections, groupSubcollections, profileDefaults, userSubcollections } from '../firestoreSchema';
 import { sendAppNotification, getJson, postJson, putJson, deleteJson } from './backend';
 
