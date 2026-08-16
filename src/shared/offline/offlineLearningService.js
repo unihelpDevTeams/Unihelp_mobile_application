@@ -6,6 +6,7 @@ import { auth, db } from '../../../firebase/config';
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { getJson, postJson } from '../services/backend';
 import { resolveDocumentAsset } from '../utils/documentMedia';
+import { cachedRequest } from '../utils/requestCache';
 
 // ATOMIC STORAGE KEYS (optimized for independent updates)
 const LEARNING_STORAGE_KEY = '@unihelp_learning_offline_v2'; // Legacy - kept for migration
@@ -210,7 +211,14 @@ export async function validateOfflineEntitlement({ force = false } = {}) {
   const online = await checkConnectivity();
   if (!online) return store.entitlement || { premium: false, userId: uid, reason: 'offline-unvalidated' };
 
-  const data = await getJson('/api/offline-library/entitlement');
+  // Use request deduplication to prevent multiple concurrent validation calls
+  const cacheKey = `entitlement-validate-${uid}`;
+  const data = await cachedRequest(
+    cacheKey,
+    () => getJson('/api/offline-library/entitlement'),
+    10000 // 10 second dedup window
+  );
+  
   const entitlement = data.entitlement || { premium: false, userId: uid };
   // Only write entitlement, not entire store
   await writeEntitlement(entitlement);

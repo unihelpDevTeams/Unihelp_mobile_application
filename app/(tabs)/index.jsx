@@ -62,7 +62,7 @@ const HERO_CONTENT = [
     title: "Ready to crush today's goals?",
     subtitle: 'Build your daily momentum with focused study',
     primaryCta: { label: 'Study Vault', route: '/(tabs)/studyMaterials', icon: 'library' },
-    secondaryCta: { label: '', route: '/tasks', icon: 'checkmark-done' },
+    secondaryCta: { label: '', route: '/cbt', icon: 'flash' },
   },
   {
     title: 'Master the subjects you need',
@@ -86,12 +86,6 @@ const HERO_CONTENT = [
     title: 'Connect with your peers',
     subtitle: 'Find friends and study together',
     primaryCta: { label: 'Find Friends', route: '/find-friends', icon: 'people' },
-    secondaryCta: { label: '', route: '/tasks', icon: 'checkmark-done' },
-  },
-  {
-    title: 'Stay ahead of the curve',
-    subtitle: 'Get premium access to unlimited resources',
-    primaryCta: { label: 'Go Premium', route: '/premium', icon: 'sparkles' },
     secondaryCta: { label: '', route: '/tasks', icon: 'checkmark-done' },
   },
 ];

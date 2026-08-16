@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { FlatList, Pressable, ScrollView, Text, View, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -55,6 +55,10 @@ export default function SearchScreen() {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchHistory, setSearchHistory] = useState([]);
+  
+  // Debounce search history writes (max once per 2 seconds)
+  const searchHistoryTimeoutRef = useRef(null);
+  const SEARCH_HISTORY_DEBOUNCE_MS = 2000;
 
   const RESULT_TYPES = useMemo(() => ({
     notes: { label: 'Notes', icon: 'book-outline', color: colors.brand },
@@ -147,18 +151,34 @@ export default function SearchScreen() {
         if (data) setSearchHistory(JSON.parse(data));
       })
       .catch(() => {});
+
+    // Cleanup timeout on unmount
+    return () => {
+      if (searchHistoryTimeoutRef.current) {
+        clearTimeout(searchHistoryTimeoutRef.current);
+      }
+    };
   }, []);
 
-  // Save search term to AsyncStorage history
+  // Save search term to AsyncStorage history (debounced)
   const saveToHistory = useCallback(async (term) => {
     if (!term.trim()) return;
-    try {
-      const stored = await AsyncStorage.getItem(SEARCH_HISTORY_KEY);
-      let history = stored ? JSON.parse(stored) : [];
-      history = [term, ...history.filter((t) => t !== term)].slice(0, 10);
-      await AsyncStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(history));
-      setSearchHistory(history);
-    } catch {}
+    
+    // Clear existing timeout
+    if (searchHistoryTimeoutRef.current) {
+      clearTimeout(searchHistoryTimeoutRef.current);
+    }
+    
+    // Debounce: only write to AsyncStorage after 2 seconds of inactivity
+    searchHistoryTimeoutRef.current = setTimeout(async () => {
+      try {
+        const stored = await AsyncStorage.getItem(SEARCH_HISTORY_KEY);
+        let history = stored ? JSON.parse(stored) : [];
+        history = [term, ...history.filter((t) => t !== term)].slice(0, 10);
+        await AsyncStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(history));
+        setSearchHistory(history);
+      } catch {}
+    }, SEARCH_HISTORY_DEBOUNCE_MS);
   }, []);
 
   const performSearch = useCallback(async (searchTerm) => {
