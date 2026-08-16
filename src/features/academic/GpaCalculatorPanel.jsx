@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { addDoc, collection, deleteDoc, doc, getDocs, query, serverTimestamp, where } from 'firebase/firestore';
+import { checkConnectivity, getLocalGpaRecords, saveLocalGpaRecord } from '../../shared/offline/offlineLearningService';
 
 import { db } from '../../../firebase/config';
 import { useAuth } from '../../../context/AuthContext';
@@ -681,6 +682,9 @@ export default function GpaCalculatorPanel() {
   );
 
   const loadRecords = useCallback(async () => {
+    const localRecords = await getLocalGpaRecords();
+    if (localRecords.length) setRecords(localRecords);
+
     if (!profile?.uid) {
       setLoading(false);
       return;
@@ -689,7 +693,7 @@ export default function GpaCalculatorPanel() {
       const snap = await getDocs(query(collection(db, 'GPARecords'), where('userId', '==', profile.uid)));
       const items = snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
       items.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-      setRecords(items);
+      setRecords((current) => { if (current.length && !items.length) return current; return items.length ? items : current; });
     } catch {
       // Handle optional err logging
     } finally {
@@ -710,9 +714,27 @@ export default function GpaCalculatorPanel() {
   }, []);
 
   const save = async () => {
-    if (!profile?.uid || !canSave || saving) return;
+    if (!canSave || saving) return;
     setSaving(true);
     try {
+      const localRecord = {
+        id: `gpa-${Date.now()}`,
+        userId: profile?.uid || 'offline-user',
+        GPA: gpa,
+        classification: classifyGpa(gpa, colors).label,
+        courses,
+        createdAt: new Date().toISOString(),
+        offline: true,
+      };
+
+      const isOnline = await checkConnectivity();
+      if (!isOnline || !profile?.uid) {
+        const saved = await saveLocalGpaRecord(localRecord);
+        setRecords((current) => [saved, ...current]);
+        setCourses([{ ...defaultCourse }]);
+        return;
+      }
+
       await addDoc(collection(db, 'GPARecords'), {
         userId: profile.uid,
         GPA: gpa,

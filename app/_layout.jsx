@@ -91,6 +91,7 @@ function AppContent() {
           <Stack.Screen name="search" options={{ presentation: 'card' }} />
           <Stack.Screen name="saved" options={{ presentation: 'card' }} />
           <Stack.Screen name="downloads" options={{ presentation: 'card' }} />
+          <Stack.Screen name="offline-center" options={{ presentation: 'card' }} />
           <Stack.Screen name="leaderboard" options={{ presentation: 'card' }} />
           <Stack.Screen name="achievements" options={{ presentation: 'card' }} />
           <Stack.Screen name="payment-success" options={{ presentation: 'modal' }} />

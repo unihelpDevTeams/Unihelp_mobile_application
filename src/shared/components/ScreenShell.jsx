@@ -390,7 +390,7 @@ function OfflineNotice({ visible, colors, styles }) {
       <Ionicons name="cloud-offline-outline" size={18} color={colors.brand} />
       <View style={styles.offlineBannerText}>
         <Text style={styles.offlineBannerTitle}>You’re offline</Text>
-        <Text style={styles.offlineBannerSubtitle}>Some features may be unavailable until your connection is back.</Text>
+        <Text style={styles.offlineBannerSubtitle}>You’re offline — downloaded learning materials are still available.</Text>
       </View>
     </View>
   );

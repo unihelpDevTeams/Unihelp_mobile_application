@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
+import NetInfo from '@react-native-community/netinfo';
 import { getJson } from '../src/shared/services/backend';
-
+import { getStoredFormulas, saveDownloadedFormulas } from '../src/shared/offline/offlineLearningService';
 
 let cachedFormulas = null;
 
@@ -81,29 +82,50 @@ export const useFormulas = (refreshKey = 0) => {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (cachedFormulas && !refreshKey) {
-      setFormulas(cachedFormulas);
-      setLoading(false);
-      return;
-    }
-
     let cancelled = false;
-    const fetchFormulas = async () => {
+
+    const hydrateOfflineFirst = async () => {
       setLoading(true);
       setError(null);
+
+      try {
+        const localFormulas = await getStoredFormulas();
+        if (localFormulas?.length && !cancelled) {
+          cachedFormulas = localFormulas;
+          setFormulas(localFormulas);
+        } else if (cachedFormulas && !refreshKey && !cancelled) {
+          setFormulas(cachedFormulas);
+        }
+      } catch {
+        // ignore local hydrate failures and continue to remote fallback
+      }
+
+      const netState = await NetInfo.fetch();
+      const online = Boolean(netState?.isConnected) && netState?.isInternetReachable !== false;
+
+      if (!online && !cancelled) {
+        setLoading(false);
+        return;
+      }
+
       try {
         const nextFormulas = await fetchFormulasFromApi();
-        cachedFormulas = nextFormulas;
-        if (!cancelled) setFormulas(nextFormulas);
+        if (!cancelled) {
+          cachedFormulas = nextFormulas;
+          setFormulas(nextFormulas);
+        }
+        await saveDownloadedFormulas(nextFormulas);
       } catch (err) {
         console.error('Failed to fetch formulas:', err);
-        if (!cancelled) setError(err?.message || 'Failed to fetch formulas.');
+        if (!cancelled) {
+          setError(err?.message || 'Failed to fetch formulas.');
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
 
-    fetchFormulas();
+    hydrateOfflineFirst();
 
     return () => {
       cancelled = true;

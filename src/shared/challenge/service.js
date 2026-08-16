@@ -14,6 +14,7 @@ import {
 import { auth, db } from '../../../firebase/config';
 import { CHALLENGE_ACHIEVEMENTS, FALLBACK_QUESTIONS, calculateChallengeScore, getRankForXp, getTodayKey } from './data';
 import { getJson } from '../services/backend';
+import { checkConnectivity, getLocalStudyProgress, saveLocalStudyProgress, queueLearningSync } from '../offline/offlineLearningService';
 
 const COLLECTION = 'challenges';
 const USERS_COLLECTION = 'challengeUsers';
@@ -136,6 +137,17 @@ function filterFallbackByProfile(questions, category, profile = {}) {
 }
 
 export async function fetchChallengeQuestions({ category, count = 8, profile = {} } = {}) {
+  const localDeck = (await getLocalStudyProgress('challenge')) || {};
+  const localQuestions = localDeck?.questions || [];
+  if (localQuestions.length) {
+    const filteredLocal = category && category !== 'random'
+      ? localQuestions.filter((item) => item.category === category)
+      : localQuestions;
+    if (filteredLocal.length) {
+      return [...filteredLocal].sort(() => Math.random() - 0.5).slice(0, count);
+    }
+  }
+
   try {
     let apiQuestions = unwrapQuestions(await getJson('/api/challenge-questions'));
 
@@ -146,7 +158,9 @@ export async function fetchChallengeQuestions({ category, count = 8, profile = {
     apiQuestions = filterFallbackByProfile(apiQuestions, category, profile);
 
     if (apiQuestions.length) {
-      return [...apiQuestions].sort(() => Math.random() - 0.5).slice(0, count);
+      const selected = [...apiQuestions].sort(() => Math.random() - 0.5).slice(0, count);
+      await saveLocalStudyProgress('challenge', 'questions', apiQuestions);
+      return selected;
     }
   } catch (err) {
     console.warn('Failed to fetch challenge questions from API:', err?.message);
@@ -200,7 +214,9 @@ export async function fetchChallengeQuestions({ category, count = 8, profile = {
     }
 
     if (remoteQuestions.length) {
-      return [...remoteQuestions].sort(() => Math.random() - 0.5).slice(0, count);
+      const selected = [...remoteQuestions].sort(() => Math.random() - 0.5).slice(0, count);
+      await saveLocalStudyProgress('challenge', 'questions', remoteQuestions);
+      return selected;
     }
   } catch (err) {
     console.warn('Failed to fetch challenge questions from Firestore:', err?.message);
@@ -208,6 +224,7 @@ export async function fetchChallengeQuestions({ category, count = 8, profile = {
 
   // Fallback to filtered local questions based on user's profile
   const filteredPool = filterFallbackByProfile(FALLBACK_QUESTIONS, category, profile);
+  await saveLocalStudyProgress('challenge', 'questions', filteredPool);
   return [...filteredPool].sort(() => Math.random() - 0.5).slice(0, count);
 }
 
@@ -286,7 +303,28 @@ const getTimeSessionBucket = () => {
 };
 
 export async function saveChallengeAttempt({ profile = {}, category = 'daily', questions = [], answers = [], durationSeconds = 0 }) {
-  if (!auth.currentUser?.uid) throw new Error('No authenticated user');
+  const isOnline = await checkConnectivity();
+  const localResult = {
+    id: `challenge-${Date.now()}`,
+    category: category || questions[0]?.category || 'daily',
+    score: 0,
+    totalQuestions: questions.length,
+    accuracy: 0,
+    xpEarned: 0,
+    pointsEarned: 0,
+    correct: 0,
+    wrong: 0,
+    skipped: 0,
+    answers,
+    createdAt: new Date().toISOString(),
+    offline: !isOnline,
+  };
+
+  if (!auth.currentUser?.uid) {
+    await saveLocalStudyProgress('challenge', localResult.id, localResult);
+    await queueLearningSync({ type: 'challengeAttempt', action: 'update', payload: { attempt: localResult, syncKey: localResult.id } });
+    return { ...localResult, stats: {} };
+  }
 
   const previous = await fetchChallengeStats(profile);
   const score = calculateChallengeScore({ answers, durationSeconds, totalQuestions: questions.length });
@@ -352,6 +390,24 @@ export async function saveChallengeAttempt({ profile = {}, category = 'daily', q
     weeklyResetKey: getWeekKey(),
     updatedAt: serverTimestamp(),
   };
+
+  if (!isOnline) {
+    const result = {
+      id: localResult.id,
+      ...attempt,
+      ...score,
+      previousRank,
+      nextRank: previousRank,
+      rankChanged: false,
+      streakUpdated: false,
+      stats: statsUpdate,
+      offline: true,
+      createdAt: new Date().toISOString(),
+    };
+    await saveLocalStudyProgress('challenge', result.id, result);
+    await queueLearningSync({ type: 'challengeAttempt', action: 'update', payload: { attempt: result, stats: statsUpdate, syncKey: result.id } });
+    return result;
+  }
 
   await setDoc(doc(db, USERS_COLLECTION, auth.currentUser.uid), statsUpdate, { merge: true });
   const attemptRef = await addDoc(collection(db, USERS_COLLECTION, auth.currentUser.uid, ATTEMPTS_COLLECTION), attempt);

@@ -4,6 +4,7 @@ export const headerMenuSections = [
     items: [
       { label: 'Home', route: '/(tabs)' },
       { label: 'Resources', route: '/(tabs)/studyMaterials' },
+      { label: 'Offline / Downloads', route: '/offline-center', icon: 'cloud-download-outline' },
       { label: 'News Feed', route: '/newsfeed' },
       { label: 'Challenge', route: '/challenge', icon: 'flash-outline' },
     ],
