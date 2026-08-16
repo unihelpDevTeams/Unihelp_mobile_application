@@ -45,111 +45,10 @@ const IMAGES = {
   community: 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?q=80&w=600&auto=format&fit=crop',
 };
 
-// 🧠 INTELLIGENT HERO BACKGROUNDS - Gradient overlays for data visualization
-const HERO_BACKGROUNDS = [
-  // Slide 1: Smart Today - productivity flow state
-  'https://images.unsplash.com/photo-1620121692029-d088224ddc74?q=80&w=800&auto=format&fit=crop', // Brain/mind
-  // Slide 2: Weak Areas - focused improvement
-  'https://images.unsplash.com/photo-1623182033515-cb0e5a24dfd2?q=80&w=800&auto=format&fit=crop', // Targeted focus
-  // Slide 3: Study Streak - momentum and habits
-  'https://images.unsplash.com/photo-1552664730-d307ca884978?q=80&w=800&auto=format&fit=crop', // Fire/momentum
-  // Slide 4: Performance Metrics - analytics
-  'https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=800&auto=format&fit=crop', // Data/metrics
-  // Slide 5: Spaced Repetition - retention science
-  'https://images.unsplash.com/photo-1516534775068-bb57ce941d2b?q=80&w=800&auto=format&fit=crop', // Learning journey
-  // Slide 6: Exam Prep Mode - power study
-  'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=800&auto=format&fit=crop', // Laptop study
-];
-
-/**
- * 🎯 SMART STUDY COMPANION HERO
- * 
- * Instead of generic motivation, each slide is an INTELLIGENT, DATA-DRIVEN
- * study insight that educates and actionably guides the user.
- * 
- * The hero adapts based on user profile metrics (streak, weak areas, GPA, etc)
- * and shows REAL insights about what they should focus on TODAY.
- */
-const HERO_CONTENT = [
-  {
-    // SLIDE 1: Smart Today - AI-powered daily study plan
-    slide: 'smart-today',
-    icon: '🎯',
-    badge: 'AI INSIGHT',
-    title: "Your Smart Study Plan",
-    subtitle: 'Based on your learning patterns, focus on Calculus & Chemistry today',
-    dataPoints: ['30 min deep focus', 'Review 5 weak areas', 'Spaced repeat: 12 topics'],
-    insight: 'Your focus score peaks at 10-11 AM — start your hardest topic then',
-    primaryCta: { label: 'Start Today\'s Plan', route: '/(tabs)/studyMaterials', icon: 'play-circle' },
-    secondaryCta: { label: 'Quick Quiz', route: '/ai', icon: 'help-circle' },
-  },
-  {
-    // SLIDE 2: Weak Areas Alert - Targeted improvement
-    slide: 'weak-areas',
-    icon: '📈',
-    badge: 'GROWTH OPPORTUNITY',
-    title: "Boost Your Weak Areas",
-    subtitle: 'Physics (62%) & Organic Chem (58%) need attention this week',
-    dataPoints: ['Physics: 18 practice problems', 'Chemistry: 12 concept videos', 'Est. 2.5 hrs to mastery'],
-    insight: 'Students who focus on weak areas improve by 34% on next exam',
-    primaryCta: { label: 'Master Physics', route: '/formula-hub', icon: 'school' },
-    secondaryCta: { label: 'Set Reminder', route: '/tasks', icon: 'timer' },
-  },
-  {
-    // SLIDE 3: Streak Celebration - Motivation + Science of habits
-    slide: 'streak-power',
-    icon: '🔥',
-    badge: 'STREAK MOMENTUM',
-    title: "You're Building Unstoppable Habits!",
-    subtitle: `${57} days of consistent study — You're in the top 8% of your cohort`,
-    dataPoints: ['Habit strength: 94%', 'Next milestone: 60-day', 'Brain: Peak neuroplasticity'],
-    insight: 'Research shows 60-day learners retain 3x more than sporadic studiers',
-    primaryCta: { label: 'Study Today', route: '/(tabs)/studyMaterials', icon: 'flame' },
-    secondaryCta: { label: 'View Stats', route: '/achievements', icon: 'stats-chart' },
-  },
-  {
-    // SLIDE 4: Performance Dashboard - Real metrics
-    slide: 'performance',
-    icon: '📊',
-    badge: 'YOUR PROGRESS',
-    title: "You've Mastered 127 Topics",
-    subtitle: 'GPA Trajectory: 3.8 → 4.0 | Accuracy: 89% | Speed +23% this month',
-    dataPoints: ['127 mastered topics', '89% accuracy rate', 'Consistency: +23%'],
-    insight: 'Your study velocity is accelerating — momentum is on your side',
-    primaryCta: { label: 'See Full Analytics', route: '/analytics', icon: 'analytics' },
-    secondaryCta: { label: 'Export Report', route: '/profile', icon: 'download' },
-  },
-  {
-    // SLIDE 5: Spaced Repetition Engine - Science-backed learning
-    slide: 'spaced-repeat',
-    icon: '🧠',
-    badge: 'SCIENCE OF LEARNING',
-    title: "12 Topics Ready for Review",
-    subtitle: 'Spaced repetition shows 250% better retention than cramming',
-    dataPoints: ['Due today: 12 topics', 'Optimal intervals applied', 'Forgetting curve averted'],
-    insight: 'Your brain optimally consolidates memories with these 5-minute review sessions',
-    primaryCta: { label: 'Start Review Session', route: '/formula-hub/flashcards', icon: 'refresh-circle' },
-    secondaryCta: { label: 'Learn More', route: '/help-center', icon: 'information-circle' },
-  },
-  {
-    // SLIDE 6: Exam Prep Mode - Power study
-    slide: 'exam-mode',
-    icon: '⚡',
-    badge: 'POWER MODE',
-    title: "Exam Prep: 21 Days to Physics Final",
-    subtitle: 'Recommended: 2 hrs/day focused study | Coverage: 89% of likely topics',
-    dataPoints: ['21 days left', 'Coverage: 89%', 'Practice tests: 12 available'],
-    insight: 'Students who finish prep 3 weeks early score 18% higher on average',
-    primaryCta: { label: 'Activate Exam Mode', route: '/cbt', icon: 'rocket' },
-    secondaryCta: { label: 'View Syllabus', route: '/(tabs)/studyMaterials', icon: 'document' },
-  },
-];
-
-const HERO_ROTATION_INTERVAL = 10000; // Slightly longer to read educational content (10 seconds)
-
 const FAB_SIZE = 56;
 const MARQUEE_PX_PER_SECOND = 46;
 const MARQUEE_MESSAGE = 'study offline, unlimited downloads & priority AI access.';
+const HERO_AUTO_ADVANCE_MS = 7000;
 
 const pickMediaUrl = (value) => {
   if (!value) return null;
@@ -204,6 +103,64 @@ const formatPrice = (value) => {
 };
 
 const friendlyPersonName = (person = {}) => person.username || person.name || person.displayName || person.email || 'Student';
+
+// One message per slide: eyebrow, title, a single supporting stat, one CTA.
+// Copy here (other than the streak slide, which uses the real streakCount)
+// is illustrative — wire it to real analytics (weak-area %, mastery counts,
+// exam countdowns) as that data becomes available.
+const buildHeroSlides = (streakCount = 0) => [
+  {
+    slide: 'smart-today',
+    icon: 'flash-outline',
+    eyebrow: "TODAY'S FOCUS",
+    title: 'Calculus & Chemistry need you today',
+    stat: '30 min deep focus · 5 topics due for review',
+    cta: { label: 'Start studying', route: '/(tabs)/studyMaterials' },
+  },
+  {
+    slide: 'weak-areas',
+    icon: 'trending-up-outline',
+    eyebrow: 'GROWTH AREA',
+    title: 'Physics is holding your average back',
+    stat: '62% mastery · 18 practice problems left',
+    cta: { label: 'Strengthen physics', route: '/formula-hub' },
+  },
+  {
+    slide: 'streak-power',
+    icon: 'flame',
+    eyebrow: 'STUDY STREAK',
+    title: streakCount > 0 ? `${streakCount}-day streak — keep it alive` : 'Start your study streak today',
+    stat:
+      streakCount > 0
+        ? 'Consistent daily learners retain up to 3× more'
+        : 'One session today gets your streak going',
+    cta: { label: streakCount > 0 ? 'Continue streak' : 'Start today', route: '/(tabs)/studyMaterials' },
+  },
+  {
+    slide: 'performance',
+    icon: 'stats-chart-outline',
+    eyebrow: 'YOUR PROGRESS',
+    title: '127 topics mastered this term',
+    stat: '89% accuracy · trending up 23% this month',
+    cta: { label: 'View analytics', route: '/analytics' },
+  },
+  {
+    slide: 'spaced-repeat',
+    icon: 'sync-outline',
+    eyebrow: 'DUE FOR REVIEW',
+    title: '12 topics are ready to review',
+    stat: 'Spaced review beats cramming by up to 250%',
+    cta: { label: 'Start review', route: '/formula-hub/flashcards' },
+  },
+  {
+    slide: 'exam-mode',
+    icon: 'rocket-outline',
+    eyebrow: 'EXAM COUNTDOWN',
+    title: '21 days to your Physics final',
+    stat: '89% syllabus covered · 12 practice tests ready',
+    cta: { label: 'Enter exam mode', route: '/cbt' },
+  },
+];
 
 // Slim, always-visible upgrade prompt: a single scrolling line instead of a big
 // stacked card, so it earns its place at the very top without competing with
@@ -312,6 +269,257 @@ function PremiumMarquee({ onPress }) {
   );
 }
 
+// A single-message-at-a-time hero: one clear insight, one stat, one call to
+// action per slide, on the app's own brand gradient — no stock photography,
+// no borrowed accent colors. User-swipeable, with a slow auto-advance that
+// backs off the moment someone interacts with it.
+function HeroCarousel({ slides, router }) {
+  const { colors } = useTheme();
+  const { width: screenWidth } = useWindowDimensions();
+  const cardWidth = screenWidth - layout.screenPadding * 2;
+
+  const scrollRef = useRef(null);
+  const scrollX = useRef(new Animated.Value(0)).current;
+  const autoTimerRef = useRef(null);
+  const [, setActiveIndex] = useState(0);
+
+  const styles = useThemeStyles((c, s, r) => ({
+    shadowWrap: {
+      borderRadius: r['3xl'],
+      marginBottom: s.xl,
+      shadowColor: c.brand,
+      shadowOffset: { width: 0, height: 12 },
+      shadowOpacity: 0.18,
+      shadowRadius: 24,
+      elevation: 8,
+    },
+    card: {
+      borderRadius: r['3xl'],
+      overflow: 'hidden',
+    },
+    gradient: {
+      height: 214,
+    },
+    haloTop: {
+      position: 'absolute',
+      width: 180,
+      height: 180,
+      borderRadius: 90,
+      right: -50,
+      top: -60,
+      backgroundColor: 'rgba(255,255,255,0.12)',
+    },
+    haloBottom: {
+      position: 'absolute',
+      width: 140,
+      height: 140,
+      borderRadius: 70,
+      left: -40,
+      bottom: -70,
+      backgroundColor: 'rgba(255,255,255,0.08)',
+    },
+    slide: {
+      flex: 1,
+      padding: s.xl,
+      justifyContent: 'space-between',
+    },
+    eyebrowPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      alignSelf: 'flex-start',
+      backgroundColor: 'rgba(255,255,255,0.16)',
+      paddingLeft: 6,
+      paddingRight: s.md,
+      paddingVertical: 5,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.2)',
+    },
+    eyebrowIconWrap: {
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      backgroundColor: 'rgba(255,255,255,0.22)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    eyebrowText: {
+      color: c.onBrand,
+      fontSize: 10.5,
+      fontWeight: '800',
+      letterSpacing: 0.6,
+    },
+    slideTitle: {
+      color: c.onBrand,
+      fontSize: 22,
+      fontWeight: '900',
+      letterSpacing: -0.4,
+      lineHeight: 27,
+    },
+    slideStat: {
+      color: 'rgba(255,255,255,0.82)',
+      fontSize: 13,
+      fontWeight: '600',
+      marginTop: 6,
+      lineHeight: 18,
+    },
+    cta: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: c.surface,
+      paddingHorizontal: s.lg,
+      paddingVertical: 11,
+      borderRadius: r.xl,
+    },
+    ctaText: {
+      color: c.brandText,
+      fontSize: 13.5,
+      fontWeight: '800',
+    },
+    dotsRow: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: s.md,
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: 5,
+    },
+    dot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: c.onBrand,
+    },
+  }));
+
+  const goToIndex = useCallback(
+    (index) => {
+      scrollRef.current?.scrollTo({ x: index * cardWidth, animated: true });
+    },
+    [cardWidth]
+  );
+
+  const restartAutoAdvance = useCallback(() => {
+    if (autoTimerRef.current) clearInterval(autoTimerRef.current);
+    if (slides.length <= 1) return;
+    autoTimerRef.current = setInterval(() => {
+      setActiveIndex((prev) => {
+        const next = (prev + 1) % slides.length;
+        goToIndex(next);
+        return next;
+      });
+    }, HERO_AUTO_ADVANCE_MS);
+  }, [slides.length, goToIndex]);
+
+  useEffect(() => {
+    restartAutoAdvance();
+    return () => {
+      if (autoTimerRef.current) clearInterval(autoTimerRef.current);
+    };
+  }, [restartAutoAdvance]);
+
+  const handleScroll = Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], {
+    useNativeDriver: true,
+  });
+
+  const handleMomentumEnd = (event) => {
+    const index = Math.round(event.nativeEvent.contentOffset.x / cardWidth);
+    setActiveIndex(index);
+    restartAutoAdvance();
+  };
+
+  const pauseAutoAdvance = () => {
+    if (autoTimerRef.current) clearInterval(autoTimerRef.current);
+  };
+
+  return (
+    <View style={styles.shadowWrap}>
+      <View style={styles.card}>
+        <LinearGradient
+          colors={[colors.brand, colors.purple || colors.brand]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.gradient}
+        >
+          <View style={styles.haloTop} />
+          <View style={styles.haloBottom} />
+
+          <Animated.ScrollView
+            ref={scrollRef}
+            horizontal
+            pagingEnabled
+            decelerationRate="fast"
+            showsHorizontalScrollIndicator={false}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            onScrollBeginDrag={pauseAutoAdvance}
+            onMomentumScrollEnd={handleMomentumEnd}
+          >
+            {slides.map((slide) => (
+              <View key={slide.slide} style={[styles.slide, { width: cardWidth }]}>
+                <View style={styles.eyebrowPill}>
+                  <View style={styles.eyebrowIconWrap}>
+                    <Ionicons name={slide.icon} size={12} color={colors.onBrand} />
+                  </View>
+                  <Text style={styles.eyebrowText}>{slide.eyebrow}</Text>
+                </View>
+
+                <View>
+                  <Text style={styles.slideTitle} numberOfLines={2}>
+                    {slide.title}
+                  </Text>
+                  <Text style={styles.slideStat} numberOfLines={2}>
+                    {slide.stat}
+                  </Text>
+                </View>
+
+                <Pressable
+                  onPress={() => router.push(slide.cta.route)}
+                  style={({ pressed }) => [styles.cta, pressed && { opacity: 0.9, transform: [{ scale: 0.97 }] }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={slide.cta.label}
+                >
+                  <Text style={styles.ctaText}>{slide.cta.label}</Text>
+                  <Ionicons name="arrow-forward" size={15} color={colors.brandText} />
+                </Pressable>
+              </View>
+            ))}
+          </Animated.ScrollView>
+
+          {slides.length > 1 ? (
+            <View style={styles.dotsRow} pointerEvents="none">
+              {slides.map((slide, index) => {
+                const inputRange = [(index - 1) * cardWidth, index * cardWidth, (index + 1) * cardWidth];
+                const dotOpacity = scrollX.interpolate({
+                  inputRange,
+                  outputRange: [0.4, 1, 0.4],
+                  extrapolate: 'clamp',
+                });
+                const dotScale = scrollX.interpolate({
+                  inputRange,
+                  outputRange: [1, 1.6, 1],
+                  extrapolate: 'clamp',
+                });
+                return (
+                  <Animated.View
+                    key={slide.slide}
+                    style={[styles.dot, { opacity: dotOpacity, transform: [{ scale: dotScale }] }]}
+                  />
+                );
+              })}
+            </View>
+          ) : null}
+        </LinearGradient>
+      </View>
+    </View>
+  );
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const { profile } = useAuth();
@@ -323,9 +531,6 @@ export default function HomeScreen() {
   const [streakDates, setStreakDates] = useState([]);
   const [, setIsFabDragging] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
-  const [heroImageIndex, setHeroImageIndex] = useState(0);
-  const [heroFadeAnim] = useState(new Animated.Value(1));
-  const [heroContentFadeAnim] = useState(new Animated.Value(1));
   const [discoverData, setDiscoverData] = useState({
     hostels: [],
     friends: [],
@@ -334,46 +539,13 @@ export default function HomeScreen() {
     error: null,
   });
 
+  const heroSlides = useMemo(() => buildHeroSlides(streakCount), [streakCount]);
+
   // Reset avatar-error state whenever the source photo actually changes,
   // otherwise a newly-uploaded photo can never recover from a prior failed load.
   useEffect(() => {
     setAvatarFailed(false);
   }, [profile?.photoURL]);
-
-  // Auto-rotate hero background image with fade transition
-  useEffect(() => {
-    const interval = setInterval(() => {
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(heroFadeAnim, {
-            toValue: 0,
-            duration: 600,
-            useNativeDriver: true,
-          }),
-          Animated.timing(heroContentFadeAnim, {
-            toValue: 0,
-            duration: 600,
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.parallel([
-          Animated.timing(heroFadeAnim, {
-            toValue: 1,
-            duration: 600,
-            useNativeDriver: true,
-          }),
-          Animated.timing(heroContentFadeAnim, {
-            toValue: 1,
-            duration: 600,
-            useNativeDriver: true,
-          }),
-        ]),
-      ]).start();
-      setHeroImageIndex((prev) => (prev + 1) % HERO_BACKGROUNDS.length);
-    }, HERO_ROTATION_INTERVAL);
-
-    return () => clearInterval(interval);
-  }, [heroFadeAnim, heroContentFadeAnim]);
 
   // Floating Action Button Physics
   const fabPan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
@@ -465,161 +637,6 @@ export default function HomeScreen() {
       justifyContent: 'center',
       borderWidth: 1,
       borderColor: c.borderLight || c.border,
-    },
-
-    // Focus Zone (Dynamic Hero Card)
-    // NOTE: shadow lives on the OUTER wrapper only. The inner wrapper below
-    // carries `overflow: hidden` to clip the image/gradient — combining both
-    // on one view silently kills the shadow on iOS.
-    focusCardShadowWrap: {
-      borderRadius: r['3xl'],
-      marginBottom: s.xl,
-      shadowColor: c.brand,
-      shadowOffset: { width: 0, height: 12 },
-      shadowOpacity: 0.18,
-      shadowRadius: 24,
-      elevation: 8,
-    },
-    focusCard: {
-      borderRadius: r['3xl'],
-      overflow: 'hidden',
-    },
-    focusImageBg: {
-      width: '100%',
-      minHeight: 210,
-      justifyContent: 'space-between',
-    },
-    focusGradient: {
-      padding: s.xl,
-      justifyContent: 'space-between',
-      flex: 1,
-    },
-    focusHeaderRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    focusTag: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      backgroundColor: 'rgba(255, 255, 255, 0.2)',
-      paddingHorizontal: s.md,
-      paddingVertical: 5,
-      borderRadius: 999,
-    },
-    focusTagText: {
-      color: c.onBrand,
-      fontSize: 11,
-      fontWeight: '800',
-      letterSpacing: 0.5,
-    },
-    liveDot: {
-      width: 6,
-      height: 6,
-      borderRadius: 3,
-      backgroundColor: '#10B981',
-    },
-    focusBody: {
-      marginVertical: s.md,
-    },
-    focusBadge: {
-      alignSelf: 'flex-start',
-      backgroundColor: 'rgba(255, 255, 255, 0.18)',
-      paddingHorizontal: s.md,
-      paddingVertical: 6,
-      borderRadius: 999,
-      marginBottom: s.sm,
-      borderWidth: 1,
-      borderColor: 'rgba(255, 255, 255, 0.24)',
-    },
-    focusBadgeText: {
-      color: c.onBrand,
-      fontSize: 10,
-      fontWeight: '900',
-      letterSpacing: 1,
-    },
-    focusTitle: {
-      color: c.onBrand,
-      fontSize: 26,
-      fontWeight: '900',
-      letterSpacing: -0.5,
-      lineHeight: 32,
-    },
-    focusSubtitle: {
-      color: 'rgba(255, 255, 255, 0.85)',
-      fontSize: 13,
-      fontWeight: '500',
-      marginTop: 4,
-      marginBottom: s.md,
-    },
-    focusDataPoints: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: s.sm,
-      marginBottom: s.md,
-    },
-    focusDataPoint: {
-      backgroundColor: 'rgba(255, 255, 255, 0.12)',
-      paddingHorizontal: s.md,
-      paddingVertical: 8,
-      borderRadius: r.lg,
-      borderWidth: 1,
-      borderColor: 'rgba(255, 255, 255, 0.18)',
-    },
-    focusDataPointText: {
-      color: c.onBrand,
-      fontSize: 11,
-      fontWeight: '700',
-      letterSpacing: 0.3,
-    },
-    focusInsight: {
-      backgroundColor: 'rgba(255, 255, 255, 0.1)',
-      borderRadius: r.lg,
-      padding: s.md,
-      marginBottom: s.md,
-      borderLeftWidth: 3,
-      borderLeftColor: '#60A5FA',
-      flexDirection: 'row',
-      gap: s.sm,
-    },
-    focusInsightIcon: {
-      marginTop: 2,
-    },
-    focusInsightText: {
-      color: 'rgba(255, 255, 255, 0.9)',
-      fontSize: 12,
-      fontWeight: '600',
-      lineHeight: 18,
-      flex: 1,
-    },
-    focusFooterRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: s.sm,
-    },
-    btnFocusPrimary: {
-      flex: 1,
-      height: 46,
-      borderRadius: r.xl,
-      backgroundColor: c.surface,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-    },
-    btnFocusPrimaryText: {
-      color: c.brandText,
-      fontSize: 14,
-      fontWeight: '800',
-    },
-    btnFocusIcon: {
-      width: 46,
-      height: 46,
-      borderRadius: r.xl,
-      backgroundColor: 'rgba(255, 255, 255, 0.25)',
-      alignItems: 'center',
-      justifyContent: 'center',
     },
 
     // REDESIGNED TOOLKIT SECTION
@@ -1391,8 +1408,9 @@ export default function HomeScreen() {
           </Pressable>
         </Animated.View>
       }>
-        {/* PREMIUM MARQUEE — slim, scrolling, always visible without hogging space */}
+      {/* PREMIUM MARQUEE — slim, scrolling, always visible without hogging space */}
       {!premiumUnlocked ? <PremiumMarquee onPress={() => router.push('/premium')} /> : null}
+
       {/* AMBIENT FLOATING HEADER BAR */}
       <View style={styles.headerBar}>
         <Pressable style={styles.userPill} onPress={() => router.push('/profile')}>
@@ -1422,93 +1440,8 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      
-
-      {/* DYNAMIC FOCUS ZONE HERO CARD */}
-      <View style={styles.focusCardShadowWrap}>
-        <View style={styles.focusCard}>
-          <Animated.View style={{ opacity: heroFadeAnim }}>
-            <ImageBackground
-              source={{ uri: HERO_BACKGROUNDS[heroImageIndex] }}
-              style={styles.focusImageBg}
-              resizeMode="cover"
-            >
-              <LinearGradient
-                colors={['rgba(15, 23, 42, 0.4)', 'rgba(15, 23, 42, 0.92)']}
-                style={styles.focusGradient}
-              >
-                <View style={styles.focusHeaderRow}>
-                  <View style={styles.focusTag}>
-                    <View style={styles.liveDot} />
-                    <Text style={styles.focusTagText}>SMART COMPANION</Text>
-                  </View>
-                  <Text style={{ color: colors.onBrand, fontSize: 24 }}>{HERO_CONTENT[heroImageIndex].icon}</Text>
-                </View>
-
-                <Animated.View style={{ opacity: heroContentFadeAnim }}>
-                  {/* Badge */}
-                  <View style={styles.focusBadge}>
-                    <Text style={styles.focusBadgeText}>✨ {HERO_CONTENT[heroImageIndex].badge}</Text>
-                  </View>
-
-                  {/* Title & Subtitle */}
-                  <View style={styles.focusBody}>
-                    <Text style={styles.focusTitle}>{HERO_CONTENT[heroImageIndex].title}</Text>
-                    <Text style={styles.focusSubtitle}>{HERO_CONTENT[heroImageIndex].subtitle}</Text>
-                  </View>
-
-                  {/* Data Points - Educational Metrics */}
-                  {HERO_CONTENT[heroImageIndex].dataPoints && HERO_CONTENT[heroImageIndex].dataPoints.length > 0 && (
-                    <View style={styles.focusDataPoints}>
-                      {HERO_CONTENT[heroImageIndex].dataPoints.map((point, idx) => (
-                        <View key={idx} style={styles.focusDataPoint}>
-                          <Text style={styles.focusDataPointText}>{point}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-
-                  {/* AI Insight - The key differentiator */}
-                  {HERO_CONTENT[heroImageIndex].insight && (
-                    <View style={styles.focusInsight}>
-                      <View style={styles.focusInsightIcon}>
-                        <Ionicons name="bulb" size={18} color="#FBBF24" />
-                      </View>
-                      <Text style={styles.focusInsightText}>{HERO_CONTENT[heroImageIndex].insight}</Text>
-                    </View>
-                  )}
-
-                  {/* Action Buttons */}
-                  <View style={styles.focusFooterRow}>
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.btnFocusPrimary,
-                        pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] },
-                      ]}
-                      onPress={() => router.push(HERO_CONTENT[heroImageIndex].primaryCta.route)}
-                    >
-                      <Ionicons name={HERO_CONTENT[heroImageIndex].primaryCta.icon} size={18} color={colors.brandText} />
-                      <Text style={styles.btnFocusPrimaryText}>{HERO_CONTENT[heroImageIndex].primaryCta.label}</Text>
-                    </Pressable>
-
-                    {HERO_CONTENT[heroImageIndex].secondaryCta && (
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.btnFocusIcon,
-                          pressed && { opacity: 0.9 },
-                        ]}
-                        onPress={() => router.push(HERO_CONTENT[heroImageIndex].secondaryCta.route)}
-                      >
-                        <Ionicons name={HERO_CONTENT[heroImageIndex].secondaryCta.icon} size={20} color={colors.onBrand} />
-                      </Pressable>
-                    )}
-                  </View>
-                </Animated.View>
-            </LinearGradient>
-          </ImageBackground>
-            </Animated.View>
-        </View>
-      </View>
+      {/* SMART STUDY HERO — one message at a time, user-swipeable */}
+      <HeroCarousel slides={heroSlides} router={router} />
 
       {/* STREAK WIDGET */}
       <View style={{ marginBottom: layout.screenPadding }}>
@@ -1520,7 +1453,6 @@ export default function HomeScreen() {
         />
       </View>
 
-      
       {/* REDESIGNED ACADEMIC TOOLKIT SECTION */}
       <View>
         <View style={styles.sectionHeaderRow}>
@@ -1562,7 +1494,8 @@ export default function HomeScreen() {
           ))}
         </View>
       </View>
-          <Pressable
+
+      <Pressable
         style={({ pressed }) => [
           styles.flashBanner,
           pressed && { opacity: 0.92, transform: [{ scale: 0.99 }] },
@@ -1694,8 +1627,7 @@ export default function HomeScreen() {
         ) : (
           <View style={{ gap: 18 }}>
             <View>
-              <View style={discoverySectionStyles.sectionMeta}> 
-
+              <View style={discoverySectionStyles.sectionMeta}>
                 <Text style={discoverySectionStyles.discoveryTitle}>Hostels</Text>
                 <Pressable onPress={() => router.push('/hostelmarketplace')}>
                   <Text style={discoverySectionStyles.metaText}>View all</Text>
