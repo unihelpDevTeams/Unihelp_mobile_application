@@ -676,7 +676,12 @@ export default function ConversationPage() {
         </Pressable>
       </View>
 
-      <View style={styles.messagesPane}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        style={{ flex: 1 }}
+      >
+        <View style={styles.messagesPane}>
         {visibleMessages.length ? (
           <FlatList
             ref={listRef}
@@ -745,11 +750,7 @@ export default function ConversationPage() {
       {renderRelationshipPrompt()}
 
       {canChat ? (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-          style={styles.composerContainer}
-        >
+        <View style={styles.composerContainer}>
           {replyTo ? (
             <View style={styles.replyPreview}>
               <View style={styles.replyPreviewHeader}>
@@ -790,8 +791,9 @@ export default function ConversationPage() {
               {sending ? <ActivityIndicator color="#fff" /> : <Ionicons name="arrow-up" size={18} color={colors.onBrand} />}
             </Pressable>
           </View>
-        </KeyboardAvoidingView>
+        </View>
       ) : null}
+      </KeyboardAvoidingView>
 
       {/* Message Context Actions Sheet */}
       <Modal visible={!!activeMessage} transparent animationType="fade" onRequestClose={closeSheet}>
