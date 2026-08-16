@@ -106,8 +106,6 @@ export default function FormulaSubjectsPage() {
     });
   }, [sampleFormulas, getSubjectConfig]);
 
-  const totalFormulas = useMemo(() => sampleFormulas.length, [sampleFormulas]);
-
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle={colors.statusBar === 'light' ? 'light-content' : 'dark-content'} />
@@ -135,8 +133,8 @@ export default function FormulaSubjectsPage() {
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{totalFormulas}</Text>
-              <Text style={styles.statLabel}>Total Formulas</Text>
+              <Text style={styles.statNumber}>Random</Text>
+              <Text style={styles.statLabel}>Deck Mode</Text>
             </View>
           </View>
 

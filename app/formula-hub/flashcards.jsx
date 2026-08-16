@@ -2,6 +2,7 @@ import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react'
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   Animated,
   StyleSheet,
@@ -19,6 +20,15 @@ import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { typography, borderRadius, shadows } from '../../src/shared/theme';
 
+const shuffleArray = (items = []) => {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
+};
+
 export default function FlashCardsPage() {
   const { colors } = useTheme();
   const { width } = useWindowDimensions();
@@ -26,6 +36,7 @@ export default function FlashCardsPage() {
   const { formulas, loading, error } = useFormulas(reloadKey);
 
   const [activeSubject, setActiveSubject] = useState('All');
+  const [search, setSearch] = useState('');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [isShuffled, setIsShuffled] = useState(false);
@@ -42,19 +53,32 @@ export default function FlashCardsPage() {
     return ['All', ...unique];
   }, [formulas]);
 
-  // Filtered and potentially shuffled list
+  const randomizedFormulas = useMemo(() => shuffleArray(formulas), [formulas]);
+
+  // Filtered and intentionally randomized list
   const activeFormulas = useMemo(() => {
+    const normalizedQuery = search.trim().toLowerCase();
     let filtered =
       activeSubject === 'All'
-        ? formulas
-        : formulas.filter((f) => f.subject === activeSubject);
+        ? randomizedFormulas
+        : randomizedFormulas.filter((f) => f.subject === activeSubject);
+
+    if (normalizedQuery) {
+      filtered = filtered.filter((formula) =>
+        [formula.title, formula.subject, formula.category, formula.explanation]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(normalizedQuery)
+      );
+    }
 
     if (isShuffled) {
-      filtered = [...filtered].sort(() => Math.random() - 0.5);
+      filtered = shuffleArray(filtered);
     }
 
     return filtered;
-  }, [formulas, activeSubject, isShuffled]);
+  }, [activeSubject, isShuffled, randomizedFormulas, search]);
 
   const currentFormula = activeFormulas[currentIndex];
   const progress = activeFormulas.length > 0 ? (currentIndex + 1) / activeFormulas.length : 0;
@@ -75,7 +99,7 @@ export default function FlashCardsPage() {
     setIsFlipped(false);
     flipAnim.setValue(0);
     animateCardIn(0.5);
-  }, [activeSubject, isShuffled, flipAnim, animateCardIn]);
+  }, [activeSubject, isShuffled, search, flipAnim, animateCardIn]);
 
   useEffect(() => {
     if (currentIndex >= activeFormulas.length) {
@@ -251,6 +275,25 @@ export default function FlashCardsPage() {
       ...typography.sm,
       ...typography.bold,
       color: c.textSecondary,
+    },
+    searchCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.sm,
+      paddingHorizontal: s.md,
+      paddingVertical: s.sm,
+      borderRadius: borderRadius.xl,
+      backgroundColor: c.surfacePrimary,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      marginHorizontal: s.lg,
+      marginBottom: s.md,
+    },
+    searchInput: {
+      flex: 1,
+      color: c.textPrimary,
+      fontSize: 14,
+      paddingVertical: s.sm,
     },
     progressTrack: {
       height: 6,
@@ -494,6 +537,24 @@ export default function FlashCardsPage() {
       <StatusBar barStyle={colors.statusBar === 'light' ? 'light-content' : 'dark-content'} />
       <ScreenShell title="Flash Cards" subtitle="Test your formula memory." showBack scrollable={false}>
         
+        <View style={styles.searchCard}>
+          <Ionicons name="search-outline" size={18} color={colors.textTertiary} />
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search formulas, subjects, or topics"
+            placeholderTextColor={colors.textTertiary}
+            style={styles.searchInput}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {search ? (
+            <TouchableOpacity onPress={() => setSearch('')}>
+              <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
         {/* Subjects Filter */}
         <View>
           <ScrollView

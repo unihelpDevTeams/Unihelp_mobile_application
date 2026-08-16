@@ -275,7 +275,7 @@ export default function MessagesPage() {
       borderColor: c.borderDefault,
       borderRadius: 18,
       padding: 14,
-      marginBottom: 16,
+      marginBottom: 12,
     },
     findFriendIconWrap: {
       width: 42,
@@ -289,6 +289,20 @@ export default function MessagesPage() {
     findFriendTextWrap: { flex: 1 },
     findFriendTitle: { fontSize: 15, fontWeight: '800', color: c.textPrimary },
     findFriendSubtitle: { fontSize: 12, color: c.textSecondary, marginTop: 2 },
+    secondaryActionBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.surfacePrimary,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      borderRadius: 14,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      marginBottom: 16,
+      gap: 8,
+    },
+    secondaryActionText: { fontSize: 13, fontWeight: '700', color: c.textPrimary },
     friendCard: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -903,6 +917,15 @@ export default function MessagesPage() {
         <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
       </TouchableOpacity>
 
+      <TouchableOpacity
+        style={styles.secondaryActionBtn}
+        onPress={() => router.push('/friends')}
+        activeOpacity={0.8}
+      >
+        <Ionicons name="ban-outline" size={16} color={colors.textPrimary} />
+        <Text style={styles.secondaryActionText}>View blocked users</Text>
+      </TouchableOpacity>
+
       <Text style={styles.sectionLabel}>
         Friends {friends.length > 0 ? `(${friends.length})` : ''}
       </Text>
@@ -1050,6 +1073,18 @@ export default function MessagesPage() {
               </TouchableOpacity>
             )}
           </View>
+
+          <TouchableOpacity
+            style={styles.secondaryActionBtn}
+            onPress={() => {
+              setFindModalVisible(false);
+              router.push('/find-friends');
+            }}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="compass-outline" size={16} color={colors.textPrimary} />
+            <Text style={styles.secondaryActionText}>Open full Find Friends page</Text>
+          </TouchableOpacity>
 
           <FlatList
             data={matches}

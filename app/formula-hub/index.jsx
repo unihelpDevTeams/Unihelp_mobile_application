@@ -61,7 +61,7 @@ export default function FormulaHubHome() {
       route: '/formula-hub/subjects',
       gradient: gradients.brand,
       iconName: 'library-outline',
-      badgeText: `${formulas.length} Formulas`,
+      badgeText: 'Smart library',
     },
     {
       id: 'bookmarks',
@@ -70,7 +70,7 @@ export default function FormulaHubHome() {
       route: '/formula-hub/bookmarks',
       gradient: [colors.orange, '#EA580C'],
       iconName: 'bookmark-outline',
-      badgeText: `${bookmarksCount} Saved`,
+      badgeText: `${bookmarksCount} saved`,
     },
   ];
 
@@ -96,19 +96,19 @@ export default function FormulaHubHome() {
           <View style={styles.statsRow}>
             <StatCard
               styles={styles}
-              icon="book-outline"
-              label="Total"
-              value={loading ? '...' : formulas.length}
-              iconColor={colors.brand}
-              bgColor={colors.brandLight}
-            />
-            <StatCard
-              styles={styles}
               icon="layers-outline"
               label="Subjects"
               value={loading ? '...' : categoriesCount || 'Multi'}
               iconColor={colors.purple}
               bgColor={colors.purpleLight}
+            />
+            <StatCard
+              styles={styles}
+              icon="shuffle-outline"
+              label="Random Deck"
+              value={loading ? '...' : 'Live'}
+              iconColor={colors.brand}
+              bgColor={colors.brandLight}
             />
             <StatCard
               styles={styles}
