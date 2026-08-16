@@ -4,6 +4,7 @@ import {
   Text,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -17,6 +18,7 @@ import { useFormulas } from '../../hooks/useFormulas';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { getFormulaBookmarks } from '../../src/shared/services/formulaBookmarks';
+import { getDownloadRecord, saveResourceForOffline } from '../../src/shared/offline/offlineLearningService';
 
 import {
   spacing,
@@ -29,6 +31,8 @@ export default function FormulaHubHome() {
   const { colors, gradients } = useTheme();
   const { formulas, loading } = useFormulas();
   const [bookmarksCount, setBookmarksCount] = useState(0);
+  const [offlineRecord, setOfflineRecord] = useState(null);
+  const [savingOffline, setSavingOffline] = useState(false);
   const styles = createStyles(colors);
 
   useFocusEffect(
@@ -40,6 +44,13 @@ export default function FormulaHubHome() {
         })
         .catch(() => {
           if (active) setBookmarksCount(0);
+        });
+      getDownloadRecord('formulas', 'all')
+        .then((record) => {
+          if (active) setOfflineRecord(record);
+        })
+        .catch(() => {
+          if (active) setOfflineRecord(null);
         });
       return () => {
         active = false;
@@ -73,6 +84,24 @@ export default function FormulaHubHome() {
       badgeText: `${bookmarksCount} saved`,
     },
   ];
+
+  const saveFormulaLibrary = async () => {
+    if (!formulas.length) return;
+    setSavingOffline(true);
+    try {
+      const record = await saveResourceForOffline({
+        resourceType: 'formulas',
+        resourceId: 'all',
+        resource: formulas,
+      });
+      setOfflineRecord(record);
+      Alert.alert('Available Offline', 'Formula Library is saved inside UniHelp.');
+    } catch (error) {
+      Alert.alert('Save failed', error?.message || 'Could not save formulas for offline use.');
+    } finally {
+      setSavingOffline(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -119,6 +148,24 @@ export default function FormulaHubHome() {
               bgColor={colors.orangeLight}
             />
           </View>
+
+          <TouchableOpacity
+            activeOpacity={0.88}
+            onPress={saveFormulaLibrary}
+            disabled={loading || savingOffline || !formulas.length}
+            style={styles.offlineButton}
+            accessibilityRole="button"
+            accessibilityLabel="Save formula library for offline"
+          >
+            {savingOffline ? (
+              <ActivityIndicator size="small" color={colors.onBrand} />
+            ) : (
+              <Ionicons name={offlineRecord?.status === 'downloaded' ? 'checkmark-circle-outline' : 'cloud-download-outline'} size={17} color={colors.onBrand} />
+            )}
+            <Text style={styles.offlineButtonText}>
+              {offlineRecord?.status === 'downloaded' ? 'Formula Library Available Offline' : savingOffline ? 'Saving...' : 'Save Formula Library for Offline'}
+            </Text>
+          </TouchableOpacity>
 
           <TouchableOpacity
             activeOpacity={0.88}
@@ -257,6 +304,21 @@ const createStyles = (colors) => StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.sm,
     marginBottom: spacing.lg,
+  },
+  offlineButton: {
+    minHeight: 46,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  offlineButtonText: {
+    ...typography.sm,
+    ...typography.extrabold,
+    color: colors.onBrand,
   },
   statCard: {
     flex: 1,

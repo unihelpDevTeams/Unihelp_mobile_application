@@ -1,10 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useEffect, useState } from 'react';
 import { auth, db } from '../../../firebase/config';
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { getJson, postJson } from '../services/backend';
+import { resolveDocumentAsset } from '../utils/documentMedia';
 
-const LEARNING_STORAGE_KEY = '@unihelp_learning_offline_v1';
+const LEARNING_STORAGE_KEY = '@unihelp_learning_offline_v2';
+const LEGACY_STORAGE_KEY = '@unihelp_learning_offline_v1';
+const OFFLINE_ROOT = `${FileSystem.documentDirectory || ''}unihelp-offline/`;
+const OFFLINE_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
 
 const emptyStore = () => ({
   downloads: [],
@@ -17,29 +23,27 @@ const emptyStore = () => ({
     notes: {},
     gpa: {},
   },
-  metadata: {
-    lastSyncedAt: null,
-  },
+  entitlement: null,
+  metadata: { lastSyncedAt: null },
 });
 
 const ensureStoreShape = (value) => {
   const base = emptyStore();
   if (!value || typeof value !== 'object') return base;
-
   return {
     ...base,
     ...value,
     downloads: Array.isArray(value.downloads) ? value.downloads : base.downloads,
     syncQueue: Array.isArray(value.syncQueue) ? value.syncQueue : base.syncQueue,
     progress: { ...base.progress, ...(value.progress || {}) },
+    entitlement: value.entitlement || base.entitlement,
     metadata: { ...base.metadata, ...(value.metadata || {}) },
   };
 };
 
 async function readStore() {
-  const raw = await AsyncStorage.getItem(LEARNING_STORAGE_KEY);
+  const raw = (await AsyncStorage.getItem(LEARNING_STORAGE_KEY)) || (await AsyncStorage.getItem(LEGACY_STORAGE_KEY));
   if (!raw) return emptyStore();
-
   try {
     return ensureStoreShape(JSON.parse(raw));
   } catch {
@@ -53,55 +57,143 @@ async function writeStore(nextStore) {
   return normalized;
 }
 
-export async function getStoredFormulas() {
-  const store = await readStore();
-  return Array.isArray(store.progress.formulas) ? store.progress.formulas : [];
+const normalizeType = (type = '') => {
+  const value = String(type || '').trim();
+  if (['question', 'questions', 'pastQuestion', 'pastQuestions'].includes(value)) return 'pastQuestions';
+  if (['note', 'notes', 'studyMaterial', 'studyMaterials'].includes(value)) return 'notes';
+  if (['formula', 'formulas', 'flashcards'].includes(value)) return value === 'flashcards' ? 'flashcards' : 'formulas';
+  if (['challenge', 'challenges'].includes(value)) return 'challenge';
+  return value || 'resource';
+};
+
+const getCurrentUid = () => auth.currentUser?.uid || null;
+
+const isEntitlementUsable = (entitlement, uid = getCurrentUid()) => {
+  if (!entitlement?.premium || !uid || entitlement.userId !== uid) return false;
+  if (entitlement.expiresAt) {
+    const expiry = new Date(entitlement.expiresAt);
+    if (!Number.isNaN(expiry.getTime()) && expiry.getTime() <= Date.now()) return false;
+  }
+  const validatedAt = entitlement.lastValidatedAt ? new Date(entitlement.lastValidatedAt) : null;
+  if (!validatedAt || Number.isNaN(validatedAt.getTime())) return false;
+  return Date.now() - validatedAt.getTime() <= OFFLINE_GRACE_MS;
+};
+
+const safeFileName = (value = 'resource.bin') => {
+  const name = String(value || 'resource.bin').split(/[\\/]/).pop() || 'resource.bin';
+  return name.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'resource.bin';
+};
+
+const getResourceDirectory = (uid, type, id) =>
+  `${OFFLINE_ROOT}${safeFileName(uid)}/resources/${safeFileName(type)}/${safeFileName(String(id))}/`;
+
+async function ensureDirectory(uri) {
+  const info = await FileSystem.getInfoAsync(uri);
+  if (!info.exists) await FileSystem.makeDirectoryAsync(uri, { intermediates: true });
 }
 
-export async function saveStoredFormulas(formulas = []) {
+const withoutRemoteDocumentUrls = (metadata = {}) => {
+  const blocked = new Set(['fileUrl', 'pdfUrl', 'downloadUrl', 'url', 'link']);
+  return Object.entries(metadata || {}).reduce((acc, [key, value]) => {
+    if (blocked.has(key)) return acc;
+    if (key === 'files' && Array.isArray(value)) {
+      acc.files = value.map((file) => ({
+        name: file?.name || file?.fileName || file?.original_filename || '',
+        type: file?.type || file?.mimeType || '',
+        size: file?.size || 0,
+      }));
+      return acc;
+    }
+    acc[key] = value;
+    return acc;
+  }, {});
+};
+
+export async function validateOfflineEntitlement({ force = false } = {}) {
   const store = await readStore();
-  const normalized = Array.isArray(formulas) ? formulas : [];
-  const next = await writeStore({
-    ...store,
-    progress: {
-      ...store.progress,
-      formulas: normalized,
-    },
-  });
-  return next.progress.formulas;
+  const uid = getCurrentUid();
+  if (!uid) return { premium: false, userId: null, reason: 'auth-required' };
+  if (!force && isEntitlementUsable(store.entitlement, uid)) return store.entitlement;
+
+  const online = await checkConnectivity();
+  if (!online) return store.entitlement || { premium: false, userId: uid, reason: 'offline-unvalidated' };
+
+  const data = await getJson('/api/offline-library/entitlement');
+  const entitlement = data.entitlement || { premium: false, userId: uid };
+  await writeStore({ ...store, entitlement });
+  return entitlement;
+}
+
+export async function hasOfflineLibraryAccess() {
+  const store = await readStore();
+  return isEntitlementUsable(store.entitlement);
+}
+
+export async function getOfflineEntitlement() {
+  const store = await readStore();
+  return store.entitlement;
 }
 
 function createDownloadEntry(type, id, payload = {}) {
+  const uid = payload.userId || getCurrentUid() || 'offline-user';
   return {
     id: String(id || `${type}-${Date.now()}`),
-    type,
-    status: 'downloaded',
-    contentVersion: payload.contentVersion || '1',
-    downloadedAt: new Date().toISOString(),
+    type: normalizeType(type),
+    userId: uid,
+    title: payload.title || payload.meta?.title || 'Offline resource',
+    status: payload.status || 'downloaded',
+    contentKind: payload.contentKind || 'structured',
+    contentVersion: String(payload.contentVersion || '1'),
+    downloadedVersion: String(payload.downloadedVersion || payload.contentVersion || '1'),
+    downloadedAt: payload.downloadedAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     lastSyncedAt: null,
-    payload: payload.payload || payload,
+    size: payload.size || 0,
+    localReference: payload.localReference || null,
+    payload: payload.payload || null,
     meta: payload.meta || {},
   };
 }
 
-export async function getDownloadRecords() {
+export async function getDownloadRecords({ includeExpired = true } = {}) {
   const store = await readStore();
-  return [...store.downloads];
+  const uid = getCurrentUid();
+  const list = uid ? store.downloads.filter((item) => !item.userId || item.userId === uid) : store.downloads;
+  if (includeExpired) return [...list];
+  return isEntitlementUsable(store.entitlement, uid) ? [...list] : [];
+}
+
+export async function getDownloadRecord(type, id) {
+  const normalizedType = normalizeType(type);
+  const uid = getCurrentUid();
+  const store = await readStore();
+  return store.downloads.find((item) =>
+    item.type === normalizedType &&
+    String(item.id) === String(id) &&
+    (!uid || !item.userId || item.userId === uid)
+  ) || null;
 }
 
 export async function setDownloadState(type, id, update = {}) {
   const store = await readStore();
+  const normalizedType = normalizeType(type);
   const normalizedId = String(id);
-  const existingIndex = store.downloads.findIndex((item) => item.type === type && String(item.id) === normalizedId);
-  const entry = existingIndex >= 0 ? { ...store.downloads[existingIndex], ...update } : createDownloadEntry(type, normalizedId, update);
+  const uid = update.userId || getCurrentUid() || 'offline-user';
+  const existingIndex = store.downloads.findIndex((item) =>
+    item.type === normalizedType &&
+    String(item.id) === normalizedId &&
+    (!item.userId || item.userId === uid)
+  );
+  const entry = existingIndex >= 0
+    ? { ...store.downloads[existingIndex], ...update, updatedAt: new Date().toISOString() }
+    : createDownloadEntry(normalizedType, normalizedId, { ...update, userId: uid });
 
   const nextDownloads = [...store.downloads];
   if (existingIndex >= 0) nextDownloads[existingIndex] = entry;
   else nextDownloads.push(entry);
 
   const nextStore = await writeStore({ ...store, downloads: nextDownloads });
-  return nextStore.downloads.find((item) => item.type === type && String(item.id) === normalizedId) || entry;
+  return nextStore.downloads.find((item) => item.type === normalizedType && String(item.id) === normalizedId) || entry;
 }
 
 export async function isContentDownloaded(type, id) {
@@ -109,16 +201,130 @@ export async function isContentDownloaded(type, id) {
   return Boolean(item && item.status === 'downloaded');
 }
 
-export async function getDownloadRecord(type, id) {
-  const store = await readStore();
-  return store.downloads.find((item) => item.type === type && String(item.id) === String(id)) || null;
+export async function saveResourceForOffline({ resourceType, resourceId, resource = null, fileUrl = '', fileName = '', onProgress } = {}) {
+  const type = normalizeType(resourceType);
+  const id = String(resourceId || resource?.id || type);
+  const uid = getCurrentUid();
+  if (!uid) throw new Error('Please sign in to save resources offline.');
+
+  const existing = await getDownloadRecord(type, id);
+  if (existing?.status === 'downloaded' && existing.downloadedVersion === String(existing.contentVersion || '1')) {
+    return existing;
+  }
+
+  await setDownloadState(type, id, {
+    userId: uid,
+    status: 'saving',
+    title: resource?.title || resource?.name || existing?.title || 'Saving resource',
+    contentVersion: resource?.contentVersion || existing?.contentVersion || '1',
+  });
+
+  try {
+    const authResult = await postJson('/api/offline-library/authorize', { resourceType: type, resourceId: id });
+    const entitlement = authResult.entitlement;
+    const authorized = authResult.resource || {};
+    const store = await readStore();
+    await writeStore({ ...store, entitlement });
+    if (!isEntitlementUsable(entitlement, uid)) throw new Error('Offline Library is available with UniHelp Premium.');
+
+    const title = authorized.title || resource?.title || resource?.name || 'Offline resource';
+    const contentVersion = String(authorized.contentVersion || resource?.contentVersion || resource?.version || '1');
+    const contentKind = authorized.contentKind || (fileUrl ? 'document' : 'structured');
+    const meta = authorized.metadata || resource || {};
+    const resolved = resolveDocumentAsset(meta || {});
+    const remoteUrl = fileUrl || resolved.directDownloadUrl || resolved.fileUrl || resolved.downloadUrl || '';
+    let localReference = null;
+    let size = 0;
+    let payload = authorized.payload || null;
+
+    if (contentKind === 'document' && remoteUrl) {
+      const directory = getResourceDirectory(uid, type, id);
+      await ensureDirectory(directory);
+      const finalName = safeFileName(fileName || resolved.fileName || `${id}.pdf`);
+      localReference = `${directory}${finalName}`;
+      const resumable = FileSystem.createDownloadResumable?.(remoteUrl, localReference, {}, ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
+        if (typeof onProgress === 'function' && totalBytesExpectedToWrite > 0) {
+          onProgress(Math.round((totalBytesWritten / totalBytesExpectedToWrite) * 100));
+        }
+      });
+      const result = resumable ? await resumable.downloadAsync() : await FileSystem.downloadAsync(remoteUrl, localReference);
+      if (!result?.uri) throw new Error('Save failed.');
+      const info = await FileSystem.getInfoAsync(result.uri, { size: true });
+      size = info?.size || 0;
+      payload = null;
+    } else {
+      payload = authorized.payload || resource || {};
+      size = JSON.stringify(payload || {}).length;
+    }
+
+    return setDownloadState(type, id, {
+      userId: uid,
+      status: 'downloaded',
+      title,
+      contentKind,
+      contentVersion,
+      downloadedVersion: contentVersion,
+      downloadedAt: new Date().toISOString(),
+      size,
+      localReference,
+      payload,
+      meta: { ...withoutRemoteDocumentUrls(meta), title, resourceType: type, contentKind },
+    });
+  } catch (error) {
+    await setDownloadState(type, id, { userId: uid, status: 'failed', reason: error?.message || 'Save failed' });
+    throw error;
+  }
 }
 
 export async function removeDownload(type, id) {
+  const normalizedType = normalizeType(type);
+  const uid = getCurrentUid();
   const store = await readStore();
-  const nextDownloads = store.downloads.filter((item) => !(item.type === type && String(item.id) === String(id)));
+  const target = store.downloads.find((item) =>
+    item.type === normalizedType &&
+    String(item.id) === String(id) &&
+    (!uid || !item.userId || item.userId === uid)
+  );
+  if (target?.localReference) {
+    await FileSystem.deleteAsync(target.localReference, { idempotent: true }).catch(() => {});
+  }
+  const nextDownloads = store.downloads.filter((item) =>
+    !(item.type === normalizedType && String(item.id) === String(id) && (!uid || !item.userId || item.userId === uid))
+  );
   const nextStore = await writeStore({ ...store, downloads: nextDownloads });
   return nextStore.downloads;
+}
+
+export async function clearOfflineDownloads() {
+  const uid = getCurrentUid();
+  if (!uid) return [];
+  const store = await readStore();
+  const keep = [];
+  for (const item of store.downloads) {
+    if (item.userId === uid) {
+      if (item.localReference) await FileSystem.deleteAsync(item.localReference, { idempotent: true }).catch(() => {});
+    } else {
+      keep.push(item);
+    }
+  }
+  await FileSystem.deleteAsync(`${OFFLINE_ROOT}${safeFileName(uid)}/resources/`, { idempotent: true }).catch(() => {});
+  const nextStore = await writeStore({ ...store, downloads: keep });
+  return nextStore.downloads;
+}
+
+export async function getStoredFormulas() {
+  const store = await readStore();
+  if (Array.isArray(store.progress.formulas)) return store.progress.formulas;
+  const formulaDownloads = store.downloads.filter((item) => item.type === 'formulas' && item.status === 'downloaded');
+  const payloads = formulaDownloads.flatMap((item) => Array.isArray(item.payload) ? item.payload : [item.payload].filter(Boolean));
+  return payloads.length ? payloads : [];
+}
+
+export async function saveStoredFormulas(formulas = []) {
+  const store = await readStore();
+  const normalized = Array.isArray(formulas) ? formulas : [];
+  const next = await writeStore({ ...store, progress: { ...store.progress, formulas: normalized } });
+  return next.progress.formulas;
 }
 
 export async function queueLearningSync(entry = {}) {
@@ -133,12 +339,10 @@ export async function queueLearningSync(entry = {}) {
     updatedAt: entry.updatedAt || new Date().toISOString(),
     retryCount: entry.retryCount || 0,
   };
-
   const existingIndex = store.syncQueue.findIndex((item) => item.id === syncItem.id);
   const nextQueue = [...store.syncQueue];
   if (existingIndex >= 0) nextQueue[existingIndex] = syncItem;
   else nextQueue.unshift(syncItem);
-
   const nextStore = await writeStore({ ...store, syncQueue: nextQueue });
   return nextStore.syncQueue[0] || syncItem;
 }
@@ -151,8 +355,7 @@ export async function getSyncQueue() {
 export async function markSyncSuccess(id) {
   const store = await readStore();
   const queue = store.syncQueue.map((item) => (item.id === id ? { ...item, status: 'synced', updatedAt: new Date().toISOString() } : item));
-  const nextStore = await writeStore({ ...store, syncQueue: queue.filter((item) => item.id !== id), metadata: { ...store.metadata, lastSyncedAt: new Date().toISOString() } });
-  return nextStore;
+  return writeStore({ ...store, syncQueue: queue.filter((item) => item.id !== id), metadata: { ...store.metadata, lastSyncedAt: new Date().toISOString() } });
 }
 
 export async function markSyncFailed(id, reason = '') {
@@ -160,15 +363,8 @@ export async function markSyncFailed(id, reason = '') {
   const nextQueue = store.syncQueue.map((item) => {
     if (item.id !== id) return item;
     const retryCount = Math.max(0, Number(item.retryCount || 0) + 1);
-    return {
-      ...item,
-      status: retryCount >= 4 ? 'failed' : 'queued',
-      retryCount,
-      reason,
-      updatedAt: new Date().toISOString(),
-    };
+    return { ...item, status: retryCount >= 4 ? 'failed' : 'queued', retryCount, reason, updatedAt: new Date().toISOString() };
   });
-
   await writeStore({ ...store, syncQueue: nextQueue });
   return nextQueue;
 }
@@ -186,13 +382,7 @@ export async function getLocalStudyProgress(scope = 'challenge') {
 
 export async function saveLocalStudyProgress(scope, key, value) {
   const store = await readStore();
-  const nextProgress = {
-    ...store.progress,
-    [scope]: {
-      ...(store.progress?.[scope] || {}),
-      [key]: value,
-    },
-  };
+  const nextProgress = { ...store.progress, [scope]: { ...(store.progress?.[scope] || {}), [key]: value } };
   const nextStore = await writeStore({ ...store, progress: nextProgress });
   return nextStore.progress?.[scope]?.[key];
 }
@@ -203,48 +393,23 @@ export async function checkConnectivity() {
 }
 
 export function useNetworkStatus() {
-  const [status, setStatus] = useState({
-    isConnected: true,
-    isOffline: false,
-    isReconnecting: false,
-    isSyncing: false,
-    state: null,
-  });
-
+  const [status, setStatus] = useState({ isConnected: true, isOffline: false, isReconnecting: false, isSyncing: false, state: null });
   useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener((state) => {
+    const applyState = (state) => {
       const connected = Boolean(state?.isConnected) && state?.isInternetReachable !== false;
-      setStatus({
-        isConnected: connected,
-        isOffline: !connected,
-        isReconnecting: Boolean(!connected && state?.isConnected === null),
-        isSyncing: false,
-        state,
-      });
-    });
-
-    NetInfo.fetch().then((state) => {
-      const connected = Boolean(state?.isConnected) && state?.isInternetReachable !== false;
-      setStatus({
-        isConnected: connected,
-        isOffline: !connected,
-        isReconnecting: false,
-        isSyncing: false,
-        state,
-      });
-    }).catch(() => {});
-
+      setStatus({ isConnected: connected, isOffline: !connected, isReconnecting: Boolean(!connected && state?.isConnected === null), isSyncing: false, state });
+    };
+    const unsubscribe = NetInfo.addEventListener(applyState);
+    NetInfo.fetch().then(applyState).catch(() => {});
     return () => unsubscribe();
   }, []);
-
   return status;
 }
 
 export async function syncQueuedLearningActions({ onProgress } = {}) {
   const canSync = await checkConnectivity();
-  if (!canSync || !auth.currentUser?.uid) {
-    return { processed: 0, queued: true };
-  }
+  if (!canSync || !auth.currentUser?.uid) return { processed: 0, queued: true };
+  await validateOfflineEntitlement({ force: true }).catch(() => null);
 
   const store = await readStore();
   const queue = [...store.syncQueue].filter((item) => item.status !== 'synced' && (item.status === 'queued' || item.status === 'failed'));
@@ -272,21 +437,18 @@ export async function syncQueuedLearningActions({ onProgress } = {}) {
         await setDoc(ref, { ...item.payload?.value, updatedAt: serverTimestamp() }, { merge: true });
       }
 
-      if (typeof onProgress === 'function') {
-        onProgress({ processed: processed + 1, total: queue.length });
+      if (item.type?.startsWith?.('offline:')) {
+        await postJson('/api/offline-library/sync', item);
       }
 
+      if (typeof onProgress === 'function') onProgress({ processed: processed + 1, total: queue.length });
       processed += 1;
       await markSyncSuccess(item.id);
     } catch (error) {
       await markSyncFailed(item.id, error?.message || 'Sync failed');
     }
   }
-
-  return {
-    processed,
-    queued: queue.length > processed,
-  };
+  return { processed, queued: queue.length > processed };
 }
 
 export async function saveLocalChallengeAttempt(result = {}) {
@@ -305,14 +467,9 @@ export async function saveLocalChallengeAttempt(result = {}) {
     createdAt: new Date().toISOString(),
     offline: true,
   };
-
   const store = await readStore();
   const keyed = { ...store.progress.challenge, [localResult.id]: localResult };
-  await writeStore({
-    ...store,
-    progress: { ...store.progress, challenge: keyed },
-  });
-
+  await writeStore({ ...store, progress: { ...store.progress, challenge: keyed } });
   return localResult;
 }
 
@@ -320,10 +477,7 @@ export async function saveLocalGpaRecord(record = {}) {
   const safeId = String(record.id || `gpa-${Date.now()}`);
   const store = await readStore();
   const keyed = { ...store.progress.gpa, [safeId]: { ...record, id: safeId, savedAt: new Date().toISOString(), offline: true } };
-  await writeStore({
-    ...store,
-    progress: { ...store.progress, gpa: keyed },
-  });
+  await writeStore({ ...store, progress: { ...store.progress, gpa: keyed } });
   return keyed[safeId];
 }
 
@@ -334,6 +488,16 @@ export async function getLocalGpaRecords() {
 
 export async function saveDownloadedFormulas(formulas = []) {
   await saveStoredFormulas(Array.isArray(formulas) ? formulas : []);
+  if (Array.isArray(formulas) && formulas.length) {
+    await setDownloadState('formulas', 'all', {
+      status: 'downloaded',
+      title: 'Formula Library',
+      contentKind: 'structured',
+      payload: formulas,
+      size: JSON.stringify(formulas).length,
+      meta: { title: 'Formula Library', count: formulas.length },
+    });
+  }
   return getStoredFormulas();
 }
 

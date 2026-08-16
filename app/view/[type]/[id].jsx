@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Dimensions, Linking, Modal, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 import { Image } from 'expo-image';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +14,7 @@ import { startConversation, sendDirectMessage } from '../../../src/shared/servic
 import { getUserProfileById } from '../../../src/shared/services/friendships';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
 import { canManageResource } from '../../../src/shared/auth/resourcePermissions';
+import { getDownloadRecord, saveResourceForOffline } from '../../../src/shared/offline/offlineLearningService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const SCREEN_PADDING = 18;
@@ -190,7 +189,9 @@ export default function RecordViewPage() {
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState('');
   const [pdfViewerIndex, setPdfViewerIndex] = useState(0);
   const [pdfPreviewError, setPdfPreviewError] = useState(false);
-  const [downloading, setDownloading] = useState(false);
+  const [savingOffline, setSavingOffline] = useState(false);
+  const [offlineProgress, setOfflineProgress] = useState(0);
+  const [offlineRecord, setOfflineRecord] = useState(null);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [contactSheetVisible, setContactSheetVisible] = useState(false);
   const [messaging, setMessaging] = useState(false);
@@ -369,6 +370,22 @@ export default function RecordViewPage() {
   }, [isCommerceType, isHostel, item, primaryLocation]);
   const hasFileAsset = Boolean(asset?.fileUrl || asset?.downloadUrl);
 
+  useEffect(() => {
+    if (!id || !['note', 'question', 'studyMaterial'].includes(type)) {
+      setOfflineRecord(null);
+      return undefined;
+    }
+    let cancelled = false;
+    getDownloadRecord(type, id)
+      .then((record) => {
+        if (!cancelled) setOfflineRecord(record);
+      })
+      .catch(() => {
+        if (!cancelled) setOfflineRecord(null);
+      });
+    return () => { cancelled = true; };
+  }, [id, type]);
+
   const openPdfPreview = (url) => {
     const previewUrl = url || asset?.fileUrl || asset?.downloadUrl || '';
     if (!previewUrl) return;
@@ -378,54 +395,37 @@ export default function RecordViewPage() {
     setPdfPreviewOpen(true);
   };
 
-  const downloadDocument = async (url) => {
-    const downloadUrl = url || asset?.downloadUrl || asset?.fileUrl || '';
+  const saveDocumentOffline = async () => {
+    const downloadUrl = asset?.directDownloadUrl || asset?.fileUrl || asset?.downloadUrl || '';
     if (!downloadUrl) {
-      Alert.alert('Download unavailable', 'There is no file attached for this item.');
+      Alert.alert('Save unavailable', 'There is no file attached for this item.');
       return;
     }
-
     if (isDownloadRestricted) {
-      Alert.alert('Premium required', 'Upgrade to Premium to download this file.');
+      Alert.alert('Premium required', 'Offline Library is available with UniHelp Premium.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'View Premium', onPress: () => router.push('/premium') },
+      ]);
       return;
     }
 
-    setDownloading(true);
+    setSavingOffline(true);
+    setOfflineProgress(0);
     try {
-      const rawFileName = String(asset?.fileName || downloadUrl.split('?')[0].split('/').pop() || 'document.pdf');
-      const safeBaseName = rawFileName.replace(/[^a-zA-Z0-9._-]+/g, '_') || 'document.pdf';
-      const fileName = asset?.isPdf && !/\.pdf$/i.test(safeBaseName) ? `${safeBaseName}.pdf` : safeBaseName;
-      const localUri = `${FileSystem.cacheDirectory}${fileName}`;
-      const attempts = [...new Set([downloadUrl, asset?.directDownloadUrl, asset?.fileUrl].filter(Boolean))];
-      let result = null;
-      let lastError = null;
-
-      for (const attemptUrl of attempts) {
-        try {
-          result = await FileSystem.downloadAsync(attemptUrl, localUri);
-          if (result?.status >= 200 && result?.status < 300) break;
-          throw new Error(`Download returned status ${result?.status || 'unknown'}`);
-        } catch (attemptError) {
-          lastError = attemptError;
-          result = null;
-        }
-      }
-
-      if (!result?.uri) {
-        throw lastError || new Error('Download failed');
-      }
-
-      const canShare = await Sharing.isAvailableAsync().catch(() => false);
-      if (canShare) {
-        await Sharing.shareAsync(result.uri, { mimeType: 'application/pdf', dialogTitle: 'Save document', UTI: 'com.adobe.pdf' });
-      } else {
-        await Linking.openURL(downloadUrl);
-      }
+      const saved = await saveResourceForOffline({
+        resourceType: type,
+        resourceId: id,
+        resource: item,
+        fileUrl: downloadUrl,
+        fileName: asset?.fileName,
+        onProgress: setOfflineProgress,
+      });
+      setOfflineRecord(saved);
+      Alert.alert('Available Offline', 'This resource is saved inside UniHelp and can be opened from Offline Library.');
     } catch (error) {
-      console.warn('Document download failed', error);
-      Alert.alert('Download failed', 'We could not download this file right now.');
+      Alert.alert('Save failed', error?.message || 'We could not save this resource right now.');
     } finally {
-      if (isMounted.current) setDownloading(false);
+      if (isMounted.current) setSavingOffline(false);
     }
   };
 
@@ -909,17 +909,27 @@ export default function RecordViewPage() {
                   (!asset.hasDocumentUrl || isDownloadRestricted) && styles.disabledButton,
                   pressed && asset.hasDocumentUrl && !isDownloadRestricted && styles.pressedSubtle,
                 ]}
-                onPress={() => downloadDocument(asset.downloadUrl || asset.fileUrl)}
-                disabled={downloading || !asset.hasDocumentUrl || isDownloadRestricted}
+                onPress={saveDocumentOffline}
+                disabled={savingOffline || !asset.hasDocumentUrl}
                 accessibilityRole="button"
-                accessibilityLabel="Download document"
+                accessibilityLabel="Save resource for offline"
               >
-                {downloading ? (
+                {savingOffline ? (
                   <ActivityIndicator color={colors.brandDark} />
                 ) : (
                   <>
-                    <Ionicons name="download-outline" size={16} color={colors.brandDark} />
-                    <Text style={styles.stickyDownloadText}>{isDownloadRestricted ? 'Premium to download' : 'Download'}</Text>
+                    <Ionicons name={offlineRecord?.status === 'downloaded' ? 'checkmark-circle-outline' : 'cloud-download-outline'} size={16} color={colors.brandDark} />
+                    <Text style={styles.stickyDownloadText}>
+                      {isDownloadRestricted
+                        ? 'Premium required'
+                        : offlineRecord?.status === 'downloaded'
+                          ? 'Available Offline'
+                          : savingOffline && offlineProgress
+                            ? `Saving ${offlineProgress}%`
+                            : offlineRecord?.status === 'failed'
+                              ? 'Save Failed - Retry'
+                              : 'Save for Offline'}
+                    </Text>
                   </>
                 )}
               </Pressable>
@@ -1043,7 +1053,7 @@ export default function RecordViewPage() {
             <View style={styles.webviewLoading}>
               <Ionicons name="cloud-offline-outline" size={30} color={colors.textSecondary} />
               <Text style={styles.loadingText}>We could not load a preview for this file.</Text>
-              <Text style={styles.previewErrorHint}>Try opening it in your browser or downloading it instead.</Text>
+              <Text style={styles.previewErrorHint}>You can still save eligible Premium resources for offline use from the detail page.</Text>
             </View>
           ) : (
             <WebView
@@ -1069,22 +1079,12 @@ export default function RecordViewPage() {
           <View style={styles.previewModalActions}>
             <Pressable
               style={({ pressed }) => [styles.previewModalAction, pressed && styles.pressedSubtle]}
-              onPress={() => Linking.openURL(pdfPreviewUrl).catch(() => {})}
+              onPress={() => setPdfPreviewOpen(false)}
               accessibilityRole="button"
-              accessibilityLabel="Open in browser"
+              accessibilityLabel="Close document preview"
             >
-              <Ionicons name="open-outline" size={16} color={colors.brandDark} />
-              <Text style={styles.previewModalActionText}>Open</Text>
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [styles.previewModalAction, pressed && styles.pressedSubtle]}
-              onPress={() => downloadDocument(asset.downloadUrl || asset.fileUrl)}
-              disabled={downloading}
-              accessibilityRole="button"
-              accessibilityLabel="Download document"
-            >
-              <Ionicons name="download-outline" size={16} color={colors.brandDark} />
-              <Text style={styles.previewModalActionText}>Download</Text>
+              <Ionicons name="reader-outline" size={16} color={colors.brandDark} />
+              <Text style={styles.previewModalActionText}>Done</Text>
             </Pressable>
           </View>
         </View>

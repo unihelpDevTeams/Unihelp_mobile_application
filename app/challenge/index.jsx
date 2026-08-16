@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import ScreenShell from '../../src/shared/components/ScreenShell';
@@ -10,8 +10,9 @@ import { spacing, borderRadius, shadows } from '../../src/shared/theme';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { getTodayKey, getRecommendedCategories } from '../../src/shared/challenge/data';
-import { fetchChallengeDashboard } from '../../src/shared/challenge/service';
+import { fetchChallengeDashboard, fetchChallengeQuestions } from '../../src/shared/challenge/service';
 import { AnimatedPressable, ChallengeBadge, ProgressBar, StatCard } from '../../src/shared/challenge/components/ChallengePieces';
+import { getDownloadRecord, saveResourceForOffline } from '../../src/shared/offline/offlineLearningService';
 
 export default function ChallengeHomeScreen() {
   const router = useRouter();
@@ -19,6 +20,8 @@ export default function ChallengeHomeScreen() {
   const { colors } = useTheme();
   const [dashboard, setDashboard] = useState({ stats: {}, history: [], leaderboard: [] });
   const [loading, setLoading] = useState(true);
+  const [offlineRecord, setOfflineRecord] = useState(null);
+  const [savingOffline, setSavingOffline] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -31,6 +34,9 @@ export default function ChallengeHomeScreen() {
         .finally(() => {
           if (!cancelled) setLoading(false);
         });
+      getDownloadRecord('challenge', 'all').then((record) => {
+        if (!cancelled) setOfflineRecord(record);
+      }).catch(() => {});
       return () => {
         cancelled = true;
       };
@@ -53,6 +59,24 @@ export default function ChallengeHomeScreen() {
 
   const quickCategories = useMemo(() => getRecommendedCategories(profile).slice(0, 6), [profile]);
   const recentActivity = stats.activity || [];
+
+  const saveChallengeOffline = async () => {
+    setSavingOffline(true);
+    try {
+      const questions = await fetchChallengeQuestions({ count: 120, profile: profile || {} });
+      const record = await saveResourceForOffline({
+        resourceType: 'challenge',
+        resourceId: 'all',
+        resource: questions,
+      });
+      setOfflineRecord(record);
+      Alert.alert('Available Offline', 'Challenge questions are saved. Attempts completed offline will sync once you reconnect.');
+    } catch (error) {
+      Alert.alert('Save failed', error?.message || 'Could not save challenges for offline use.');
+    } finally {
+      setSavingOffline(false);
+    }
+  };
 
   return (
     <ScreenShell
@@ -80,6 +104,19 @@ export default function ChallengeHomeScreen() {
           <Ionicons name="arrow-forward" size={18} color={colors.onBrand} />
         </Pressable>
       </View>
+
+      <Pressable
+        style={({ pressed }) => [styles.offlineButton, pressed && { opacity: 0.85 }]}
+        disabled={savingOffline}
+        onPress={saveChallengeOffline}
+        accessibilityRole="button"
+        accessibilityLabel="Save challenge questions for offline"
+      >
+        <Ionicons name={offlineRecord?.status === 'downloaded' ? 'checkmark-circle-outline' : 'cloud-download-outline'} size={17} color={colors.brand} />
+        <Text style={styles.offlineButtonText}>
+          {offlineRecord?.status === 'downloaded' ? 'Challenges Available Offline' : savingOffline ? 'Saving...' : 'Save Challenges for Offline'}
+        </Text>
+      </Pressable>
 
       <View style={styles.statsGrid}>
         <StatCard label="Current Streak" value={stats.currentStreak || 0} icon="flame-outline" tone={colors.orange} />
@@ -207,6 +244,23 @@ function createStyles(colors) {
       padding: spacing.md,
       marginBottom: spacing.lg,
       ...shadows.sm,
+    },
+    offlineButton: {
+      minHeight: 46,
+      borderRadius: borderRadius.full,
+      backgroundColor: colors.brandLight,
+      borderWidth: 1,
+      borderColor: colors.brandBorder,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.sm,
+      marginBottom: spacing.lg,
+    },
+    offlineButtonText: {
+      color: colors.brand,
+      fontWeight: '900',
+      fontSize: 13,
     },
     weekDay: { alignItems: 'center', gap: spacing.xs },
     weekDot: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.canvasLight, alignItems: 'center', justifyContent: 'center' },
