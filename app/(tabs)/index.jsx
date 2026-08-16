@@ -6,6 +6,7 @@ import {
   View,
   PanResponder,
   Animated,
+  Easing,
   useWindowDimensions,
   Image,
   ImageBackground,
@@ -47,6 +48,8 @@ const IMAGES = {
 };
 
 const FAB_SIZE = 56;
+const MARQUEE_PX_PER_SECOND = 46;
+const MARQUEE_MESSAGE = 'study offline, unlimited downloads & priority AI access.';
 
 const pickMediaUrl = (value) => {
   if (!value) return null;
@@ -101,6 +104,113 @@ const formatPrice = (value) => {
 };
 
 const friendlyPersonName = (person = {}) => person.username || person.name || person.displayName || person.email || 'Student';
+
+// Slim, always-visible upgrade prompt: a single scrolling line instead of a big
+// stacked card, so it earns its place at the very top without competing with
+// the hero card below it for attention.
+function PremiumMarquee({ onPress }) {
+  const { colors } = useTheme();
+  const [contentWidth, setContentWidth] = useState(0);
+  const translateX = useRef(new Animated.Value(0)).current;
+
+  const styles = useThemeStyles((c, s, r) => ({
+    wrap: {
+      borderRadius: r.full,
+      overflow: 'hidden',
+      marginBottom: s.md,
+      shadowColor: c.brand,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.15,
+      shadowRadius: 10,
+      elevation: 4,
+    },
+    gradient: {
+      height: 42,
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingLeft: s.md,
+      paddingRight: 4,
+    },
+    trackClip: {
+      flex: 1,
+      height: '100%',
+      overflow: 'hidden',
+      justifyContent: 'center',
+    },
+    track: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    text: {
+      color: c.onBrand,
+      fontSize: 12.5,
+      fontWeight: '600',
+      paddingRight: 28,
+    },
+    cta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      backgroundColor: 'rgba(255,255,255,0.22)',
+      paddingHorizontal: s.sm + 2,
+      paddingVertical: 6,
+      borderRadius: r.full,
+      marginLeft: s.sm,
+    },
+    ctaText: {
+      color: c.onBrand,
+      fontSize: 11,
+      fontWeight: '900',
+    },
+  }));
+
+  // Classic seamless-loop marquee: two copies of the same text back to back,
+  // scrolled left by exactly one copy's width so the loop point is invisible.
+  useEffect(() => {
+    if (!contentWidth) return undefined;
+    translateX.setValue(0);
+    const loop = Animated.loop(
+      Animated.timing(translateX, {
+        toValue: -contentWidth,
+        duration: (contentWidth / MARQUEE_PX_PER_SECOND) * 1000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [contentWidth, translateX]);
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.wrap, pressed && { opacity: 0.92 }]}
+      accessibilityRole="button"
+      accessibilityLabel="Upgrade to premium"
+    >
+      <LinearGradient
+        colors={[colors.brand, colors.purple || colors.brand]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.gradient}
+      >
+        <Ionicons name="sparkles" size={14} color={colors.onBrand} style={{ marginRight: 6 }} />
+        <View style={styles.trackClip}>
+          <Animated.View style={[styles.track, { transform: [{ translateX }] }]}>
+            <Text style={styles.text} onLayout={(e) => setContentWidth(e.nativeEvent.layout.width)}>
+              {MARQUEE_MESSAGE}
+            </Text>
+            <Text style={styles.text}>{MARQUEE_MESSAGE}</Text>
+          </Animated.View>
+        </View>
+        <View style={styles.cta}>
+          <Text style={styles.ctaText}>Upgrade</Text>
+          <Ionicons name="chevron-forward" size={12} color={colors.onBrand} />
+        </View>
+      </LinearGradient>
+    </Pressable>
+  );
+}
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -402,61 +512,6 @@ export default function HomeScreen() {
       color: c.grey,
       fontWeight: '500',
       marginTop: 2,
-    },
-    premiumBanner: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: s.md,
-      backgroundColor: c.surface,
-      borderRadius: r['2xl'],
-      borderWidth: 1,
-      borderColor: c.borderLight || c.border,
-      padding: s.md,
-      marginBottom: s.xl,
-      shadowColor: c.shadow,
-      shadowOffset: { width: 0, height: 6 },
-      shadowOpacity: 0.06,
-      shadowRadius: 10,
-      elevation: 3,
-    },
-    premiumBannerIconWrap: {
-      width: 42,
-      height: 42,
-      borderRadius: r.lg,
-      backgroundColor: c.brandLight,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    premiumBannerCopy: {
-      flex: 1,
-      minWidth: 0,
-    },
-    premiumBannerTitle: {
-      color: c.ink,
-      fontSize: 15,
-      fontWeight: '900',
-      letterSpacing: -0.2,
-    },
-    premiumBannerSubtitle: {
-      color: c.grey,
-      fontSize: 12,
-      fontWeight: '600',
-      lineHeight: 18,
-      marginTop: 2,
-    },
-    premiumBannerCta: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: c.brandLight,
-      borderRadius: 999,
-      paddingHorizontal: s.md,
-      paddingVertical: 8,
-    },
-    premiumBannerCtaText: {
-      color: c.brandText,
-      fontSize: 12,
-      fontWeight: '800',
     },
     flashBanner: {
       borderRadius: r['3xl'],
@@ -1147,6 +1202,8 @@ export default function HomeScreen() {
           </Pressable>
         </Animated.View>
       }>
+        {/* PREMIUM MARQUEE — slim, scrolling, always visible without hogging space */}
+      {!premiumUnlocked ? <PremiumMarquee onPress={() => router.push('/premium')} /> : null}
       {/* AMBIENT FLOATING HEADER BAR */}
       <View style={styles.headerBar}>
         <Pressable style={styles.userPill} onPress={() => router.push('/profile')}>
@@ -1175,6 +1232,8 @@ export default function HomeScreen() {
           </Pressable>
         </View>
       </View>
+
+      
 
       {/* DYNAMIC FOCUS ZONE HERO CARD */}
       <View style={styles.focusCardShadowWrap}>
@@ -1238,31 +1297,49 @@ export default function HomeScreen() {
         />
       </View>
 
-      {!premiumUnlocked ? (
-        <Pressable
-          style={({ pressed }) => [
-            styles.premiumBanner,
-            pressed && { opacity: 0.96 },
-          ]}
-          onPress={() => router.push('/premium')}
-          accessibilityRole="button"
-          accessibilityLabel="Upgrade to premium"
-        >
-          <View style={styles.premiumBannerIconWrap}>
-            <Ionicons name="cloud-download-outline" size={18} color={colors.brand} />
-          </View>
-          <View style={styles.premiumBannerCopy}>
-            <Text style={styles.premiumBannerTitle}>Study Beyond Internet</Text>
-            <Text style={styles.premiumBannerSubtitle}>Save resources and keep learning offline with Premium.</Text>
-          </View>
-          <View style={styles.premiumBannerCta}>
-            <Text style={styles.premiumBannerCtaText}>Unlock Premium</Text>
-            <Ionicons name="arrow-forward" size={14} color={colors.brandText} />
-          </View>
-        </Pressable>
-      ) : null}
+      
+      {/* REDESIGNED ACADEMIC TOOLKIT SECTION */}
+      <View>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Academic Toolkit</Text>
 
-      <Pressable
+          {/* ALL TOOLS BUTTON */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.seeAllBtn,
+              pressed && { opacity: 0.75 },]} onPress={() => router.push('/toolScreen')}>
+            <Text style={styles.seeAllText}>All Tools</Text>
+            <Ionicons name="arrow-forward" size={14} color={colors.brandText} />
+          </Pressable>
+        </View>
+
+        {/* HIGH-DENSITY BALANCED TOOL GRID */}
+        <View style={styles.toolGrid}>
+          {toolsList.map((tool) => (
+            <Pressable
+              key={tool.id}
+              style={({ pressed }) => [
+                styles.toolCard,
+                pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] },
+              ]}
+              onPress={() => router.push(tool.route)}
+            >
+              <View style={styles.toolHeader}>
+                <View style={[styles.toolIconContainer, { backgroundColor: tool.bgColor }]}>
+                  <Ionicons name={tool.icon} size={20} color={tool.color} />
+                </View>
+                <Text style={styles.toolBadge}>{tool.badge}</Text>
+              </View>
+
+              <View style={styles.toolContent}>
+                <Text style={styles.toolTitle}>{tool.title}</Text>
+                <Text style={styles.toolSub}>{tool.sub}</Text>
+              </View>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+          <Pressable
         style={({ pressed }) => [
           styles.flashBanner,
           pressed && { opacity: 0.92, transform: [{ scale: 0.99 }] },
@@ -1308,48 +1385,7 @@ export default function HomeScreen() {
         </LinearGradient>
       </Pressable>
 
-      {/* REDESIGNED ACADEMIC TOOLKIT SECTION */}
-      <View>
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Academic Toolkit</Text>
-
-          {/* ALL TOOLS BUTTON */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.seeAllBtn,
-              pressed && { opacity: 0.75 },]} onPress={() => router.push('/toolScreen')}>
-            <Text style={styles.seeAllText}>All Tools</Text>
-            <Ionicons name="arrow-forward" size={14} color={colors.brandText} />
-          </Pressable>
-        </View>
-
-        {/* HIGH-DENSITY BALANCED TOOL GRID */}
-        <View style={styles.toolGrid}>
-          {toolsList.map((tool) => (
-            <Pressable
-              key={tool.id}
-              style={({ pressed }) => [
-                styles.toolCard,
-                pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] },
-              ]}
-              onPress={() => router.push(tool.route)}
-            >
-              <View style={styles.toolHeader}>
-                <View style={[styles.toolIconContainer, { backgroundColor: tool.bgColor }]}>
-                  <Ionicons name={tool.icon} size={20} color={tool.color} />
-                </View>
-                <Text style={styles.toolBadge}>{tool.badge}</Text>
-              </View>
-
-              <View style={styles.toolContent}>
-                <Text style={styles.toolTitle}>{tool.title}</Text>
-                <Text style={styles.toolSub}>{tool.sub}</Text>
-              </View>
-            </Pressable>
-          ))}
-        </View>
-      </View>
-          {/* HORIZONTAL CAMPUS DISCOVERY CAROUSEL */}
+      {/* HORIZONTAL CAMPUS DISCOVERY CAROUSEL */}
       <View style={{ marginBottom: layout.screenPadding }}>
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionTitle}>Explore Campus</Text>
@@ -1415,7 +1451,7 @@ export default function HomeScreen() {
           </Pressable>
         </ScrollView>
       </View>
-      
+
       <View style={discoverySectionStyles.discoverySection}>
         <View style={discoverySectionStyles.sectionMeta}>
           <Text style={discoverySectionStyles.discoveryTitle}>Discover</Text>
@@ -1436,7 +1472,7 @@ export default function HomeScreen() {
           <View style={{ gap: 18 }}>
             <View>
               <View style={discoverySectionStyles.sectionMeta}>
-                <Text style={styles.sectionTitle}>Hostels</Text>
+                <Text style={discoverySectionStyles.discoveryTitle}>Hostels</Text>
                 <Pressable onPress={() => router.push('/hostelmarketplace')}>
                   <Text style={discoverySectionStyles.metaText}>View all</Text>
                 </Pressable>
@@ -1454,7 +1490,7 @@ export default function HomeScreen() {
 
             <View>
               <View style={discoverySectionStyles.sectionMeta}>
-                <Text style={styles.sectionTitle}>Friend suggestions</Text>
+                <Text style={discoverySectionStyles.discoveryTitle}>Friend suggestions</Text>
                 <Pressable onPress={() => router.push('/find-friends')}>
                   <Text style={discoverySectionStyles.metaText}>Connect</Text>
                 </Pressable>
@@ -1472,7 +1508,7 @@ export default function HomeScreen() {
 
             <View>
               <View style={discoverySectionStyles.sectionMeta}>
-                <Text style={styles.sectionTitle}>Marketplace</Text>
+                <Text style={discoverySectionStyles.discoveryTitle}>Marketplace</Text>
                 <Pressable onPress={() => router.push('/studentmarketplace')}>
                   <Text style={discoverySectionStyles.metaText}>Browse</Text>
                 </Pressable>
@@ -1490,8 +1526,6 @@ export default function HomeScreen() {
           </View>
         )}
       </View>
-
-      
     </ScreenShell>
   );
 }

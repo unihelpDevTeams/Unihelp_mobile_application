@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import ScreenShell from '../../src/shared/components/ScreenShell';
@@ -13,17 +13,364 @@ import {
   PREMIUM_PLAN,
   startPremiumCheckout,
 } from '../../src/shared/services/premium';
-import { colors, spacing, borderRadius, shadows } from '../../src/shared/theme';
+import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { useThemeStyles } from '../../src/shared/theme/createStyles';
 
 export default function PremiumPage() {
   const router = useRouter();
   const { user, profile, refreshProfile } = useAuth();
+  const { colors } = useTheme();
   const [billing, setBilling] = useState('monthly');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [planLoading, setPlanLoading] = useState(true);
 
   const premiumActive = isPremiumActive(profile);
+
+  const styles = useThemeStyles((c, s, r) => ({
+    hero: {
+      backgroundColor: c.brandLight || c.surfaceSecondary,
+      borderRadius: r.xl,
+      padding: s.xl,
+      marginBottom: s.xl,
+      alignItems: 'center',
+    },
+    heroIcon: {
+      width: 72,
+      height: 72,
+      borderRadius: r.xl,
+      backgroundColor: c.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: s.lg,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 8,
+      elevation: 2,
+    },
+    heroTitle: {
+      color: c.textPrimary,
+      fontSize: 24,
+      fontWeight: '800',
+      textAlign: 'center',
+      marginBottom: s.sm,
+      letterSpacing: -0.3,
+    },
+    heroText: {
+      color: c.textSecondary,
+      fontSize: 15,
+      lineHeight: 22,
+      textAlign: 'center',
+      maxWidth: '90%',
+    },
+    billingCard: {
+      backgroundColor: c.card,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      padding: s.lg,
+      marginBottom: s.lg,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 8,
+      elevation: 2,
+    },
+    sectionTitle: {
+      color: c.textPrimary,
+      fontSize: 15,
+      fontWeight: '800',
+      marginBottom: s.md,
+    },
+    segment: {
+      flexDirection: 'row',
+      backgroundColor: c.brandLight || c.surfaceSecondary,
+      borderRadius: r.full,
+      padding: 4,
+    },
+    segmentButton: {
+      flex: 1,
+      borderRadius: r.full,
+      paddingVertical: s.md,
+      alignItems: 'center',
+    },
+    segmentButtonActive: {
+      backgroundColor: c.card,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.02,
+      shadowRadius: 4,
+      elevation: 1,
+    },
+    segmentText: {
+      color: c.textSecondary,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    segmentTextActive: {
+      color: c.brand,
+    },
+    planCard: {
+      backgroundColor: c.card,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      padding: s.xl,
+      marginBottom: s.lg,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 8,
+      elevation: 2,
+    },
+    planHeader: {
+      gap: s.md,
+      marginBottom: s.xl,
+    },
+    planName: {
+      color: c.textPrimary,
+      fontSize: 22,
+      fontWeight: '800',
+    },
+    planSubtitle: {
+      color: c.textSecondary,
+      fontSize: 14,
+    },
+    pricePill: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      backgroundColor: c.brandLight || c.surfaceSecondary,
+      borderRadius: r.full,
+      paddingHorizontal: s.md,
+      paddingVertical: s.sm,
+    },
+    priceText: {
+      color: c.brand,
+      fontSize: 20,
+      fontWeight: '800',
+    },
+    priceCycle: {
+      color: c.brand,
+      fontSize: 14,
+      fontWeight: '700',
+      marginBottom: 2,
+      opacity: 0.7,
+    },
+    featureList: {
+      gap: s.sm,
+      marginBottom: s.xl,
+    },
+    featureRow: {
+      flexDirection: 'row',
+      gap: s.sm,
+      alignItems: 'center',
+    },
+    checkIcon: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: c.surfaceSecondary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    featureCopy: {
+      flex: 1,
+    },
+    featureText: {
+      flex: 1,
+      color: c.textPrimary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    featureDescription: {
+      color: c.textSecondary,
+      fontSize: 12,
+      marginTop: 2,
+    },
+    successBox: {
+      flexDirection: 'row',
+      gap: s.sm,
+      alignItems: 'center',
+      backgroundColor: c.surfaceSecondary,
+      borderRadius: r.md,
+      padding: s.md,
+      marginBottom: s.lg,
+      borderLeftWidth: 3,
+      borderLeftColor: c.brand,
+    },
+    successText: {
+      flex: 1,
+      color: c.textPrimary,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    subscribeButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: s.sm,
+      backgroundColor: c.brand,
+      borderRadius: r.full,
+      paddingVertical: s.lg,
+      shadowColor: c.brand,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 5,
+    },
+    subscribeButtonPressed: {
+      opacity: 0.9,
+    },
+    subscribeButtonDisabled: {
+      opacity: 0.6,
+    },
+    subscribeText: {
+      color: c.onBrand,
+      fontSize: 16,
+      fontWeight: '800',
+    },
+    featureActionCard: {
+      backgroundColor: c.card,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      padding: s.lg,
+      marginBottom: s.lg,
+      gap: s.md,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 8,
+      elevation: 2,
+    },
+    featureActionHeader: {
+      flexDirection: 'row',
+      gap: s.md,
+      alignItems: 'flex-start',
+    },
+    featureActionIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: r.lg,
+      backgroundColor: c.surfaceSecondary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    featureActionCopy: {
+      flex: 1,
+    },
+    featureActionTitle: {
+      color: c.textPrimary,
+      fontSize: 15,
+      fontWeight: '800',
+      marginBottom: 2,
+    },
+    featureActionDescription: {
+      color: c.textSecondary,
+      fontSize: 13,
+      lineHeight: 18,
+    },
+    featureActionButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: s.sm,
+      backgroundColor: c.brand,
+      borderRadius: r.lg,
+      paddingVertical: s.md,
+    },
+    featureActionButtonPressed: {
+      opacity: 0.9,
+    },
+    featureActionButtonText: {
+      color: c.onBrand,
+      fontSize: 14,
+      fontWeight: '800',
+    },
+    noteBox: {
+      flexDirection: 'row',
+      gap: s.md,
+      backgroundColor: c.surfaceSecondary,
+      borderRadius: r.xl,
+      borderLeftWidth: 3,
+      borderLeftColor: c.brand,
+      padding: s.lg,
+    },
+    noteText: {
+      flex: 1,
+      color: c.textPrimary,
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '600',
+    },
+    loadingCard: {
+      backgroundColor: c.card,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      padding: s['3xl'],
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 8,
+      elevation: 2,
+    },
+    loadingText: {
+      marginTop: s.md,
+      color: c.textSecondary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    activeCard: {
+      backgroundColor: c.card,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      padding: s.lg,
+      marginBottom: s.lg,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 8,
+      elevation: 2,
+    },
+    activeRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    activeLabel: {
+      fontSize: 13,
+      color: c.textSecondary,
+      fontWeight: '600',
+    },
+    activeValue: {
+      fontSize: 15,
+      color: c.textPrimary,
+      fontWeight: '700',
+    },
+    activePill: {
+      backgroundColor: c.surfaceSecondary,
+      borderRadius: r.full,
+      paddingHorizontal: s.md,
+      paddingVertical: 6,
+    },
+    activePillText: {
+      fontSize: 12,
+      color: c.brand,
+      fontWeight: '700',
+    },
+    divider: {
+      height: 1,
+      backgroundColor: c.borderDefault,
+      marginVertical: s.md,
+    },
+  }));
 
   useEffect(() => {
     let active = true;
@@ -236,248 +583,3 @@ export default function PremiumPage() {
     </ScreenShell>
   );
 }
-
-const styles = StyleSheet.create({
-  hero: {
-    backgroundColor: colors.goldLight,
-    borderRadius: borderRadius['3xl'],
-    padding: spacing.xl,
-    marginBottom: spacing.xl,
-    alignItems: 'center',
-  },
-  heroIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: borderRadius.xl,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.lg,
-    ...shadows.md,
-  },
-  heroTitle: {
-    color: colors.ink,
-    fontSize: 24,
-    fontWeight: '800',
-    textAlign: 'center',
-    marginBottom: spacing.sm,
-    letterSpacing: -0.3,
-  },
-  heroText: {
-    color: colors.grey,
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: 'center',
-    maxWidth: '90%',
-  },
-  billingCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.xl,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
-    ...shadows.md,
-  },
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
-    marginBottom: spacing.md,
-  },
-  segment: {
-    flexDirection: 'row',
-    backgroundColor: colors.brandLight,
-    borderRadius: borderRadius.full,
-    padding: 4,
-  },
-  segmentButton: {
-    flex: 1,
-    borderRadius: borderRadius.full,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  segmentButtonActive: {
-    backgroundColor: colors.surface,
-    ...shadows.sm,
-  },
-  segmentText: {
-    color: colors.inkMuted,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  segmentTextActive: {
-    color: colors.brandText,
-  },
-  planCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius['2xl'],
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.xl,
-    marginBottom: spacing.lg,
-    ...shadows.md,
-  },
-  planHeader: {
-    gap: spacing.md,
-    marginBottom: spacing.xl,
-  },
-  planName: {
-    color: colors.ink,
-    fontSize: 22,
-    fontWeight: '800',
-  },
-  planSubtitle: {
-    color: colors.grey,
-    fontSize: 14,
-  },
-  pricePill: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    backgroundColor: colors.goldLight,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  priceText: {
-    color: colors.amber,
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  priceCycle: {
-    color: colors.gold,
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  featureList: {
-    gap: spacing.sm,
-    marginBottom: spacing.xl,
-  },
-  featureRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    alignItems: 'center',
-  },
-  checkIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: colors.tealLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  featureText: {
-    flex: 1,
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  successBox: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    alignItems: 'center',
-    backgroundColor: colors.tealLight,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  successText: {
-    flex: 1,
-    color: colors.teal,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  subscribeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.brand,
-    borderRadius: borderRadius.full,
-    paddingVertical: spacing.lg,
-    ...shadows.brand,
-  },
-  subscribeButtonPressed: {
-    backgroundColor: colors.brandDark,
-  },
-  subscribeButtonDisabled: {
-    opacity: 0.7,
-  },
-  subscribeText: {
-    color: colors.surface,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  noteBox: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    backgroundColor: colors.brandLight,
-    borderRadius: borderRadius.xl,
-    padding: spacing.lg,
-  },
-  noteText: {
-    flex: 1,
-    color: colors.brandText,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '600',
-  },
-  loadingCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.xl,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing['3xl'],
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadows.md,
-  },
-  loadingText: {
-    marginTop: spacing.md,
-    color: colors.grey,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  activeCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.xl,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
-    ...shadows.md,
-  },
-  activeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  activeLabel: {
-    fontSize: 13,
-    color: colors.grey,
-    fontWeight: '600',
-  },
-  activeValue: {
-    fontSize: 15,
-    color: colors.ink,
-    fontWeight: '700',
-  },
-  activePill: {
-    backgroundColor: colors.tealLight,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-  },
-  activePillText: {
-    fontSize: 12,
-    color: colors.teal,
-    fontWeight: '700',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: colors.borderLight,
-    marginVertical: spacing.md,
-  },
-});
