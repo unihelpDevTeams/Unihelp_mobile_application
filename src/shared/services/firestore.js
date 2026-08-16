@@ -245,6 +245,15 @@ export async function fetchNotifications(uid = auth.currentUser?.uid) {
 }
 
 export async function fetchNotificationsPage({ uid = auth.currentUser?.uid, pageSize = 30, cursor = null } = {}) {
+  if (!cursor) {
+    try {
+      const { items } = await getJson('/api/notifications?pageSize=' + pageSize);
+      return { items, cursor: null, hasMore: false };
+    } catch (e) {
+      console.error('API notifications fetch failed, falling back to firebase', e);
+    }
+  }
+
   if (!uid) return { items: [], cursor: null, hasMore: false };
   const constraints = [orderBy('createdAt', 'desc')];
   if (cursor) constraints.push(startAfter(cursor));
@@ -281,9 +290,14 @@ export async function fetchConversationMessages(conversationId) {
   return mapDocs(snapshot);
 }
 
-export async function markNotificationRead(id, uid = auth.currentUser?.uid) {
-  if (!uid) throw new Error('No authenticated user');
-  await setDoc(doc(db, COLLECTIONS.notifications, uid, 'items', id), { read: true }, { merge: true });
+export async function markNotificationRead(uid, id) {
+  if (!uid || !id) return;
+  try {
+    await postJson(`/api/notifications/${id}/read`, {});
+  } catch (error) {
+    console.error('API markNotificationRead failed, falling back to firebase', error);
+    await setDoc(doc(db, COLLECTIONS.notifications, uid, 'items', id), { read: true }, { merge: true });
+  }
 }
 
 export async function fetchBookmarks(uid = auth.currentUser?.uid) {
@@ -605,16 +619,18 @@ export async function createGroup(payload = {}) {
       name,
       role: 'owner',
       joinedAt: now,
-    }),
-    setDoc(doc(db, COLLECTIONS.notifications, ownerId, 'items', ref.id), {
-      type: 'group_created',
-      title: 'Group created',
-      body: `${name} is ready.`,
-      groupId: ref.id,
-      read: false,
-      createdAt: now,
-    }),
+    })
   ]);
+
+  sendAppNotification({
+    userIds: [ownerId],
+    title: 'Group created',
+    body: `${name} is ready.`,
+    type: 'group_created',
+    category: 'Group',
+    url: '/groups',
+    data: { groupId: ref.id }
+  }).catch(() => {});
 
   return { id: ref.id };
 }

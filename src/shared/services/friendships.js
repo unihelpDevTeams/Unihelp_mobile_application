@@ -103,13 +103,6 @@ const findSharedFriendIds = async (uidA, uidB, max = 3) => {
 
 export const notifyUser = async (uid, payload) => {
   if (!uid) return;
-  const now = serverTimestamp();
-  await addDoc(collection(db, COLLECTIONS.notifications, uid, 'items'), {
-    read: false,
-    createdAt: now,
-    ...payload,
-  });
-
   try {
     await sendAppNotification({
       userIds: [uid],
