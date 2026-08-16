@@ -104,10 +104,6 @@ const formatPrice = (value) => {
 
 const friendlyPersonName = (person = {}) => person.username || person.name || person.displayName || person.email || 'Student';
 
-// One message per slide: eyebrow, title, a single supporting stat, one CTA.
-// Copy here (other than the streak slide, which uses the real streakCount)
-// is illustrative — wire it to real analytics (weak-area %, mastery counts,
-// exam countdowns) as that data becomes available.
 const buildHeroSlides = (streakCount = 0) => [
   {
     slide: 'smart-today',
@@ -121,28 +117,20 @@ const buildHeroSlides = (streakCount = 0) => [
     slide: 'weak-areas',
     icon: 'trending-up-outline',
     eyebrow: 'GROWTH AREA',
-    title: 'Physics is holding your average back',
-    stat: '62% mastery · 18 practice problems left',
-    cta: { label: 'Strengthen physics', route: '/formula-hub' },
+    title: 'struggling with calculations? Strengthen your weak areas',
+    stat: 'Targeted practice improves retention by up to 80%',
+    cta: { label: 'Strengthen weak areas', route: '/formula-hub' },
   },
   {
     slide: 'streak-power',
     icon: 'flame',
     eyebrow: 'STUDY STREAK',
-    title: streakCount > 0 ? `${streakCount}-day streak — keep it alive` : 'Start your study streak today',
+    title: streakCount > 0 ? `${streakCount}-day streak, keep it alive` : 'Start your study streak today',
     stat:
       streakCount > 0
         ? 'Consistent daily learners retain up to 3× more'
         : 'One session today gets your streak going',
-    cta: { label: streakCount > 0 ? 'Continue streak' : 'Start today', route: '/(tabs)/studyMaterials' },
-  },
-  {
-    slide: 'performance',
-    icon: 'stats-chart-outline',
-    eyebrow: 'YOUR PROGRESS',
-    title: '127 topics mastered this term',
-    stat: '89% accuracy · trending up 23% this month',
-    cta: { label: 'View analytics', route: '/analytics' },
+    cta: { label: streakCount > 0 ? 'Continue streak' : 'Start today', route: '/streak' },
   },
   {
     slide: 'spaced-repeat',
@@ -629,12 +617,13 @@ export default function HomeScreen() {
       gap: s.xs,
     },
     iconBadgeBtn: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: c.surface,
+      flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
+      height: 40,
+      paddingHorizontal: s.sm,
+      borderRadius: 20,
+      backgroundColor: c.surface,
       borderWidth: 1,
       borderColor: c.borderLight || c.border,
     },
@@ -988,17 +977,6 @@ export default function HomeScreen() {
   }, [profile?.uid]);
 
   const handleStreakPress = useCallback(() => router.push('/streak'), [router]);
-
-  const handleStudyNow = useCallback(async () => {
-    try {
-      const result = await recordDailyStreak();
-      if (result) {
-        setStreakCount(result.streakCount);
-        setStreakDates(result.streakDates);
-      }
-      router.push('/streak');
-    } catch {}
-  }, [router]);
 
   const avatarInitial = (profile?.username || 'U').trim().charAt(0).toUpperCase();
   const showAvatarImage = !!profile?.photoURL && !avatarFailed;
@@ -1435,6 +1413,9 @@ export default function HomeScreen() {
 
         <View style={styles.topActions}>
           <Pressable style={styles.iconBadgeBtn} onPress={handleStreakPress}>
+            <Text style={{ fontSize: 11, fontWeight: '800', color: colors.brandText }}>
+              {streakCount} Day Streak
+            </Text>
             <Ionicons name="flame" size={20} color={colors.orange} />
           </Pressable>
         </View>
@@ -1442,16 +1423,6 @@ export default function HomeScreen() {
 
       {/* SMART STUDY HERO — one message at a time, user-swipeable */}
       <HeroCarousel slides={heroSlides} router={router} />
-
-      {/* STREAK WIDGET */}
-      <View style={{ marginBottom: layout.screenPadding }}>
-        <DailyStreakBanner
-          streakCount={streakCount}
-          streakDates={streakDates}
-          onPress={handleStreakPress}
-          onStudyNow={handleStudyNow}
-        />
-      </View>
 
       {/* REDESIGNED ACADEMIC TOOLKIT SECTION */}
       <View>
