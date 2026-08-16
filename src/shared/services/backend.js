@@ -35,6 +35,17 @@ async function buildHeaders(extraHeaders = {}) {
   return headers;
 }
 
+const parseResponse = async (response) => {
+  const rawText = await response.text();
+  if (!rawText) return {};
+
+  try {
+    return JSON.parse(rawText);
+  } catch {
+    return { error: rawText };
+  }
+};
+
 export async function postJson(path, payload) {
   const headers = await buildHeaders();
   const response = await fetch(`${getApiUrl()}${path}`, {
@@ -43,10 +54,11 @@ export async function postJson(path, payload) {
     body: JSON.stringify(payload),
   });
 
-  const data = await response.json().catch(() => ({}));
+  const data = await parseResponse(response);
 
   if (!response.ok) {
-    throw new Error(data.message || data.error || 'Request failed');
+    const message = data.message || data.error || 'Request failed';
+    throw new Error(`${response.status} ${message}`);
   }
 
   return data;
@@ -60,10 +72,11 @@ export async function putJson(path, payload) {
     body: JSON.stringify(payload),
   });
 
-  const data = await response.json().catch(() => ({}));
+  const data = await parseResponse(response);
 
   if (!response.ok) {
-    throw new Error(data.message || data.error || 'Request failed');
+    const message = data.message || data.error || 'Request failed';
+    throw new Error(`${response.status} ${message}`);
   }
 
   return data;
@@ -76,10 +89,11 @@ export async function deleteJson(path) {
     headers,
   });
 
-  const data = await response.json().catch(() => ({}));
+  const data = await parseResponse(response);
 
   if (!response.ok) {
-    throw new Error(data.message || data.error || 'Request failed');
+    const message = data.message || data.error || 'Request failed';
+    throw new Error(`${response.status} ${message}`);
   }
 
   return data;
@@ -92,10 +106,11 @@ export async function getJson(path) {
     headers,
   });
 
-  const data = await response.json().catch(() => ({}));
+  const data = await parseResponse(response);
 
   if (!response.ok) {
-    throw new Error(data.message || data.error || 'Request failed');
+    const message = data.message || data.error || 'Request failed';
+    throw new Error(`${response.status} ${message}`);
   }
 
   return data;

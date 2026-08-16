@@ -290,13 +290,31 @@ export async function fetchConversationMessages(conversationId) {
   return mapDocs(snapshot);
 }
 
-export async function markNotificationRead(uid, id) {
-  if (!uid || !id) return;
+export async function markNotificationRead(id, uid = auth.currentUser?.uid) {
+  if (!id) return;
+
+  const resolvedUid = uid || auth.currentUser?.uid;
+  if (!resolvedUid) return;
+
   try {
     await postJson(`/api/notifications/${id}/read`, {});
   } catch (error) {
     console.error('API markNotificationRead failed, falling back to firebase', error);
-    await setDoc(doc(db, COLLECTIONS.notifications, uid, 'items', id), { read: true }, { merge: true });
+    await setDoc(doc(db, COLLECTIONS.notifications, resolvedUid, 'items', id), { read: true }, { merge: true });
+  }
+}
+
+export async function deleteNotification(id, uid = auth.currentUser?.uid) {
+  if (!id) return;
+
+  const resolvedUid = uid || auth.currentUser?.uid;
+  if (!resolvedUid) return;
+
+  try {
+    await deleteJson(`/api/notifications/${encodeURIComponent(id)}`);
+  } catch (error) {
+    console.error('API deleteNotification failed, falling back to firebase', error);
+    await deleteDoc(doc(db, COLLECTIONS.notifications, resolvedUid, 'items', id));
   }
 }
 

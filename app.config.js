@@ -4,7 +4,8 @@ dotenv.config();
 
 const extra = {
   EXPO_PUBLIC_APP_URL: process.env.EXPO_PUBLIC_APP_URL || "https://unihelp.app",
-  EXPO_PUBLIC_API_URL: process.env.EXPO_PUBLIC_API_URL || "",
+  EXPO_PUBLIC_API_URL:
+    process.env.EXPO_PUBLIC_API_URL || "https://unihelp-backend-dg0o.onrender.com",
   EXPO_PUBLIC_FLUTTERWAVE_PUBLIC_KEY:
     process.env.EXPO_PUBLIC_FLUTTERWAVE_PUBLIC_KEY || "",
   EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME:

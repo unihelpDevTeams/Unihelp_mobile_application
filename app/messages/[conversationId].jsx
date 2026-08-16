@@ -518,6 +518,7 @@ export default function ConversationPage() {
 
   const showSendError = (error) => {
     showAlertDialog('Message not sent', error.message || 'You can only send direct messages to friends.');
+    console.error('Failed to send message', error);
   };
 
   const sendVoiceMessage = useCallback(async (voiceResult) => {

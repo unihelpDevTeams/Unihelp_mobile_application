@@ -6,7 +6,8 @@ import ScreenShell from '../../src/shared/components/ScreenShell';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import EmptyState from '../../src/shared/components/EmptyState';
-import { fetchNotificationsPage, markNotificationRead } from '../../services/firestoreSync';
+import ConfirmDialog from '../../src/shared/components/ConfirmDialog';
+import { deleteNotification, fetchNotificationsPage, markNotificationRead } from '../../services/firestoreSync';
 
 const PAGE_SIZE = 30;
 
@@ -92,6 +93,8 @@ export default function NotificationsPage() {
   const [markingAll, setMarkingAll] = useState(false);
   const [cursor, setCursor] = useState(null);
   const [hasMore, setHasMore] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const { colors } = useTheme();
   const styles = useThemeStyles(createStyles);
   const typeMeta = useMemo(() => getTypeMeta(colors), [colors]);
@@ -170,6 +173,26 @@ export default function NotificationsPage() {
     markNotificationRead(item.id).catch(() => {
       setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, read: false } : entry)));
     });
+  };
+
+  const handleDeleteNotification = async () => {
+    if (!pendingDelete) return;
+
+    const deletingItem = pendingDelete;
+    setDeletingId(deletingItem.id);
+    setPendingDelete(null);
+    setItems((current) => current.filter((entry) => entry.id !== deletingItem.id));
+
+    try {
+      await deleteNotification(deletingItem.id);
+    } catch {
+      setItems((current) => {
+        if (current.some((entry) => entry.id === deletingItem.id)) return current;
+        return [deletingItem, ...current];
+      });
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const openNotification = (item) => {
@@ -253,9 +276,11 @@ export default function NotificationsPage() {
               const meta = typeMeta[item.type] || typeMeta.default;
               return (
                 <Pressable
-                  style={({ pressed }) => [ styles.row, !item.read && styles.rowUnread,
-                    pressed && styles.rowPressed,]}
-                  onPress={() => openNotification(item)}>
+                  style={({ pressed }) => [styles.row, !item.read && styles.rowUnread, pressed && styles.rowPressed]}
+                  onPress={() => openNotification(item)}
+                  onLongPress={() => setPendingDelete(item)}
+                  delayLongPress={300}
+                >
                   <View style={[styles.iconWrap, { backgroundColor: meta.soft }]}>
                     <Ionicons name={meta.icon} size={17} color={meta.color} />
                     {!item.read && <View style={styles.iconDot} />}
@@ -293,6 +318,19 @@ export default function NotificationsPage() {
           </View>
         )
       )}
+
+      <ConfirmDialog
+        visible={Boolean(pendingDelete)}
+        title="Delete notification?"
+        message="This notification will be removed from your inbox."
+        confirmLabel={deletingId ? 'Deleting...' : 'Delete'}
+        cancelLabel="Keep"
+        variant="destructive"
+        icon="trash-outline"
+        loading={deletingId === pendingDelete?.id}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={handleDeleteNotification}
+      />
     </ScreenShell>
   );
 }
