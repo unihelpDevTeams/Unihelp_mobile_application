@@ -631,6 +631,5 @@ export const updatePrivacySettings = async (uid, privacy) => {
   if (!uid) throw new Error('No authenticated user');
   await setDoc(doc(db, COLLECTIONS.users, uid), {
     privacy,
-    updatedAt: serverTimestamp(),
   }, { merge: true });
 };

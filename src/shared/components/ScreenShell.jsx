@@ -255,9 +255,19 @@ export default function ScreenShell({
     menuLogoutText: { color: c.danger, fontSize: 14, fontWeight: '900' },
   }));
 
+  // Debounce notifications check - only load every 60 seconds on focus
+  const unreadCheckTimeRef = React.useRef(0);
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
+      const now = Date.now();
+      const timeSinceLastCheck = now - unreadCheckTimeRef.current;
+      
+      // Only load if 60+ seconds have passed since last check
+      if (timeSinceLastCheck < 60000) return () => { cancelled = true; };
+      
+      unreadCheckTimeRef.current = now;
+      
       const loadUnread = async () => {
         try {
           const items = await fetchNotifications();
@@ -269,16 +279,25 @@ export default function ScreenShell({
     }, [])
   );
 
+  // Debounce upload counts - only load every 60 seconds on focus
+  const uploadCountsTimeRef = React.useRef(0);
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
+      const now = Date.now();
+      const timeSinceLastCheck = now - uploadCountsTimeRef.current;
+      
+      // Only load if 60+ seconds have passed since last check
+      if (timeSinceLastCheck < 60000) return () => { cancelled = true; };
+      
+      if (!uid) {
+        setUploadCounts({ hostels: 0, listings: 0, stories: 0 });
+        return () => { cancelled = true; };
+      }
+
+      uploadCountsTimeRef.current = now;
 
       const loadUploadCounts = async () => {
-        if (!uid) {
-          if (!cancelled) setUploadCounts({ hostels: 0, listings: 0, stories: 0 });
-          return;
-        }
-
         try {
           const [hostels, listings, stories] = await Promise.all([
             countUserUploads(COLLECTIONS.hostels, uid, 'userId'),

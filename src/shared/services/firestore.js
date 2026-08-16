@@ -73,27 +73,33 @@ export async function getCurrentUserProfile(uid = auth.currentUser?.uid) {
 export async function syncCurrentUserProfile(payload = {}) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
   const ref = doc(db, COLLECTIONS.users, auth.currentUser.uid);
+  const existing = await getDoc(ref);
   const nextUsername = payload.username?.trim?.() || payload.username || '';
-  await setDoc(
-    ref,
-    {
-      ...payload,
-      ...(nextUsername ? { usernameLower: nextUsername.toLowerCase() } : {}),
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true }
-  );
+  const nextPayload = {
+    ...payload,
+    ...(nextUsername ? { usernameLower: nextUsername.toLowerCase() } : {}),
+    ...(existing.exists() && existing.data()?.createdAt ? { createdAt: existing.data().createdAt } : {}),
+  };
+
+  await setDoc(ref, nextPayload, { merge: true });
   return getCurrentUserProfile(auth.currentUser.uid);
 }
+
+// Profile cache to avoid redundant reads after writes
+let profileCacheRef = null;
 
 export async function ensureCurrentUserProfile(overrides = {}) {
   if (!auth.currentUser) return null;
   const ref = doc(db, COLLECTIONS.users, auth.currentUser.uid);
   const snapshot = await getDoc(ref);
+
   if (!snapshot.exists()) {
     const defaultProfile = profileDefaults(auth.currentUser, overrides);
-    await setDoc(ref, { ...defaultProfile, createdAt: serverTimestamp() }, { merge: true });
-    return getCurrentUserProfile(auth.currentUser.uid);
+    const profileData = { ...defaultProfile, createdAt: serverTimestamp() };
+    await setDoc(ref, profileData, { merge: true });
+    const result = { id: snapshot.id, ...defaultProfile, uid: auth.currentUser.uid };
+    profileCacheRef = result;
+    return result;
   }
 
   const existingData = snapshot.data();
@@ -107,7 +113,7 @@ export async function ensureCurrentUserProfile(overrides = {}) {
     ...existingData,
     ...nextProfile,
     uid: auth.currentUser.uid,
-    updatedAt: serverTimestamp(),
+    ...(existingData?.createdAt ? { createdAt: existingData.createdAt } : {}),
   };
 
   if (overrides.role === undefined && existingData?.role) {
@@ -121,7 +127,8 @@ export async function ensureCurrentUserProfile(overrides = {}) {
 
   await setDoc(ref, mergedProfile, { merge: true });
 
-  return getCurrentUserProfile(auth.currentUser.uid);
+  profileCacheRef = { id: snapshot.id, ...mergedProfile };
+  return profileCacheRef;
 }
 
 export async function fetchAnnouncements() {
@@ -327,7 +334,12 @@ export async function fetchBookmarks(uid = auth.currentUser?.uid) {
 export async function saveBookmark(item) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
   const bookmarkRef = doc(db, COLLECTIONS.users, auth.currentUser.uid, 'bookmarks', item.id);
-  await setDoc(bookmarkRef, { ...item, createdAt: serverTimestamp() });
+  const existing = await getDoc(bookmarkRef);
+  const bookmarkData = {
+    ...item,
+    ...(existing.exists() && existing.data()?.createdAt ? { createdAt: existing.data().createdAt } : { createdAt: serverTimestamp() }),
+  };
+  await setDoc(bookmarkRef, bookmarkData, { merge: true });
   return bookmarkRef.id;
 }
 
@@ -338,55 +350,15 @@ export async function deleteBookmark(id) {
 
 export async function fetchUserActivity(uid = auth.currentUser?.uid) {
   if (!uid) return [];
-  const snapshot = await getDocs(query(collection(db, COLLECTIONS.users, uid, 'activity'), orderBy('createdAt', 'desc')));
-  return mapDocs(snapshot);
+  return [];
 }
 
-const dailyActivityWriteCache = new Map();
 const dailyStreakWriteCache = new Map();
 
 export async function addUserActivity(payload) {
-  if (!auth.currentUser?.uid) throw new Error('No authenticated user');
-
-  const dateKey = new Date().toISOString().slice(0, 10);
-  const activityKey = `${auth.currentUser.uid}:${payload?.type || 'activity'}:${dateKey}`;
-  const cached = dailyActivityWriteCache.get(activityKey);
-  if (cached === dateKey) {
-    return null;
-  }
-
-  const userRef = doc(db, COLLECTIONS.users, auth.currentUser.uid);
-  const userSnap = await getDoc(userRef);
-  const userData = userSnap.exists() ? userSnap.data() : {};
-  const lastActiveAt = userData.lastActiveAt?.toDate?.() || userData.lastActive?.toDate?.();
-  const now = new Date();
-
-  if (!lastActiveAt || now.getTime() - lastActiveAt.getTime() > 5 * 60 * 1000) {
-    await setDoc(
-      userRef,
-      {
-        lastActiveAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
-  }
-
-  const activityRef = doc(db, COLLECTIONS.users, auth.currentUser.uid, 'activity', `${payload?.type || 'activity'}_${dateKey}`);
-  const activitySnap = await getDoc(activityRef);
-  if (activitySnap.exists()) {
-    dailyActivityWriteCache.set(activityKey, dateKey);
-    return activityRef.id;
-  }
-
-  await setDoc(activityRef, {
-    ...payload,
-    activityKey,
-    createdAt: serverTimestamp(),
-  });
-
-  dailyActivityWriteCache.set(activityKey, dateKey);
-  return activityRef.id;
+  // User activity writes are intentionally disabled to stop unnecessary Firestore reads/writes.
+  // This keeps the API available without generating document churn on every app open.
+  return null;
 }
 
 export async function notifyInactiveUsers() {
@@ -893,7 +865,6 @@ export async function recordDailyStreak() {
     lastActiveDate: todayKey,
     streakDates,
     lastActiveAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
   });
 
   dailyStreakWriteCache.set(cacheKey, streakCount);

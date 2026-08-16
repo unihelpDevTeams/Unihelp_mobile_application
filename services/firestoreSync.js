@@ -1,5 +1,4 @@
 export {
-  addUserActivity,
   createAnnouncement,
   createGroup,
   createHostelListing,

@@ -120,7 +120,6 @@ export async function createCompleteAccount(formData) {
     role: studentType || 'university',
     provider: 'email',
     createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
   };
 
   await setDoc(userRef, userDocument, { merge: true });
