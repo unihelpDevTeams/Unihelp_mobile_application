@@ -17,7 +17,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../../../firebase/config';
 import { COLLECTIONS, conversationSubcollections, groupSubcollections, profileDefaults, userSubcollections } from '../firestoreSchema';
-import { deleteJson, getJson, postJson, putJson, sendAppNotification } from './backend';
+import { sendAppNotification } from './backend';
 
 const mapDocs = (snapshot) => snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
 const RESOURCE_ADMIN_EMAILS = new Set(['iadejuwon77@gmail.com', 'onakomayaokiki@gmail.com']);
@@ -178,48 +178,27 @@ export async function fetchUserGroups(uid = auth.currentUser?.uid) {
 }
 
 export async function fetchStories() {
-  const data = await getJson('/api/stories?limit=100');
-  return data.items || data || [];
+  return orderedList(COLLECTIONS.stories);
 }
 
 export async function fetchStoriesPage({ pageSize = 20, cursor = null } = {}) {
-  const page = Number(cursor?.page || cursor || 1);
-  const data = await getJson(`/api/stories?page=${page}&limit=${pageSize}`);
-  return {
-    items: data.items || [],
-    cursor: data.hasMore ? { page: page + 1 } : null,
-    hasMore: Boolean(data.hasMore),
-  };
+  return orderedPage(COLLECTIONS.stories, 'createdAt', 'desc', pageSize, cursor);
 }
 
 export async function fetchHostels() {
-  const data = await getJson('/api/hostels?limit=100');
-  return data.items || data || [];
+  return orderedList(COLLECTIONS.hostels);
 }
 
 export async function fetchHostelsPage({ pageSize = 20, cursor = null } = {}) {
-  const page = Number(cursor?.page || cursor || 1);
-  const data = await getJson(`/api/hostels?page=${page}&limit=${pageSize}`);
-  return {
-    items: data.items || [],
-    cursor: data.hasMore ? { page: page + 1 } : null,
-    hasMore: Boolean(data.hasMore),
-  };
+  return orderedPage(COLLECTIONS.hostels, 'createdAt', 'desc', pageSize, cursor);
 }
 
 export async function fetchStudentListings() {
-  const data = await getJson('/api/marketplace?limit=100');
-  return data.items || data || [];
+  return orderedList(COLLECTIONS.studentMarketplace);
 }
 
 export async function fetchStudentListingsPage({ pageSize = 20, cursor = null } = {}) {
-  const page = Number(cursor?.page || cursor || 1);
-  const data = await getJson(`/api/marketplace?page=${page}&limit=${pageSize}`);
-  return {
-    items: data.items || [],
-    cursor: data.hasMore ? { page: page + 1 } : null,
-    hasMore: Boolean(data.hasMore),
-  };
+  return orderedPage(COLLECTIONS.studentMarketplace, 'createdAt', 'desc', pageSize, cursor);
 }
 
 export async function fetchTasks(uid = auth.currentUser?.uid) {

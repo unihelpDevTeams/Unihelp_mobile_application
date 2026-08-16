@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 
-const DEFAULT_API_URL = 'https://unihelp-backend-vdps.onrender.com';
+const DEFAULT_API_URL = 'https://unihelp-backend-dg0o.onrender.com';
 const ANDROID_DEFAULT_CHANNEL_ID = 'default';
 
 Notifications.setNotificationHandler({
