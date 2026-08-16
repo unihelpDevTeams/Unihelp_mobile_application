@@ -17,7 +17,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../../../firebase/config';
 import { COLLECTIONS, conversationSubcollections, groupSubcollections, profileDefaults, userSubcollections } from '../firestoreSchema';
-import { sendAppNotification } from './backend';
+import { sendAppNotification, getJson } from './backend';
 
 const mapDocs = (snapshot) => snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
 const RESOURCE_ADMIN_EMAILS = new Set(['iadejuwon77@gmail.com', 'onakomayaokiki@gmail.com']);
@@ -178,26 +178,66 @@ export async function fetchUserGroups(uid = auth.currentUser?.uid) {
 }
 
 export async function fetchStories() {
-  return orderedList(COLLECTIONS.stories);
+  try {
+    return await getJson('/api/stories');
+  } catch (error) {
+    console.error('API stories fetch failed, falling back to firebase', error);
+    return orderedList(COLLECTIONS.stories);
+  }
 }
 
 export async function fetchStoriesPage({ pageSize = 20, cursor = null } = {}) {
+  // If no cursor is passed, try API first
+  if (!cursor) {
+    try {
+      const items = await getJson('/api/stories');
+      return { items, cursor: null, hasMore: false };
+    } catch (error) {
+      return orderedPage(COLLECTIONS.stories, 'createdAt', 'desc', pageSize, cursor);
+    }
+  }
   return orderedPage(COLLECTIONS.stories, 'createdAt', 'desc', pageSize, cursor);
 }
 
 export async function fetchHostels() {
-  return orderedList(COLLECTIONS.hostels);
+  try {
+    return await getJson('/api/hostels');
+  } catch (error) {
+    console.error('API hostels fetch failed, falling back to firebase', error);
+    return orderedList(COLLECTIONS.hostels);
+  }
 }
 
 export async function fetchHostelsPage({ pageSize = 20, cursor = null } = {}) {
+  if (!cursor) {
+    try {
+      const items = await getJson('/api/hostels');
+      return { items, cursor: null, hasMore: false };
+    } catch (error) {
+      return orderedPage(COLLECTIONS.hostels, 'createdAt', 'desc', pageSize, cursor);
+    }
+  }
   return orderedPage(COLLECTIONS.hostels, 'createdAt', 'desc', pageSize, cursor);
 }
 
 export async function fetchStudentListings() {
-  return orderedList(COLLECTIONS.studentMarketplace);
+  try {
+    return await getJson('/api/marketplace');
+  } catch (error) {
+    console.error('API marketplace fetch failed, falling back to firebase', error);
+    return orderedList(COLLECTIONS.studentMarketplace);
+  }
 }
 
 export async function fetchStudentListingsPage({ pageSize = 20, cursor = null } = {}) {
+  if (!cursor) {
+    try {
+      const items = await getJson('/api/marketplace');
+      return { items, cursor: null, hasMore: false };
+    } catch (error) {
+      return orderedPage(COLLECTIONS.studentMarketplace, 'createdAt', 'desc', pageSize, cursor);
+    }
+  }
   return orderedPage(COLLECTIONS.studentMarketplace, 'createdAt', 'desc', pageSize, cursor);
 }
 
