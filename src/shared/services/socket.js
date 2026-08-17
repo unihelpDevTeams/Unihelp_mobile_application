@@ -6,7 +6,6 @@ let socket = null;
 export const getSocket = () => {
   if (!socket) {
     socket = io(getApiUrl(), {
-      transports: ['websocket'],
       autoConnect: true,
     });
   }
