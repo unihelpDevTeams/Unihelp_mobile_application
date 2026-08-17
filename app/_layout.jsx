@@ -12,6 +12,8 @@ import { ThemeProvider, useTheme, ThemeGate } from '../src/shared/theme/ThemeCon
 import PromoSpotlight from '../src/shared/components/PromoSpotlight/PromoSpotlight';
 import { usePromoSpotlight } from '../src/shared/hooks/usePromoSpotlight';
 import { FullScreenLoader } from '../src/shared/components/AILoaders';
+import { NetworkProvider } from '../context/NetworkContext';
+import OfflineBanner from '../components/OfflineBanner';
 
 function GlobalPreloader() {
   const { loading } = useAuth();
@@ -60,6 +62,7 @@ function AppContent() {
         onDismiss={dismissPromo}
         onAction={markPromoClicked}
       />
+      <OfflineBanner />
     </ThemeGate>
   );
 }
@@ -68,14 +71,16 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <ThemeProvider>
-          <AuthProvider>
-            <AIProvider>
-              <PushNotificationBootstrap />
-              <AppContent />
-            </AIProvider>
-          </AuthProvider>
-        </ThemeProvider>
+        <NetworkProvider>
+          <ThemeProvider>
+            <AuthProvider>
+              <AIProvider>
+                <PushNotificationBootstrap />
+                <AppContent />
+              </AIProvider>
+            </AuthProvider>
+          </ThemeProvider>
+        </NetworkProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
