@@ -3,6 +3,7 @@ import { Animated, Easing, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { useThemeStyles } from '../theme/createStyles';
+import { Image } from 'react-native';
 
 /* =========================================================
    Page Loader - Branded full-screen or card loading
@@ -83,7 +84,7 @@ export function PageLoader({ label = 'Loading...' }) {
         <View style={styles.loaderSparkOne} />
         <View style={styles.loaderSparkTwo} />
         <View style={styles.logoCore}>
-          <Ionicons name="school" size={24} color={colors.brand} />
+          <Image source={require('../../../assets/images/icon-square.png')} style={{ width: 28, height: 28 }} />
         </View>
       </Animated.View>
       <Animated.Text style={[styles.pageLoaderText, { opacity: labelOpacity }]}>
@@ -200,7 +201,7 @@ export function FullScreenLoader({ label = 'Loading...' }) {
           <View style={styles.fullSparkOne} />
           <View style={styles.fullSparkTwo} />
           <View style={styles.fullLogoCore}>
-            <Ionicons name="school" size={32} color={colors.brand} />
+            <Image source={require('../../../assets/images/icon-square.png')} style={{ width: 28, height: 28 }} />
           </View>
         </Animated.View>
 
@@ -263,7 +264,7 @@ export function ChatThinkingLoader({ label = 'Thinking...' }) {
     <View style={styles.thinkingRow}>
       <View style={styles.thinkingAvatar}>
         <Animated.View style={{ transform: [{ scale }], opacity }}>
-          <Ionicons name="sparkles" size={14} color={colors.brand} />
+          <Image source={require('../../../assets/images/icon-square.png')} style={{ width: 28, height: 28 }} />
         </Animated.View>
       </View>
       <View style={styles.thinkingBubble}>
@@ -356,7 +357,7 @@ export function WidgetIconLoader({ color, size = 18 }) {
 
   return (
     <Animated.View style={{ transform: [{ rotate }] }}>
-      <Ionicons name="sync-outline" size={size} color={effectiveColor} />
+      <Image source={require('../../../assets/images/icon-square.png')} style={{ width: 28, height: 28 }} />
     </Animated.View>
   );
 }
@@ -391,7 +392,7 @@ export function ButtonLoader({ color, size = 16 }) {
 
   return (
     <Animated.View style={{ transform: [{ rotate }] }}>
-      <Ionicons name="arrow-redo" size={size} color={effectiveColor} />
+      <Image source={require('../../../assets/images/icon-square.png')} style={{ width: 28, height: 28 }} />
     </Animated.View>
   );
 }
