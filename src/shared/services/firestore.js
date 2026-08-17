@@ -362,50 +362,8 @@ export async function addUserActivity(payload) {
 }
 
 export async function notifyInactiveUsers() {
-  try {
-    const usersSnap = await getDocs(collection(db, COLLECTIONS.users));
-    const now = Date.now();
-    const inactiveCutoff = now - 20 * 60 * 60 * 1000; // 20 hours
-
-    const recipients = [];
-
-    usersSnap.forEach((userDoc) => {
-      const user = userDoc.data() || {};
-      if (user.notificationsEnabled === false || user.pushNotificationsEnabled === false) {
-        return;
-      }
-
-      const lastActive = user.lastActiveAt?.toDate?.()?.getTime?.() || user.lastActive?.toDate?.()?.getTime?.() || user.updatedAt?.toDate?.()?.getTime?.();
-      if (!lastActive) {
-        return;
-      }
-
-      if (lastActive > inactiveCutoff) {
-        return;
-      }
-
-      recipients.push(userDoc.id);
-    });
-
-    if (!recipients.length) {
-      return { sent: 0, recipients: 0 };
-    }
-
-    const result = await sendAppNotification({
-      userIds: recipients,
-      title: 'We miss you! 🎓',
-      body: 'You have been away for over 20 hours. Come back and continue learning.',
-      type: 'inactive_user',
-      category: 'Reminder',
-      url: '/notifications',
-      route: '/notifications',
-    });
-
-    return { sent: result?.sent || recipients.length, recipients: recipients.length };
-  } catch (error) {
-    console.log('Inactive-user notification job failed:', error);
-    return { sent: 0, recipients: 0 };
-  }
+  console.log('Inactive-user notification job should run on a backend cron, not client side.');
+  return { sent: 0, recipients: 0 };
 }
 
 export async function countUserUploads(collectionName, uid = auth.currentUser?.uid, field = 'userId') {

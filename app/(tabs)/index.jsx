@@ -934,7 +934,6 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!profile?.uid) return;
     recordDailyStreak().catch(() => {});
-    notifyInactiveUsers().catch(() => {});
   }, [profile?.uid]);
 
   useEffect(() => {

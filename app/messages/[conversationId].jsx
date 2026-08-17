@@ -290,12 +290,19 @@ export default function ConversationPage() {
       .catch(err => console.log('Failed to fetch messages', err));
 
     const socket = getSocket();
-    socket.emit("join_conversation", conversationId);
+    
+    const handleConnect = () => {
+      socket.emit("join_conversation", conversationId);
+    };
+
+    if (socket.connected) {
+      handleConnect();
+    }
     
     const handleReceiveMessage = (newMessage) => {
       setMessages((prev) => {
         if (prev.find(m => m.id === newMessage.id)) return prev;
-        return [...prev, newMessage];
+        return [...prev, newMessage].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
       });
     };
     
@@ -305,10 +312,12 @@ export default function ConversationPage() {
       if (isTyping && name) setTypingName(name);
     };
 
+    socket.on("connect", handleConnect);
     socket.on("receive_message", handleReceiveMessage);
     socket.on("typing_update", handleTyping);
 
     return () => {
+      socket.off("connect", handleConnect);
       socket.off("receive_message", handleReceiveMessage);
       socket.off("typing_update", handleTyping);
     };
