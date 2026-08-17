@@ -39,10 +39,10 @@ import { isPremiumActive } from '../../src/shared/services/premium';
 
 // Curated high-res imagery for top-tier visual hierarchy
 const IMAGES = {
-  hostel: 'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?q=80&w=600&auto=format&fit=crop',
-  marketplace: 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?q=80&w=600&auto=format&fit=crop',
-  stories: 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?q=80&w=600&auto=format&fit=crop',
-  community: 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?q=80&w=600&auto=format&fit=crop',
+  hostel: require('../../assets/images/campus_hostel.jpg'),
+  marketplace: require('../../assets/images/campus_marketplace.jpg'),
+  stories: require('../../assets/images/campus_stories.jpg'),
+  community: require('../../assets/images/campus_community.jpg'),
 };
 
 const FAB_SIZE = 56;
@@ -1218,7 +1218,7 @@ export default function HomeScreen() {
       return (
         <View key={item.id || item.uid || item.title || 'hostel'} style={discoverySectionStyles.discoveryCardShadowWrap}>
           <Pressable style={discoverySectionStyles.discoveryCard} onPress={() => router.push('/hostelmarketplace')}>
-            <Image source={{ uri: imageUrl }} style={discoverySectionStyles.discoveryMedia} resizeMode="cover" />
+            <Image source={typeof imageUrl === 'string' ? { uri: imageUrl } : imageUrl} style={discoverySectionStyles.discoveryMedia} resizeMode="cover" />
             <View style={discoverySectionStyles.discoveryBody}>
               <Text style={discoverySectionStyles.discoveryPrice}>{price}</Text>
               <Text style={discoverySectionStyles.discoveryName} numberOfLines={1}>{item.title || item.name || 'Student hostel'}</Text>
@@ -1278,7 +1278,7 @@ export default function HomeScreen() {
     return (
       <View key={item.id || item.uid || item.title || 'product'} style={discoverySectionStyles.discoveryCardShadowWrap}>
         <Pressable style={discoverySectionStyles.discoveryCard} onPress={() => router.push('/studentmarketplace')}>
-          <Image source={{ uri: imageUrl }} style={discoverySectionStyles.discoveryMedia} resizeMode="cover" />
+          <Image source={typeof imageUrl === 'string' ? { uri: imageUrl } : imageUrl} style={discoverySectionStyles.discoveryMedia} resizeMode="cover" />
           <View style={discoverySectionStyles.discoveryBody}>
             <Text style={discoverySectionStyles.discoveryPrice}>{price}</Text>
             <Text style={discoverySectionStyles.discoveryName} numberOfLines={1}>{item.title || item.name || 'Student product'}</Text>
@@ -1527,7 +1527,7 @@ export default function HomeScreen() {
             style={styles.horizontalCard}
             onPress={() => router.push('/hostelmarketplace')}
           >
-            <ImageBackground source={{ uri: IMAGES.hostel }} style={styles.horizontalBg}>
+            <ImageBackground source={IMAGES.hostel} style={styles.horizontalBg}>
               <LinearGradient
                 colors={['transparent', 'rgba(0,0,0,0.85)']}
                 style={styles.horizontalOverlay}
@@ -1542,7 +1542,7 @@ export default function HomeScreen() {
             style={styles.horizontalCard}
             onPress={() => router.push('/studentmarketplace')}
           >
-            <ImageBackground source={{ uri: IMAGES.marketplace }} style={styles.horizontalBg}>
+            <ImageBackground source={IMAGES.marketplace} style={styles.horizontalBg}>
               <LinearGradient
                 colors={['transparent', 'rgba(0,0,0,0.85)']}
                 style={styles.horizontalOverlay}
@@ -1554,7 +1554,7 @@ export default function HomeScreen() {
           </Pressable>
 
           <Pressable style={styles.horizontalCard} onPress={() => router.push('/stories')}>
-            <ImageBackground source={{ uri: IMAGES.stories }} style={styles.horizontalBg}>
+            <ImageBackground source={IMAGES.stories} style={styles.horizontalBg}>
               <LinearGradient
                 colors={['transparent', 'rgba(0,0,0,0.85)']}
                 style={styles.horizontalOverlay}
@@ -1566,7 +1566,7 @@ export default function HomeScreen() {
           </Pressable>
 
           <Pressable style={styles.horizontalCard} onPress={() => router.push('/find-friends')}>
-            <ImageBackground source={{ uri: IMAGES.community }} style={styles.horizontalBg}>
+            <ImageBackground source={IMAGES.community} style={styles.horizontalBg}>
               <LinearGradient
                 colors={['transparent', 'rgba(0,0,0,0.85)']}
                 style={styles.horizontalOverlay}

@@ -16,7 +16,7 @@ export default function ChallengeResultScreen() {
     try {
       return JSON.parse(decodeURIComponent(params.result || ''));
     } catch {
-      return {};
+      return {}; 
     }
   }, [params.result]);
 

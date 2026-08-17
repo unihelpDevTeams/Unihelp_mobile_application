@@ -357,7 +357,7 @@ export function WidgetIconLoader({ color, size = 18 }) {
 
   return (
     <Animated.View style={{ transform: [{ rotate }] }}>
-      <Image source={require('../../../assets/images/icon-square.png')} style={{ width: 28, height: 28 }} />
+      <Image source={require('../../../assets/images/icon-square.png')} style={{ width: 28, height: 28,  }} />
     </Animated.View>
   );
 }

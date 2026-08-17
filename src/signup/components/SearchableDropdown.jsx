@@ -9,6 +9,8 @@ import {
   Modal,
   Keyboard,
   StyleSheet,
+  Platform,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../shared/theme/ThemeContext';
@@ -159,8 +161,9 @@ export default function SearchableDropdown({
       {error && <Text style={st.errorText}>{error}</Text>}
 
       <Modal visible={isOpen} transparent animationType="fade" onRequestClose={close}>
-        <Pressable style={st.overlay} onPress={close}>
-          <Pressable style={st.dropdown} onPress={() => {}}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <Pressable style={st.overlay} onPress={close}>
+            <Pressable style={st.dropdown} onPress={() => {}}>
             <View style={st.searchContainer}>
               <Ionicons name="search" size={18} color={colors.grey} style={st.searchIcon} />
               <TextInput
@@ -227,6 +230,7 @@ export default function SearchableDropdown({
             />
           </Pressable>
         </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
