@@ -125,7 +125,17 @@ export async function ensureCurrentUserProfile(overrides = {}) {
     mergedProfile.usernameLower = existingData.usernameLower;
   }
 
-  await setDoc(ref, mergedProfile, { merge: true });
+  // Only write if overrides contain meaningful field changes
+  const overrideKeys = Object.keys(overrides).filter(
+    (key) => key !== 'provider' && overrides[key] !== undefined
+  );
+  const hasRealChanges = overrideKeys.some(
+    (key) => JSON.stringify(existingData?.[key]) !== JSON.stringify(overrides[key])
+  );
+
+  if (hasRealChanges) {
+    await setDoc(ref, mergedProfile, { merge: true });
+  }
 
   profileCacheRef = { id: snapshot.id, ...mergedProfile };
   return profileCacheRef;

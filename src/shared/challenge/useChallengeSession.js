@@ -138,6 +138,23 @@ export function useChallengeSession({ category, profile }) {
         answers: finalAnswers,
       };
       router.replace({ pathname: '/challenge/result', params: { result: encodeURIComponent(JSON.stringify(displayResult)) } });
+    } catch (error) {
+      console.warn("Challenge save error:", error);
+      // Construct a fallback result so the user isn't stuck on the question screen
+      const fallbackResult = {
+        id: `challenge-error-${Date.now()}`,
+        category: category || currentQuestion?.category || 'daily',
+        score: answersRef.current.filter(a => a.isCorrect).length,
+        totalQuestions: questions.length,
+        accuracy: Math.round((answersRef.current.filter(a => a.isCorrect).length / questions.length) * 100) || 0,
+        xpEarned: 0,
+        pointsEarned: 0,
+        correct: answersRef.current.filter(a => a.isCorrect).length,
+        wrong: answersRef.current.filter(a => a.selectedIndex !== null && !a.isCorrect).length,
+        skipped: answersRef.current.filter(a => a.selectedIndex === null).length,
+        answers: answersRef.current,
+      };
+      router.replace({ pathname: '/challenge/result', params: { result: encodeURIComponent(JSON.stringify(fallbackResult)) } });
     } finally {
       setSaving(false);
     }

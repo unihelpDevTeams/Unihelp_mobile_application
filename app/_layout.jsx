@@ -1,8 +1,8 @@
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import React from 'react';
+import React, { useEffect } from 'react';
 import '@/global.css';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { AIProvider } from '../src/shared/context/AIContext';
@@ -12,7 +12,7 @@ import { ThemeProvider, useTheme, ThemeGate } from '../src/shared/theme/ThemeCon
 import PromoSpotlight from '../src/shared/components/PromoSpotlight/PromoSpotlight';
 import { usePromoSpotlight } from '../src/shared/hooks/usePromoSpotlight';
 import { FullScreenLoader } from '../src/shared/components/AILoaders';
-import { NetworkProvider } from '../context/NetworkContext';
+import { NetworkProvider, useNetwork } from '../context/NetworkContext';
 import OfflineBanner from '../components/OfflineBanner';
 
 function GlobalPreloader() {
@@ -24,6 +24,14 @@ function GlobalPreloader() {
 function AppContent() {
   const { colors, isDark, themeLoaded } = useTheme();
   const { promo, visible: promoVisible, dismiss: dismissPromo, markClicked: markPromoClicked } = usePromoSpotlight();
+  const { isOnline } = useNetwork();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (isOnline === false) {
+      router.push('/offline-center');
+    }
+  }, [isOnline, router]);
 
   // Prevent flash - don't render until theme is loaded
   if (!themeLoaded) {

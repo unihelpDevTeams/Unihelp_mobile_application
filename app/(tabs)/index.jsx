@@ -1295,6 +1295,16 @@ export default function HomeScreen() {
   // Filtered tools based on user roles
   const toolsList = [
     {
+      id: 'challenge',
+      title: 'Daily Challenge',
+      sub: 'Build your streak',
+      icon: 'flame',
+      color: '#F97316',
+      bgColor: '#FFF7ED',
+      route: '/challenge',
+      badge: 'HOT',
+    },
+    {
       id: 'cbt',
       title: 'CBT Practice',
       sub: 'Mock exams & quizzes',
