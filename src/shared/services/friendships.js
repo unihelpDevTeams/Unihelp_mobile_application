@@ -1,5 +1,4 @@
 import {
-  addDoc,
   collection,
   deleteDoc,
   doc,
@@ -168,57 +167,47 @@ const incrementDailyLimit = (transaction, limitInfo) => {
 };
 
 export const listenRelationship = (currentUid, otherUid, callback) => {
-  if (!currentUid || !otherUid || currentUid === otherUid) {
-    callback({ state: RELATIONSHIP.NONE });
-    return () => {};
-  }
+  const runCheck = async () => {
+    if (!currentUid || !otherUid || currentUid === otherUid) {
+      callback({ state: RELATIONSHIP.NONE });
+      return;
+    }
 
-  const friendshipRef = doc(db, COLLECTIONS.friends, pairId(currentUid, otherUid));
-  const requestRef = doc(db, COLLECTIONS.friendRequests, pairId(currentUid, otherUid));
-  const currentBlockRef = doc(db, COLLECTIONS.blockedUsers, directedId(currentUid, otherUid));
-  const otherBlockRef = doc(db, COLLECTIONS.blockedUsers, directedId(otherUid, currentUid));
-  const state = {};
+    try {
+      const [friendshipSnap, requestSnap, currentBlockSnap, otherBlockSnap] = await Promise.all([
+        getDoc(doc(db, COLLECTIONS.friends, pairId(currentUid, otherUid))),
+        getDoc(doc(db, COLLECTIONS.friendRequests, pairId(currentUid, otherUid))),
+        getDoc(doc(db, COLLECTIONS.blockedUsers, directedId(currentUid, otherUid))),
+        getDoc(doc(db, COLLECTIONS.blockedUsers, directedId(otherUid, currentUid))),
+      ]);
 
-  const emit = () => {
-    if (state.currentBlock?.exists || state.otherBlock?.exists) {
-      callback({ state: RELATIONSHIP.BLOCKED, blockedByMe: !!state.currentBlock?.exists });
-      return;
+      if (currentBlockSnap.exists() || otherBlockSnap.exists()) {
+        callback({ state: RELATIONSHIP.BLOCKED, blockedByMe: currentBlockSnap.exists() });
+        return;
+      }
+
+      if (friendshipSnap.exists()) {
+        callback({ state: RELATIONSHIP.FRIENDS, friendship: friendshipSnap.data() });
+        return;
+      }
+
+      const request = requestSnap.exists() ? requestSnap.data() : null;
+      if (request?.status === 'pending') {
+        callback({
+          state: request.from === currentUid ? RELATIONSHIP.SENT : RELATIONSHIP.RECEIVED,
+          request: { id: pairId(currentUid, otherUid), ...request },
+        });
+        return;
+      }
+
+      callback({ state: RELATIONSHIP.NONE });
+    } catch (error) {
+      callback({ state: RELATIONSHIP.NONE, error: error?.message || 'Unable to resolve relationship.' });
     }
-    if (state.friendship?.exists) {
-      callback({ state: RELATIONSHIP.FRIENDS, friendship: state.friendship.data });
-      return;
-    }
-    const request = state.request?.data;
-    if (state.request?.exists && request?.status === 'pending') {
-      callback({
-        state: request.from === currentUid ? RELATIONSHIP.SENT : RELATIONSHIP.RECEIVED,
-        request: { id: pairId(currentUid, otherUid), ...request },
-      });
-      return;
-    }
-    callback({ state: RELATIONSHIP.NONE });
   };
 
-  const unsubscribers = [
-    onSnapshot(friendshipRef, (snap) => {
-      state.friendship = { exists: snap.exists(), data: snap.exists() ? snap.data() : null };
-      emit();
-    }),
-    onSnapshot(requestRef, (snap) => {
-      state.request = { exists: snap.exists(), data: snap.exists() ? snap.data() : null };
-      emit();
-    }),
-    onSnapshot(currentBlockRef, (snap) => {
-      state.currentBlock = { exists: snap.exists() };
-      emit();
-    }),
-    onSnapshot(otherBlockRef, (snap) => {
-      state.otherBlock = { exists: snap.exists() };
-      emit();
-    }),
-  ];
-
-  return () => unsubscribers.forEach((unsubscribe) => unsubscribe?.());
+  runCheck();
+  return () => {};
 };
 
 export const sendFriendRequest = async ({ currentUid, targetUid, currentProfile = {}, targetProfile = {} }) => {

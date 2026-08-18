@@ -5,7 +5,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  increment,
   limit,
   orderBy,
   query,
@@ -165,28 +164,22 @@ export async function fetchQuestionsPage({ pageSize = 20, cursor = null } = {}) 
   return orderedPage(COLLECTIONS.questions, 'createdAt', 'desc', pageSize, cursor);
 }
 
+export async function fetchGroupsPage({ pageSize = 20, cursor = null } = {}) {
+  const safePageSize = Math.max(1, Number(pageSize) || 20);
+  const constraints = [orderBy('lastActivityAt', 'desc')];
+  if (cursor) constraints.push(startAfter(cursor));
+  constraints.push(limit(safePageSize));
+
+  const snapshot = await getDocs(query(collection(db, COLLECTIONS.groups), ...constraints));
+  return {
+    items: mapDocs(snapshot).filter((item) => item?.id),
+    cursor: snapshot.docs[snapshot.docs.length - 1] || null,
+    hasMore: snapshot.docs.length === safePageSize,
+  };
+}
+
 export async function fetchGroups() {
-  const snapshot = await getDocs(collection(db, COLLECTIONS.groups));
-  return mapDocs(snapshot)
-    .filter((item) => item?.id)
-    .sort((left, right) => {
-      const leftTime =
-        left.lastActivityAt?.toDate?.()?.getTime?.() ||
-        left.updatedAt?.toDate?.()?.getTime?.() ||
-        left.createdAt?.toDate?.()?.getTime?.() ||
-        0;
-      const rightTime =
-        right.lastActivityAt?.toDate?.()?.getTime?.() ||
-        right.updatedAt?.toDate?.()?.getTime?.() ||
-        right.createdAt?.toDate?.()?.getTime?.() ||
-        0;
-
-      if (rightTime !== leftTime) {
-        return rightTime - leftTime;
-      }
-
-      return String(left.name || '').localeCompare(String(right.name || ''));
-    });
+  return (await fetchGroupsPage({ pageSize: 20 })).items;
 }
 
 export async function fetchUserGroups(uid = auth.currentUser?.uid) {

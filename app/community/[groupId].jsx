@@ -1007,8 +1007,8 @@ export default function GroupDetailPage() {
     setGroup(groupData);
     setMembership(memberData);
     if (groupData && user?.uid && (groupData.adminId === user.uid || groupData.ownerId === user.uid || memberData?.role === 'admin' || memberData?.role === 'owner')) {
-      const requests = await listGroupJoinRequests(groupId);
-      setJoinRequests(requests);
+      const result = await listGroupJoinRequests(groupId, 20);
+      setJoinRequests(Array.isArray(result?.items) ? result.items : result || []);
     } else {
       setJoinRequests([]);
     }

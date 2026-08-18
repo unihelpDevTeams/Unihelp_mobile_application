@@ -48,14 +48,19 @@ export const searchUsers = async (term, currentUid, pageSize = 12) => {
   const value = normalizeSearch(term);
   if (value.length < 2) return [];
 
-  const snapshot = await getDocs(collection(db, 'users'));
+  const safeLimit = Math.max(1, Number(pageSize) || 12);
+  const q = query(
+    collection(db, 'users'),
+    where('usernameLower', '>=', value),
+    where('usernameLower', '<=', `${value}\uf8ff`),
+    orderBy('usernameLower'),
+    limit(safeLimit)
+  );
+
+  const snapshot = await getDocs(q);
   return mapDocs(snapshot)
     .filter((entry) => entry.id !== currentUid)
-    .filter((entry) => {
-      const searchText = `${entry.username || ''} ${entry.email || ''} ${entry.school || ''} ${entry.department || ''}`.toLowerCase();
-      return searchText.includes(value);
-    })
-    .slice(0, pageSize);
+    .slice(0, safeLimit);
 };
 
 export const listGroups = async ({ search = '', category = 'All', cursor = null } = {}) => {
@@ -181,24 +186,41 @@ export const requestJoinGroup = async (group, user, profile) => {
   });
 
   const adminIds = Array.isArray(group.adminIds) ? group.adminIds : [];
-  const notifyTargets = [group.ownerId, ...adminIds].filter(Boolean);
-  for (const targetId of [...new Set(notifyTargets)]) {
-    await addDoc(collection(db, 'notifications', targetId, 'items'), {
+  const notifyTargets = [...new Set([group.ownerId, ...adminIds].filter(Boolean))];
+  if (notifyTargets.length === 0) return;
+
+  const batch = writeBatch(db);
+  const now = serverTimestamp();
+
+  for (const targetId of notifyTargets) {
+    const notificationRef = doc(collection(db, 'notifications', targetId, 'items'));
+    batch.set(notificationRef, {
       type: 'group_join_request',
       title: 'New join request',
       body: `${summary.name} wants to join ${group.name}.`,
       groupId: group.id,
       route: `/community/${group.id}`,
       read: false,
-      createdAt: serverTimestamp(),
+      createdAt: now,
     });
   }
+
+  await batch.commit();
 };
 
-export const listGroupJoinRequests = async (groupId) => {
-  if (!groupId) return [];
-  const snapshot = await getDocs(query(collection(db, 'groups', groupId, 'joinRequests'), orderBy('requestedAt', 'desc')));
-  return mapDocs(snapshot).filter((request) => request.status === 'pending');
+export const listGroupJoinRequests = async (groupId, pageSize = 20, cursor = null) => {
+  if (!groupId) return { items: [], cursor: null, hasMore: false };
+  const safePageSize = Math.max(1, Number(pageSize) || 20);
+  const clauses = [orderBy('requestedAt', 'desc')];
+  if (cursor) clauses.push(startAfter(cursor));
+  clauses.push(limit(safePageSize));
+
+  const snapshot = await getDocs(query(collection(db, 'groups', groupId, 'joinRequests'), ...clauses));
+  return {
+    items: mapDocs(snapshot).filter((request) => request.status === 'pending'),
+    cursor: snapshot.docs[snapshot.docs.length - 1] || null,
+    hasMore: snapshot.docs.length === safePageSize,
+  };
 };
 
 export const approveGroupJoinRequest = async (groupId, requestUserId, currentUserId) => {
