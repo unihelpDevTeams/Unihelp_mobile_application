@@ -14,6 +14,7 @@ import { usePromoSpotlight } from '../src/shared/hooks/usePromoSpotlight';
 import { FullScreenLoader } from '../src/shared/components/AILoaders';
 import { NetworkProvider, useNetwork } from '../context/NetworkContext';
 import OfflineBanner from '../components/OfflineBanner';
+import { isPremiumActive } from '../src/shared/services/premium';
 
 function GlobalPreloader() {
   const { loading } = useAuth();
@@ -23,15 +24,17 @@ function GlobalPreloader() {
 
 function AppContent() {
   const { colors, isDark, themeLoaded } = useTheme();
+  const { profile } = useAuth();
   const { promo, visible: promoVisible, dismiss: dismissPromo, markClicked: markPromoClicked } = usePromoSpotlight();
   const { isOnline } = useNetwork();
   const router = useRouter();
+  const premiumUnlocked = isPremiumActive(profile);
 
   useEffect(() => {
-    if (isOnline === false) {
+    if (isOnline === false && premiumUnlocked && router.pathname !== '/offline-center' && router.pathname !== '/premium') {
       router.push('/offline-center');
     }
-  }, [isOnline, router]);
+  }, [isOnline, premiumUnlocked, router]);
 
   // Prevent flash - don't render until theme is loaded
   if (!themeLoaded) {

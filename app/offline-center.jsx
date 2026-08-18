@@ -15,7 +15,6 @@ import {
   hasOfflineLibraryAccess,
   removeDownload,
   syncQueuedLearningActions,
-  validateOfflineEntitlement,
 } from '../src/shared/offline/offlineLearningService';
 import { isPremiumActive } from '../src/shared/services/premium';
 
@@ -33,7 +32,7 @@ const formatSize = (bytes = 0) => {
 
 export default function OfflineCenterScreen() {
   const router = useRouter();
-  const { profile, refreshProfile } = useAuth();
+  const { profile } = useAuth();
   const { colors } = useTheme();
   const { isConnected } = useNetInfo();
   const [downloads, setDownloads] = useState([]);
@@ -104,6 +103,42 @@ export default function OfflineCenterScreen() {
       color: c.textSecondary,
       lineHeight: 20,
     },
+    lockCard: {
+      backgroundColor: c.card,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      padding: s.xl,
+      alignItems: 'center',
+      gap: s.md,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 8,
+      elevation: 2,
+    },
+    lockIconWrap: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: c.brandLight || c.surfaceSecondary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    lockTitle: {
+      color: c.textPrimary,
+      fontSize: 18,
+      fontWeight: '800',
+      textAlign: 'center',
+      letterSpacing: -0.3,
+    },
+    lockText: {
+      color: c.textSecondary,
+      fontSize: 13.5,
+      lineHeight: 20,
+      textAlign: 'center',
+      maxWidth: 280,
+    },
     premiumCTA: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -118,6 +153,23 @@ export default function OfflineCenterScreen() {
       fontWeight: '800',
       fontSize: 14,
       color: c.onBrand,
+    },
+    actionButton: {
+      marginTop: s.xs,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: s.xs,
+      borderRadius: r.lg,
+      backgroundColor: c.brand,
+      paddingVertical: s.md,
+      paddingHorizontal: s.xl,
+      width: '100%',
+    },
+    actionText: {
+      color: c.onBrand,
+      fontWeight: '800',
+      fontSize: 14,
     },
 
     // Section Titles
@@ -362,8 +414,10 @@ export default function OfflineCenterScreen() {
 
   useEffect(() => {
     if (!premiumUnlocked) {
-      router.replace('/premium');
-      return;
+      Alert.alert('Premium required', 'Offline Library is available with UniHelp Premium.', [
+        { text: 'Maybe later', style: 'cancel', onPress: () => router.back() },
+        { text: 'View Premium', onPress: () => router.replace('/premium') },
+      ]);
     }
   }, [premiumUnlocked, router]);
 
@@ -457,8 +511,18 @@ export default function OfflineCenterScreen() {
   if (!premiumUnlocked) {
     return (
       <ScreenShell title="Offline Library" subtitle="Premium saved learning materials" showBack scrollable>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color={colors.brand} />
+        <View style={styles.lockCard}>
+          <View style={styles.lockIconWrap}>
+            <Ionicons name="lock-closed" size={28} color={colors.brand} />
+          </View>
+          <Text style={styles.lockTitle}>Offline Library Locked</Text>
+          <Text style={styles.lockText}>
+            Upgrade to UniHelp Premium to save and open study materials without an internet connection.
+          </Text>
+          <Pressable style={styles.actionButton} onPress={() => router.push('/premium')}>
+            <Ionicons name="star" size={16} color={colors.onBrand} />
+            <Text style={styles.actionText}>Upgrade to Premium</Text>
+          </Pressable>
         </View>
       </ScreenShell>
     );
