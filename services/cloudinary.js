@@ -32,6 +32,13 @@ const ALLOWED_VIDEO_TYPES = [
 ];
 
 const ALLOWED_PDF_TYPES = [PDF_MIME_TYPE];
+const DISALLOWED_HTML_TYPES = new Set(["text/html", "application/xhtml+xml"]);
+
+const isHtmlLikeFile = (file) => {
+  const fileType = String(getFileType(file)).toLowerCase();
+  const fileName = String(file?.name || "").toLowerCase();
+  return DISALLOWED_HTML_TYPES.has(fileType) || /\.(html?|xhtml)$/i.test(fileName);
+};
 
 const getFileType = (file) => file?.type || file?.mimeType || file?.contentType || "";
 
@@ -119,6 +126,11 @@ const validateFile = (file, kind) => {
   }
 
   const fileType = getFileType(file);
+
+  if (isHtmlLikeFile(file)) {
+    errors.push("Invalid file type: html is not allowed");
+    return errors;
+  }
 
   if (kind === "image" && !ALLOWED_IMAGE_TYPES.includes(fileType)) {
     errors.push(

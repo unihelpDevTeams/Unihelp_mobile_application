@@ -21,6 +21,18 @@ import { sendAppNotification, getJson, postJson, putJson, deleteJson } from './b
 
 const mapDocs = (snapshot) => snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
 const RESOURCE_ADMIN_EMAILS = new Set(['iadejuwon77@gmail.com', 'onakomayaokiki@gmail.com']);
+const collectionMapForType = {
+  announcement: COLLECTIONS.announcements,
+  note: COLLECTIONS.notes,
+  question: COLLECTIONS.questions,
+  group: COLLECTIONS.groups,
+  story: COLLECTIONS.stories,
+  hostel: COLLECTIONS.hostels,
+  listing: COLLECTIONS.studentMarketplace,
+  tutorial: COLLECTIONS.tutorials,
+  studyMaterial: COLLECTIONS.studyMaterials,
+  formula: COLLECTIONS.formulas,
+};
 
 const currentUserIsResourceAdmin = async () => {
   const user = auth.currentUser;
@@ -643,6 +655,20 @@ export async function fetchRecord(collectionName, id) {
   }
 
   return null;
+}
+
+// Detail screens need to preserve REST errors instead of turning every API
+// failure into an ambiguous "Item not found" state.
+export async function fetchDetailRecord(type, id) {
+  if (!type || !id) return null;
+
+  if (type === 'hostel') return getJson(`/api/hostels/${encodeURIComponent(id)}`);
+  if (type === 'listing') return getJson(`/api/marketplace/${encodeURIComponent(id)}`);
+  if (type === 'story') return getJson(`/api/stories/${encodeURIComponent(id)}`);
+
+  const collectionName = collectionMapForType[type] || type;
+  const snapshot = await getDoc(doc(db, collectionName, id));
+  return snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null;
 }
 
 export function groupPaths(groupId) {

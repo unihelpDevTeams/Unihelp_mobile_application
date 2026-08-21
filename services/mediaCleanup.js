@@ -1,11 +1,7 @@
 import { auth } from "../firebase/config";
-import Constants from 'expo-constants';
+import { getApiUrl } from "../src/shared/services/backend";
 
-const extra = Constants.expoConfig?.extra || Constants.manifest?.extra || {};
-const API_URL =
-  extra?.EXPO_PUBLIC_API_URL ||
-  (typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_API_URL : undefined) ||
-  "http://localhost:5000";
+const API_URL = getApiUrl();
 
 const requestCleanupDelete = async (path) => {
   const user = auth.currentUser;

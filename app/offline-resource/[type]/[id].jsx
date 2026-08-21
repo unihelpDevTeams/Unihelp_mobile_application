@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import ScreenShell from '../../../src/shared/components/ScreenShell';
@@ -18,6 +19,23 @@ const TYPE_CONFIG = {
   notes: { label: 'Notes & Study Materials', icon: 'document-text-outline' },
 };
 
+const offlineViewerLockdownScript = `
+  (function () {
+    const style = document.createElement('style');
+    style.textContent = 'html, body, embed, iframe { user-select: none !important; -webkit-user-select: none !important; -webkit-touch-callout: none !important; }';
+    document.head.appendChild(style);
+    document.addEventListener('contextmenu', (event) => event.preventDefault(), { passive: false });
+    document.addEventListener('copy', (event) => event.preventDefault(), { passive: false });
+    document.addEventListener('keydown', (event) => {
+      if (event.ctrlKey && ['p', 's', 'u'].includes(String(event.key).toLowerCase())) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }, { passive: false });
+  })();
+  true;
+`;
+
 export default function OfflineResourceScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -30,6 +48,7 @@ export default function OfflineResourceScreen() {
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [deleting, setDeleting] = useState(false);
+  const [readerError, setReaderError] = useState(false);
 
   const flatListRef = useRef(null);
 
@@ -345,7 +364,17 @@ export default function OfflineResourceScreen() {
   const load = useCallback(async () => {
     try {
       const [download, access] = await Promise.all([getDownloadRecord(type, id), hasOfflineLibraryAccess()]);
-      setRecord(download);
+      if (download?.localReference) {
+        const localFile = await FileSystem.getInfoAsync(download.localReference);
+        if (!localFile.exists) {
+          await removeDownload(type, id);
+          setRecord(null);
+        } else {
+          setRecord(download);
+        }
+      } else {
+        setRecord(download);
+      }
       setAllowed(access);
     } finally {
       setLoading(false);
@@ -358,8 +387,8 @@ export default function OfflineResourceScreen() {
 
   const handleDeleteOffline = useCallback(() => {
     Alert.alert(
-      'Delete Offline Copy',
-      `Remove "${record?.title || 'this resource'}" from your device? You can download it again later.`,
+      'Remove from Offline Library',
+      `Remove "${record?.title || 'this resource'}" from UniHelp Offline Library? You can save it again later.`,
       [
         { text: 'Keep', onPress: () => {}, style: 'cancel' },
         {
@@ -369,8 +398,8 @@ export default function OfflineResourceScreen() {
             try {
               await removeDownload(type, id);
               Alert.alert(
-                'Deleted',
-                'Offline copy removed from this device.',
+                'Removed',
+                'Removed from Offline Library.',
                 [{ text: 'OK', onPress: () => router.back() }],
               );
             } catch (error) {
@@ -454,10 +483,34 @@ export default function OfflineResourceScreen() {
   }
 
   if (record.localReference) {
+    if (readerError) {
+      return (
+        <ScreenShell title="Offline Reader" subtitle="Resource unavailable" showBack>
+          <View style={styles.lockCard}>
+            <Ionicons name="alert-circle-outline" size={30} color={colors.textSecondary} />
+            <Text style={styles.lockTitle}>Could not open this resource</Text>
+            <Text style={styles.lockText}>The private offline copy appears to be damaged. Return to the resource and save it again.</Text>
+            <Pressable style={styles.actionButton} onPress={() => router.back()}>
+              <Text style={styles.actionText}>Return to resource</Text>
+            </Pressable>
+          </View>
+        </ScreenShell>
+      );
+    }
     return (
       <ScreenShell title={record.title || 'Offline Document'} subtitle="UniHelp Reader" showBack scrollable={false}>
         <View style={styles.webviewWrap}>
-          <WebView source={{ uri: record.localReference }} originWhitelist={['*']} startInLoadingState />
+          <WebView
+            source={{ uri: record.localReference }}
+            originWhitelist={['file://*']}
+            allowFileAccess
+            allowUniversalAccessFromFileURLs={false}
+            javaScriptEnabled
+            injectedJavaScript={offlineViewerLockdownScript}
+            onShouldStartLoadWithRequest={(request) => request.url.startsWith('file://')}
+            onError={() => setReaderError(true)}
+            startInLoadingState
+          />
         </View>
       </ScreenShell>
     );
@@ -486,7 +539,7 @@ export default function OfflineResourceScreen() {
           onPress={handleDeleteOffline}
           disabled={deleting}
           accessibilityRole="button"
-          accessibilityLabel="Delete offline copy"
+          accessibilityLabel="Remove from Offline Library"
         >
           {deleting ? (
             <ActivityIndicator size={16} color={colors.textSecondary} />

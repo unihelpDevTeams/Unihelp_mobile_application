@@ -256,26 +256,36 @@ export const spacing = {
   '4xl': 40,
 };
 
+export const fontFamilies = {
+  body: 'Manrope_400Regular',
+  bodyMedium: 'Manrope_500Medium',
+  bodySemibold: 'Manrope_600SemiBold',
+  bodyBold: 'Manrope_700Bold',
+  heading: 'Sora_700Bold',
+  headingSemibold: 'Sora_600SemiBold',
+  display: 'Sora_800ExtraBold',
+};
+
 // ============================================================
 // TYPOGRAPHY
 // ============================================================
 export const typography = {
-  xs: { fontSize: 11 },
-  sm: { fontSize: 12 },
-  md: { fontSize: 13 },
-  lg: { fontSize: 14 },
-  xl: { fontSize: 15 },
-  '2xl': { fontSize: 17 },
-  '3xl': { fontSize: 19 },
-  '4xl': { fontSize: 20 },
-  '5xl': { fontSize: 24 },
-  '6xl': { fontSize: 30 },
-  regular: { fontWeight: '400' },
-  medium: { fontWeight: '500' },
-  semibold: { fontWeight: '600' },
-  bold: { fontWeight: '700' },
-  extrabold: { fontWeight: '800' },
-  black: { fontWeight: '900' },
+  xs: { fontSize: 11, fontFamily: fontFamilies.body },
+  sm: { fontSize: 12, fontFamily: fontFamilies.body },
+  md: { fontSize: 13, fontFamily: fontFamilies.body },
+  lg: { fontSize: 14, fontFamily: fontFamilies.body },
+  xl: { fontSize: 15, fontFamily: fontFamilies.body },
+  '2xl': { fontSize: 17, fontFamily: fontFamilies.body },
+  '3xl': { fontSize: 19, fontFamily: fontFamilies.body },
+  '4xl': { fontSize: 20, fontFamily: fontFamilies.body },
+  '5xl': { fontSize: 24, fontFamily: fontFamilies.heading },
+  '6xl': { fontSize: 30, fontFamily: fontFamilies.display },
+  regular: { fontWeight: '400', fontFamily: fontFamilies.body },
+  medium: { fontWeight: '500', fontFamily: fontFamilies.bodyMedium },
+  semibold: { fontWeight: '600', fontFamily: fontFamilies.bodySemibold },
+  bold: { fontWeight: '700', fontFamily: fontFamilies.bodyBold },
+  extrabold: { fontWeight: '800', fontFamily: fontFamilies.headingSemibold },
+  black: { fontWeight: '900', fontFamily: fontFamilies.display },
 };
 
 // ============================================================

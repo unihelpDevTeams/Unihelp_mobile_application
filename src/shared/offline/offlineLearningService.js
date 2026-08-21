@@ -4,7 +4,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { useEffect, useState } from 'react';
 import { auth, db } from '../../../firebase/config';
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { getJson, postJson } from '../services/backend';
+import { getApiUrl, getJson, postJson } from '../services/backend';
 import { resolveDocumentAsset } from '../utils/documentMedia';
 import { cachedRequest } from '../utils/requestCache';
 
@@ -142,7 +142,8 @@ async function writeSyncQueue(syncQueue = []) {
 const normalizeType = (type = '') => {
   const value = String(type || '').trim();
   if (['question', 'questions', 'pastQuestion', 'pastQuestions'].includes(value)) return 'pastQuestions';
-  if (['note', 'notes', 'studyMaterial', 'studyMaterials'].includes(value)) return 'notes';
+  if (['studyMaterial', 'studyMaterials'].includes(value)) return 'studyMaterials';
+  if (['note', 'notes'].includes(value)) return 'notes';
   return value || 'resource';
 };
 
@@ -307,7 +308,7 @@ export async function isContentDownloaded(type, id) {
   return Boolean(item && item.status === 'downloaded');
 }
 
-export async function saveResourceForOffline({ resourceType, resourceId, resource = null, fileUrl = '', fileName = '', onProgress } = {}) {
+export async function saveResourceForOffline({ resourceType, resourceId, resource = null, fileName = '', onProgress } = {}) {
   const type = normalizeType(resourceType);
   const id = String(resourceId || resource?.id || type);
   const uid = getCurrentUid();
@@ -325,6 +326,8 @@ export async function saveResourceForOffline({ resourceType, resourceId, resourc
     contentVersion: resource?.contentVersion || existing?.contentVersion || '1',
   });
 
+  let localReference = null;
+
   try {
     const authResult = await postJson('/api/offline-library/authorize', { resourceType: type, resourceId: id });
     const entitlement = authResult.entitlement;
@@ -335,11 +338,14 @@ export async function saveResourceForOffline({ resourceType, resourceId, resourc
 
     const title = authorized.title || resource?.title || resource?.name || 'Offline resource';
     const contentVersion = String(authorized.contentVersion || resource?.contentVersion || resource?.version || '1');
-    const contentKind = authorized.contentKind || (fileUrl ? 'document' : 'structured');
+    const contentKind = authorized.contentKind || 'structured';
     const meta = authorized.metadata || resource || {};
     const resolved = resolveDocumentAsset(meta || {});
-    const remoteUrl = fileUrl || resolved.directDownloadUrl || resolved.fileUrl || resolved.downloadUrl || '';
-    let localReference = null;
+    // Never trust or persist a caller-supplied Cloudinary URL. The API checks
+    // entitlement and streams the document only after authorizing this ID.
+    const remoteUrl = authorized.contentUrl ? `${getApiUrl()}${authorized.contentUrl}` : '';
+    const authToken = await auth.currentUser?.getIdToken?.();
+    const requestOptions = authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {};
     let size = 0;
     let payload = authorized.payload || null;
 
@@ -348,16 +354,18 @@ export async function saveResourceForOffline({ resourceType, resourceId, resourc
       await ensureDirectory(directory);
       const finalName = safeFileName(fileName || resolved.fileName || `${id}.pdf`);
       localReference = `${directory}${finalName}`;
-      const resumable = FileSystem.createDownloadResumable?.(remoteUrl, localReference, {}, ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
+      const resumable = FileSystem.createDownloadResumable?.(remoteUrl, localReference, requestOptions, ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
         if (typeof onProgress === 'function' && totalBytesExpectedToWrite > 0) {
           onProgress(Math.round((totalBytesWritten / totalBytesExpectedToWrite) * 100));
         }
       });
-      const result = resumable ? await resumable.downloadAsync() : await FileSystem.downloadAsync(remoteUrl, localReference);
+      const result = resumable ? await resumable.downloadAsync() : await FileSystem.downloadAsync(remoteUrl, localReference, requestOptions);
       if (!result?.uri) throw new Error('Save failed.');
       const info = await FileSystem.getInfoAsync(result.uri, { size: true });
       size = info?.size || 0;
       payload = null;
+    } else if (contentKind === 'document') {
+      throw new Error('This resource is not available for private offline saving.');
     } else {
       payload = authorized.payload || resource || {};
       size = JSON.stringify(payload || {}).length;
@@ -384,6 +392,9 @@ export async function saveResourceForOffline({ resourceType, resourceId, resourc
       },
     });
   } catch (error) {
+    if (localReference) {
+      await FileSystem.deleteAsync(localReference, { idempotent: true }).catch(() => {});
+    }
     await setDownloadState(type, id, { userId: uid, status: 'failed', reason: error?.message || 'Save failed' });
     throw error;
   }

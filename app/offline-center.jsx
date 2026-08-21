@@ -488,7 +488,7 @@ export default function OfflineCenterScreen() {
   };
 
   const handleClear = () => {
-    Alert.alert('Clear offline content?', 'Downloaded content will be removed, but your study progress and scores remain.', [
+    Alert.alert('Clear offline content?', 'Saved offline resources will be removed, but your study progress and scores remain.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Clear', style: 'destructive', onPress: async () => { await clearOfflineDownloads(); await loadData(); } },
     ]);
@@ -629,7 +629,7 @@ export default function OfflineCenterScreen() {
                       <View>
                         <Text style={styles.categoryText}>{type.label}</Text>
                         <Text style={styles.categoryMeta}>
-                          {count > 0 ? `${count} ${count === 1 ? 'item' : 'items'} saved` : 'No downloads'}
+                          {count > 0 ? `${count} ${count === 1 ? 'item' : 'items'} saved` : 'Nothing saved yet'}
                         </Text>
                       </View>
                     </View>
@@ -741,7 +741,7 @@ export default function OfflineCenterScreen() {
               /* 6. Polished Empty State */
               <View style={styles.emptyCard}>
                 <View style={styles.emptyIconWrap}>
-                  <Ionicons name="cloud-download-outline" size={28} color={colors.textSecondary} />
+                  <Ionicons name="cloud-offline-outline" size={28} color={colors.textSecondary} />
                 </View>
                 <Text style={styles.emptyTitle}>Nothing saved yet</Text>
                 <Text style={styles.emptySubtitle}>

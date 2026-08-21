@@ -3,18 +3,20 @@ import { ActivityIndicator, Alert, Animated, Dimensions, Linking, Modal, Pressab
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { WebView } from 'react-native-webview';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../../src/shared/components/ScreenShell';
-import { deleteNote, deleteQuestion, fetchRecord } from '../../../services/firestoreSync';
+import { deleteNote, deleteQuestion, fetchDetailRecord } from '../../../services/firestoreSync';
 import { COLLECTIONS } from '../../../src/shared/firestoreSchema';
 import { resolveDocumentAsset, formatDocumentMeta } from '../../../src/shared/utils/documentMedia';
-import { isPdfUrl, isPreviewImageUrl } from '../../../src/shared/services/cloudinary';
+import { isPreviewImageUrl } from '../../../src/shared/services/cloudinary';
 import { useAuth } from '../../../context/AuthContext';
 import { startConversation, sendDirectMessage } from '../../../src/shared/services/community';
 import { getUserProfileById } from '../../../src/shared/services/friendships';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
 import { canManageResource } from '../../../src/shared/auth/resourcePermissions';
 import { getDownloadRecord, saveResourceForOffline } from '../../../src/shared/offline/offlineLearningService';
+import { getApiUrl } from '../../../src/shared/services/backend';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const SCREEN_PADDING = 18;
@@ -51,28 +53,95 @@ const TYPE_META = {
   formula: { label: 'Formula sheet', icon: 'calculator' },
 };
 
-const buildPdfViewerUrl = (url = '', forcePdf = false) => {
-  const normalized = String(url).trim();
-  if (!normalized) return '';
-  if (!forcePdf && !isPdfUrl(normalized)) return normalized;
-  return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(normalized)}`;
-};
+const pdfExportLockdownScript = `
+  (function () {
+    const hideSelectors = [
+      '.download',
+      '.print',
+      '[aria-label*="Download"]',
+      '[aria-label*="Print"]',
+      '[title*="Download"]',
+      '[title*="Print"]',
+      '[data-l10n-id*="download"]',
+      '[data-l10n-id*="print"]',
+      '.toolbarButton',
+      '.secondaryToolbarButton'
+    ];
 
-const buildPdfViewerUrls = (url = '', forcePdf = false) => {
-  const normalized = String(url).trim();
-  if (!normalized) return [];
-  if (!forcePdf && !isPdfUrl(normalized)) return [normalized];
-  return [
-    `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(normalized)}`,
-    `https://drive.google.com/viewerng/viewer?embedded=true&url=${encodeURIComponent(normalized)}`,
-    normalized,
-  ];
-};
+    const removeToolbarButtons = () => {
+      document.querySelectorAll(hideSelectors.join(',')).forEach((element) => {
+        const text = (element.textContent || '').toLowerCase();
+        if (text.includes('download') || text.includes('print') || text.includes('save')) {
+          element.remove();
+          return;
+        }
+
+        const label = (element.getAttribute('aria-label') || '').toLowerCase();
+        const title = (element.getAttribute('title') || '').toLowerCase();
+        if (label.includes('download') || label.includes('print') || title.includes('download') || title.includes('print')) {
+          element.remove();
+        }
+      });
+
+      const viewer = document.querySelector('#mainContainer');
+      if (viewer) {
+        viewer.style.setProperty('user-select', 'none', 'important');
+        viewer.style.setProperty('-webkit-user-select', 'none', 'important');
+      }
+    };
+
+    const blockPrint = () => {
+      window.print = function () {};
+      document.addEventListener('contextmenu', function (event) {
+        event.preventDefault();
+      }, { passive: false });
+      document.addEventListener('copy', function (event) {
+        event.preventDefault();
+      }, { passive: false });
+      document.addEventListener('keydown', function (event) {
+        const isPrintShortcut = event.ctrlKey && (event.key === 'p' || event.key === 'P');
+        if (isPrintShortcut) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }, { passive: false });
+    };
+
+    const style = document.createElement('style');
+    style.innerHTML = [
+      'html, body, #outerContainer, #mainContainer, #viewerContainer, .page {',
+      '  user-select: none !important;',
+      '  -webkit-user-select: none !important;',
+      '  -webkit-touch-callout: none !important;',
+      '}',
+      '.download, .print, [aria-label*="Download"], [aria-label*="Print"],',
+      '[title*="Download"], [title*="Print"],',
+      '[data-l10n-id*="download"], [data-l10n-id*="print"] {',
+      '  display: none !important;',
+      '}'
+    ].join(' ');
+    document.head.appendChild(style);
+
+    removeToolbarButtons();
+    blockPrint();
+
+    const observer = new MutationObserver(() => {
+      removeToolbarButtons();
+    });
+
+    const target = document.body || document.documentElement;
+    if (target) {
+      observer.observe(target, { childList: true, subtree: true });
+    }
+  })();
+  true;
+`;
 
 const formatDate = (value) => {
   if (!value) return '';
-  const date = typeof value === 'string' ? new Date(value) : value?.toDate ? value.toDate() : value;
-  if (!date || Number.isNaN(date.getTime?.())) return '';
+  const rawDate = typeof value === 'string' ? new Date(value) : value?.toDate ? value.toDate() : value;
+  const date = rawDate instanceof Date ? rawDate : new Date(rawDate);
+  if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
@@ -187,10 +256,9 @@ export default function RecordViewPage() {
   const [loadError, setLoadError] = useState('');
   const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState('');
-  const [pdfViewerIndex, setPdfViewerIndex] = useState(0);
   const [pdfPreviewError, setPdfPreviewError] = useState(false);
+  const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false);
   const [savingOffline, setSavingOffline] = useState(false);
-  const [offlineProgress, setOfflineProgress] = useState(0);
   const [offlineRecord, setOfflineRecord] = useState(null);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [contactSheetVisible, setContactSheetVisible] = useState(false);
@@ -202,6 +270,8 @@ export default function RecordViewPage() {
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const galleryRef = useRef(null);
   const lightboxRef = useRef(null);
+  const previewFileRef = useRef(null);
+  const lightboxInitialScrollRef = useRef(false);
   const sheetAnim = useRef(new Animated.Value(0)).current;
   const skeletonAnim = useRef(new Animated.Value(0.4)).current;
   const isMounted = useRef(true);
@@ -263,13 +333,20 @@ export default function RecordViewPage() {
     ['note', 'question'].includes(type) && canManageResource({ type, item, user, profile });
   const isCommerceType = ['listing', 'hostel'].includes(type);
   const isHostel = type === 'hostel';
-  const isPremiumUser = Boolean(profile?.premium && profile?.subscriptionStatus !== 'expired');
-  const isDownloadRestricted = !isPremiumUser;
-  const pdfViewerUrls = useMemo(
-    () => buildPdfViewerUrls(pdfPreviewUrl, asset?.isPdf),
-    [asset?.isPdf, pdfPreviewUrl]
+  const premiumExpiry = profile?.subscriptionExpiresAt || profile?.premiumExpiresAt || profile?.expiresAt;
+  const premiumExpiryDate = premiumExpiry?.toDate ? premiumExpiry.toDate() : premiumExpiry ? new Date(premiumExpiry) : null;
+  const isPremiumUser = Boolean(
+    profile?.premium &&
+    profile?.subscriptionStatus !== 'expired' &&
+    (!premiumExpiryDate || Number.isNaN(premiumExpiryDate.getTime()) || premiumExpiryDate.getTime() > Date.now())
   );
-  const activePdfViewerUrl = pdfViewerUrls[pdfViewerIndex] || buildPdfViewerUrl(pdfPreviewUrl, asset?.isPdf);
+  // This is a UX gate only. The offline endpoint must remain the authority for
+  // entitlement checks; client state can be stale or tampered with.
+  const canSaveOffline = Boolean(
+    asset?.hasDocumentUrl &&
+    isPremiumUser &&
+    ['note', 'question', 'studyMaterial'].includes(type)
+  );
 
   const load = useCallback(async () => {
     const collectionName = collectionMap[type];
@@ -283,7 +360,7 @@ export default function RecordViewPage() {
 
     try {
       if (isMounted.current) setLoadError('');
-      const record = await fetchRecord(collectionName, id);
+      const record = await fetchDetailRecord(type, id);
       if (isMounted.current) setItem(record);
     } catch (error) {
       if (isMounted.current) setLoadError(error?.message || 'Could not load this record.');
@@ -368,7 +445,7 @@ export default function RecordViewPage() {
     add('checkmark-circle-outline', 'Status', item.availability || (item.verified ? 'Verified' : 'Available'));
     return highlights.slice(0, 4);
   }, [isCommerceType, isHostel, item, primaryLocation]);
-  const hasFileAsset = Boolean(asset?.fileUrl || asset?.downloadUrl);
+  const hasFileAsset = Boolean(asset?.hasDocumentUrl);
 
   useEffect(() => {
     if (!id || !['note', 'question', 'studyMaterial'].includes(type)) {
@@ -386,39 +463,82 @@ export default function RecordViewPage() {
     return () => { cancelled = true; };
   }, [id, type]);
 
-  const openPdfPreview = (url) => {
-    const previewUrl = url || asset?.fileUrl || asset?.downloadUrl || '';
-    if (!previewUrl) return;
-    setPdfPreviewUrl(previewUrl);
-    setPdfViewerIndex(0);
-    setPdfPreviewError(false);
-    setPdfPreviewOpen(true);
+  const closePdfPreview = () => {
+    const previewFile = previewFileRef.current;
+    previewFileRef.current = null;
+    if (previewFile) {
+      FileSystem.deleteAsync(previewFile, { idempotent: true }).catch(() => {});
+    }
+    setPdfPreviewOpen(false);
+    setPdfPreviewUrl('');
+    setPdfPreviewLoading(false);
   };
 
-  const saveDocumentOffline = async () => {
-    const downloadUrl = asset?.directDownloadUrl || asset?.fileUrl || asset?.downloadUrl || '';
-    if (!downloadUrl) {
-      Alert.alert('Save unavailable', 'There is no file attached for this item.');
-      return;
+  const openPdfPreview = async () => {
+    if (!asset?.hasDocumentUrl || !id || !type) return;
+    closePdfPreview();
+    setPdfPreviewUrl('');
+    setPdfPreviewError(false);
+    setPdfPreviewLoading(true);
+    setPdfPreviewOpen(true);
+    try {
+      const token = await user?.getIdToken?.();
+      if (!token) throw new Error('Please sign in to preview this document.');
+      const previewUri = `${FileSystem.cacheDirectory}unihelp-preview-${String(id).replace(/[^a-zA-Z0-9_-]/g, '_')}-${Date.now()}.pdf`;
+      const previewEndpoint = `${getApiUrl()}/api/offline-library/preview/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
+      const result = await FileSystem.downloadAsync(previewEndpoint, previewUri, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!result?.uri || result.status !== 200) {
+        await FileSystem.deleteAsync(previewUri, { idempotent: true }).catch(() => {});
+        throw new Error('Preview file was not created.');
+      }
+      previewFileRef.current = result.uri;
+      if (isMounted.current) setPdfPreviewUrl(result.uri);
+    } catch (_error) {
+      if (isMounted.current) {
+        setPdfPreviewLoading(false);
+        setPdfPreviewError(true);
+      }
     }
-    if (isDownloadRestricted) {
-      Alert.alert('Premium required', 'Offline Library is available with UniHelp Premium.', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'View Premium', onPress: () => router.push('/premium') },
-      ]);
+  };
+
+  useEffect(() => () => {
+    if (previewFileRef.current) {
+      FileSystem.deleteAsync(previewFileRef.current, { idempotent: true }).catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!pdfPreviewOpen || !pdfPreviewLoading) return undefined;
+    const timeout = setTimeout(() => {
+      setPdfPreviewLoading(false);
+      setPdfPreviewError(true);
+    }, 10000);
+    return () => clearTimeout(timeout);
+  }, [pdfPreviewLoading, pdfPreviewOpen]);
+
+  const saveDocumentOffline = async () => {
+    if (!canSaveOffline) {
+      Alert.alert(
+        isPremiumUser ? 'Save unavailable' : 'Premium required',
+        isPremiumUser
+          ? 'This resource has no document available for offline saving.'
+          : 'Offline Library requires an active UniHelp Premium subscription.',
+        !isPremiumUser
+          ? [{ text: 'Cancel', style: 'cancel' }, { text: 'View Premium', onPress: () => router.push('/premium') }]
+          : undefined,
+      );
       return;
     }
 
     setSavingOffline(true);
-    setOfflineProgress(0);
     try {
       const saved = await saveResourceForOffline({
         resourceType: type,
         resourceId: id,
         resource: item,
-        fileUrl: downloadUrl,
         fileName: asset?.fileName,
-        onProgress: setOfflineProgress,
       });
       setOfflineRecord(saved);
       Alert.alert('Available Offline', 'This resource is saved inside UniHelp and can be opened from Offline Library.');
@@ -573,11 +693,17 @@ export default function RecordViewPage() {
 
   const openLightbox = (index) => {
     setLightboxIndex(index);
+    lightboxInitialScrollRef.current = false;
     setLightboxVisible(true);
-    requestAnimationFrame(() => {
-      lightboxRef.current?.scrollTo({ x: index * SCREEN_WIDTH, animated: false });
-    });
   };
+
+  useEffect(() => {
+    if (!lightboxVisible || lightboxInitialScrollRef.current) return;
+    lightboxInitialScrollRef.current = true;
+    requestAnimationFrame(() => {
+      lightboxRef.current?.scrollTo({ x: lightboxIndex * SCREEN_WIDTH, animated: false });
+    });
+  }, [lightboxIndex, lightboxVisible]);
 
   const handleLightboxScroll = (event) => {
     const offset = event.nativeEvent.contentOffset.x;
@@ -588,6 +714,10 @@ export default function RecordViewPage() {
   };
 
   const showStickyFooter = showContactCta || hasFileAsset;
+  const pdfViewerUrl = useMemo(() => {
+    if (!pdfPreviewUrl || pdfPreviewUrl.startsWith('file://')) return pdfPreviewUrl;
+    return `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(pdfPreviewUrl)}`;
+  }, [pdfPreviewUrl]);
 
   return (
     <ScreenShell title="Details" subtitle={item?.title || item?.name || 'Record details'} showBack loading={loading}>
@@ -705,7 +835,7 @@ export default function RecordViewPage() {
                       !asset.hasDocumentUrl && styles.disabledButton,
                       pressed && asset.hasDocumentUrl && styles.pressedBrand,
                     ]}
-                    onPress={() => openPdfPreview(asset.fileUrl || asset.downloadUrl)}
+                    onPress={openPdfPreview}
                     disabled={!asset.hasDocumentUrl}
                     accessibilityRole="button"
                     accessibilityLabel="Preview document"
@@ -723,7 +853,6 @@ export default function RecordViewPage() {
               <ScrollView
                 ref={galleryRef}
                 horizontal
-                pagingEnabled
                 showsHorizontalScrollIndicator={false}
                 snapToInterval={GALLERY_STEP}
                 snapToAlignment="start"
@@ -907,11 +1036,11 @@ export default function RecordViewPage() {
                 style={({ pressed }) => [
                   styles.stickyDownloadButton,
                   styles.flexButton,
-                  (!asset.hasDocumentUrl || isDownloadRestricted) && styles.disabledButton,
-                  pressed && asset.hasDocumentUrl && !isDownloadRestricted && styles.pressedSubtle,
+                  !canSaveOffline && styles.disabledButton,
+                  pressed && canSaveOffline && styles.pressedSubtle,
                 ]}
                 onPress={saveDocumentOffline}
-                disabled={savingOffline || !asset.hasDocumentUrl}
+                disabled={savingOffline || !canSaveOffline}
                 accessibilityRole="button"
                 accessibilityLabel="Save resource for offline"
               >
@@ -923,12 +1052,12 @@ export default function RecordViewPage() {
                 ) : (
                   <>
                     <Ionicons
-                      name={isDownloadRestricted ? 'lock-closed-outline' : offlineRecord?.status === 'downloaded' ? 'checkmark-circle-outline' : 'cloud-download-outline'}
+                      name={!isPremiumUser ? 'lock-closed-outline' : offlineRecord?.status === 'downloaded' ? 'checkmark-circle-outline' : 'cloud-download-outline'}
                       size={16}
                       color={colors.brandDark}
                     />
                     <Text style={styles.stickyDownloadText}>
-                      {isDownloadRestricted
+                      {!isPremiumUser
                         ? 'Premium required'
                         : offlineRecord?.status === 'downloaded'
                           ? '✓ Available Offline'
@@ -1041,13 +1170,13 @@ export default function RecordViewPage() {
       <Modal
         visible={pdfPreviewOpen}
         animationType="slide"
-        onRequestClose={() => setPdfPreviewOpen(false)}
+        onRequestClose={closePdfPreview}
       >
         <View style={styles.previewModal}>
           <View style={styles.previewModalHeader}>
             <Text style={styles.previewModalTitle}>PDF preview</Text>
             <Pressable
-              onPress={() => setPdfPreviewOpen(false)}
+              onPress={closePdfPreview}
               style={styles.previewModalClose}
               accessibilityRole="button"
               accessibilityLabel="Close preview"
@@ -1061,18 +1190,31 @@ export default function RecordViewPage() {
               <Text style={styles.loadingText}>We could not load a preview for this file.</Text>
               <Text style={styles.previewErrorHint}>You can still save eligible Premium resources for offline use from the detail page.</Text>
             </View>
-          ) : (
+          ) : pdfPreviewUrl ? (
             <WebView
-              source={{ uri: activePdfViewerUrl }}
+              source={{ uri: pdfViewerUrl || pdfPreviewUrl }}
               style={styles.webview}
               originWhitelist={['*']}
+              allowFileAccess
+              allowUniversalAccessFromFileURLs={false}
+              onShouldStartLoadWithRequest={(request) => {
+                const url = request.url || '';
+                return url.startsWith('file://') || url.startsWith('http://') || url.startsWith('https://') || url.startsWith('about:blank');
+              }}
               startInLoadingState
+              javaScriptEnabled
+              injectedJavaScript={pdfExportLockdownScript}
+              allowsBackForwardNavigationGestures={false}
+              onLoadStart={() => setPdfPreviewLoading(true)}
+              onLoad={() => setPdfPreviewLoading(false)}
+              onLoadEnd={() => setPdfPreviewLoading(false)}
+              onHttpError={() => {
+                setPdfPreviewError(true);
+                setPdfPreviewLoading(false);
+              }}
               onError={() => {
-                setPdfViewerIndex((index) => {
-                  if (index + 1 < pdfViewerUrls.length) return index + 1;
-                  setPdfPreviewError(true);
-                  return index;
-                });
+                setPdfPreviewError(true);
+                setPdfPreviewLoading(false);
               }}
               renderLoading={() => (
                 <View style={styles.webviewLoading}>
@@ -1081,11 +1223,22 @@ export default function RecordViewPage() {
                 </View>
               )}
             />
+          ) : (
+            <View style={styles.webviewLoading}>
+              <ActivityIndicator color={colors.brand} />
+              <Text style={styles.loadingText}>Preparing private preview...</Text>
+            </View>
           )}
+          {pdfPreviewLoading && !pdfPreviewError ? (
+            <View pointerEvents="none" style={styles.webviewLoading}>
+              <ActivityIndicator color={colors.brand} />
+              <Text style={styles.loadingText}>Opening document...</Text>
+            </View>
+          ) : null}
           <View style={styles.previewModalActions}>
             <Pressable
               style={({ pressed }) => [styles.previewModalAction, pressed && styles.pressedSubtle]}
-              onPress={() => setPdfPreviewOpen(false)}
+              onPress={closePdfPreview}
               accessibilityRole="button"
               accessibilityLabel="Close document preview"
             >
@@ -1118,7 +1271,6 @@ export default function RecordViewPage() {
             pagingEnabled
             showsHorizontalScrollIndicator={false}
             onMomentumScrollEnd={handleLightboxScroll}
-            onContentSizeChange={() => lightboxRef.current?.scrollTo({ x: lightboxIndex * SCREEN_WIDTH, animated: false })}
           >
             {mediaItems.map((url, index) => (
               <View key={`${url}-${index}`} style={styles.lightboxSlide}>

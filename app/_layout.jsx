@@ -3,6 +3,9 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import React, { useEffect } from 'react';
+import { Text } from 'react-native';
+import { useFonts, Manrope_400Regular, Manrope_500Medium, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold } from '@expo-google-fonts/manrope';
+import { useFonts as useSoraFonts, Sora_400Regular, Sora_500Medium, Sora_600SemiBold, Sora_700Bold, Sora_800ExtraBold } from '@expo-google-fonts/sora';
 import '@/global.css';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { AIProvider } from '../src/shared/context/AIContext';
@@ -79,6 +82,37 @@ function AppContent() {
 }
 
 export default function RootLayout() {
+  const [manropeLoaded] = useFonts({
+    Manrope_400Regular,
+    Manrope_500Medium,
+    Manrope_600SemiBold,
+    Manrope_700Bold,
+    Manrope_800ExtraBold,
+  });
+
+  const [soraLoaded] = useSoraFonts({
+    Sora_400Regular,
+    Sora_500Medium,
+    Sora_600SemiBold,
+    Sora_700Bold,
+    Sora_800ExtraBold,
+  });
+
+  const fontsReady = manropeLoaded && soraLoaded;
+
+  if (!fontsReady) {
+    return <FullScreenLoader label="Loading fonts..." />;
+  }
+
+  const baseTextStyle = { fontFamily: 'Manrope_400Regular' };
+  const previousStyle = Text.defaultProps?.style;
+  Text.defaultProps = {
+    ...(Text.defaultProps || {}),
+    style: Array.isArray(previousStyle)
+      ? [baseTextStyle, ...previousStyle]
+      : [baseTextStyle, previousStyle].filter(Boolean),
+  };
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>

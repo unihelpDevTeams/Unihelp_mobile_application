@@ -71,14 +71,15 @@ export default function StudyMaterials() {
   // Ref flag to handle rapid tab switching safely
   const isMountedRef = useRef(true);
 
+  // Dynamic Accents
+  const isQuestions = activeTab === 'questions';
+
   // Memoize fetcher function to prevent unnecessary re-renders
   const fetcher = useMemo(
     () => isQuestions ? fetchQuestionsPage : fetchNotesPage,
     [isQuestions]
   );
 
-  // Dynamic Accents
-  const isQuestions = activeTab === 'questions';
   const activeTone = isQuestions ? colors.blue : colors.brand;
   const activeLightTone = isQuestions ? colors.blueLight : colors.brandLight;
   const resourceColumns = width >= 900 ? 2 : 1;

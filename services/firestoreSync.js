@@ -32,6 +32,7 @@ export {
   fetchQuestions,
   fetchQuestionsPage,
   fetchRecord,
+  fetchDetailRecord,
   fetchStories,
   fetchStoriesPage,
   fetchStudentListings,
