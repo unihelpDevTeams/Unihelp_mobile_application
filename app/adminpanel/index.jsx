@@ -9,6 +9,7 @@ import { useAuth } from '../../context/AuthContext';
 import { db } from '../../firebase/config';
 import { collection, getDocs, orderBy, query, limit } from 'firebase/firestore';
 import { COLLECTIONS } from '../../src/shared/firestoreSchema';
+import { getJson, deleteJson } from '../../src/shared/services/backend';
 import { blockUser, createAnnouncement, unblockUser } from '../../services/firestoreSync';
 import ChallengeQuestionForm from '../../src/admin/ChallengeQuestionForm';
 import UniversityManager from '../../src/admin/UniversityManager';
@@ -27,8 +28,8 @@ const TABS = [
 ];
 
 const ADMIN_COLLECTION_MAP = {
-  marketplace: { collection: COLLECTIONS.studentMarketplace, label: 'Student Marketplace' },
-  hostels: { collection: COLLECTIONS.hostels, label: 'Hostels' },
+  marketplace: { endpoint: '/api/marketplace', label: 'Student Marketplace' },
+  hostels: { endpoint: '/api/hostels', label: 'Hostels' },
 };
 
 export default function AdminPanelPage() {
@@ -49,10 +50,15 @@ export default function AdminPanelPage() {
     if (!config) return;
     setLoading(true);
     try {
-      const snapshot = await getDocs(
-        query(collection(db, config.collection), orderBy('createdAt', 'desc'), limit(50))
-      );
-      setItems(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+      if (config.endpoint) {
+        const data = await getJson(`${config.endpoint}?limit=50`);
+        setItems(data?.items || []);
+      } else if (config.collection) {
+        const snapshot = await getDocs(
+          query(collection(db, config.collection), orderBy('createdAt', 'desc'), limit(50))
+        );
+        setItems(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+      }
     } catch (error) {
       console.warn('Admin fetch error:', error);
       setItems([]);
@@ -79,8 +85,12 @@ export default function AdminPanelPage() {
           onPress: async () => {
             setDeletingId(item.id);
             try {
-              const { deleteMediaDocument } = await import('../../services/mediaCleanup');
-              await deleteMediaDocument(config.collection, item.id);
+              if (config.endpoint) {
+                await deleteJson(`${config.endpoint}/${item.id}`);
+              } else if (config.collection) {
+                const { deleteMediaDocument } = await import('../../services/mediaCleanup');
+                await deleteMediaDocument(config.collection, item.id);
+              }
               setItems((prev) => prev.filter((i) => i.id !== item.id));
               Alert.alert('Deleted', 'The listing has been removed.');
             } catch (error) {

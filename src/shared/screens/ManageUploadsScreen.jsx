@@ -10,12 +10,7 @@ import { shadows } from '../theme';
 import { useTheme } from '../theme/ThemeContext';
 import { useThemeStyles } from '../theme/createStyles';
 import { useAuth } from '../../../context/AuthContext';
-import {
-  deleteHostelListing,
-  deleteStory,
-  deleteStudentListing,
-  fetchUserDocuments,
-} from '../../../services/firestoreSync';
+import { getJson, deleteJson } from '../services/backend';
 
 const CONFIGS = {
   hostels: {
@@ -28,7 +23,8 @@ const CONFIGS = {
     uploadRoute: '/upload?type=hostel',
     editRoute: (id) => ({ pathname: '/upload', params: { type: 'hostel', editId: id } }),
     viewRoute: (id) => ({ pathname: '/view/[type]/[id]', params: { type: 'hostel', id } }),
-    deleteItem: deleteHostelListing,
+    deleteItem: (id) => deleteJson(`/api/hostels/${id}`),
+    endpoint: '/api/hostels',
     createLabel: 'Add hostel',
     icon: 'home-outline',
     accent: 'blue',
@@ -43,7 +39,8 @@ const CONFIGS = {
     uploadRoute: '/upload?type=marketplace',
     editRoute: (id) => ({ pathname: '/upload', params: { type: 'marketplace', editId: id } }),
     viewRoute: (id) => ({ pathname: '/view/[type]/[id]', params: { type: 'listing', id } }),
-    deleteItem: deleteStudentListing,
+    deleteItem: (id) => deleteJson(`/api/marketplace/${id}`),
+    endpoint: '/api/marketplace',
     createLabel: 'Sell item',
     icon: 'storefront-outline',
     accent: 'brand',
@@ -58,7 +55,8 @@ const CONFIGS = {
     uploadRoute: '/stories/create',
     editRoute: (id) => ({ pathname: '/stories/create', params: { editId: id } }),
     viewRoute: (id) => ({ pathname: '/stories/[storyId]', params: { storyId: id } }),
-    deleteItem: deleteStory,
+    deleteItem: (id) => deleteJson(`/api/stories/${id}`),
+    endpoint: '/api/stories',
     createLabel: 'Create story',
     icon: 'book-outline',
     accent: 'purple',
@@ -177,9 +175,14 @@ export default function ManageUploadsScreen({ type }) {
     setLoading(true);
     setError('');
     try {
-      setItems(await fetchUserDocuments(config.collection, uid, config.ownerField));
-    } catch (loadError) {
-      setError(loadError?.message || 'Could not load your uploads.');
+      if (!uid || !config.endpoint) return;
+      const data = await getJson(`${config.endpoint}?userId=${uid}&authorId=${uid}&sellerId=${uid}&limit=100`);
+      {
+        setItems(data?.items || []);
+      }
+    } catch (err) {
+      console.warn(`Error fetching ${type}:`, err);
+      setError(`Could not load ${type}.`);
     } finally {
       setLoading(false);
     }
