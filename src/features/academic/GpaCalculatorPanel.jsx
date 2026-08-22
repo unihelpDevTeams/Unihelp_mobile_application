@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { addDoc, collection, deleteDoc, doc, getDocs, query, serverTimestamp, where } from 'firebase/firestore';
+import { fetchGpaRecords, createGpaRecord, deleteGpaRecord } from '../../shared/services/cgpa';
 import { checkConnectivity, getLocalGpaRecords, saveLocalGpaRecord } from '../../shared/offline/offlineLearningService';
 
-import { db } from '../../../firebase/config';
 import { useAuth } from '../../../context/AuthContext';
 import EmptyState from '../../shared/components/EmptyState';
 import { useTheme } from '../../shared/theme/ThemeContext';
@@ -690,9 +689,8 @@ export default function GpaCalculatorPanel() {
       return;
     }
     try {
-      const snap = await getDocs(query(collection(db, 'GPARecords'), where('userId', '==', profile.uid)));
-      const items = snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
-      items.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      const items = await fetchGpaRecords();
+      items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
       setRecords((current) => { if (current.length && !items.length) return current; return items.length ? items : current; });
     } catch {
       // Handle optional err logging
@@ -735,12 +733,10 @@ export default function GpaCalculatorPanel() {
         return;
       }
 
-      await addDoc(collection(db, 'GPARecords'), {
-        userId: profile.uid,
+      await createGpaRecord({
         GPA: gpa,
         classification: classifyGpa(gpa, colors).label,
         courses,
-        createdAt: serverTimestamp(),
       });
       await loadRecords();
       setCourses([{ ...defaultCourse }]);
@@ -750,7 +746,7 @@ export default function GpaCalculatorPanel() {
   };
 
   const removeRecord = (id) => {
-    deleteDoc(doc(db, 'GPARecords', id))
+    deleteGpaRecord(id)
       .then(() => setRecords((current) => current.filter((record) => record.id !== id)))
       .catch(() => {});
   };

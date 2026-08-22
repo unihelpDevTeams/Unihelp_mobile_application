@@ -14,22 +14,13 @@ import {
   UIManager,
   View,
 } from "react-native";
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  query,
-  serverTimestamp,
-  updateDoc,
-  where,
-} from "firebase/firestore";
+// Removed firebase/firestore imports
 import { useLocalSearchParams } from "expo-router";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 
-import { db } from "../../firebase/config";
+// Removed firebase db import
+import { fetchCgpaRecords, createCgpaRecord, updateCgpaRecord, deleteCgpaRecord } from "../../src/shared/services/cgpa";
 import { useAuth } from "../../context/AuthContext";
 import { useTheme } from "../../src/shared/theme/ThemeContext";
 import { useThemeStyles } from "../../src/shared/theme/createStyles";
@@ -493,8 +484,8 @@ export default function CgpaPage() {
       return copy.sort((a, b) => Number(b.cgpa || 0) - Number(a.cgpa || 0));
     }
     return copy.sort((a, b) => {
-      const aTime = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
-      const bTime = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
+      const aTime = new Date(a.createdAt || a.created_at || 0).getTime();
+      const bTime = new Date(b.createdAt || b.created_at || 0).getTime();
       return bTime - aTime;
     });
   }, [records, sortBy]);
@@ -505,8 +496,8 @@ export default function CgpaPage() {
       return;
     }
     try {
-      const snapshot = await getDocs(query(collection(db, "cgpaTracker"), where("userId", "==", profile.uid)));
-      setRecords(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+      const fetchedRecords = await fetchCgpaRecords();
+      setRecords(fetchedRecords);
     } catch (e) {
       console.log(e);
       showBanner("error", "Couldn't load your saved records");
@@ -529,20 +520,17 @@ export default function CgpaPage() {
     try {
       setSaving(true);
       if (editingId) {
-        await updateDoc(doc(db, "cgpaTracker", editingId), {
+        await updateCgpaRecord(editingId, {
           semesters,
           cgpa,
           scale,
-          updatedAt: serverTimestamp(),
         });
         showBanner("success", "Record updated");
       } else {
-        await addDoc(collection(db, "cgpaTracker"), {
-          userId: profile.uid,
+        await createCgpaRecord({
           semesters,
           cgpa,
           scale,
-          createdAt: serverTimestamp(),
         });
         showBanner("success", "CGPA saved");
       }
@@ -580,7 +568,7 @@ export default function CgpaPage() {
 
   async function removeRecord(id) {
     try {
-      await deleteDoc(doc(db, "cgpaTracker", id));
+      await deleteCgpaRecord(id);
       setRecords((prev) => prev.filter((record) => record.id !== id));
       if (editingId === id) cancelEdit();
       setDeleteTarget(null);
