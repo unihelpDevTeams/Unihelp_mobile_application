@@ -11,18 +11,13 @@ import { collection, getDocs, orderBy, query, limit } from 'firebase/firestore';
 import { COLLECTIONS } from '../../src/shared/firestoreSchema';
 import { getJson, deleteJson } from '../../src/shared/services/backend';
 import { blockUser, createAnnouncement, unblockUser } from '../../services/firestoreSync';
-import ChallengeQuestionForm from '../../src/admin/ChallengeQuestionForm';
-import UniversityManager from '../../src/admin/UniversityManager';
 import PromoSpotlightManager from '../../src/admin/PromoSpotlightManager';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 
 const TABS = [
   { key: 'users', label: 'Users', icon: 'people-outline' },
-  { key: 'marketplace', label: 'Marketplace', icon: 'pricetag-outline' },
-  { key: 'hostels', label: 'Hostels', icon: 'home-outline' },
+  { key: 'listings', label: 'Listings', icon: 'storefront-outline' },
   { key: 'support', label: 'Support Center', icon: 'headset-outline' },
-  { key: 'challenge', label: 'Challenge Qs', icon: 'flash-outline' },
-  { key: 'universities', label: 'Universities', icon: 'school-outline' },
   { key: 'notifications', label: 'Send Notification', icon: 'notifications-outline' },
   { key: 'promoSpotlights', label: 'Promo Spotlights', icon: 'sparkles-outline' },
   { key: 'migration', label: 'Migration Tracker', icon: 'server-outline' },
@@ -33,13 +28,19 @@ const ADMIN_COLLECTION_MAP = {
   hostels: { endpoint: '/api/hostels', label: 'Hostels' },
 };
 
+const LISTING_TYPES = [
+  { key: 'marketplace', label: 'Marketplace', icon: 'pricetag-outline' },
+  { key: 'hostels', label: 'Hostels', icon: 'home-outline' },
+];
+
 export default function AdminPanelPage() {
   const router = useRouter();
   const { profile, user } = useAuth();
   const { colors } = useTheme();
   const pageStyles = useMemo(() => createPageStyles(colors), [colors]);
 
-  const [activeTab, setActiveTab] = useState('marketplace');
+  const [activeTab, setActiveTab] = useState('listings');
+  const [listingType, setListingType] = useState('marketplace');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState(null);
@@ -47,7 +48,7 @@ export default function AdminPanelPage() {
   const isAdmin = profile?.admin === true || user?.email === 'iadejuwon77@gmail.com';
 
   const fetchItems = useCallback(async () => {
-    const config = ADMIN_COLLECTION_MAP[activeTab];
+    const config = ADMIN_COLLECTION_MAP[listingType];
     if (!config) return;
     setLoading(true);
     try {
@@ -66,7 +67,7 @@ export default function AdminPanelPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab]);
+  }, [listingType]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -74,7 +75,7 @@ export default function AdminPanelPage() {
   }, [isAdmin, fetchItems]);
 
   const handleDelete = (item) => {
-    const config = ADMIN_COLLECTION_MAP[activeTab];
+    const config = ADMIN_COLLECTION_MAP[listingType];
     Alert.alert(
       'Delete Listing',
       `Are you sure you want to delete "${item.title || item.name || 'Untitled'}"? This cannot be undone.`,
@@ -202,85 +203,105 @@ export default function AdminPanelPage() {
             <Text style={pageStyles.notificationButtonText}>Open Migration Checklist</Text>
           </Pressable>
         </View>
-      ) : activeTab === 'challenge' ? (
-        <ChallengeQuestionForm />
-      ) : activeTab === 'universities' ? (
-        <UniversityManager />
       ) : activeTab === 'promoSpotlights' ? (
         <PromoSpotlightManager />
-      ) : activeTab !== 'notifications' ? (
-        loading ? (
-          <View style={pageStyles.loadingContainer}>
-            <PageLoader label="Loading admin records..." />
-          </View>
-        ) : items.length === 0 ? (
-          <View style={pageStyles.emptyContainer}>
-            <Ionicons name="information-circle-outline" size={40} color={colors.textSecondary} />
-            <Text style={pageStyles.emptyText}>No listings found</Text>
-          </View>
-        ) : (
-          <FlatList
-            data={items}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={pageStyles.listContent}
-            renderItem={({ item }) => (
-              <View style={pageStyles.listingCard}>
-                <View style={pageStyles.listingLeft}>
-                  {getImageUrl(item) ? (
-                    <Image
-                      source={{ uri: getImageUrl(item) }}
-                      style={pageStyles.listingThumb}
-                      contentFit="cover"
-                      cachePolicy="disk"
-                    />
-                  ) : (
-                    <View style={pageStyles.listingThumbFallback}>
-                      <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
-                    </View>
-                  )}
-                </View>
-                <View style={pageStyles.listingBody}>
-                  <Text style={pageStyles.listingTitle} numberOfLines={1}>
-                    {item.title || item.name || 'Untitled'}
+      ) : activeTab === 'listings' ? (
+        <View style={pageStyles.listingToggleWrap}>
+          <View style={pageStyles.listingToggleContainer}>
+            {LISTING_TYPES.map((option) => {
+              const isActive = listingType === option.key;
+              return (
+                <Pressable
+                  key={option.key}
+                  onPress={() => setListingType(option.key)}
+                  style={[pageStyles.listingToggle, isActive && pageStyles.listingToggleActive]}
+                >
+                  <Ionicons
+                    name={option.icon}
+                    size={16}
+                    color={isActive ? colors.brandText || '#FFF' : colors.textSecondary}
+                  />
+                  <Text style={[pageStyles.listingToggleText, isActive && pageStyles.listingToggleTextActive]}>
+                    {option.label}
                   </Text>
-                  {item.price != null && (
-                    <Text style={pageStyles.listingPrice}>{formatNaira(item.price)}</Text>
-                  )}
-                  <Text style={pageStyles.listingOwner} numberOfLines={1}>
-                    {item.sellerName || item.ownerName || 'Unknown'}
-                  </Text>
-                </View>
-                <View style={pageStyles.listingActions}>
-                  <Pressable
-                    style={pageStyles.viewButton}
-                    onPress={() =>
-                      router.push({
-                        pathname: '/view/[type]/[id]',
-                        params: {
-                          type: activeTab === 'marketplace' ? 'listing' : 'hostel',
-                          id: item.id,
-                        },
-                      })
-                    }
-                  >
-                    <Ionicons name="eye-outline" size={18} color={colors.brand} />
-                  </Pressable>
-                  <Pressable
-                    style={pageStyles.deleteButton}
-                    onPress={() => handleDelete(item)}
-                    disabled={deletingId === item.id}
-                  >
-                    {deletingId === item.id ? (
-                      <ActivityIndicator size="small" color={colors.danger || '#DC2626'} />
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {loading ? (
+            <View style={pageStyles.loadingContainer}>
+              <PageLoader label={`Loading ${ADMIN_COLLECTION_MAP[listingType].label}...`} />
+            </View>
+          ) : items.length === 0 ? (
+            <View style={pageStyles.emptyContainer}>
+              <Ionicons name="information-circle-outline" size={40} color={colors.textSecondary} />
+              <Text style={pageStyles.emptyText}>No listings found</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={items}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={pageStyles.listContent}
+              renderItem={({ item }) => (
+                <View style={pageStyles.listingCard}>
+                  <View style={pageStyles.listingLeft}>
+                    {getImageUrl(item) ? (
+                      <Image
+                        source={{ uri: getImageUrl(item) }}
+                        style={pageStyles.listingThumb}
+                        contentFit="cover"
+                        cachePolicy="disk"
+                      />
                     ) : (
-                      <Ionicons name="trash-outline" size={18} color={colors.danger || '#DC2626'} />
+                      <View style={pageStyles.listingThumbFallback}>
+                        <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
+                      </View>
                     )}
-                  </Pressable>
+                  </View>
+                  <View style={pageStyles.listingBody}>
+                    <Text style={pageStyles.listingTitle} numberOfLines={1}>
+                      {item.title || item.name || 'Untitled'}
+                    </Text>
+                    {item.price != null && (
+                      <Text style={pageStyles.listingPrice}>{formatNaira(item.price)}</Text>
+                    )}
+                    <Text style={pageStyles.listingOwner} numberOfLines={1}>
+                      {item.sellerName || item.ownerName || 'Unknown'}
+                    </Text>
+                  </View>
+                  <View style={pageStyles.listingActions}>
+                    <Pressable
+                      style={pageStyles.viewButton}
+                      onPress={() =>
+                        router.push({
+                          pathname: '/view/[type]/[id]',
+                          params: {
+                            type: listingType === 'marketplace' ? 'listing' : 'hostel',
+                            id: item.id,
+                          },
+                        })
+                      }
+                    >
+                      <Ionicons name="eye-outline" size={18} color={colors.brand} />
+                    </Pressable>
+                    <Pressable
+                      style={pageStyles.deleteButton}
+                      onPress={() => handleDelete(item)}
+                      disabled={deletingId === item.id}
+                    >
+                      {deletingId === item.id ? (
+                        <ActivityIndicator size="small" color={colors.danger || '#DC2626'} />
+                      ) : (
+                        <Ionicons name="trash-outline" size={18} color={colors.danger || '#DC2626'} />
+                      )}
+                    </Pressable>
+                  </View>
                 </View>
-              </View>
-            )}
-          />
-        )
+              )}
+            />
+          )}
+        </View>
       ) : (
         <CreateAnnouncementForm colors={colors} />
       )}
@@ -672,6 +693,40 @@ const createPageStyles = (colors) =>
     loadingContainer: {
       paddingVertical: 60,
       alignItems: 'center',
+    },
+    listingToggleWrap: {
+      gap: 12,
+      marginBottom: 12,
+    },
+    listingToggleContainer: {
+      flexDirection: 'row',
+      backgroundColor: colors.card || '#FFFFFF',
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
+      padding: 4,
+      gap: 6,
+    },
+    listingToggle: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      borderRadius: 10,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+    },
+    listingToggleActive: {
+      backgroundColor: colors.brand || '#4F46E5',
+    },
+    listingToggleText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.textSecondary || '#6B7280',
+    },
+    listingToggleTextActive: {
+      color: colors.brandText || '#FFFFFF',
     },
     emptyContainer: {
       paddingVertical: 60,
