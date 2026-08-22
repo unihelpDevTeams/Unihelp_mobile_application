@@ -59,7 +59,7 @@ export default function AdminSupportCenter() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [error, setError] = useState('');
-  const lastDocRef = useRef(null);
+  const pageRef = useRef(1);
   const searchTimeoutRef = useRef(null);
 
   const isAdmin = profile?.admin === true;
@@ -96,7 +96,7 @@ export default function AdminSupportCenter() {
       try {
         if (isRefresh) {
           setRefreshing(true);
-          lastDocRef.current = null;
+          pageRef.current = 1;
         } else {
           setLoading(true);
         }
@@ -105,20 +105,20 @@ export default function AdminSupportCenter() {
         const result = await fetchFn({
           statusFilter: statusFilter !== 'all' ? statusFilter : undefined,
           searchQuery: searchQuery.trim() || undefined,
-          lastDoc: isRefresh ? null : lastDocRef.current,
+          page: isRefresh ? 1 : pageRef.current,
         });
 
-        if (isRefresh || !lastDocRef.current) {
+        if (isRefresh || pageRef.current === 1) {
           setItems(result.items);
         } else {
           setItems((prev) => [...prev, ...result.items]);
         }
 
-        lastDocRef.current = result.lastDoc;
+        if (result.hasMore) pageRef.current += 1;
         setHasMore(result.hasMore);
       } catch (fetchError) {
         setError(fetchError?.message || 'Failed to load data.');
-        if (!isRefresh && !lastDocRef.current) {
+        if (!isRefresh && pageRef.current === 1) {
           setItems([]);
         }
       } finally {
@@ -131,7 +131,7 @@ export default function AdminSupportCenter() {
   );
 
   useEffect(() => {
-    lastDocRef.current = null;
+    pageRef.current = 1;
     setItems([]);
     setLoading(true);
     setError('');
@@ -142,7 +142,7 @@ export default function AdminSupportCenter() {
     setSearchQuery(text);
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     searchTimeoutRef.current = setTimeout(() => {
-      lastDocRef.current = null;
+      pageRef.current = 1;
       fetchData();
     }, 300);
   };
@@ -154,7 +154,7 @@ export default function AdminSupportCenter() {
   };
 
   const handleRefresh = () => {
-    lastDocRef.current = null;
+    pageRef.current = 1;
     fetchData(true);
   };
 
