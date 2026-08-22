@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
+import { auth } from '../../src/firebase/config';
 
 const MIGRATION_STORAGE_KEY = '@admin_migration_checklist';
 
@@ -177,18 +178,24 @@ export default function MigrationChecklistScreen() {
   useEffect(() => {
     const loadState = async () => {
       try {
-        const stored = await AsyncStorage.getItem(MIGRATION_STORAGE_KEY);
-        if (stored) {
-          setCheckedItems(JSON.parse(stored));
-        } else {
-          // Pre-check the ones we know are done from backend migration agent session
-          setCheckedItems({
-            'support_contact': true,
-            'support_reports': true,
-            'support_suggestions': true,
-            'academic_gpa': true,
-            'academic_cgpa': true,
-          });
+        const response = await fetch(process.env.EXPO_PUBLIC_API_URL + '/api/migration-status', {
+          headers: {
+            'Authorization': 'Bearer ' + await auth.currentUser?.getIdToken()
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          let merged = data.checkedItems || {};
+          if (Object.keys(merged).length === 0) {
+             merged = {
+              'support_contact': true,
+              'support_reports': true,
+              'support_suggestions': true,
+              'academic_gpa': true,
+              'academic_cgpa': true,
+             };
+          }
+          setCheckedItems(merged);
         }
       } catch (e) {
         console.error('Failed to load migration state', e);
@@ -206,7 +213,14 @@ export default function MigrationChecklistScreen() {
     };
     setCheckedItems(newState);
     try {
-      await AsyncStorage.setItem(MIGRATION_STORAGE_KEY, JSON.stringify(newState));
+      await fetch(process.env.EXPO_PUBLIC_API_URL + '/api/migration-status', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + await auth.currentUser?.getIdToken()
+        },
+        body: JSON.stringify({ checkedItems: newState })
+      });
     } catch (e) {
       console.error('Failed to save migration state', e);
     }
