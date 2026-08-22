@@ -57,6 +57,13 @@ const emptyForm = {
   startAt: '',
   endAt: '',
   targetAudience: 'all',
+  gradientStart: '#1A1A2E',
+  gradientEnd: '#0F0F23',
+  gradientDirection: 'vertical',
+  textColor: '#FFFFFF',
+  titleSize: 19,
+  subtitleSize: 14,
+  descriptionSize: 13,
 };
 
 const dateValue = (value) => {
@@ -390,6 +397,32 @@ export default function PromoSpotlightManager() {
             <Field label="Logo URL" value={form.advertiserLogoUrl} onChangeText={(val) => updateField('advertiserLogoUrl', val)} placeholder="https://..." containerStyle={styles.flex} autoCapitalize="none" palette={palette} styles={styles} />
           </View>
         )}
+
+        <View style={styles.field}>
+          <Text style={styles.label}>Background</Text>
+          <View style={styles.row}>
+            <Field
+              label="Start color"
+              value={form.gradientStart}
+              onChangeText={(val) => updateField('gradientStart', val || '#')}
+              placeholder="#1A1A2E"
+              autoCapitalize="none"
+              containerStyle={styles.flex}
+              palette={palette}
+              styles={styles}
+            />
+            <Field
+              label="End color"
+              value={form.gradientEnd}
+              onChangeText={(val) => updateField('gradientEnd', val || '#')}
+              placeholder="#0F0F23"
+              autoCapitalize="none"
+              containerStyle={styles.flex}
+              palette={palette}
+              styles={styles}
+            />
+          </View>
+        </View>
 
         <View style={styles.row}>
           <Field label="CTA Button Text" value={form.buttonText} onChangeText={(val) => updateField('buttonText', val)} placeholder="Learn More" containerStyle={styles.flex} palette={palette} styles={styles} />

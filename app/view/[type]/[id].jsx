@@ -475,7 +475,10 @@ export default function RecordViewPage() {
   };
 
   const openPdfPreview = async () => {
-    if (!asset?.hasDocumentUrl || !id || !type) return;
+    if (!asset?.hasDocumentUrl || !id || !type) {
+      console.warn('[PDF preview] blocked before request', { type, id, hasDocumentUrl: !!asset?.hasDocumentUrl });
+      return;
+    }
     closePdfPreview();
     setPdfPreviewUrl('');
     setPdfPreviewError(false);
@@ -483,19 +486,40 @@ export default function RecordViewPage() {
     setPdfPreviewOpen(true);
     try {
       const token = await user?.getIdToken?.();
+      console.log('[PDF preview] starting preview download', {
+        type,
+        id,
+        hasDocumentUrl: !!asset?.hasDocumentUrl,
+        hasToken: Boolean(token),
+        fileName: asset?.fileName,
+      });
       if (!token) throw new Error('Please sign in to preview this document.');
       const previewUri = `${FileSystem.cacheDirectory}unihelp-preview-${String(id).replace(/[^a-zA-Z0-9_-]/g, '_')}-${Date.now()}.pdf`;
       const previewEndpoint = `${getApiUrl()}/api/offline-library/preview/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
+      console.log('[PDF preview] request details', { previewEndpoint, previewUri });
       const result = await FileSystem.downloadAsync(previewEndpoint, previewUri, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      console.log('[PDF preview] download result', result);
       if (!result?.uri || result.status !== 200) {
         await FileSystem.deleteAsync(previewUri, { idempotent: true }).catch(() => {});
-        throw new Error('Preview file was not created.');
+        throw new Error(`Preview file was not created. status=${result?.status ?? 'unknown'} uri=${result?.uri ?? 'missing'}`);
       }
       previewFileRef.current = result.uri;
       if (isMounted.current) setPdfPreviewUrl(result.uri);
+      console.log('[PDF preview] ready for WebView', { previewUri: result.uri, viewerUrl: pdfViewerUrl || result.uri });
     } catch (_error) {
+      console.error('[PDF preview] failed', {
+        type,
+        id,
+        message: _error?.message,
+        stack: _error?.stack,
+        asset: asset ? {
+          fileName: asset.fileName,
+          hasDocumentUrl: asset.hasDocumentUrl,
+          previewUrl: asset.previewUrl,
+        } : null,
+      });
       if (isMounted.current) {
         setPdfPreviewLoading(false);
         setPdfPreviewError(true);
@@ -511,11 +535,7 @@ export default function RecordViewPage() {
 
   useEffect(() => {
     if (!pdfPreviewOpen || !pdfPreviewLoading) return undefined;
-    const timeout = setTimeout(() => {
-      setPdfPreviewLoading(false);
-      setPdfPreviewError(true);
-    }, 10000);
-    return () => clearTimeout(timeout);
+    return undefined;
   }, [pdfPreviewLoading, pdfPreviewOpen]);
 
   const saveDocumentOffline = async () => {
@@ -1205,14 +1225,31 @@ export default function RecordViewPage() {
               javaScriptEnabled
               injectedJavaScript={pdfExportLockdownScript}
               allowsBackForwardNavigationGestures={false}
-              onLoadStart={() => setPdfPreviewLoading(true)}
-              onLoad={() => setPdfPreviewLoading(false)}
-              onLoadEnd={() => setPdfPreviewLoading(false)}
-              onHttpError={() => {
+              onLoadStart={() => {
+                console.log('[PDF preview] WebView started loading', { uri: pdfViewerUrl || pdfPreviewUrl });
+                setPdfPreviewLoading(true);
+              }}
+              onLoad={() => {
+                console.log('[PDF preview] WebView loaded successfully', { uri: pdfViewerUrl || pdfPreviewUrl });
+                setPdfPreviewLoading(false);
+              }}
+              onLoadEnd={() => {
+                console.log('[PDF preview] WebView load end', { uri: pdfViewerUrl || pdfPreviewUrl, pdfPreviewUrl, pdfViewerUrl });
+                setPdfPreviewLoading(false);
+              }}
+              onHttpError={(syntheticEvent) => {
+                console.error('[PDF preview] WebView HTTP error', {
+                  uri: pdfViewerUrl || pdfPreviewUrl,
+                  nativeEvent: syntheticEvent?.nativeEvent,
+                });
                 setPdfPreviewError(true);
                 setPdfPreviewLoading(false);
               }}
-              onError={() => {
+              onError={(syntheticEvent) => {
+                console.error('[PDF preview] WebView error', {
+                  uri: pdfViewerUrl || pdfPreviewUrl,
+                  nativeEvent: syntheticEvent?.nativeEvent,
+                });
                 setPdfPreviewError(true);
                 setPdfPreviewLoading(false);
               }}

@@ -42,6 +42,13 @@ export const normalizePromoSpotlight = (item = {}) => ({
   advertiserLogoUrl: String(item.advertiserLogoUrl || '').trim(),
   priority: Number.isFinite(Number(item.priority)) ? Number(item.priority) : 0,
   enabled: item.enabled === true,
+  gradientStart: String(item.gradientStart || item.design?.gradientStart || '').trim(),
+  gradientEnd: String(item.gradientEnd || item.design?.gradientEnd || '').trim(),
+  gradientDirection: item.gradientDirection || item.design?.gradientDirection || 'vertical',
+  textColor: String(item.textColor || item.design?.textColor || '').trim() || '#FFFFFF',
+  titleSize: Number.isFinite(Number(item.titleSize)) ? Number(item.titleSize) : undefined,
+  subtitleSize: Number.isFinite(Number(item.subtitleSize)) ? Number(item.subtitleSize) : undefined,
+  descriptionSize: Number.isFinite(Number(item.descriptionSize)) ? Number(item.descriptionSize) : undefined,
 });
 
 export const isPromoActive = (promo, now = Date.now()) => {
@@ -124,6 +131,13 @@ const normalizeWritePayload = (payload = {}) => ({
   startAt: writeDateValue(payload.startAt),
   endAt: writeDateValue(payload.endAt),
   targetAudience: payload.targetAudience || 'all',
+  gradientStart: String(payload.gradientStart || '').trim(),
+  gradientEnd: String(payload.gradientEnd || '').trim(),
+  gradientDirection: payload.gradientDirection || 'vertical',
+  textColor: String(payload.textColor || '').trim(),
+  titleSize: Number.isFinite(Number(payload.titleSize)) ? Number(payload.titleSize) : undefined,
+  subtitleSize: Number.isFinite(Number(payload.subtitleSize)) ? Number(payload.subtitleSize) : undefined,
+  descriptionSize: Number.isFinite(Number(payload.descriptionSize)) ? Number(payload.descriptionSize) : undefined,
 });
 
 export async function fetchPromoSpotlightsForAdmin() {
