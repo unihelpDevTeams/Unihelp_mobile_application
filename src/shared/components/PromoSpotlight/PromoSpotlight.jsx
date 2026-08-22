@@ -174,7 +174,7 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
         return;
       }
       if (promo.actionType === 'screen' && promo.actionUrl) {
-        router.push(promo.actionUrl);
+        router.navigate(promo.actionUrl);
         await onAction?.();
       }
     } catch (error) {

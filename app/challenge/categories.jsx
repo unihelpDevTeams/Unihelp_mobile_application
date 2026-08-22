@@ -26,7 +26,7 @@ export default function ChallengeCategoriesScreen() {
       <SectionHeader title="All challenge categories" subtitle="Personalized to your department, level and goals." icon="grid-outline" />
       <View style={styles.grid}>
         {sortedCategories.map((item) => (
-          <CategoryCard key={item.id} item={item} onPress={() => router.push({ pathname: '/challenge/question', params: { category: item.id } })} />
+          <CategoryCard key={item.id} item={item} onPress={() => router.navigate({ pathname: '/challenge/question', params: { category: item.id } })} />
         ))}
       </View>
     </ScreenShell>

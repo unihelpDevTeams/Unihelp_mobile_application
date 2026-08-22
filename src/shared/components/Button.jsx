@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useRef } from 'react';
 import { Pressable, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
@@ -57,9 +57,19 @@ export function Button({
     elevation: 4,
   };
 
+  // Throttle to prevent double-navigation glitch
+  const lastPress = useRef(0);
+  const handlePress = useCallback((e) => {
+    const now = Date.now();
+    if (now - lastPress.current > 400) {
+      lastPress.current = now;
+      if (onPress) onPress(e);
+    }
+  }, [onPress]);
+
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       disabled={disabled || loading}
       style={({ pressed }) => [
         styles.button,
@@ -98,9 +108,19 @@ export function IconButton({ icon, onPress, size = 40, color: propColor, backgro
   const { colors } = useTheme();
   const color = propColor || colors.textPrimary;
   const backgroundColor = propBgColor || colors.surfaceSecondary;
+
+  const lastPress = useRef(0);
+  const handlePress = useCallback((e) => {
+    const now = Date.now();
+    if (now - lastPress.current > 400) {
+      lastPress.current = now;
+      if (onPress) onPress(e);
+    }
+  }, [onPress]);
+
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       style={({ pressed }) => [
         {
           width: size, height: size, borderRadius: size / 2, backgroundColor,
@@ -132,9 +152,18 @@ export function Chip({ label, onPress, selected = false, icon, style }) {
     chipTextSelected: { color: c.onBrand },
   }));
 
+  const lastPress = useRef(0);
+  const handlePress = useCallback((e) => {
+    const now = Date.now();
+    if (now - lastPress.current > 400) {
+      lastPress.current = now;
+      if (onPress) onPress(e);
+    }
+  }, [onPress]);
+
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       style={({ pressed }) => [
         styles.chip,
         selected ? styles.chipSelected : {},

@@ -127,7 +127,7 @@ export default function CollectionListScreen({
             subtitleKey={subtitleKey}
             onPress={() => {
               if (!detailRoute) return;
-              router.push(buildRoute(detailRoute, detailParams(item)));
+              router.navigate(buildRoute(detailRoute, detailParams(item)));
             }}
             footer={renderFooter ? renderFooter(item) : null}
           />

@@ -119,7 +119,7 @@ export default function ViewUserProfile() {
         currentProfile,
         otherProfile: profile,
       });
-      router.push(`/messages/${conversationId}`);
+      router.navigate(`/messages/${conversationId}`);
     });
   };
 

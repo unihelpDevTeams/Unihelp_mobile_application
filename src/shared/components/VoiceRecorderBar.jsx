@@ -148,7 +148,7 @@ const VoiceRecorderBar = memo(({ conversationId, onVoiceSent }) => {
 
   const handleUpgrade = useCallback(() => {
     setShowUpgrade(false);
-    router.push('/premium');
+    router.navigate('/premium');
   }, [router]);
 
   const handlePressIn = useCallback(async () => {

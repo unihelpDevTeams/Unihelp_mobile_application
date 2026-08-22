@@ -587,7 +587,7 @@ export default function ProfileScreen() {
 
   const goTo = (path) => {
     closeSheet();
-    router.push(path);
+    router.navigate(path);
   };
 
   const challengeStatCards = challengeStats ? [
@@ -978,8 +978,8 @@ export default function ProfileScreen() {
         <DailyStreakBanner
           streakCount={streakCount}
           streakDates={streakDates}
-          onPress={() => router.push('/streak')}
-          onStudyNow={() => router.push('/streak')}
+          onPress={() => router.navigate('/streak')}
+          onStudyNow={() => router.navigate('/streak')}
         />
 
         {status ? (
@@ -1030,7 +1030,7 @@ export default function ProfileScreen() {
 
         <Text style={styles.groupLabel}>DANGER ZONE</Text>
         <View style={styles.groupCard}>
-          <Pressable onPress={() => router.push('/profile/danger')} style={({ pressed }) => [styles.listRow, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="Open danger zone">
+          <Pressable onPress={() => router.navigate('/profile/danger')} style={({ pressed }) => [styles.listRow, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="Open danger zone">
             <View style={[styles.rowIconSm, styles.rowIconDanger]}><Ionicons name="person-remove-outline" size={16} color={colors.red} /></View>
             <View style={styles.rowTextWrap}>
               <Text style={[styles.rowTitle, { color: colors.red }]}>Delete Account</Text>

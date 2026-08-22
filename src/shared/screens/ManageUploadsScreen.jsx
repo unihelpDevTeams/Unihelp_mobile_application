@@ -273,7 +273,7 @@ export default function ManageUploadsScreen({ type }) {
             <Text style={styles.heroTitle}>{config.title}</Text>
             <Text style={styles.heroSubtitle}>{config.subtitle}</Text>
           </View>
-          <Pressable onPress={() => router.push(config.uploadRoute)} style={[styles.createButton, { backgroundColor: accentColor }]}>
+          <Pressable onPress={() => router.navigate(config.uploadRoute)} style={[styles.createButton, { backgroundColor: accentColor }]}>
             <Ionicons name="add" size={17} color={colors.onBrand} />
             <Text style={styles.createText}>{config.createLabel}</Text>
           </Pressable>
@@ -331,8 +331,8 @@ export default function ManageUploadsScreen({ type }) {
             deleting={deletingId === item.id}
             styles={styles}
             colors={colors}
-            onView={() => router.push(config.viewRoute(item.id))}
-            onEdit={() => router.push(config.editRoute(item.id))}
+            onView={() => router.navigate(config.viewRoute(item.id))}
+            onEdit={() => router.navigate(config.editRoute(item.id))}
             onDelete={() => confirmDelete(item)}
           />
         ))

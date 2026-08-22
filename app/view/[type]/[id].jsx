@@ -546,7 +546,7 @@ export default function RecordViewPage() {
           ? 'This resource has no document available for offline saving.'
           : 'Offline Library requires an active UniHelp Premium subscription.',
         !isPremiumUser
-          ? [{ text: 'Cancel', style: 'cancel' }, { text: 'View Premium', onPress: () => router.push('/premium') }]
+          ? [{ text: 'Cancel', style: 'cancel' }, { text: 'View Premium', onPress: () => router.navigate('/premium') }]
           : undefined,
       );
       return;
@@ -590,7 +590,7 @@ export default function RecordViewPage() {
         replyTo: null,
       });
       setContactSheetVisible(false);
-      router.push(`/messages/${conversationId}`);
+      router.navigate(`/messages/${conversationId}`);
     } catch (error) {
       Alert.alert('Could not start chat', error?.message || 'Please try again.');
     } finally {
@@ -644,7 +644,7 @@ export default function RecordViewPage() {
     Alert.alert(title || 'Resource actions', 'Choose what you want to do.', [
       {
         text: 'Edit',
-        onPress: () => router.push({ pathname: '/upload', params: { type, editId: id } }),
+        onPress: () => router.navigate({ pathname: '/upload', params: { type, editId: id } }),
       },
       {
         text: 'Delete',

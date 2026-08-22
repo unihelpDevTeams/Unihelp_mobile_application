@@ -65,7 +65,7 @@ export default function StreakScreen() {
     try {
       const result = await recordDailyStreak();
       setStreakData(result);
-      router.push('/challenge/categories');
+      router.navigate('/challenge/categories');
     } catch {}
   };
 

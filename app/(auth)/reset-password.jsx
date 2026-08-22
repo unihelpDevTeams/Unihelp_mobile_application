@@ -132,10 +132,10 @@ export default function ResetPassword() {
           </Pressable>
 
           <View style={styles.linkRow}>
-            <Pressable onPress={() => router.push('/login')}>
+            <Pressable onPress={() => router.navigate('/login')}>
               <Text style={styles.link}>Back to sign in</Text>
             </Pressable>
-            <Pressable onPress={() => router.push('/register')}>
+            <Pressable onPress={() => router.navigate('/register')}>
               <Text style={styles.linkSecondary}>Create account</Text>
             </Pressable>
           </View>

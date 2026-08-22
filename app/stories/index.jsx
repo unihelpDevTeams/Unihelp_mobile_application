@@ -180,7 +180,7 @@ export default function StoriesHome() {
 
       <Pressable
         style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
-        onPress={() => router.push('/stories/create')}
+        onPress={() => router.navigate('/stories/create')}
         accessibilityRole="button"
         accessibilityLabel="Write a new story"
       >

@@ -198,7 +198,7 @@ export default function NotificationsPage() {
   const openNotification = (item) => {
     markOneRead(item);
     const route = resolveNotificationRoute(item);
-    router.push(route);
+    router.navigate(route);
   };
 
   const markAllRead = async () => {

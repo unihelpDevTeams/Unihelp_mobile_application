@@ -467,7 +467,7 @@ function HeroCarousel({ slides, router }) {
                 </View>
 
                 <Pressable
-                  onPress={() => router.push(slide.cta.route)}
+                  onPress={() => router.navigate(slide.cta.route)}
                   style={({ pressed }) => [styles.cta, pressed && { opacity: 0.9, transform: [{ scale: 0.97 }] }]}
                   accessibilityRole="button"
                   accessibilityLabel={slide.cta.label}
@@ -975,7 +975,7 @@ export default function HomeScreen() {
     };
   }, [profile?.uid]);
 
-  const handleStreakPress = useCallback(() => router.push('/streak'), [router]);
+  const handleStreakPress = useCallback(() => router.navigate('/streak'), [router]);
 
   const avatarInitial = (profile?.username || 'U').trim().charAt(0).toUpperCase();
   const showAvatarImage = !!profile?.photoURL && !avatarFailed;
@@ -1057,7 +1057,7 @@ export default function HomeScreen() {
 
           if (dragDistance.current < 8) {
             dragDistance.current = 0;
-            router.push('/ai');
+            router.navigate('/ai');
             return;
           }
           dragDistance.current = 0;
@@ -1216,7 +1216,7 @@ export default function HomeScreen() {
       const imageUrl = resolveImage(item) || IMAGES.hostel;
       return (
         <View key={item.id || item.uid || item.title || 'hostel'} style={discoverySectionStyles.discoveryCardShadowWrap}>
-          <Pressable style={discoverySectionStyles.discoveryCard} onPress={() => router.push('/hostelmarketplace')}>
+          <Pressable style={discoverySectionStyles.discoveryCard} onPress={() => router.navigate('/hostelmarketplace')}>
             <Image source={typeof imageUrl === 'string' ? { uri: imageUrl } : imageUrl} style={discoverySectionStyles.discoveryMedia} resizeMode="cover" />
             <View style={discoverySectionStyles.discoveryBody}>
               <Text style={discoverySectionStyles.discoveryPrice}>{price}</Text>
@@ -1243,7 +1243,7 @@ export default function HomeScreen() {
           <Pressable
             style={discoverySectionStyles.discoveryCard}
             disabled={!targetId}
-            onPress={() => targetId && router.push(`/view-user-profile/${targetId}`)}
+            onPress={() => targetId && router.navigate(`/view-user-profile/${targetId}`)}
           >
             <View style={[discoverySectionStyles.discoveryMedia, { justifyContent: 'center', alignItems: 'center', backgroundColor: colors.brandLight }]}>
               {personImage ? (
@@ -1276,7 +1276,7 @@ export default function HomeScreen() {
     const imageUrl = resolveImage(item) || IMAGES.marketplace;
     return (
       <View key={item.id || item.uid || item.title || 'product'} style={discoverySectionStyles.discoveryCardShadowWrap}>
-        <Pressable style={discoverySectionStyles.discoveryCard} onPress={() => router.push('/studentmarketplace')}>
+        <Pressable style={discoverySectionStyles.discoveryCard} onPress={() => router.navigate('/studentmarketplace')}>
           <Image source={typeof imageUrl === 'string' ? { uri: imageUrl } : imageUrl} style={discoverySectionStyles.discoveryMedia} resizeMode="cover" />
           <View style={discoverySectionStyles.discoveryBody}>
             <Text style={discoverySectionStyles.discoveryPrice}>{price}</Text>
@@ -1383,7 +1383,7 @@ export default function HomeScreen() {
             },
           ]}
           {...panResponder.panHandlers}>
-          <Pressable style={styles.fab} onPress={() => router.push('/ai')}>
+          <Pressable style={styles.fab} onPress={() => router.navigate('/ai')}>
             <LinearGradient
               colors={['#6366F1', '#8B5CF6']}
               start={{ x: 0, y: 0 }}
@@ -1396,11 +1396,11 @@ export default function HomeScreen() {
         </Animated.View>
       }>
       {/* PREMIUM MARQUEE — slim, scrolling, always visible without hogging space */}
-      {!premiumUnlocked ? <PremiumMarquee onPress={() => router.push('/premium')} /> : null}
+      {!premiumUnlocked ? <PremiumMarquee onPress={() => router.navigate('/premium')} /> : null}
 
       {/* AMBIENT FLOATING HEADER BAR */}
       <View style={styles.headerBar}>
-        <Pressable style={styles.userPill} onPress={() => router.push('/profile')}>
+        <Pressable style={styles.userPill} onPress={() => router.navigate('/profile')}>
           <View style={styles.avatarGlow}>
             {showAvatarImage ? (
               <Image
@@ -1442,7 +1442,7 @@ export default function HomeScreen() {
           <Pressable
             style={({ pressed }) => [
               styles.seeAllBtn,
-              pressed && { opacity: 0.75 },]} onPress={() => router.push('/toolScreen')}>
+              pressed && { opacity: 0.75 },]} onPress={() => router.navigate('/toolScreen')}>
             <Text style={styles.seeAllText}>All Tools</Text>
             <Ionicons name="arrow-forward" size={14} color={colors.brandText} />
           </Pressable>
@@ -1457,7 +1457,7 @@ export default function HomeScreen() {
                 styles.toolCard,
                 pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] },
               ]}
-              onPress={() => router.push(tool.route)}
+              onPress={() => router.navigate(tool.route)}
             >
               <View style={styles.toolHeader}>
                 <View style={[styles.toolIconContainer, { backgroundColor: tool.bgColor }]}>
@@ -1480,7 +1480,7 @@ export default function HomeScreen() {
           styles.flashBanner,
           pressed && { opacity: 0.92, transform: [{ scale: 0.99 }] },
         ]}
-        onPress={() => router.push('/formula-hub/flashcards')}
+        onPress={() => router.navigate('/formula-hub/flashcards')}
         accessibilityRole="button"
         accessibilityLabel="Open formula flash cards"
       >
@@ -1534,7 +1534,7 @@ export default function HomeScreen() {
         >
           <Pressable
             style={styles.horizontalCard}
-            onPress={() => router.push('/hostelmarketplace')}
+            onPress={() => router.navigate('/hostelmarketplace')}
           >
             <ImageBackground source={IMAGES.hostel} style={styles.horizontalBg}>
               <LinearGradient
@@ -1549,7 +1549,7 @@ export default function HomeScreen() {
 
           <Pressable
             style={styles.horizontalCard}
-            onPress={() => router.push('/studentmarketplace')}
+            onPress={() => router.navigate('/studentmarketplace')}
           >
             <ImageBackground source={IMAGES.marketplace} style={styles.horizontalBg}>
               <LinearGradient
@@ -1562,7 +1562,7 @@ export default function HomeScreen() {
             </ImageBackground>
           </Pressable>
 
-          <Pressable style={styles.horizontalCard} onPress={() => router.push('/stories')}>
+          <Pressable style={styles.horizontalCard} onPress={() => router.navigate('/stories')}>
             <ImageBackground source={IMAGES.stories} style={styles.horizontalBg}>
               <LinearGradient
                 colors={['transparent', 'rgba(0,0,0,0.85)']}
@@ -1574,7 +1574,7 @@ export default function HomeScreen() {
             </ImageBackground>
           </Pressable>
 
-          <Pressable style={styles.horizontalCard} onPress={() => router.push('/find-friends')}>
+          <Pressable style={styles.horizontalCard} onPress={() => router.navigate('/find-friends')}>
             <ImageBackground source={IMAGES.community} style={styles.horizontalBg}>
               <LinearGradient
                 colors={['transparent', 'rgba(0,0,0,0.85)']}
@@ -1591,7 +1591,7 @@ export default function HomeScreen() {
       <View style={discoverySectionStyles.discoverySection}>
         <View style={discoverySectionStyles.sectionMeta}>
           <Text style={discoverySectionStyles.discoveryTitle}>Discover</Text>
-          <Pressable onPress={() => router.push('/find-friends')}>
+          <Pressable onPress={() => router.navigate('/find-friends')}>
             <Text style={discoverySectionStyles.metaText}>Fresh picks</Text>
           </Pressable>
         </View>
@@ -1609,7 +1609,7 @@ export default function HomeScreen() {
             <View>
               <View style={discoverySectionStyles.sectionMeta}>
                 <Text style={discoverySectionStyles.discoveryTitle}>Hostels</Text>
-                <Pressable onPress={() => router.push('/hostelmarketplace')}>
+                <Pressable onPress={() => router.navigate('/hostelmarketplace')}>
                   <Text style={discoverySectionStyles.metaText}>View all</Text>
                 </Pressable>
               </View>
@@ -1627,7 +1627,7 @@ export default function HomeScreen() {
             <View>
               <View style={discoverySectionStyles.sectionMeta}>
                 <Text style={discoverySectionStyles.discoveryTitle}>Friend suggestions</Text>
-                <Pressable onPress={() => router.push('/find-friends')}>
+                <Pressable onPress={() => router.navigate('/find-friends')}>
                   <Text style={discoverySectionStyles.metaText}>Connect</Text>
                 </Pressable>
               </View>
@@ -1645,7 +1645,7 @@ export default function HomeScreen() {
             <View>
               <View style={discoverySectionStyles.sectionMeta}>
                 <Text style={discoverySectionStyles.discoveryTitle}>Marketplace</Text>
-                <Pressable onPress={() => router.push('/studentmarketplace')}>
+                <Pressable onPress={() => router.navigate('/studentmarketplace')}>
                   <Text style={discoverySectionStyles.metaText}>Browse</Text>
                 </Pressable>
               </View>

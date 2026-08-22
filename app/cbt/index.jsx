@@ -1150,7 +1150,7 @@ export default function CBTPracticeScreen() {
                   <Text style={{ fontWeight: '700', color: T.textSecondary, fontSize: 12, textTransform: 'uppercase' }}>Retake Paper</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => router.push('/')}
+                  onPress={() => router.navigate('/')}
                   style={{ flex: 1, backgroundColor: T.indigo, paddingVertical: 14, borderRadius: 16, alignItems: 'center', shadowColor: T.indigo, shadowOpacity: 0.3, shadowRadius: 10, elevation: 3 }}
                   accessibilityRole="button"
                 >

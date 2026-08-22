@@ -192,7 +192,7 @@ export default function TermsPage() {
           <Text style={styles.metaText}>4 min read</Text>
         </View>
         <Pressable 
-          onPress={() => router.push('/contact')}
+          onPress={() => router.navigate('/contact')}
           style={styles.metaItem}
           hitSlop={6}
         >

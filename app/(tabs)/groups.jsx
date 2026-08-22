@@ -540,7 +540,7 @@ export default function Groups() {
 
   const handleJoin = async (group) => {
     if (!user) {
-      router.push('/login');
+      router.navigate('/login');
       return;
     }
     const role = getMembershipRole(group, user, userGroupsById);
@@ -651,7 +651,7 @@ export default function Groups() {
             </View>
             <Pressable
               style={({ pressed }) => [styles.createButton, pressed && { opacity: 0.9 }]}
-              onPress={() => router.push('/create')}
+              onPress={() => router.navigate('/create')}
               accessibilityLabel="Create group"
             >
               <Ionicons name="add" size={18} color={colors.onBrand} />
@@ -755,7 +755,7 @@ export default function Groups() {
               role={getMembershipRole(group, user, userGroupsById)}
               joinState={joinStates[group.id]}
               joining={joiningId === group.id}
-              onOpen={() => router.push(`/community/${group.id}`)}
+              onOpen={() => router.navigate(`/community/${group.id}`)}
               onJoin={() => handleJoin(group)}
               onShare={() => handleShare(group)}
               styles={styles}

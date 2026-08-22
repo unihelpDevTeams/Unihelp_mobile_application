@@ -658,7 +658,7 @@ export default function ConversationPage() {
       <View style={styles.headerRow}>
         <Pressable
           style={styles.avatarWrapper}
-          onPress={() => otherId && router.push(`/view-user-profile/${otherId}`)}
+          onPress={() => otherId && router.navigate(`/view-user-profile/${otherId}`)}
           disabled={!otherId}
         >
           {otherUser.avatar && !avatarFailed ? (

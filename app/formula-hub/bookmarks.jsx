@@ -148,7 +148,7 @@ export default function FormulaBookmarks() {
             <Pressable
               key={item.id}
               style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-              onPress={() => router.push(`/formula-hub/${encodeURIComponent(String(item.id))}`)}
+              onPress={() => router.navigate(`/formula-hub/${encodeURIComponent(String(item.id))}`)}
               accessibilityRole="button"
               accessibilityLabel={`Open ${item.title}`}
             >
@@ -198,7 +198,7 @@ export default function FormulaBookmarks() {
             title="No saved formulas yet"
             description="Open any formula and tap the bookmark button to keep it here for quick revision."
             actionLabel="Browse formulas"
-            onAction={() => router.push('/formula-hub/subjects')}
+            onAction={() => router.navigate('/formula-hub/subjects')}
           />
         )}
       </ScrollView>

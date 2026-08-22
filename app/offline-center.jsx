@@ -519,7 +519,7 @@ export default function OfflineCenterScreen() {
           <Text style={styles.lockText}>
             Upgrade to UniHelp Premium to save and open study materials without an internet connection.
           </Text>
-          <Pressable style={styles.actionButton} onPress={() => router.push('/premium')}>
+          <Pressable style={styles.actionButton} onPress={() => router.navigate('/premium')}>
             <Ionicons name="star" size={16} color={colors.onBrand} />
             <Text style={styles.actionText}>Upgrade to Premium</Text>
           </Pressable>
@@ -569,7 +569,7 @@ export default function OfflineCenterScreen() {
             </View>
 
             {!accessAllowed ? (
-              <Pressable style={styles.premiumCTA} onPress={() => router.push('/premium')}>
+              <Pressable style={styles.premiumCTA} onPress={() => router.navigate('/premium')}>
                 <Ionicons name="star" size={16} color={colors.onBrand} />
                 <Text style={styles.premiumCTAText}>Unlock Premium</Text>
               </Pressable>
@@ -688,7 +688,7 @@ export default function OfflineCenterScreen() {
                       ]}
                       disabled={isDisabled}
                       onPress={() =>
-                        router.push({
+                        router.navigate({
                           pathname: '/offline-resource/[type]/[id]',
                           params: { type: item.type, id: item.id },
                         })

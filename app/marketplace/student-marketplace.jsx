@@ -568,7 +568,7 @@ export default function StudentMarketplacePage() {
     ].filter((section) => section.items.length > 0);
   }, [categorySummaries, filteredItems]);
 
-  const goToListing = (item) => router.push({ pathname: '/view/[type]/[id]', params: { type: 'listing', id: item.id } });
+  const goToListing = (item) => router.navigate({ pathname: '/view/[type]/[id]', params: { type: 'listing', id: item.id } });
 
   const clearFilters = () => {
     setSearch('');
@@ -743,7 +743,7 @@ export default function StudentMarketplacePage() {
       )}
 
       {isAdmin && (
-        <Pressable style={styles.adminButton} onPress={() => router.push('/adminpanel')}>
+        <Pressable style={styles.adminButton} onPress={() => router.navigate('/adminpanel')}>
           <Ionicons name="shield-checkmark-outline" size={16} color={colors.brandText} />
           <Text style={styles.adminButtonText}>Admin Panel</Text>
         </Pressable>
@@ -756,7 +756,7 @@ export default function StudentMarketplacePage() {
           sections={marketplaceSections}
           styles={styles}
           onPressItem={goToListing}
-          onSell={() => router.push('/upload?type=marketplace')}
+          onSell={() => router.navigate('/upload?type=marketplace')}
           onSelectCategory={(nextCategory) => {
             setCategory(nextCategory);
             setShowFilters(true);
@@ -772,7 +772,7 @@ export default function StudentMarketplacePage() {
           </Text>
           <View style={styles.sectionRowRight}>
             <Pressable
-              onPress={() => router.push('/upload?type=marketplace')}
+              onPress={() => router.navigate('/upload?type=marketplace')}
               style={styles.uploadButton}
               accessibilityRole="button"
             >
