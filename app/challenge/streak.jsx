@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
@@ -12,16 +12,44 @@ import { StatCard } from '../../src/shared/challenge/components/ChallengePieces'
 
 export default function ChallengeStreakScreen() {
   const { profile } = useAuth();
+  const profileSnapshot = React.useMemo(() => ({
+    uid: profile?.uid,
+    username: profile?.username,
+    school: profile?.school,
+    department: profile?.department,
+    photo: profile?.photo,
+    faculty: profile?.faculty,
+    level: profile?.level,
+  }), [profile?.uid, profile?.username, profile?.school, profile?.department, profile?.photo, profile?.faculty, profile?.level]);
   const [stats, setStats] = useState({});
   const [loading, setLoading] = useState(true);
+  const statsRef = useRef({});
+  const lastLoadedUidRef = useRef('');
 
   useFocusEffect(
     useCallback(() => {
+      const currentUid = profileSnapshot.uid || 'guest';
+      const hasLoadedStats = lastLoadedUidRef.current === currentUid && Object.keys(statsRef.current || {}).length > 0;
+
+      if (hasLoadedStats) {
+        return () => {};
+      }
+
+      lastLoadedUidRef.current = currentUid;
       let cancelled = false;
       setLoading(true);
-      fetchChallengeStats(profile || {})
+      fetchChallengeStats(profileSnapshot)
         .then((data) => {
-          if (!cancelled) setStats(data);
+          if (!cancelled) {
+            statsRef.current = data;
+            setStats(data);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            statsRef.current = {};
+            setStats({});
+          }
         })
         .finally(() => {
           if (!cancelled) setLoading(false);
@@ -29,7 +57,7 @@ export default function ChallengeStreakScreen() {
       return () => {
         cancelled = true;
       };
-    }, [profile])
+    }, [profileSnapshot])
   );
 
   const days = useMemo(() => buildCalendarDays(126, stats.streakDates || []), [stats.streakDates]);

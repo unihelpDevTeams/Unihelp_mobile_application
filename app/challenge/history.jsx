@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
@@ -20,14 +20,33 @@ export default function ChallengeHistoryScreen() {
   const [sort, setSort] = useState('recent');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const lastLoadedKeyRef = useRef('');
+  const itemsRef = useRef([]);
 
   useFocusEffect(
     useCallback(() => {
+      const currentKey = `${category || 'all'}:${sort}`;
+      const hasLoadedItems = lastLoadedKeyRef.current === currentKey && itemsRef.current.length >= 0;
+
+      if (hasLoadedItems) {
+        return () => {};
+      }
+
+      lastLoadedKeyRef.current = currentKey;
       let cancelled = false;
       setLoading(true);
       fetchChallengeHistory({ category, sort })
         .then((data) => {
-          if (!cancelled) setItems(data);
+          if (!cancelled) {
+            itemsRef.current = data;
+            setItems(data);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            itemsRef.current = [];
+            setItems([]);
+          }
         })
         .finally(() => {
           if (!cancelled) setLoading(false);

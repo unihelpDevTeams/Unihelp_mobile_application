@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
@@ -11,27 +11,47 @@ import { AchievementTile, ProgressBar, StatCard } from '../../src/shared/challen
 
 export default function ChallengeProfileScreen() {
   const { profile } = useAuth();
+  const profileSnapshot = React.useMemo(() => ({
+    uid: profile?.uid,
+    username: profile?.username,
+    school: profile?.school,
+    department: profile?.department,
+    photo: profile?.photo,
+    faculty: profile?.faculty,
+    level: profile?.level,
+  }), [profile?.uid, profile?.username, profile?.school, profile?.department, profile?.photo, profile?.faculty, profile?.level]);
   const [stats, setStats] = useState({});
   const [ranks, setRanks] = useState({ university: null, department: null });
   const [achievements, setAchievements] = useState([]);
   const [loading, setLoading] = useState(true);
+  const statsRef = useRef({});
+  const lastLoadedUidRef = useRef('');
 
   useFocusEffect(
     useCallback(() => {
+      const currentUid = profileSnapshot.uid || 'guest';
+      const hasLoadedStats = lastLoadedUidRef.current === currentUid && Object.keys(statsRef.current || {}).length > 0;
+
+      if (hasLoadedStats) {
+        return () => {};
+      }
+
+      lastLoadedUidRef.current = currentUid;
       let cancelled = false;
       setLoading(true);
       Promise.all([
-        fetchChallengeStats(profile || {}),
-        fetchChallengeLeaderboard({ scope: 'university', profile: profile || {} }),
-        fetchChallengeLeaderboard({ scope: 'department', profile: profile || {} }),
+        fetchChallengeStats(profileSnapshot),
+        fetchChallengeLeaderboard({ scope: 'university', profile: profileSnapshot }),
+        fetchChallengeLeaderboard({ scope: 'department', profile: profileSnapshot }),
       ])
         .then(([nextStats, universityRows, departmentRows]) => {
           if (cancelled) return;
+          statsRef.current = nextStats;
           setStats(nextStats);
           setAchievements(getChallengeAchievements(nextStats).filter((item) => item.unlocked).slice(0, 4));
           setRanks({
-            university: universityRows.findIndex((item) => item.uid === profile?.uid) + 1 || null,
-            department: departmentRows.findIndex((item) => item.uid === profile?.uid) + 1 || null,
+            university: universityRows.findIndex((item) => item.uid === profileSnapshot.uid) + 1 || null,
+            department: departmentRows.findIndex((item) => item.uid === profileSnapshot.uid) + 1 || null,
           });
         })
         .finally(() => {
@@ -40,7 +60,7 @@ export default function ChallengeProfileScreen() {
       return () => {
         cancelled = true;
       };
-    }, [profile])
+    }, [profileSnapshot])
   );
 
   return (

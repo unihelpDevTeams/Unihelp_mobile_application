@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import ScreenShell from '../../src/shared/components/ScreenShell';
@@ -10,16 +10,35 @@ import { AchievementTile } from '../../src/shared/challenge/components/Challenge
 
 export default function ChallengeAchievementsScreen() {
   const { profile } = useAuth();
+  const profileSnapshot = React.useMemo(() => ({
+    uid: profile?.uid,
+    username: profile?.username,
+    school: profile?.school,
+    department: profile?.department,
+    photo: profile?.photo,
+    faculty: profile?.faculty,
+    level: profile?.level,
+  }), [profile?.uid, profile?.username, profile?.school, profile?.department, profile?.photo, profile?.faculty, profile?.level]);
   const [achievements, setAchievements] = useState([]);
   const [loading, setLoading] = useState(true);
+  const lastLoadedUidRef = useRef('');
 
   useFocusEffect(
     useCallback(() => {
+      const currentUid = profileSnapshot.uid || 'guest';
+      if (lastLoadedUidRef.current === currentUid && achievements.length > 0) {
+        return () => {};
+      }
+
+      lastLoadedUidRef.current = currentUid;
       let cancelled = false;
       setLoading(true);
-      fetchChallengeStats(profile || {})
+      fetchChallengeStats(profileSnapshot)
         .then((stats) => {
           if (!cancelled) setAchievements(getChallengeAchievements(stats));
+        })
+        .catch(() => {
+          if (!cancelled) setAchievements([]);
         })
         .finally(() => {
           if (!cancelled) setLoading(false);
@@ -27,7 +46,7 @@ export default function ChallengeAchievementsScreen() {
       return () => {
         cancelled = true;
       };
-    }, [profile])
+    }, [profileSnapshot, achievements.length])
   );
 
   return (

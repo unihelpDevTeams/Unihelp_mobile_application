@@ -17,27 +17,45 @@ import { AnimatedPressable } from '../../src/shared/challenge/components/Challen
 export default function ChallengeHomeScreen() {
   const router = useRouter();
   const { profile } = useAuth();
+  const profileSnapshot = useMemo(() => ({
+    uid: profile?.uid,
+    username: profile?.username,
+    school: profile?.school,
+    department: profile?.department,
+    faculty: profile?.faculty,
+    level: profile?.level,
+    photo: profile?.photo,
+  }), [profile?.uid, profile?.username, profile?.school, profile?.department, profile?.faculty, profile?.level, profile?.photo]);
   const { colors } = useTheme();
   const [dashboard, setDashboard] = useState({ stats: {}, history: [], leaderboard: [] });
   const [loading, setLoading] = useState(true);
   const lastDashboardKeyRef = useRef('');
+  const dashboardRef = useRef(dashboard);
+
+  dashboardRef.current = dashboard;
 
   useFocusEffect(
     useCallback(() => {
-      const dashboardKey = profile?.uid || 'guest';
-      if (lastDashboardKeyRef.current === dashboardKey && Object.keys(dashboard.stats || {}).length > 0) {
+      const dashboardKey = profileSnapshot.uid || 'guest';
+      const hasLoadedDashboard = lastDashboardKeyRef.current === dashboardKey && Object.keys(dashboardRef.current.stats || {}).length > 0;
+
+      if (hasLoadedDashboard) {
         return () => {};
       }
+
       lastDashboardKeyRef.current = dashboardKey;
 
       let cancelled = false;
-      if (!dashboard.stats || Object.keys(dashboard.stats || {}).length === 0) {
+      if (!dashboardRef.current.stats || Object.keys(dashboardRef.current.stats || {}).length === 0) {
         setLoading(true);
       }
 
-      fetchChallengeDashboard(profile || {})
+      fetchChallengeDashboard(profileSnapshot)
         .then((data) => {
           if (!cancelled) setDashboard(data);
+        })
+        .catch(() => {
+          if (!cancelled) setDashboard({ stats: {}, history: [], leaderboard: [] });
         })
         .finally(() => {
           if (!cancelled) setLoading(false);
@@ -45,7 +63,7 @@ export default function ChallengeHomeScreen() {
       return () => {
         cancelled = true;
       };
-    }, [dashboard.stats, profile])
+    }, [profileSnapshot])
   );
   
   const styles = useMemo(() => createStyles(colors), [colors]);

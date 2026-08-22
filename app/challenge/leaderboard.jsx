@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import ScreenShell from '../../src/shared/components/ScreenShell';
@@ -17,17 +17,45 @@ const TABS = [
 
 export default function ChallengeLeaderboardScreen() {
   const { profile } = useAuth();
+  const profileSnapshot = React.useMemo(() => ({
+    uid: profile?.uid,
+    username: profile?.username,
+    school: profile?.school,
+    department: profile?.department,
+    photo: profile?.photo,
+    faculty: profile?.faculty,
+    level: profile?.level,
+  }), [profile?.uid, profile?.username, profile?.school, profile?.department, profile?.photo, profile?.faculty, profile?.level]);
   const [scope, setScope] = useState('global');
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const lastLoadedKeyRef = useRef('');
+  const rowsRef = useRef([]);
 
   useFocusEffect(
     useCallback(() => {
+      const currentKey = `${profileSnapshot.uid || 'guest'}:${scope}`;
+      const hasLoadedRows = lastLoadedKeyRef.current === currentKey && rowsRef.current.length > 0;
+
+      if (hasLoadedRows) {
+        return () => {};
+      }
+
+      lastLoadedKeyRef.current = currentKey;
       let cancelled = false;
       setLoading(true);
-      fetchChallengeLeaderboard({ scope, profile: profile || {} })
+      fetchChallengeLeaderboard({ scope, profile: profileSnapshot })
         .then((data) => {
-          if (!cancelled) setRows(data);
+          if (!cancelled) {
+            rowsRef.current = data;
+            setRows(data);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            rowsRef.current = [];
+            setRows([]);
+          }
         })
         .finally(() => {
           if (!cancelled) setLoading(false);
@@ -35,7 +63,7 @@ export default function ChallengeLeaderboardScreen() {
       return () => {
         cancelled = true;
       };
-    }, [profile, scope])
+    }, [profileSnapshot, scope])
   );
 
   return (
