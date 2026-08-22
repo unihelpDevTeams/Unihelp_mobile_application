@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
-import { auth } from '../../src/firebase/config';
+import { auth } from '../../firebase/config';
 
 const MIGRATION_STORAGE_KEY = '@admin_migration_checklist';
 
