@@ -165,7 +165,7 @@ export default function CreateTutorialPage() {
       setThumbnail(null);
       setPdfFile(null);
       setProgress({ video: 0, thumb: 0, pdf: 0 });
-      router.push('/marketplace/tutorials');
+      router.navigate('/marketplace/tutorials');
     } catch (submitError) {
       setError(submitError?.message || 'Upload failed. Please try again.');
     } finally {

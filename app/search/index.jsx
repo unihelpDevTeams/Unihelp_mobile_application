@@ -263,7 +263,7 @@ export default function SearchScreen() {
 
   const handleResultPress = (item) => {
     saveToHistory(item.title || '');
-    router.push({ pathname: '/view/[type]/[id]', params: { type: item.type, id: item.id } });
+    router.navigate({ pathname: '/view/[type]/[id]', params: { type: item.type, id: item.id } });
   };
 
   const handleSearchSubmit = () => {
@@ -277,7 +277,7 @@ export default function SearchScreen() {
   };
 
   const openFeature = (route) => {
-    router.push(route);
+    router.navigate(route);
   };
 
   const renderResult = ({ item }) => {

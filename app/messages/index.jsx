@@ -85,7 +85,7 @@ function ConversationItem({
   return (
     <Pressable
       style={({ pressed }) => [styles.chatCard, pressed && styles.cardPressed]}
-      onPress={() => router.push(`/messages/${item.id}`)}
+      onPress={() => router.navigate(`/messages/${item.id}`)}
       onLongPress={() => onLongPress?.(item)}
       delayLongPress={240}
     >
@@ -638,7 +638,7 @@ export default function MessagesPage() {
     const otherUid = friend.users?.find((id) => id !== profile?.uid);
     if (!otherUid) return;
     const conversationId = [profile?.uid, otherUid].sort().join('_');
-    router.push(`/messages/${conversationId}`);
+    router.navigate(`/messages/${conversationId}`);
   };
 
   const emptyMessage = useMemo(() => 'Search for a student and start a direct conversation.', []);
@@ -940,7 +940,7 @@ export default function MessagesPage() {
 
       <TouchableOpacity
         style={styles.secondaryActionBtn}
-        onPress={() => router.push('/friends')}
+        onPress={() => router.navigate('/friends')}
         activeOpacity={0.8}
       >
         <Ionicons name="ban-outline" size={16} color={colors.textPrimary} />
@@ -1107,7 +1107,7 @@ export default function MessagesPage() {
             style={styles.secondaryActionBtn}
             onPress={() => {
               setFindModalVisible(false);
-              router.push('/find-friends');
+              router.navigate('/find-friends');
             }}
             activeOpacity={0.8}
           >

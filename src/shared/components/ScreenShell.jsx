@@ -361,10 +361,10 @@ export default function ScreenShell({
           showBack={showBack}
           onBack={() => router.back()}
           showSearch={showUniversityIcons}
-          onSearch={() => router.push('/search')}
+          onSearch={() => router.navigate('/search')}
           showNotifications={showUniversityIcons}
           hasUnreadNotifications={hasUnreadNotifications}
-          onNotifications={() => router.push('/notifications')}
+          onNotifications={() => router.navigate('/notifications')}
           showMenu={showMenu}
           onMenu={() => setMenuOpen(true)}
           actions={actions}
@@ -379,7 +379,7 @@ export default function ScreenShell({
       <MenuDrawer
         visible={menuOpen}
         onClose={() => setMenuOpen(false)}
-        onNavigate={(route) => { setMenuOpen(false); router.push(route); }}
+        onNavigate={(route) => { setMenuOpen(false); router.navigate(route); }}
         sections={filteredMenuSections}
         profile={profile}
         onProfilePress={onProfilePress ? () => { setMenuOpen(false); onProfilePress(); } : null}

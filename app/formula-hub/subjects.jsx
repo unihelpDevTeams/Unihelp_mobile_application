@@ -144,7 +144,7 @@ export default function FormulaSubjectsPage() {
               <TouchableOpacity
                 key={item.title}
                 activeOpacity={0.85}
-                onPress={() => router.push(item.route)}
+                onPress={() => router.navigate(item.route)}
                 style={styles.card}
               >
                 {/* Top Accent Gradient Border */}

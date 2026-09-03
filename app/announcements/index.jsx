@@ -178,7 +178,7 @@ export default function AnnouncementsScreen() {
             <Pressable
               key={item.id}
               style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-              onPress={() => router.push({ pathname: '/view/[type]/[id]', params: { type: 'announcement', id: item.id } })}
+              onPress={() => router.navigate({ pathname: '/view/[type]/[id]', params: { type: 'announcement', id: item.id } })}
             >
               <View style={styles.cardTop}>
                 <View style={[styles.cardIcon, { backgroundColor: (item.priority === 'high' ? '#DC2626' : colors.brand) + '15' }]}>

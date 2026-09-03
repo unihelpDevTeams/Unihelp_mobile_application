@@ -182,7 +182,7 @@ export default function AdminPanelPage() {
           </Text>
           <Pressable
             style={pageStyles.notificationButton}
-            onPress={() => router.push('/adminpanel/support-center')}
+            onPress={() => router.navigate('/adminpanel/support-center')}
           >
             <Ionicons name="arrow-forward-outline" size={18} color={colors.onBrand || '#FFF'} />
             <Text style={pageStyles.notificationButtonText}>Open Support Center</Text>
@@ -197,7 +197,7 @@ export default function AdminPanelPage() {
           </Text>
           <Pressable
             style={pageStyles.notificationButton}
-            onPress={() => router.push('/adminpanel/migration-checklist')}
+            onPress={() => router.navigate('/adminpanel/migration-checklist')}
           >
             <Ionicons name="arrow-forward-outline" size={18} color={colors.onBrand || '#FFF'} />
             <Text style={pageStyles.notificationButtonText}>Open Migration Checklist</Text>
@@ -274,7 +274,7 @@ export default function AdminPanelPage() {
                     <Pressable
                       style={pageStyles.viewButton}
                       onPress={() =>
-                        router.push({
+                        router.navigate({
                           pathname: '/view/[type]/[id]',
                           params: {
                             type: listingType === 'marketplace' ? 'listing' : 'hostel',
@@ -569,7 +569,7 @@ function UsersList({ colors }) {
           renderItem={({ item }) => (
             <Pressable
               style={({ pressed }) => [userStyles.card, pressed && userStyles.cardPressed]}
-              onPress={() => router.push(`/view-user-profile/${item.uid || item.id}`)}
+              onPress={() => router.navigate(`/view-user-profile/${item.uid || item.id}`)}
             >
               <View style={userStyles.avatar}>
                 {item.photo ? (

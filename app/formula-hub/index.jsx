@@ -122,7 +122,7 @@ export default function FormulaHubHome() {
 
           <TouchableOpacity
             activeOpacity={0.88}
-            onPress={() => router.push('/formula-hub/flashcards')}
+            onPress={() => router.navigate('/formula-hub/flashcards')}
             style={styles.flashBanner}
             accessibilityRole="button"
             accessibilityLabel="Open formula flash cards"
@@ -168,7 +168,7 @@ export default function FormulaHubHome() {
               <TouchableOpacity
                 key={item.id}
                 activeOpacity={0.85}
-                onPress={() => router.push(item.route)}
+                onPress={() => router.navigate(item.route)}
                 style={styles.card} >
                 <LinearGradient
                   colors={item.gradient}

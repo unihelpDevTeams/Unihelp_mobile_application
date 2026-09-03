@@ -143,7 +143,7 @@ export default function FriendsPage() {
         currentProfile: profile,
         otherProfile: person,
       });
-      router.push(`/messages/${conversationId}`);
+      router.navigate(`/messages/${conversationId}`);
     } catch (error) {
       Alert.alert('Message unavailable', error.message || 'You need to be friends before messaging.');
     } finally {
@@ -176,7 +176,7 @@ export default function FriendsPage() {
       const friendId = item.users?.find((id) => id !== uid);
       const person = item.profiles?.[friendId] || { uid: friendId };
       return (
-        <StudentCard person={person} onPress={() => router.push(`/view-user-profile/${friendId}`)} styles={styles}>
+        <StudentCard person={person} onPress={() => router.navigate(`/view-user-profile/${friendId}`)} styles={styles}>
           <ActionButton styles={styles} label="Message" icon="chatbubble-outline" loading={busyId === friendId} onPress={() => openMessage(person)} />
         </StudentCard>
       );
@@ -188,7 +188,7 @@ export default function FriendsPage() {
         <StudentCard person={person} subtitle={item.message} styles={styles}>
           <ActionButton styles={styles} label="Accept" icon="checkmark" loading={busyId === item.id} onPress={() => handleAction(item.id, async () => {
             const conversationId = await acceptMessageRequest({ request: item, currentUid: uid, currentProfile: profile });
-            router.push(`/messages/${conversationId}`);
+            router.navigate(`/messages/${conversationId}`);
           })} />
           <ActionButton styles={styles} label="Decline" icon="close" variant="secondary" loading={busyId === item.id} onPress={() => handleAction(item.id, () => declineMessageRequest({ request: item, currentUid: uid, currentProfile: profile }))} />
         </StudentCard>
@@ -198,7 +198,7 @@ export default function FriendsPage() {
     if (activeTab === 'requests') {
       const person = item.fromProfile || { uid: item.from };
       return (
-        <StudentCard person={person} onPress={() => router.push(`/view-user-profile/${item.from}`)} styles={styles}>
+        <StudentCard person={person} onPress={() => router.navigate(`/view-user-profile/${item.from}`)} styles={styles}>
           <ActionButton styles={styles} label="Accept" icon="checkmark" loading={busyId === item.id} onPress={() => handleAction(item.id, () => acceptFriendRequest({ request: item, currentUid: uid, currentProfile: profile }))} />
           <ActionButton styles={styles} label="Decline" icon="close" variant="secondary" loading={busyId === item.id} onPress={() => handleAction(item.id, () => declineFriendRequest({ request: item, currentUid: uid, currentProfile: profile }))} />
         </StudentCard>
@@ -208,7 +208,7 @@ export default function FriendsPage() {
     if (activeTab === 'sent') {
       const person = item.toProfile || { uid: item.to };
       return (
-        <StudentCard person={person} onPress={() => router.push(`/view-user-profile/${item.to}`)} styles={styles}>
+        <StudentCard person={person} onPress={() => router.navigate(`/view-user-profile/${item.to}`)} styles={styles}>
           <ActionButton styles={styles} label="Cancel" icon="close-circle-outline" variant="secondary" loading={busyId === item.id} onPress={() => handleAction(item.id, () => cancelFriendRequest({ requestId: item.id, currentUid: uid }))} />
         </StudentCard>
       );
@@ -216,7 +216,7 @@ export default function FriendsPage() {
 
     if (activeTab === 'suggested') {
       return (
-        <StudentCard person={{ ...item, uid: item.id || item.uid }} subtitle={`${schoolLine(item) || 'Suggested student'}${item.score ? ` • ${item.score}% match` : ''}`} onPress={() => router.push(`/view-user-profile/${item.id || item.uid}`)} styles={styles}>
+        <StudentCard person={{ ...item, uid: item.id || item.uid }} subtitle={`${schoolLine(item) || 'Suggested student'}${item.score ? ` • ${item.score}% match` : ''}`} onPress={() => router.navigate(`/view-user-profile/${item.id || item.uid}`)} styles={styles}>
           <ActionButton styles={styles} label="Add" icon="person-add-outline" loading={busyId === item.id} onPress={() => handleAction(item.id, () => sendFriendRequest({
             currentUid: uid,
             targetUid: item.id || item.uid,
@@ -245,7 +245,7 @@ export default function FriendsPage() {
 
   return (
     <ScreenShell title="Friends" subtitle="Trusted campus connections" showBack loading={loading} scrollable={false}>
-      <Pressable style={styles.findButton} onPress={() => router.push('/find-friends')}>
+      <Pressable style={styles.findButton} onPress={() => router.navigate('/find-friends')}>
         <View style={styles.findIcon}>
           <Ionicons name="search-outline" size={18} color={colors.brand} />
         </View>

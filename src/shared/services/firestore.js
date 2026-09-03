@@ -77,23 +77,29 @@ const orderedList = async (name, field = 'createdAt', direction = 'desc', pageSi
 
 export async function getCurrentUserProfile(uid = auth.currentUser?.uid) {
   if (!uid) return null;
-  const snapshot = await getDoc(doc(db, COLLECTIONS.users, uid));
-  return snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null;
+  try {
+    const res = await getJson('/api/users');
+    return res.data || null;
+  } catch (error) {
+    console.error('Failed to get user profile from API', error);
+    return null;
+  }
 }
 
 export async function syncCurrentUserProfile(payload = {}) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
-  const ref = doc(db, COLLECTIONS.users, auth.currentUser.uid);
-  const existing = await getDoc(ref);
-  const nextUsername = payload.username?.trim?.() || payload.username || '';
-  const nextPayload = {
-    ...payload,
-    ...(nextUsername ? { usernameLower: nextUsername.toLowerCase() } : {}),
-    ...(existing.exists() && existing.data()?.createdAt ? { createdAt: existing.data().createdAt } : {}),
-  };
-
-  await setDoc(ref, nextPayload, { merge: true });
-  return getCurrentUserProfile(auth.currentUser.uid);
+  try {
+    const nextUsername = payload.username?.trim?.() || payload.username || '';
+    const nextPayload = {
+      ...payload,
+      ...(nextUsername ? { usernameLower: nextUsername.toLowerCase() } : {}),
+    };
+    const res = await putJson('/api/users', nextPayload);
+    return res.data || null;
+  } catch (error) {
+    console.error('Failed to sync user profile', error);
+    return null;
+  }
 }
 
 // Profile cache to avoid redundant reads after writes
@@ -101,55 +107,57 @@ let profileCacheRef = null;
 
 export async function ensureCurrentUserProfile(overrides = {}) {
   if (!auth.currentUser) return null;
-  const ref = doc(db, COLLECTIONS.users, auth.currentUser.uid);
-  const snapshot = await getDoc(ref);
+  
+  try {
+    const existingRes = await getJson('/api/users').catch(() => null);
+    
+    if (!existingRes || !existingRes.data) {
+      const defaultProfile = profileDefaults(auth.currentUser, overrides);
+      const res = await putJson('/api/users', defaultProfile);
+      profileCacheRef = res.data;
+      return profileCacheRef;
+    }
+    
+    const existingData = existingRes.data;
+    const nextProfile = { ...overrides };
 
-  if (!snapshot.exists()) {
-    const defaultProfile = profileDefaults(auth.currentUser, overrides);
-    const profileData = { ...defaultProfile, createdAt: serverTimestamp() };
-    await setDoc(ref, profileData, { merge: true });
-    const result = { id: snapshot.id, ...defaultProfile, uid: auth.currentUser.uid };
-    profileCacheRef = result;
-    return result;
+    if (typeof nextProfile.username === 'string' && nextProfile.username.trim()) {
+      nextProfile.usernameLower = nextProfile.username.trim().toLowerCase();
+    }
+
+    const mergedProfile = {
+      ...existingData,
+      ...nextProfile,
+    };
+
+    if (overrides.role === undefined && existingData?.role) {
+      mergedProfile.role = existingData.role;
+    }
+
+    if (overrides.username === undefined && existingData?.username) {
+      mergedProfile.username = existingData.username;
+      mergedProfile.usernameLower = existingData.usernameLower;
+    }
+
+    const overrideKeys = Object.keys(overrides).filter(
+      (key) => key !== 'provider' && overrides[key] !== undefined
+    );
+    const hasRealChanges = overrideKeys.some(
+      (key) => JSON.stringify(existingData?.[key]) !== JSON.stringify(overrides[key])
+    );
+
+    if (hasRealChanges) {
+      const res = await putJson('/api/users', mergedProfile);
+      profileCacheRef = res.data;
+      return profileCacheRef;
+    }
+
+    profileCacheRef = existingData;
+    return profileCacheRef;
+  } catch (error) {
+    console.error('Failed to ensure user profile', error);
+    return null;
   }
-
-  const existingData = snapshot.data();
-  const nextProfile = { ...overrides };
-
-  if (typeof nextProfile.username === 'string' && nextProfile.username.trim()) {
-    nextProfile.usernameLower = nextProfile.username.trim().toLowerCase();
-  }
-
-  const mergedProfile = {
-    ...existingData,
-    ...nextProfile,
-    uid: auth.currentUser.uid,
-    ...(existingData?.createdAt ? { createdAt: existingData.createdAt } : {}),
-  };
-
-  if (overrides.role === undefined && existingData?.role) {
-    mergedProfile.role = existingData.role;
-  }
-
-  if (overrides.username === undefined && existingData?.username) {
-    mergedProfile.username = existingData.username;
-    mergedProfile.usernameLower = existingData.usernameLower;
-  }
-
-  // Only write if overrides contain meaningful field changes
-  const overrideKeys = Object.keys(overrides).filter(
-    (key) => key !== 'provider' && overrides[key] !== undefined
-  );
-  const hasRealChanges = overrideKeys.some(
-    (key) => JSON.stringify(existingData?.[key]) !== JSON.stringify(overrides[key])
-  );
-
-  if (hasRealChanges) {
-    await setDoc(ref, mergedProfile, { merge: true });
-  }
-
-  profileCacheRef = { id: snapshot.id, ...mergedProfile };
-  return profileCacheRef;
 }
 
 export async function fetchAnnouncements() {
@@ -342,30 +350,38 @@ export async function deleteNotification(id, uid = auth.currentUser?.uid) {
 
 export async function fetchBookmarks(uid = auth.currentUser?.uid) {
   if (!uid) return [];
-  const snapshot = await getDocs(collection(db, userSubcollections.bookmarks(uid)));
-  return mapDocs(snapshot);
+  try {
+    const res = await getJson('/api/users/bookmarks');
+    return res.data || [];
+  } catch (error) {
+    console.error('Error fetching bookmarks:', error);
+    return [];
+  }
 }
 
 export async function saveBookmark(item) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
-  const bookmarkRef = doc(db, COLLECTIONS.users, auth.currentUser.uid, 'bookmarks', item.id);
-  const existing = await getDoc(bookmarkRef);
-  const bookmarkData = {
-    ...item,
-    ...(existing.exists() && existing.data()?.createdAt ? { createdAt: existing.data().createdAt } : { createdAt: serverTimestamp() }),
-  };
-  await setDoc(bookmarkRef, bookmarkData, { merge: true });
-  return bookmarkRef.id;
+  const res = await postJson('/api/users/bookmarks', { 
+    item_id: item.id || item.item_id, 
+    item_type: item.type || item.item_type || 'unknown' 
+  });
+  return res.data?.id;
 }
 
 export async function deleteBookmark(id) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
-  await deleteDoc(doc(db, COLLECTIONS.users, auth.currentUser.uid, 'bookmarks', id));
+  await deleteJson(`/api/users/bookmarks/${encodeURIComponent(id)}`);
 }
 
 export async function fetchUserActivity(uid = auth.currentUser?.uid) {
   if (!uid) return [];
-  return [];
+  try {
+    const res = await getJson('/api/users/activity');
+    return res.data || [];
+  } catch (error) {
+    console.error('Error fetching activity:', error);
+    return [];
+  }
 }
 
 const dailyStreakWriteCache = new Map();

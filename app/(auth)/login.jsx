@@ -288,10 +288,10 @@ export default function Login() {
             </Pressable>
 
             <View style={styles.linkRow}>
-              <Pressable onPress={() => router.push('/reset-password')} disabled={loading} hitSlop={8}>
+              <Pressable onPress={() => router.navigate('/reset-password')} disabled={loading} hitSlop={8}>
                 <Text style={styles.linkSecondary}>Forgot password?</Text>
               </Pressable>
-              <Pressable onPress={() => router.push('/register')} disabled={loading} hitSlop={8}>
+              <Pressable onPress={() => router.navigate('/register')} disabled={loading} hitSlop={8}>
                 <Text style={styles.link}>Create account</Text>
               </Pressable>
             </View>

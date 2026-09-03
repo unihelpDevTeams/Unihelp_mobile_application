@@ -641,7 +641,7 @@ export default function StudyMaterials() {
       openContributionWhatsApp();
       return;
     }
-    router.push(`/upload?type=${isQuestions ? 'question' : 'note'}`);
+    router.navigate(`/upload?type=${isQuestions ? 'question' : 'note'}`);
   };
 
   const deleteResource = async (item) => {
@@ -663,7 +663,7 @@ export default function StudyMaterials() {
     Alert.alert(item.title || item.name || 'Resource actions', 'Choose what you want to do.', [
       {
         text: 'Edit',
-        onPress: () => router.push({ pathname: '/upload', params: { type: resourceType, editId: item.id } }),
+        onPress: () => router.navigate({ pathname: '/upload', params: { type: resourceType, editId: item.id } }),
       },
       {
         text: 'Delete',
@@ -893,7 +893,7 @@ export default function StudyMaterials() {
                 showActions={canManageResource({ type: isQuestions ? 'question' : 'note', item, user, profile })}
                 onActionPress={openResourceActions}
                 onPress={() =>
-                  router.push({
+                  router.navigate({
                     pathname: '/view/[type]/[id]',
                     params: { type: isQuestions ? 'question' : 'note', id: item.id },
                   })

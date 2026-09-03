@@ -381,7 +381,7 @@ export default function AiPage() {
             </View>
           ) : (
             !quotaBlocked && lowQuota ? (
-              <Pressable onPress={() => router.push('/premium')} accessibilityRole="button" accessibilityLabel="Get more AI tokens">
+              <Pressable onPress={() => router.navigate('/premium')} accessibilityRole="button" accessibilityLabel="Get more AI tokens">
                 <Text style={styles.upgradeLink}>Get more</Text>
               </Pressable>
             ) : null

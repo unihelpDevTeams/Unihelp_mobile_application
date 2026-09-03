@@ -45,7 +45,7 @@ export default function SavedScreen() {
   });
 
   const handleItemPress = (item) => {
-    router.push({ pathname: '/view/[type]/[id]', params: { type: item.type, id: item.id } });
+    router.navigate({ pathname: '/view/[type]/[id]', params: { type: item.type, id: item.id } });
   };
 
   const renderItem = ({ item }) => {
@@ -96,7 +96,7 @@ export default function SavedScreen() {
           description="Bookmark notes, questions, and other study materials to find them quickly later."
           illustration="saved"
           actionLabel="Explore notes"
-          onAction={() => router.push('/(tabs)/lectureNotes')}
+          onAction={() => router.navigate('/(tabs)/lectureNotes')}
         />
       )}
     </ScreenShell>

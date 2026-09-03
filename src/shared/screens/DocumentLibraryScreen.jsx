@@ -120,7 +120,7 @@ export default function DocumentLibraryScreen({
           </Text>
         </View>
         <Pressable
-          onPress={() => uploadRoute && router.push(uploadRoute)}
+          onPress={() => uploadRoute && router.navigate(uploadRoute)}
           style={({ pressed }) => [
             styles.uploadButton,
             { backgroundColor: accent, opacity: pressed ? 0.85 : 1 },
@@ -178,7 +178,7 @@ export default function DocumentLibraryScreen({
                     tone={accent}
                     onPress={() => {
                       if (!detailRoute) return;
-                      router.push(buildRoute(detailRoute, detailParams(item)));
+                      router.navigate(buildRoute(detailRoute, detailParams(item)));
                     }}
                   />
                 </View>

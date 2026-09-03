@@ -602,7 +602,7 @@ export default function PremiumPage() {
             pressed && !loading && styles.featureActionButtonPressed,
             loading && styles.subscribeButtonDisabled,
           ]}
-          onPress={() => (premiumActive ? router.push('/offline-center') : subscribe())}
+          onPress={() => (premiumActive ? router.navigate('/offline-center') : subscribe())}
           disabled={loading}
         >
           {loading ? (

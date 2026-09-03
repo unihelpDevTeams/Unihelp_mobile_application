@@ -459,7 +459,7 @@ export default function OfflineResourceScreen() {
           <Text style={styles.lockText}>
             Your Premium access needs to be renewed before your saved offline materials can be opened.
           </Text>
-          <Pressable style={styles.actionButton} onPress={() => router.push('/premium')}>
+          <Pressable style={styles.actionButton} onPress={() => router.navigate('/premium')}>
             <Ionicons name="star" size={16} color={colors.onBrand} />
             <Text style={styles.actionText}>Renew Premium</Text>
           </Pressable>

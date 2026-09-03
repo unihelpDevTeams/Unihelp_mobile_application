@@ -160,7 +160,7 @@ export default function AdminSupportCenter() {
 
   const navigateToDetail = (item) => {
     const collectionName = getCollectionName();
-    router.push({
+    router.navigate({
       pathname: '/adminpanel/support-detail',
       params: {
         collection: collectionName,

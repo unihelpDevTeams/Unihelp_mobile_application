@@ -101,7 +101,7 @@ const VoiceMessageBubble = memo(({ message, isMine, onLongPress }) => {
   }, [isPremium, message, isPlaying, isPaused, duration, pause, resume, play]);
 
   const handleUpgrade = useCallback(() => {
-    router.push('/premium');
+    router.navigate('/premium');
   }, [router]);
 
   const totalDurationMs = (message.duration || 0) * 1000;

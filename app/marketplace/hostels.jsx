@@ -414,7 +414,7 @@ export default function HostelsPage() {
     ].filter((section) => section.items.length > 0);
   }, [filteredHostels, locationSummaries]);
 
-  const goToHostel = (item) => router.push({ pathname: '/view/[type]/[id]', params: { type: 'hostel', id: item.id } });
+  const goToHostel = (item) => router.navigate({ pathname: '/view/[type]/[id]', params: { type: 'hostel', id: item.id } });
 
   const clearFilters = () => {
     setSearch('');
@@ -530,7 +530,7 @@ export default function HostelsPage() {
       </View>
 
       {isAdmin ? (
-        <Pressable style={styles.adminButton} onPress={() => router.push('/adminpanel')}>
+        <Pressable style={styles.adminButton} onPress={() => router.navigate('/adminpanel')}>
           <Ionicons name="shield-checkmark-outline" size={16} color={colors.brandText} />
           <Text style={styles.adminButtonText}>Admin Panel</Text>
         </Pressable>
@@ -543,7 +543,7 @@ export default function HostelsPage() {
           sections={hostelSections}
           styles={styles}
           onPressHostel={goToHostel}
-          onAddHostel={() => router.push('/upload?type=hostel')}
+          onAddHostel={() => router.navigate('/upload?type=hostel')}
           onSelectLocation={(nextLocation) => setLocation(nextLocation)}
           onLoadMore={() => loadHostels(false)}
           canLoadMore={hasMore}
@@ -556,7 +556,7 @@ export default function HostelsPage() {
           </Text>
           <View style={styles.sectionRowRight}>
             <Pressable
-              onPress={() => router.push('/upload?type=hostel')}
+              onPress={() => router.navigate('/upload?type=hostel')}
               hitSlop={4}
               style={({ pressed }) => [styles.uploadButton, pressed && styles.uploadButtonPressed]}
               accessibilityRole="button"

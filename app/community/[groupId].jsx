@@ -984,7 +984,7 @@ export default function GroupDetailPage() {
         },
         profile || {}
       );
-      router.push(`/messages/${conversationId}`);
+      router.navigate(`/messages/${conversationId}`);
     } finally {
       setBusy(false);
     }
@@ -1573,7 +1573,7 @@ export default function GroupDetailPage() {
               style={styles.linkCard}
               onPress={() => {
                 setGroupOptionsVisible(false);
-                router.push('/messages');
+                router.navigate('/messages');
               }}
             >
               <View style={styles.linkIconWrap}>
@@ -1587,7 +1587,7 @@ export default function GroupDetailPage() {
               style={styles.linkCard}
               onPress={() => {
                 setGroupOptionsVisible(false);
-                router.push({ pathname: '/community-settings', params: { groupId } });
+                router.navigate({ pathname: '/community-settings', params: { groupId } });
               }}
             >
               <View style={styles.linkIconWrap}>
@@ -1612,7 +1612,7 @@ export default function GroupDetailPage() {
                 style={[styles.linkCard, styles.dangerLinkCard]}
                 onPress={() => {
                   setGroupOptionsVisible(false);
-                  router.push({ pathname: '/community-settings', params: { groupId } });
+                  router.navigate({ pathname: '/community-settings', params: { groupId } });
                 }}
               >
                 <View style={[styles.linkIconWrap, styles.dangerIconWrap]}>
@@ -1884,7 +1884,7 @@ function MessageRow({
       {!mine ? (
         <Pressable
           style={styles.avatarSlot}
-          onPress={() => message.senderId && router.push(`/view-user-profile/${message.senderId}`)}
+          onPress={() => message.senderId && router.navigate(`/view-user-profile/${message.senderId}`)}
           disabled={!message.senderId}
         >
           {showHeader ? (

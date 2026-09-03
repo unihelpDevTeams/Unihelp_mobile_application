@@ -50,7 +50,7 @@ export default function DownloadsScreen() {
   };
 
   const handleOpen = (item) => {
-    router.push({ pathname: '/view/[type]/[id]', params: { type: item.type, id: item.id } });
+    router.navigate({ pathname: '/view/[type]/[id]', params: { type: item.type, id: item.id } });
   };
 
   const totalSize = downloads.reduce((sum, item) => sum + (item.size || 0), 0);
@@ -138,7 +138,7 @@ export default function DownloadsScreen() {
           description="Download lecture notes, videos, and questions for offline access."
           illustration="downloads"
           actionLabel="Browse notes"
-          onAction={() => router.push('/(tabs)/lectureNotes')}
+          onAction={() => router.navigate('/(tabs)/lectureNotes')}
         />
       )}
     </ScreenShell>

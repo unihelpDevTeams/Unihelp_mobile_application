@@ -1,217 +1,146 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, Text, View } from 'react-native';
+import { Animated, Easing, Text, View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { useThemeStyles } from '../theme/createStyles';
 import { Image } from 'react-native';
 
 /* =========================================================
-   Page Loader - Branded full-screen or card loading
+   Page Loader - Premium minimal pulse loader
    Usage: ScreenShell loading state
    ========================================================= */
 
 export function PageLoader({ label = 'Loading...' }) {
   const { colors } = useTheme();
   const styles = useThemeStyles(buildStyles);
-  const spin = useRef(new Animated.Value(0)).current;
-  const pulse = useRef(new Animated.Value(0.3)).current;
-  const orbit = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const spinLoop = Animated.loop(
-      Animated.timing(spin, {
-        toValue: 1,
-        duration: 1800,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    );
-    spinLoop.start();
-
-    const orbitLoop = Animated.loop(
-      Animated.timing(orbit, {
-        toValue: 1,
-        duration: 1200,
-        easing: Easing.inOut(Easing.quad),
-        useNativeDriver: true,
-      })
-    );
-    orbitLoop.start();
-
-    const pulseLoop = Animated.loop(
+    const pulseAnim = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, {
           toValue: 1,
-          duration: 1000,
-          easing: Easing.inOut(Easing.quad),
+          duration: 1200,
+          easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
         Animated.timing(pulse, {
-          toValue: 0.3,
-          duration: 1000,
-          easing: Easing.inOut(Easing.quad),
+          toValue: 0,
+          duration: 1200,
+          easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
       ])
     );
-    pulseLoop.start();
+    pulseAnim.start();
+    return () => pulseAnim.stop();
+  }, [pulse]);
 
-    return () => {
-      spinLoop.stop();
-      orbitLoop.stop();
-      pulseLoop.stop();
-    };
-  }, [spin, pulse, orbit]);
-
-  const rotate = spin.interpolate({
+  const scaleCore = pulse.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
+    outputRange: [0.95, 1.05],
   });
 
-  const labelOpacity = pulse.interpolate({
-    inputRange: [0.3, 1],
-    outputRange: [0.5, 1],
+  const rippleScale1 = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.5],
   });
-  const orbitScale = orbit.interpolate({
-    inputRange: [0, 0.5, 1],
-    outputRange: [0.86, 1.08, 0.86],
+
+  const rippleOpacity1 = pulse.interpolate({
+    inputRange: [0, 0.8, 1],
+    outputRange: [0.4, 0, 0],
+  });
+
+  const rippleScale2 = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.8, 1.3],
+  });
+
+  const rippleOpacity2 = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 0.3],
   });
 
   return (
-    <View style={styles.pageLoaderCard}>
-      <Animated.View style={[styles.loaderHalo, { opacity: pulse, transform: [{ scale: orbitScale }] }]} />
-      <Animated.View style={[styles.logoRing, { transform: [{ rotate }] }]}>
-        <View style={styles.loaderSparkOne} />
-        <View style={styles.loaderSparkTwo} />
-        <View style={styles.logoCore}>
-          <Image source={require('../../../assets/images/icon-square.png')} style={{ width: 28, height: 28 }} />
-        </View>
-      </Animated.View>
-      <Animated.Text style={[styles.pageLoaderText, { opacity: labelOpacity }]}>
+    <View style={styles.pageLoaderContainer}>
+      <View style={styles.loaderGraphic}>
+        {/* Ambient background ripples */}
+        <Animated.View style={[styles.ripple, { transform: [{ scale: rippleScale1 }], opacity: rippleOpacity1 }]} />
+        <Animated.View style={[styles.ripple, { transform: [{ scale: rippleScale2 }], opacity: rippleOpacity2 }]} />
+        
+        {/* Core Logo */}
+        <Animated.View style={[styles.coreLogoWrap, { transform: [{ scale: scaleCore }] }]}>
+          <Image source={require('../../../assets/images/icon-square.png')} style={styles.coreLogoImage} />
+        </Animated.View>
+      </View>
+      
+      {/* Sleek fade text */}
+      <Animated.Text style={[styles.premiumText, { opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }]}>
         {label}
       </Animated.Text>
-      <View style={styles.loadingBarTrack}>
-        <Animated.View
-          style={[
-            styles.loadingBarFill,
-            {
-              opacity: pulse,
-              transform: [
-                {
-                  translateX: pulse.interpolate({
-                    inputRange: [0.3, 1],
-                    outputRange: [-80, 280],
-                  }),
-                },
-              ],
-            },
-          ]}
-        />
-      </View>
     </View>
   );
 }
 
 /* =========================================================
-   FullScreenLoader - immersive branded loader overlay
-   Usage: ScreenShell loading state for full-screen experience
+   FullScreenLoader - Immersive immersive loader overlay
+   Usage: Global app loading, authentication state
    ========================================================= */
 
-export function FullScreenLoader({ label = 'Loading...' }) {
+export function FullScreenLoader({ label = 'Just a moment...' }) {
   const { colors } = useTheme();
   const styles = useThemeStyles(buildStyles);
-  const spin = useRef(new Animated.Value(0)).current;
-  const pulse = useRef(new Animated.Value(0.3)).current;
-  const bounce1 = useRef(new Animated.Value(0)).current;
-  const bounce2 = useRef(new Animated.Value(0)).current;
-  const bounce3 = useRef(new Animated.Value(0)).current;
-  const halo = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const spinLoop = Animated.loop(
-      Animated.timing(spin, {
-        toValue: 1,
-        duration: 2000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    );
-    spinLoop.start();
-
-    const pulseLoop = Animated.loop(
+    const pulseAnim = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 800, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0.3, duration: 800, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1500,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 1500,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
       ])
     );
-    pulseLoop.start();
+    pulseAnim.start();
+    return () => pulseAnim.stop();
+  }, [pulse]);
 
-    const haloLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(halo, { toValue: 1, duration: 1200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-        Animated.timing(halo, { toValue: 0, duration: 0, useNativeDriver: true }),
-      ])
-    );
-    haloLoop.start();
-
-    const bounceFn = (anim, delay) => {
-      const loop = Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(anim, { toValue: -6, duration: 300, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-          Animated.timing(anim, { toValue: 0, duration: 300, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        ])
-      );
-      loop.start();
-      return loop;
-    };
-
-    const l1 = bounceFn(bounce1, 0);
-    const l2 = bounceFn(bounce2, 200);
-    const l3 = bounceFn(bounce3, 400);
-
-    return () => {
-      spinLoop.stop();
-      pulseLoop.stop();
-      haloLoop.stop();
-      l1.stop();
-      l2.stop();
-      l3.stop();
-    };
-  }, [spin, pulse, bounce1, bounce2, bounce3, halo]);
-
-  const rotate = spin.interpolate({
+  const scaleCore = pulse.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
+    outputRange: [0.92, 1.08],
   });
-  const haloScale = halo.interpolate({
+
+  const rippleScale = pulse.interpolate({
     inputRange: [0, 1],
-    outputRange: [0.72, 1.38],
+    outputRange: [1, 1.8],
   });
-  const haloOpacity = halo.interpolate({
-    inputRange: [0, 0.55, 1],
-    outputRange: [0.35, 0.18, 0],
+
+  const rippleOpacity = pulse.interpolate({
+    inputRange: [0, 0.7, 1],
+    outputRange: [0.3, 0, 0],
   });
 
   return (
     <View style={styles.fullScreen}>
       <View style={styles.fullScreenContent}>
-        <Animated.View style={[styles.fullHalo, { opacity: haloOpacity, transform: [{ scale: haloScale }] }]} />
-        <Animated.View style={[styles.fullLogoRing, { transform: [{ rotate }] }]}>
-          <View style={styles.fullSparkOne} />
-          <View style={styles.fullSparkTwo} />
-          <View style={styles.fullLogoCore}>
-            <Image source={require('../../../assets/images/icon-square.png')} style={{ width: 28, height: 28 }} />
-          </View>
-        </Animated.View>
-
-        <View style={styles.dotsRow}>
-          <Animated.View style={[styles.bounceDot, { transform: [{ translateY: bounce1 }] }]} />
-          <Animated.View style={[styles.bounceDot, { transform: [{ translateY: bounce2 }] }]} />
-          <Animated.View style={[styles.bounceDot, { transform: [{ translateY: bounce3 }] }]} />
+        <View style={styles.fullLoaderGraphic}>
+          <Animated.View style={[styles.fullRipple, { transform: [{ scale: rippleScale }], opacity: rippleOpacity }]} />
+          <Animated.View style={[styles.fullRipple, { transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1.4] }) }], opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0, 0.2] }) }]} />
+          
+          <Animated.View style={[styles.fullCoreLogoWrap, { transform: [{ scale: scaleCore }] }]}>
+            <Image source={require('../../../assets/images/icon-square.png')} style={styles.fullCoreLogoImage} />
+          </Animated.View>
         </View>
 
-        <Animated.Text style={[styles.fullScreenText, { opacity: pulse }]}>
+        <Animated.Text style={[styles.fullScreenText, { opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }) }]}>
           {label}
         </Animated.Text>
       </View>
@@ -221,7 +150,6 @@ export function FullScreenLoader({ label = 'Loading...' }) {
 
 /* =========================================================
    Chat Thinking Loader - pulsing bubble with sparkles
-   Usage: AI chat "thinking..." state
    ========================================================= */
 
 export function ChatThinkingLoader({ label = 'Thinking...' }) {
@@ -329,12 +257,10 @@ function Dot({ delay }) {
 
 /* =========================================================
    Widget Loading Ring - subtle icon loader
-   Usage: AIWidget prompt card loading state
    ========================================================= */
 
 export function WidgetIconLoader({ color, size = 18 }) {
   const { colors } = useTheme();
-  const effectiveColor = color || colors.brand;
   const spin = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -357,19 +283,16 @@ export function WidgetIconLoader({ color, size = 18 }) {
 
   return (
     <Animated.View style={{ transform: [{ rotate }] }}>
-      <Image source={require('../../../assets/images/icon-square.png')} style={{ width: 28, height: 28,  }} />
+      <Image source={require('../../../assets/images/icon-square.png')} style={{ width: size, height: size }} />
     </Animated.View>
   );
 }
 
 /* =========================================================
    Button Inline Loader - compact spinner
-   Usage: buttons, send button, action buttons
    ========================================================= */
 
 export function ButtonLoader({ color, size = 16 }) {
-  const { colors } = useTheme();
-  const effectiveColor = color || colors.onBrand;
   const spin = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -392,14 +315,13 @@ export function ButtonLoader({ color, size = 16 }) {
 
   return (
     <Animated.View style={{ transform: [{ rotate }] }}>
-      <Image source={require('../../../assets/images/icon-square.png')} style={{ width: 28, height: 28 }} />
+      <Ionicons name="sync-outline" size={size} color={color || '#FFFFFF'} />
     </Animated.View>
   );
 }
 
 /* =========================================================
    Uploading Loader - file upload progress
-   Usage: attachment upload state
    ========================================================= */
 
 export function UploadingLoader() {
@@ -450,225 +372,172 @@ const buildStyles = (c) => {
     inkSoft: c.textSecondary,
     brandBorder: c.brandBorder,
   };
-  return {
-  pageLoaderCard: {
-    paddingVertical: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-    position: 'relative',
-  },
-  loaderHalo: {
-    position: 'absolute',
-    top: 29,
-    width: 86,
-    height: 86,
-    borderRadius: 43,
-    backgroundColor: COLORS.indigoSoft,
-  },
-  logoRing: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    backgroundColor: COLORS.indigoSoft,
-    borderWidth: 2,
-    borderColor: COLORS.brandBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  logoCore: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loaderSparkOne: {
-    position: 'absolute',
-    top: -2,
-    right: 10,
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: COLORS.indigo,
-  },
-  loaderSparkTwo: {
-    position: 'absolute',
-    bottom: 7,
-    left: 0,
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: COLORS.indigoDark,
-  },
-  pageLoaderText: {
-    color: COLORS.inkSoft,
-    fontSize: 13,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-  loadingBarTrack: {
-    width: 200,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: COLORS.indigoSoft,
-    overflow: 'hidden',
-    marginTop: 4,
-  },
-  loadingBarFill: {
-    width: 80,
-    height: '100%',
-    borderRadius: 2,
-    backgroundColor: COLORS.indigo,
-  },
+  return StyleSheet.create({
+    pageLoaderContainer: {
+      paddingVertical: 60,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 24,
+    },
+    loaderGraphic: {
+      width: 80,
+      height: 80,
+      alignItems: 'center',
+      justifyContent: 'center',
+      position: 'relative',
+    },
+    ripple: {
+      position: 'absolute',
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: COLORS.indigo,
+    },
+    coreLogoWrap: {
+      width: 48,
+      height: 48,
+      borderRadius: 16,
+      backgroundColor: COLORS.white,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: COLORS.indigo,
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.15,
+      shadowRadius: 12,
+      elevation: 6,
+      zIndex: 10,
+    },
+    coreLogoImage: {
+      width: 28,
+      height: 28,
+      borderRadius: 6,
+    },
+    premiumText: {
+      color: COLORS.inkSoft,
+      fontSize: 14,
+      fontWeight: '600',
+      letterSpacing: 0.5,
+    },
 
-  // FullScreen loader
-  fullScreen: {
-    flex: 1,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fullScreenContent: {
-    alignItems: 'center',
-    gap: 20,
-    position: 'relative',
-  },
-  fullHalo: {
-    position: 'absolute',
-    top: -10,
-    width: 112,
-    height: 112,
-    borderRadius: 56,
-    backgroundColor: COLORS.indigoSoft,
-  },
-  fullLogoRing: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: COLORS.indigoSoft,
-    borderWidth: 3,
-    borderColor: COLORS.brandBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  fullLogoCore: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fullSparkOne: {
-    position: 'absolute',
-    top: 0,
-    right: 15,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: COLORS.indigo,
-  },
-  fullSparkTwo: {
-    position: 'absolute',
-    left: 5,
-    bottom: 12,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.indigoDark,
-  },
-  dotsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    height: 20,
-  },
-  bounceDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.indigo,
-  },
-  fullScreenText: {
-    color: COLORS.inkSoft,
-    fontSize: 15,
-    fontWeight: '700',
-  },
+    // FullScreen loader
+    fullScreen: {
+      flex: 1,
+      backgroundColor: c.background || '#F9FAFB',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    fullScreenContent: {
+      alignItems: 'center',
+      gap: 32,
+    },
+    fullLoaderGraphic: {
+      width: 120,
+      height: 120,
+      alignItems: 'center',
+      justifyContent: 'center',
+      position: 'relative',
+    },
+    fullRipple: {
+      position: 'absolute',
+      width: 90,
+      height: 90,
+      borderRadius: 45,
+      backgroundColor: COLORS.indigo,
+    },
+    fullCoreLogoWrap: {
+      width: 72,
+      height: 72,
+      borderRadius: 24,
+      backgroundColor: COLORS.white,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: COLORS.indigo,
+      shadowOffset: { width: 0, height: 12 },
+      shadowOpacity: 0.15,
+      shadowRadius: 20,
+      elevation: 8,
+      zIndex: 10,
+    },
+    fullCoreLogoImage: {
+      width: 44,
+      height: 44,
+      borderRadius: 10,
+    },
+    fullScreenText: {
+      color: COLORS.ink,
+      fontSize: 16,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+    },
 
-  // Thinking loader
-  thinkingRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-    alignSelf: 'flex-start',
-    paddingRight: '10%',
-    paddingVertical: 4,
-  },
-  thinkingAvatar: {
-    width: 26,
-    height: 26,
-    borderRadius: 9,
-    backgroundColor: COLORS.indigoSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 6,
-  },
-  thinkingBubble: {
-    backgroundColor: COLORS.white,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 18,
-    borderBottomLeftRadius: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 8,
-    minWidth: 110,
-  },
-  thinkingDots: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    height: 14,
-  },
-  dot: {
-    width: 7,
-    height: 7,
-    borderRadius: 999,
-  },
-  thinkingLabel: {
-    color: COLORS.inkSoft,
-    fontSize: 12.5,
-    fontWeight: '700',
-  },
-  widgetLoader: {
-    width: 18,
-    height: 18,
-  },
-  uploadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 6,
-  },
-  uploadingTrack: {
-    flex: 1,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: COLORS.indigoSoft,
-    overflow: 'hidden',
-  },
-  uploadingFill: {
-    height: '100%',
-    borderRadius: 3,
-    backgroundColor: COLORS.indigo,
-  },
-  uploadingLabel: {
-    color: COLORS.inkSoft,
-    fontSize: 12.5,
-    fontWeight: '700',
-  },
-  };
+    // Thinking loader
+    thinkingRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      gap: 8,
+      alignSelf: 'flex-start',
+      paddingRight: '10%',
+      paddingVertical: 4,
+    },
+    thinkingAvatar: {
+      width: 26,
+      height: 26,
+      borderRadius: 9,
+      backgroundColor: COLORS.indigoSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 6,
+    },
+    thinkingBubble: {
+      backgroundColor: COLORS.white,
+      borderWidth: 1,
+      borderColor: COLORS.border,
+      borderRadius: 18,
+      borderBottomLeftRadius: 6,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      gap: 8,
+      minWidth: 110,
+    },
+    thinkingDots: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      height: 14,
+    },
+    dot: {
+      width: 7,
+      height: 7,
+      borderRadius: 999,
+    },
+    thinkingLabel: {
+      color: COLORS.inkSoft,
+      fontSize: 12.5,
+      fontWeight: '700',
+    },
+    uploadingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 6,
+    },
+    uploadingTrack: {
+      flex: 1,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: COLORS.indigoSoft,
+      overflow: 'hidden',
+    },
+    uploadingFill: {
+      height: '100%',
+      borderRadius: 3,
+      backgroundColor: COLORS.indigo,
+    },
+    uploadingLabel: {
+      color: COLORS.inkSoft,
+      fontSize: 12.5,
+      fontWeight: '700',
+    },
+  });
 };
+

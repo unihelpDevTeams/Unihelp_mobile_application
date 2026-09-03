@@ -295,7 +295,7 @@ export default function ContactPage() {
                 styles.card,
                 pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] },
               ]}
-              onPress={() => router.push(channel.route)}
+              onPress={() => router.navigate(channel.route)}
               accessibilityRole="button"
             >
               <View style={[styles.iconWrap, { backgroundColor: `${channel.color}15` }]}>

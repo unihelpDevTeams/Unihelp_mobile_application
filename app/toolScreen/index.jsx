@@ -342,7 +342,7 @@ export default function ToolsScreen() {
                       styles.card,
                       pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] },
                     ]}
-                    onPress={() => router.push(tool.route)}
+                    onPress={() => router.navigate(tool.route)}
                   >
                     <View style={styles.cardHeader}>
                       <View style={[styles.iconWrap, { backgroundColor: tool.bgColor }]}>

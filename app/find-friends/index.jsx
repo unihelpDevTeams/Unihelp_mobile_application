@@ -71,7 +71,7 @@ function RelationshipAction({ person, currentUid, currentProfile, styles }) {
 
   if (relationship.state === RELATIONSHIP.FRIENDS) {
     return (
-      <Pressable style={[styles.smallButton, styles.friendButton]} onPress={() => router.push(`/view-user-profile/${targetUid}`)}>
+      <Pressable style={[styles.smallButton, styles.friendButton]} onPress={() => router.navigate(`/view-user-profile/${targetUid}`)}>
         <Ionicons name="checkmark-circle" size={15} color={colors.green} />
         <Text style={styles.friendButtonText}>Friends</Text>
       </Pressable>
@@ -89,7 +89,7 @@ function RelationshipAction({ person, currentUid, currentProfile, styles }) {
 
   if (relationship.state === RELATIONSHIP.RECEIVED) {
     return (
-      <Pressable style={[styles.smallButton, styles.secondaryButton]} onPress={() => router.push(`/view-user-profile/${targetUid}`)}>
+      <Pressable style={[styles.smallButton, styles.secondaryButton]} onPress={() => router.navigate(`/view-user-profile/${targetUid}`)}>
         <Ionicons name="mail-unread-outline" size={15} color={colors.brand} />
         <Text style={styles.secondaryButtonText}>Respond</Text>
       </Pressable>
@@ -109,7 +109,7 @@ function StudentRow({ person, currentUid, currentProfile, colors, styles }) {
   const targetUid = person.id || person.uid;
 
   return (
-    <Pressable style={({ pressed }) => [styles.card, pressed && styles.cardPressed]} onPress={() => router.push(`/view-user-profile/${targetUid}`)}>
+    <Pressable style={({ pressed }) => [styles.card, pressed && styles.cardPressed]} onPress={() => router.navigate(`/view-user-profile/${targetUid}`)}>
       <Avatar person={person} styles={styles} />
       <View style={styles.cardBody}>
         <View style={styles.cardTop}>

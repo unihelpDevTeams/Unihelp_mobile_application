@@ -255,7 +255,7 @@ export default function StoryDetails() {
             ) : (
               <Pressable
                 style={styles.loginPrompt}
-                onPress={() => router.push('/(auth)/login')}
+                onPress={() => router.navigate('/(auth)/login')}
               >
                 <Text style={styles.loginPromptText}>Log in to leave a comment</Text>
               </Pressable>

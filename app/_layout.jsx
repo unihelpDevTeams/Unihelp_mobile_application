@@ -35,7 +35,7 @@ function AppContent() {
 
   useEffect(() => {
     if (isOnline === false && premiumUnlocked && router.pathname !== '/offline-center' && router.pathname !== '/premium') {
-      router.push('/offline-center');
+      router.navigate('/offline-center');
     }
   }, [isOnline, premiumUnlocked, router]);
 

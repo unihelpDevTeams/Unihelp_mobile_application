@@ -85,7 +85,7 @@ export default function CommunityScreen() {
   );
 
   const handleJoin = async (group) => {
-    if (!user) { router.push('/login'); return; }
+    if (!user) { router.navigate('/login'); return; }
     if (joinStates[group.id] === 'joined' || joinStates[group.id] === 'requested') return;
     setJoiningId(group.id);
     try {
@@ -131,7 +131,7 @@ export default function CommunityScreen() {
           ) : null}
         </View>
 
-        <Pressable onPress={() => router.push('/create')}
+        <Pressable onPress={() => router.navigate('/create')}
           style={({ pressed }) => [styles.createButton, pressed && styles.createButtonPressed]}>
           <Ionicons name="add-circle-outline" size={17} color={colors.onBrand} />
           <Text style={styles.createButtonText}>Create group</Text>
@@ -147,7 +147,7 @@ export default function CommunityScreen() {
             const state = joinStates[group.id];
             const isJoining = joiningId === group.id;
             return (
-              <Pressable key={group.id} onPress={() => router.push(`/community/${group.id}`)}
+              <Pressable key={group.id} onPress={() => router.navigate(`/community/${group.id}`)}
                 style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
                 <View style={styles.cardTop}>
                   <View style={styles.avatarWrap}>
@@ -180,7 +180,7 @@ export default function CommunityScreen() {
           })
         ) : (
           <EmptyState title="No groups found" description="Try a different search or create a new group."
-            actionLabel="Create group" onAction={() => router.push('/create')} />
+            actionLabel="Create group" onAction={() => router.navigate('/create')} />
         )}
       </ScrollView>
     </ScreenShell>

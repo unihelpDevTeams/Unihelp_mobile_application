@@ -20,7 +20,7 @@ export default function StudentPurchasesPage() {
       {items.length ? (
         <View>
           {items.map((item) => (
-            <Pressable key={item.id} style={styles.card} onPress={() => router.push(`/tutorial/${item.tutorialId}`)}>
+            <Pressable key={item.id} style={styles.card} onPress={() => router.navigate(`/tutorial/${item.tutorialId}`)}>
               <Text style={styles.title}>{item.tutorialTitle || 'Tutorial'}</Text>
               <Text style={styles.subtitle}>₦{Number(item.amount || 0).toLocaleString()} - {item.status || 'pending'}</Text>
             </Pressable>

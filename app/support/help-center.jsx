@@ -17,7 +17,7 @@ export default function HelpCenterPage() {
       <View style={styles.grid}>
         <Pressable
           style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-          onPress={() => router.push('/contact')}
+          onPress={() => router.navigate('/contact')}
         >
           <View style={[styles.iconBg, { backgroundColor: `${colors.brand}15` }]}>
             <Ionicons name="mail-outline" size={20} color={colors.brand} />
@@ -29,7 +29,7 @@ export default function HelpCenterPage() {
 
         <Pressable
           style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-          onPress={() => router.push('/report')}
+          onPress={() => router.navigate('/report')}
         >
           <View style={[styles.iconBg, { backgroundColor: `${colors.red}15` }]}>
             <Ionicons name="bug-outline" size={20} color={colors.red} />
@@ -41,7 +41,7 @@ export default function HelpCenterPage() {
 
         <Pressable
           style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-          onPress={() => router.push('/faq')}
+          onPress={() => router.navigate('/faq')}
         >
           <View style={[styles.iconBg, { backgroundColor: `${colors.teal}15` }]}>
             <Ionicons name="help-circle-outline" size={20} color={colors.teal} />
@@ -53,7 +53,7 @@ export default function HelpCenterPage() {
 
         <Pressable
           style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-          onPress={() => router.push('/suggest')}
+          onPress={() => router.navigate('/suggest')}
         >
           <View style={[styles.iconBg, { backgroundColor: `${colors.orange}15` }]}>
             <Ionicons name="bulb-outline" size={20} color={colors.orange} />

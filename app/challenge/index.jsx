@@ -90,8 +90,8 @@ export default function ChallengeHomeScreen() {
       loading={loading}>
         
       <View style={styles.footerActions}>
-        <Button label="Leaderboard" variant="outline" icon="trophy-outline" onPress={() => router.push('/challenge/leaderboard')} style={styles.footerButton} />
-        <Button label="Achievements" variant="outline" icon="ribbon-outline" onPress={() => router.push('/challenge/achievements')} style={styles.footerButton} />
+        <Button label="Leaderboard" variant="outline" icon="trophy-outline" onPress={() => router.navigate('/challenge/leaderboard')} style={styles.footerButton} />
+        <Button label="Achievements" variant="outline" icon="ribbon-outline" onPress={() => router.navigate('/challenge/achievements')} style={styles.footerButton} />
       </View>
       <View style={styles.heroWrap}>
         <LinearGradient
@@ -123,7 +123,7 @@ export default function ChallengeHomeScreen() {
 
             <View style={styles.heroActions}>
               <Pressable
-                onPress={() => router.push('/challenge/question')}
+                onPress={() => router.navigate('/challenge/question')}
                 style={({ pressed }) => [styles.heroPrimaryBtn, pressed && styles.heroBtnPressed]}
               >
                 <Text style={styles.heroPrimaryBtnText}>Start Daily Challenge</Text>
@@ -165,7 +165,7 @@ export default function ChallengeHomeScreen() {
         </View>
       </View>
 
-      <SectionHeader title="Weekly progress" subtitle="Consistency builds mastery." icon="calendar-outline" onPress={() => router.push('/challenge/streak')} actionLabel="Calendar" />
+      <SectionHeader title="Weekly progress" subtitle="Consistency builds mastery." icon="calendar-outline" onPress={() => router.navigate('/challenge/streak')} actionLabel="Calendar" />
       <View style={styles.weekCard}>
         {weeklyProgress.map((item) => (
           <View key={item.key} style={styles.weekDay}>
@@ -177,10 +177,10 @@ export default function ChallengeHomeScreen() {
         ))}
       </View>
 
-      <SectionHeader title="Targeted practice" subtitle="Focus on specific topics." icon="grid-outline" actionLabel="View all" onPress={() => router.push('/challenge/categories')} />
+      <SectionHeader title="Targeted practice" subtitle="Focus on specific topics." icon="grid-outline" actionLabel="View all" onPress={() => router.navigate('/challenge/categories')} />
       <View style={styles.quickGrid}>
         {quickCategories.map((item) => (
-          <AnimatedPressable key={item.id} style={styles.quickCard} onPress={() => router.push({ pathname: '/challenge/question', params: { category: item.id } })}>
+          <AnimatedPressable key={item.id} style={styles.quickCard} onPress={() => router.navigate({ pathname: '/challenge/question', params: { category: item.id } })}>
             <View style={styles.quickCardHeader}>
               <View style={[styles.quickIcon, { backgroundColor: `${item.tone}14` }]}>
                 <Ionicons name={item.icon} size={18} color={item.tone} />
@@ -195,11 +195,11 @@ export default function ChallengeHomeScreen() {
         ))}
       </View>
 
-      <SectionHeader title="Challenge history" subtitle="Your recent results." icon="time-outline" actionLabel="History" onPress={() => router.push('/challenge/history')} />
+      <SectionHeader title="Challenge history" subtitle="Your recent results." icon="time-outline" actionLabel="History" onPress={() => router.navigate('/challenge/history')} />
       {dashboard.history?.length ? (
         <View style={styles.historyList}>
           {dashboard.history.slice(0, 3).map((item, index) => (
-            <Pressable key={item.id} style={[styles.historyCard, index === 2 && styles.historyCardLast]} onPress={() => router.push('/challenge/history')}>
+            <Pressable key={item.id} style={[styles.historyCard, index === 2 && styles.historyCardLast]} onPress={() => router.navigate('/challenge/history')}>
               <View style={styles.historyLeft}>
                 <View style={[styles.historyIcon, { backgroundColor: item.accuracy >= 70 ? `${colors.green}15` : `${colors.orange}15` }]}>
                   <Ionicons name={item.accuracy >= 70 ? "checkmark-circle" : "barbell"} size={20} color={item.accuracy >= 70 ? colors.green : colors.orange} />
