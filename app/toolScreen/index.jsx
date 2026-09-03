@@ -147,6 +147,7 @@ export default function ToolsScreen() {
   const { profile } = useAuth();
   const { colors } = useTheme();
   const { width: screenWidth } = useWindowDimensions();
+  const role = profile?.role || 'university';
 
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -288,7 +289,7 @@ export default function ToolsScreen() {
     return ALL_TOOLS.map((cat) => {
       const allowedTools = cat.tools.filter(
         (t) =>
-          isRouteAllowedForRole(t.route, profile?.role) &&
+          isRouteAllowedForRole(t.route, role) &&
           (t.title.toLowerCase().includes(q) || t.sub.toLowerCase().includes(q))
       );
 
@@ -297,10 +298,10 @@ export default function ToolsScreen() {
         tools: allowedTools,
       };
     }).filter((cat) => cat.tools.length > 0);
-  }, [searchQuery, profile?.role]);
+  }, [role, searchQuery]);
 
   return (
-    <ScreenShell showFooter>
+    <ScreenShell showFooter scrollable={false}>
       {/* HEADER */}
       <View style={styles.navHeader}>
         <Pressable style={styles.btnBack} onPress={() => router.back()}>

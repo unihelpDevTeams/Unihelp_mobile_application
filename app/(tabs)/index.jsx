@@ -1364,7 +1364,7 @@ export default function HomeScreen() {
       route: '/newsfeed',
       badge: 'TRENDING',
     },
-  ].filter((tool) => isRouteAllowedForRole(tool.route, profile?.role));
+  ].filter((tool) => isRouteAllowedForRole(tool.route, profile?.role || 'university'));
 
   return (
     <ScreenShell

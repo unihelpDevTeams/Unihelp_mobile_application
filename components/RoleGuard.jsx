@@ -7,7 +7,7 @@ export default function RoleGuard({ children }) {
   const { user, profile, loading } = useAuth();
   const segments = useSegments();
   const path = getPathFromSegments(segments);
-  const role = profile?.role || '';
+  const role = profile?.role || 'university';
   const isAuthPath = path.startsWith('/(auth)');
 
   if (loading) {
@@ -22,15 +22,7 @@ export default function RoleGuard({ children }) {
     return <Redirect href="/(auth)/onboarding" />;
   }
 
-  if (!role) {
-    if (path === '/select-role') {
-      return children;
-    }
-
-    return <Redirect href="/select-role" />;
-  }
-
-  if (isAuthPath || path === '/select-role') {
+  if (isAuthPath) {
     return <Redirect href={getRedirectForRole(role)} />;
   }
 

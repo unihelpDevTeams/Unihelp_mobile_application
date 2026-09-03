@@ -57,7 +57,7 @@ export const profileDefaults = (user, overrides = {}) => {
     username,
     usernameLower: username.trim().toLowerCase(),
     email: user.email || '',
-    role: overrides.role || '',
+    role: overrides.role || 'university',
     photo: user.photoURL || '',
     provider: overrides.provider || 'email',
     school: overrides.school || '',

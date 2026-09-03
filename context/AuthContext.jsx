@@ -67,13 +67,13 @@ async function ensureProfileWithFallback(options = {}, cachedProfile = null, tim
     console.log("[AuthContext] Profile fetch failed, using cache:", err?.message);
     if (cachedProfile) return cachedProfile;
     if (auth.currentUser) {
-      // Minimal skeleton so role guard can at least redirect correctly
+      // Minimal skeleton so the app can render while offline.
       return {
         uid: auth.currentUser.uid,
         email: auth.currentUser.email,
         username: auth.currentUser.displayName || "",
         photo: auth.currentUser.photoURL || "",
-        role: null, // will send user to /select-role — expected
+        role: "university",
         premium: false,
         _offline: true,
       };
@@ -165,17 +165,6 @@ export function AuthProvider({ children }) {
     return credential;
   };
 
-  const saveRole = async (role) => {
-    if (!auth.currentUser) {
-      throw new Error("No authenticated user");
-    }
-
-    const profileData = await ensureCurrentUserProfile({ role });
-    setProfile(profileData);
-    persistProfileCache(profileData);
-    return profileData;
-  };
-
   const logout = async () => {
     await firebaseSignOut(auth);
     setUser(null);
@@ -225,7 +214,6 @@ export function AuthProvider({ children }) {
       loading,
       signIn,
       signUp,
-      saveRole,
       logout,
       refreshProfile,
       resetPassword,

@@ -42,7 +42,7 @@ export const getRedirectForRole = (role) => {
 };
 
 export const getAllowedRolesForPath = (path) => {
-  if (path.startsWith('/(auth)') || path === '/select-role') {
+  if (path.startsWith('/(auth)')) {
     return ['university'];
   }
 

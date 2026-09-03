@@ -141,16 +141,12 @@ export default function Login() {
     try {
       setLoading(true);
       setError('');
-      const result = await signIn(email.trim(), password);
+      await signIn(email.trim(), password);
       await AsyncStorage.setItem(
         LOGIN_STORAGE_KEY,
         JSON.stringify({ email: email.trim(), password })
       );
-      const nextRoute =
-        result?.profile?.role === 'university'
-          ? '/(tabs)'
-          : '/select-role';
-      router.replace(nextRoute);
+      router.replace('/(tabs)');
     } catch (submitError) {
       setError(
         submitError?.code === 'auth/invalid-credential' || submitError?.code === 'auth/wrong-password'
