@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Platform, Pressable, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import ScreenShell from '../../src/shared/components/ScreenShell';
@@ -15,6 +15,13 @@ import {
 } from '../../src/shared/services/premium';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
+import {
+  GOOGLE_PLAY_PRODUCT_IDS,
+  loadGooglePlayProducts,
+  purchaseGoogleSubscription,
+  restoreGooglePurchases,
+} from '../../src/shared/services/googlePlayBilling';
+import { deepLinkToSubscriptionsAndroid } from 'expo-iap';
 
 export default function PremiumPage() {
   const router = useRouter();
@@ -24,6 +31,7 @@ export default function PremiumPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [planLoading, setPlanLoading] = useState(true);
+  const [googleProducts, setGoogleProducts] = useState([]);
 
   const premiumActive = isPremiumActive(profile);
 
@@ -289,6 +297,8 @@ export default function PremiumPage() {
       color: c.onBrand,
       fontSize: 14,
       fontWeight: '800',
+      flexShrink: 1,
+      textAlign: 'center',
     },
     noteBox: {
       flexDirection: 'row',
@@ -305,6 +315,10 @@ export default function PremiumPage() {
       fontSize: 13,
       lineHeight: 18,
       fontWeight: '600',
+    },
+    androidActions: {
+      gap: s.sm,
+      marginBottom: s.lg,
     },
     loadingCard: {
       backgroundColor: c.card,
@@ -382,7 +396,20 @@ export default function PremiumPage() {
     return () => { active = false; };
   }, [refreshProfile]);
 
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+    let mounted = true;
+    loadGooglePlayProducts()
+      .then((products) => { if (mounted) setGoogleProducts(products || []); })
+      .catch((error) => console.log('[Premium] Google Play unavailable:', error?.message));
+    return () => { mounted = false; };
+  }, []);
+
   const amount = getPremiumAmount(billing);
+  const googleProductId = billing === 'yearly'
+    ? GOOGLE_PLAY_PRODUCT_IDS[1]
+    : GOOGLE_PLAY_PRODUCT_IDS[0];
+  const googleProduct = googleProducts.find((product) => product.id === googleProductId);
   const daysLeft = useMemo(() => getDaysLeft(profile?.subscriptionExpiresAt), [profile?.subscriptionExpiresAt]);
   const expiryDate = useMemo(() => getSubscriptionExpiry(profile?.subscriptionExpiresAt), [profile?.subscriptionExpiresAt]);
 
@@ -391,14 +418,33 @@ export default function PremiumPage() {
     setLoading(true);
 
     try {
-      await startPremiumCheckout({ user, profile, billing });
+      if (Platform.OS === 'android') {
+        if (!googleProductId || !googleProduct) throw new Error('This Google Play plan is currently unavailable.');
+        await purchaseGoogleSubscription(googleProductId);
+      } else {
+        await startPremiumCheckout({ user, profile, billing });
+      }
       await refreshProfile?.();
-      setMessage('Premium activated successfully.');
+      setMessage('Premium is active after Google Play verification.');
     } catch (error) {
       const text = error?.message || 'Payment could not be completed.';
       if (text !== 'Payment was cancelled.') {
         Alert.alert('Premium upgrade', text);
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const restore = async () => {
+    setLoading(true);
+    try {
+      if (Platform.OS !== 'android') throw new Error('Restore Purchases is available on Android only.');
+      await restoreGooglePurchases();
+      await refreshProfile?.();
+      setMessage('Purchases restored and verified.');
+    } catch (error) {
+      Alert.alert('Restore purchases', error?.message || 'Could not restore purchases.');
     } finally {
       setLoading(false);
     }
@@ -416,7 +462,7 @@ export default function PremiumPage() {
   }
 
   return (
-    <ScreenShell title="Premium" subtitle="Upgrade your Unihelp account." showBack>
+    <ScreenShell title="Premium" subtitle="Upgrade your Unihelp account." showBack scrollable={false}>
       {premiumActive ? (
         <View style={styles.hero}>
           <View style={styles.heroIcon}>
@@ -487,7 +533,7 @@ export default function PremiumPage() {
               <Text style={styles.planSubtitle}>One plan for all student tools</Text>
             </View>
             <View style={styles.pricePill}>
-              <Text style={styles.priceText}>NGN {amount.toLocaleString()}</Text>
+              <Text style={styles.priceText}>{Platform.OS === 'android' ? (googleProduct?.displayPrice || 'Price unavailable') : `NGN ${amount.toLocaleString()}`}</Text>
               <Text style={styles.priceCycle}>/{billing === 'monthly' ? 'mo' : 'yr'}</Text>
             </View>
           </View>
@@ -525,12 +571,12 @@ export default function PremiumPage() {
             {loading ? (
               <>
                 <ActivityIndicator color={colors.onBrand} />
-                <Text style={styles.subscribeText}>Opening Premium...</Text>
+                <Text style={styles.subscribeText}>{Platform.OS === 'android' ? 'Opening Google Play...' : 'Opening Premium...'}</Text>
               </>
             ) : (
               <>
                 <Ionicons name="sparkles" size={18} color={colors.onBrand} />
-                <Text style={styles.subscribeText}>Upgrade Now</Text>
+                <Text style={styles.subscribeText}>{Platform.OS === 'android' ? 'Subscribe with Google Play' : 'Upgrade Now'}</Text>
               </>
             )}
           </Pressable>
@@ -577,9 +623,33 @@ export default function PremiumPage() {
       <View style={styles.noteBox}>
         <Ionicons name="shield-checkmark-outline" size={18} color={colors.brand} />
         <Text style={styles.noteText}>
-          Payment opens securely with Flutterwave. The backend verifies the transaction before premium is added to your profile.
+          {Platform.OS === 'android'
+            ? 'Google Play processes this recurring subscription. UniHelp verifies the purchase before premium access is granted.'
+            : 'Payment opens securely with Flutterwave. The backend verifies the transaction before premium is added to your profile.'}
         </Text>
       </View>
+      {Platform.OS === 'android' ? (
+        <View style={styles.androidActions}>
+          <Pressable
+            onPress={restore}
+            disabled={loading}
+            style={({ pressed }) => [styles.featureActionButton, pressed && styles.featureActionButtonPressed, loading && styles.subscribeButtonDisabled]}
+          >
+            <Ionicons name="refresh-outline" size={16} color={colors.onBrand} />
+            <Text style={styles.featureActionButtonText}>Restore purchases</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => deepLinkToSubscriptionsAndroid({
+              skuAndroid: googleProductId,
+              packageNameAndroid: 'com.zenithdev.unihelp',
+            }).catch(() => Linking.openURL('https://play.google.com/store/account/subscriptions'))}
+            style={({ pressed }) => [styles.featureActionButton, pressed && styles.featureActionButtonPressed]}
+          >
+            <Ionicons name="settings-outline" size={16} color={colors.onBrand} />
+            <Text style={styles.featureActionButtonText}>Manage Google Play subscription</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </ScreenShell>
   );
 }

@@ -40,10 +40,11 @@ async function persistProfileCache(profile) {
   }
 }
 
-async function readProfileCache() {
+async function readProfileCache(uid) {
   try {
     const raw = await AsyncStorage.getItem(PROFILE_CACHE_KEY);
-    return raw ? JSON.parse(raw) : null;
+    const profile = raw ? JSON.parse(raw) : null;
+    return profile?.uid === uid ? profile : null;
   } catch {
     return null;
   }
@@ -93,7 +94,7 @@ export function AuthProvider({ children }) {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         // Step 1: read local cache immediately so the rest of the app can render
-        const cachedProfile = await readProfileCache();
+        const cachedProfile = await readProfileCache(firebaseUser.uid);
 
         // Step 2: unblock loading with whatever we have locally
         setUser(firebaseUser);

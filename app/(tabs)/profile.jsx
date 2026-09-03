@@ -21,6 +21,7 @@ import { spacing } from '../../src/shared/theme';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import ScreenShell from '../../src/shared/components/ScreenShell';
+import Footer from '../../components/Footer';
 import DailyStreakBanner from '../../src/shared/components/DailyStreakBanner';
 import ConfirmDialog from '../../src/shared/components/ConfirmDialog';
 import DraggableBottomSheet from '../../src/shared/components/DraggableBottomSheet';
@@ -41,6 +42,31 @@ import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 const BIO_MAX_LENGTH = 160;
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 const AVATAR_SIZE = 88;
+
+const PROFILE_FOOTER_SECTIONS = [
+  {
+    title: 'Platform',
+    links: [
+      { label: 'About', route: '/about' },
+      { label: 'Help Center', route: '/help-center' },
+      { label: 'Suggest Feature', route: '/suggest' },
+      { label: 'FAQ', route: '/faq' },
+    ],
+  },
+  {
+    title: 'Legal & Support',
+    links: [
+      { label: 'Terms of Service', route: '/terms' },
+      { label: 'Privacy Policy', route: '/privacy' },
+      { label: 'Contact Us', route: '/contact' },
+    ],
+  },
+];
+
+const PROFILE_SOCIAL_LINKS = [
+  { label: 'Instagram', icon: 'logo-instagram', url: 'https://instagram.com/unihelp' },
+  { label: 'LinkedIn', icon: 'logo-linkedin', url: 'https://linkedin.com/company/unihelp' },
+];
 
 const updateProfilePhoto = async ({ kind = 'photo', uri }) => {
   if (!uri) {
@@ -1039,6 +1065,14 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
           </Pressable>
         </View>
+
+        <Footer
+          title="Unihelp"
+          tagline="Study made simple"
+          sections={PROFILE_FOOTER_SECTIONS}
+          socialLinks={PROFILE_SOCIAL_LINKS}
+          version="v1.0.2"
+        />
       </ScrollView>
 
       {/* SINGLE SHARED SHEET — content swaps based on `sheet` */}

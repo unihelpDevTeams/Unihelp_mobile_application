@@ -8,6 +8,9 @@ const extra = {
     process.env.EXPO_PUBLIC_API_URL || "https://unihelp-backend-dg0o.onrender.com",
   EXPO_PUBLIC_FLUTTERWAVE_PUBLIC_KEY:
     process.env.EXPO_PUBLIC_FLUTTERWAVE_PUBLIC_KEY || "",
+  EXPO_PUBLIC_GOOGLE_PLAY_PRODUCT_IDS:
+    process.env.EXPO_PUBLIC_GOOGLE_PLAY_PRODUCT_IDS ||
+    "unihelp_premium_monthly,unihelp_premium_yearly",
   EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME:
     process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME || "",
   EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET:
@@ -79,6 +82,7 @@ module.exports = {
     plugins: [
       "expo-router",
       "expo-font",
+      "expo-iap",
       [
         "expo-notifications",
         {

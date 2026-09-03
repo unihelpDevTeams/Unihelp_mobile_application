@@ -18,9 +18,10 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useAuth } from '../../context/AuthContext';
 import { uploadImage, toCloudinaryAsset } from '../../services/cloudinary';
-import { deleteCloudinaryAssets, deleteMediaDocument } from '../../services/mediaCleanup';
+import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 import {
   createPromoSpotlight,
+  deletePromoSpotlight,
   fetchPromoSpotlightsForAdmin,
   fetchPromoSpotlightStats,
   updatePromoSpotlight,
@@ -90,15 +91,28 @@ const formFromPromo = (promo) => ({
 });
 
 const formatDisplayDate = (isoString) => {
-  if (!isoString) return 'Starts immediately';
+  if (!isoString) return 'Not scheduled';
   const parsed = new Date(isoString);
-  if (isNaN(parsed.getTime())) return 'Invalid date';
+  if (Number.isNaN(parsed.getTime())) return 'Choose a valid date';
   return parsed.toLocaleString(undefined, {
+    weekday: 'short',
     month: 'short',
     day: 'numeric',
-    hour: '2-digit',
+    year: 'numeric',
+    hour: 'numeric',
     minute: '2-digit',
   });
+};
+
+const formatScheduleDuration = (startAt, endAt) => {
+  if (!startAt || !endAt) return 'Set both dates to preview campaign duration';
+  const durationMs = new Date(endAt).getTime() - new Date(startAt).getTime();
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return 'End date must come after start date';
+  const totalHours = Math.round(durationMs / (1000 * 60 * 60));
+  if (totalHours < 24) return `${totalHours} hour${totalHours === 1 ? '' : 's'} scheduled`;
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return `${days} day${days === 1 ? '' : 's'}${hours ? ` ${hours}h` : ''} scheduled`;
 };
 
 export default function PromoSpotlightManager() {
@@ -144,6 +158,7 @@ export default function PromoSpotlightManager() {
     field: null,
     mode: 'date',
     tempDate: new Date(),
+    minimumDate: undefined,
   });
 
   const isEditing = Boolean(editingId);
@@ -164,8 +179,8 @@ export default function PromoSpotlightManager() {
       setItems(promos || []);
       const stats = await fetchPromoSpotlightStats(promos.map((p) => p.id));
       setStatsByPromoId(stats || {});
-    } catch (error) {
-      console.log('PromoSpotlight admin load failed:', error?.message);
+    } catch (err) {
+      console.log('PromoSpotlight admin load failed:', err?.message);
       setItems([]);
       setStatsByPromoId({});
     } finally {
@@ -227,8 +242,8 @@ export default function PromoSpotlightManager() {
       if (previousAsset?.publicId && previousAsset.publicId !== nextAsset.publicId) {
         deleteCloudinaryAssets({ assets: [previousAsset] }).catch(() => {});
       }
-    } catch (error) {
-      Alert.alert('Upload failed', error?.message || 'Could not upload image.');
+    } catch (err) {
+      Alert.alert('Upload failed', err?.message || 'Could not upload image.');
     } finally {
       setUploading(false);
     }
@@ -247,13 +262,14 @@ export default function PromoSpotlightManager() {
   };
 
   const save = async () => {
-    const error = validate();
-    if (error) {
-      Alert.alert('Check promotion', error);
+    const validationError = validate();
+    if (validationError) {
+      Alert.alert('Check promotion', validationError);
       return;
     }
 
     setSaving(true);
+    const wasEditing = Boolean(editingId);
     try {
       const payload = {
         ...form,
@@ -267,9 +283,9 @@ export default function PromoSpotlightManager() {
       }
       resetForm();
       await loadItems();
-      Alert.alert('Success', `PromoSpotlight successfully ${editingId ? 'updated' : 'created'}.`);
-    } catch (error) {
-      Alert.alert('Save failed', error?.message || 'Could not save promotion.');
+      Alert.alert('Success', `PromoSpotlight successfully ${wasEditing ? 'updated' : 'created'}.`);
+    } catch (err) {
+      Alert.alert('Save failed', err?.message || 'Could not save promotion.');
     } finally {
       setSaving(false);
     }
@@ -289,11 +305,11 @@ export default function PromoSpotlightManager() {
         style: 'destructive',
         onPress: async () => {
           try {
-            await deleteMediaDocument('promoSpotlights', item.id);
+            await deletePromoSpotlight(item.id);
             if (editingId === item.id) resetForm();
             await loadItems();
-          } catch (error) {
-            Alert.alert('Delete failed', error?.message || 'Could not delete promotion.');
+          } catch (err) {
+            Alert.alert('Delete failed', err?.message || 'Could not delete promotion.');
           }
         },
       },
@@ -303,11 +319,16 @@ export default function PromoSpotlightManager() {
   const openDatePicker = (field) => {
     const currentDateVal = form[field] ? new Date(form[field]) : new Date();
     const validDate = isNaN(currentDateVal.getTime()) ? new Date() : currentDateVal;
+    const startDate = form.startAt ? new Date(form.startAt) : null;
+    const minimumDate = field === 'endAt' && startDate && !Number.isNaN(startDate.getTime())
+      ? startDate
+      : undefined;
     setDatePickerConfig({
       visible: true,
       field,
       mode: 'date',
-      tempDate: validDate,
+      tempDate: minimumDate && validDate < minimumDate ? minimumDate : validDate,
+      minimumDate,
     });
   };
 
@@ -320,12 +341,15 @@ export default function PromoSpotlightManager() {
       if (selectedDate) {
         if (datePickerConfig.mode === 'date') {
           const currentTemp = new Date(selectedDate);
-          setDatePickerConfig({
-            visible: true,
-            field: datePickerConfig.field,
+          // Spread `prev` so `field` and `minimumDate` survive the date -> time
+          // step transition. Previously this rebuilt the object from scratch and
+          // dropped `minimumDate`, which let the time step pick a time earlier
+          // than the required minimum on the same calendar day.
+          setDatePickerConfig((prev) => ({
+            ...prev,
             mode: 'time',
             tempDate: currentTemp,
-          });
+          }));
         } else {
           updateField(datePickerConfig.field, selectedDate.toISOString());
           setDatePickerConfig((prev) => ({ ...prev, visible: false }));
@@ -524,6 +548,21 @@ export default function PromoSpotlightManager() {
                 styles={styles}
               />
             </View>
+
+            <View style={styles.scheduleSummary}>
+              <View style={styles.scheduleSummaryIcon}>
+                <Ionicons name="calendar-clear-outline" size={19} color={palette.indigo} />
+              </View>
+              <View style={styles.scheduleSummaryCopy}>
+                <Text style={styles.scheduleSummaryTitle}>
+                  {form.startAt ? formatDisplayDate(form.startAt) : 'Ready to schedule'}
+                </Text>
+                <Text style={styles.scheduleSummaryText}>
+                  {formatScheduleDuration(form.startAt, form.endAt)}
+                </Text>
+              </View>
+              <Ionicons name="sparkles-outline" size={16} color={palette.indigo} />
+            </View>
           </SectionBlock>
 
           {/* Section 5: Interactive Actions & Linkage */}
@@ -652,6 +691,7 @@ export default function PromoSpotlightManager() {
                 display="spinner"
                 onChange={handleDateChange}
                 textColor={palette.ink}
+                minimumDate={datePickerConfig.minimumDate}
               />
               <View style={styles.pickerActions}>
                 <Pressable style={styles.pickerCancelBtn} onPress={() => setDatePickerConfig((prev) => ({ ...prev, visible: false }))}>
@@ -672,6 +712,7 @@ export default function PromoSpotlightManager() {
           mode={datePickerConfig.mode}
           is24Hour={false}
           onChange={handleDateChange}
+          minimumDate={datePickerConfig.minimumDate}
         />
       )}
 
@@ -707,7 +748,7 @@ export default function PromoSpotlightManager() {
                     </View>
                   </View>
                   <Text style={styles.itemMeta}>Priority P{item.priority} • {item.type}</Text>
-                  
+
                   {/* Performance Metrics Row */}
                   <View style={styles.statsRow}>
                     <View style={styles.statChip}>
@@ -715,7 +756,7 @@ export default function PromoSpotlightManager() {
                       <Text style={styles.statChipText}>{statsByPromoId[item.id]?.impressions || 0}</Text>
                     </View>
                     <View style={styles.statChip}>
-                      <Ionicons name="cursor-outline" size={11} color={palette.inkSoft} />
+                      <Ionicons name="hand-left-outline" size={11} color={palette.inkSoft} />
                       <Text style={styles.statChipText}>{statsByPromoId[item.id]?.clicks || 0}</Text>
                     </View>
                     <View style={styles.statChip}>
@@ -785,11 +826,11 @@ function DatePickerTrigger({ label, value, isSet, onPress, onClear, containerSty
       <Text style={styles.label}>{label}</Text>
       <Pressable style={styles.dateTrigger} onPress={onPress}>
         <Ionicons name="calendar-outline" size={15} color={isSet ? palette.indigo : palette.inkSoft} />
-        <Text style={[styles.dateTriggerText, !isSet && styles.dateTriggerPlaceholder]} numberOfLines={1}>
+        <Text style={[styles.dateTriggerText, !isSet && styles.dateTriggerPlaceholder]} numberOfLines={2}>
           {value}
         </Text>
         {isSet && (
-          <Pressable onPress={onClear} style={styles.clearDateBtn}>
+          <Pressable onPress={(event) => { event.stopPropagation(); onClear(); }} style={styles.clearDateBtn}>
             <Ionicons name="close-circle" size={15} color={palette.inkSoft} />
           </Pressable>
         )}
@@ -825,7 +866,7 @@ const createStyles = (palette) =>
       borderRadius: 10,
       backgroundColor: palette.indigo,
       alignItems: 'center',
-      justify: 'center',
+      justifyContent: 'center',
     },
     toggleFormButtonActive: { backgroundColor: palette.indigoSoft },
 
@@ -967,10 +1008,33 @@ const createStyles = (palette) =>
       paddingVertical: 9,
       backgroundColor: palette.inputSurface,
       gap: 6,
+      minHeight: 58,
     },
-    dateTriggerText: { flex: 1, fontSize: 11, fontWeight: '600', color: palette.ink },
+    dateTriggerText: { flex: 1, fontSize: 11, lineHeight: 16, fontWeight: '600', color: palette.ink },
     dateTriggerPlaceholder: { color: palette.muted, fontWeight: '400' },
     clearDateBtn: { padding: 2 },
+
+    scheduleSummary: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      padding: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: palette.indigo + '45',
+      backgroundColor: palette.indigoSoft,
+    },
+    scheduleSummaryIcon: {
+      width: 38,
+      height: 38,
+      borderRadius: 11,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: palette.surface,
+    },
+    scheduleSummaryCopy: { flex: 1, gap: 2 },
+    scheduleSummaryTitle: { color: palette.ink, fontSize: 12, fontWeight: '800' },
+    scheduleSummaryText: { color: palette.inkSoft, fontSize: 11, fontWeight: '600' },
 
     enabledBox: {
       borderWidth: 1,

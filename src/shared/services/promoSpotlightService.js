@@ -115,30 +115,34 @@ const writeDateValue = (value) => {
   return Number.isNaN(parsed) ? null : new Date(parsed);
 };
 
-const normalizeWritePayload = (payload = {}) => ({
-  type: PROMO_TYPES.has(payload.type) ? payload.type : 'announcement',
-  title: String(payload.title || '').trim(),
-  description: String(payload.description || '').trim(),
-  imageUrl: String(payload.imageUrl || '').trim(),
-  imageAsset: payload.imageAsset || null,
-  buttonText: String(payload.buttonText || '').trim(),
-  actionType: ACTION_TYPES.has(payload.actionType) ? payload.actionType : 'none',
-  actionUrl: String(payload.actionUrl || '').trim(),
-  advertiserName: String(payload.advertiserName || '').trim(),
-  advertiserLogoUrl: String(payload.advertiserLogoUrl || '').trim(),
-  enabled: payload.enabled === true,
-  priority: Number.isFinite(Number(payload.priority)) ? Number(payload.priority) : 0,
-  startAt: writeDateValue(payload.startAt),
-  endAt: writeDateValue(payload.endAt),
-  targetAudience: payload.targetAudience || 'all',
-  gradientStart: String(payload.gradientStart || '').trim(),
-  gradientEnd: String(payload.gradientEnd || '').trim(),
-  gradientDirection: payload.gradientDirection || 'vertical',
-  textColor: String(payload.textColor || '').trim(),
-  titleSize: Number.isFinite(Number(payload.titleSize)) ? Number(payload.titleSize) : undefined,
-  subtitleSize: Number.isFinite(Number(payload.subtitleSize)) ? Number(payload.subtitleSize) : undefined,
-  descriptionSize: Number.isFinite(Number(payload.descriptionSize)) ? Number(payload.descriptionSize) : undefined,
-});
+const normalizeWritePayload = (payload = {}) => {
+  const normalized = {
+    type: PROMO_TYPES.has(payload.type) ? payload.type : 'announcement',
+    title: String(payload.title || '').trim(),
+    description: String(payload.description || '').trim(),
+    imageUrl: String(payload.imageUrl || '').trim(),
+    imageAsset: payload.imageAsset || null,
+    buttonText: String(payload.buttonText || '').trim(),
+    actionType: ACTION_TYPES.has(payload.actionType) ? payload.actionType : 'none',
+    actionUrl: String(payload.actionUrl || '').trim(),
+    advertiserName: String(payload.advertiserName || '').trim(),
+    advertiserLogoUrl: String(payload.advertiserLogoUrl || '').trim(),
+    enabled: payload.enabled === true,
+    priority: Number.isFinite(Number(payload.priority)) ? Number(payload.priority) : 0,
+    startAt: writeDateValue(payload.startAt),
+    endAt: writeDateValue(payload.endAt),
+    targetAudience: payload.targetAudience || 'all',
+    gradientStart: String(payload.gradientStart || '').trim(),
+    gradientEnd: String(payload.gradientEnd || '').trim(),
+    gradientDirection: payload.gradientDirection || 'vertical',
+    textColor: String(payload.textColor || '').trim(),
+  };
+
+  if (Number.isFinite(Number(payload.titleSize))) normalized.titleSize = Number(payload.titleSize);
+  if (Number.isFinite(Number(payload.subtitleSize))) normalized.subtitleSize = Number(payload.subtitleSize);
+  if (Number.isFinite(Number(payload.descriptionSize))) normalized.descriptionSize = Number(payload.descriptionSize);
+  return normalized;
+};
 
 export async function fetchPromoSpotlightsForAdmin() {
   const snapshot = await getDocs(collection(db, COLLECTIONS.promoSpotlights));

@@ -108,8 +108,15 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow read: if signedIn();
-      allow create: if isUser(uid) && request.resource.data.uid == uid;
-      allow update: if isUser(uid);
+      allow create: if isUser(uid) && request.resource.data.uid == uid &&
+        request.resource.data.premium == false;
+      allow update: if isUser(uid) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'premium', 'verified', 'subscriptionProvider', 'subscriptionProductId',
+          'subscriptionPlan', 'subscriptionBilling', 'subscriptionAmount',
+          'subscriptionStatus', 'subscriptionExpiresAt', 'premiumExpiresAt',
+          'subscriptionAutoRenewing'
+        ]);
       allow delete: if false;
 
       match /{subPath=**} {
