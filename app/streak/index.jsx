@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { spacing } from '../../src/shared/theme';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
@@ -8,7 +8,7 @@ import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
 import DailyStreakBanner from '../../src/shared/components/DailyStreakBanner';
 import { useAuth } from '../../context/AuthContext';
-import { fetchDailyStreak, recordDailyStreak } from '../../services/firestoreSync';
+import { fetchDailyStreak, fetchStreakMilestones, recordDailyStreak } from '../../services/firestoreSync';
 import { useRouter } from 'expo-router';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -24,6 +24,7 @@ export default function StreakScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const [streakData, setStreakData] = useState(null);
+  const [milestones, setMilestones] = useState([]);
   const [today, setToday] = useState(new Date());
   const [loading, setLoading] = useState(true);
 
@@ -53,11 +54,23 @@ export default function StreakScreen() {
     studyButton: { backgroundColor: c.brand, borderRadius: r.full, paddingVertical: 15, alignItems: 'center', marginBottom: s.lg },
     studyButtonPressed: { opacity: 0.9 },
     studyButtonText: { color: c.onBrand, fontSize: 15, fontWeight: '800' },
+    rewardsButton: { backgroundColor: c.card, borderRadius: r.full, borderWidth: 1, borderColor: c.gold, paddingVertical: 13, alignItems: 'center', marginBottom: s.lg },
+    rewardsButtonText: { color: c.gold, fontSize: 14, fontWeight: '800' },
+    milestonesTitle: { color: c.textPrimary, fontSize: 18, fontWeight: '900', marginBottom: s.sm },
+    milestoneList: { gap: s.sm, marginBottom: s.lg },
+    milestoneItem: { backgroundColor: c.card, borderRadius: r['2xl'], borderWidth: 1, borderColor: c.borderDefault, padding: s.md, flexDirection: 'row', alignItems: 'center', gap: s.md },
+    milestoneItemDone: { borderColor: c.green },
+    milestoneItemIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: c.background },
+    milestoneItemCopy: { flex: 1 },
+    milestoneItemTitle: { color: c.textPrimary, fontSize: 14, fontWeight: '800' },
+    milestoneItemStatus: { color: c.textSecondary, fontSize: 12, marginTop: 2 },
   }));
 
   useEffect(() => {
-    fetchDailyStreak().then((data) => {
-      setStreakData(data); setLoading(false);
+    Promise.all([fetchDailyStreak(), fetchStreakMilestones()]).then(([data, config]) => {
+      setStreakData(data);
+      setMilestones(config);
+      setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
 
@@ -65,6 +78,15 @@ export default function StreakScreen() {
     try {
       const result = await recordDailyStreak();
       setStreakData(result);
+      if (result.unlocked?.length) {
+        const milestone = result.unlocked[0];
+        Alert.alert(
+          `${milestone.milestone}-Day Streak!`,
+          `You unlocked a reward spin for your ${milestone.title}.`,
+          [{ text: 'Later', style: 'cancel' }, { text: 'Spin now', onPress: () => router.navigate('/rewards') }]
+        );
+        return;
+      }
       router.navigate('/challenge/categories');
     } catch {}
   };
@@ -150,6 +172,34 @@ export default function StreakScreen() {
           </View>
         </View>
       )}
+
+      {milestones.length > 0 && (
+        <>
+          <Text style={styles.milestonesTitle}>Streak milestones</Text>
+          <View style={styles.milestoneList}>
+            {milestones.map((milestone) => {
+              const completed = streakCount >= milestone.days;
+              const available = streakData?.pendingRewards?.some((reward) => Number(reward.milestone) === Number(milestone.days));
+              return (
+                <View key={milestone.days} style={[styles.milestoneItem, completed && styles.milestoneItemDone]}>
+                  <View style={styles.milestoneItemIcon}>
+                    <Ionicons name={completed ? 'checkmark-circle' : 'lock-closed-outline'} size={20} color={completed ? colors.green : colors.textSecondary} />
+                  </View>
+                  <View style={styles.milestoneItemCopy}>
+                    <Text style={styles.milestoneItemTitle}>{milestone.title}</Text>
+                    <Text style={styles.milestoneItemStatus}>{completed ? (available ? 'Reward spin available' : 'Milestone reached') : `${milestone.days - streakCount} days remaining`}</Text>
+                  </View>
+                  {available && <Ionicons name="gift-outline" size={20} color={colors.gold} />}
+                </View>
+              );
+            })}
+          </View>
+        </>
+      )}
+
+      <Pressable onPress={() => router.navigate('/rewards')} style={styles.rewardsButton} accessibilityLabel="Open streak rewards">
+        <Text style={styles.rewardsButtonText}>View Streak Rewards</Text>
+      </Pressable>
 
       <Pressable onPress={handleStudyNow} style={({ pressed }) => [styles.studyButton, pressed && styles.studyButtonPressed]}>
         <Text style={styles.studyButtonText}>Study Now & Record Streak</Text>

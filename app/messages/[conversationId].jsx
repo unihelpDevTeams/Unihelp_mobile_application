@@ -19,6 +19,8 @@ import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
 import VoiceMessageBubble from '../../src/shared/components/VoiceMessageBubble';
 import VoiceRecorderBar from '../../src/shared/components/VoiceRecorderBar';
+import StickerPicker from '../../src/shared/components/StickerPicker';
+import StickerMessage from '../../src/shared/components/StickerMessage';
 import { fetchRecord } from '../../services/firestoreSync';
 import {
   markConversationRead,
@@ -81,6 +83,7 @@ export default function ConversationPage() {
   const [relationshipBusy, setRelationshipBusy] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [stickerPickerVisible, setStickerPickerVisible] = useState(false);
   const [typingName, setTypingName] = useState('');
   let typingTimeout = useRef(null);
 
@@ -126,6 +129,7 @@ export default function ConversationPage() {
     bubbleDeleted: { opacity: 0.7, backgroundColor: c.skeleton, borderWidth: 0 },
     sender: { fontWeight: '700', fontSize: 12.5, color: c.brand, marginBottom: 4, marginLeft: 2 },
     text: { color: c.textPrimary, lineHeight: 22, fontSize: 15.5 },
+    stickerButton: { width: 40, height: 44, borderRadius: 22, backgroundColor: c.surfaceSecondary, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.borderDefault },
     mineText: { color: c.onBrand },
     deletedRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
     deletedText: { fontSize: 13.5, fontStyle: 'italic', color: c.textSecondary },
@@ -553,6 +557,21 @@ export default function ConversationPage() {
     }
   }, [canChat, conversation, user, profile, replyTo]);
 
+  const sendSticker = async (sticker) => {
+    if (!sticker || !conversation || !user || sending || !canChat) return;
+    setSending(true);
+    try {
+      await sendDirectMessage(conversation, user, profile || {}, {
+        type: 'sticker',
+        stickerId: sticker.id,
+        replyTo: replyTo ? { id: replyTo.id, senderId: replyTo.senderId || '', senderName: replyTo.senderName || 'Student', text: '[Sticker]' } : null,
+      });
+      setReplyTo(null);
+      scrollToBottom();
+    } catch (error) { showSendError(error); }
+    finally { setSending(false); }
+  };
+
   const closeSheet = () => {
     setActiveMessage(null);
     setConfirmingDelete(false);
@@ -702,9 +721,10 @@ export default function ConversationPage() {
               const deleted = !!item.deleted;
               const busy = deletingId === item.id;
               const isVoice = item.type === 'voice';
+              const isSticker = item.type === 'sticker';
               return (
                 <View>
-                  {!mine && !deleted ? <Text style={[styles.sender, isVoice && { marginBottom: 4 }]}>{item.senderName || 'Student'}</Text> : null}
+                  {!mine && !deleted ? <Text style={[styles.sender, (isVoice || isSticker) && { marginBottom: 4 }]}>{item.senderName || 'Student'}</Text> : null}
                   {!deleted && item.replyTo ? (
                     <View style={styles.replyBlock}>
                       <Text style={styles.replyAuthor}>{item.replyTo.senderName || 'Student'}</Text>
@@ -721,6 +741,8 @@ export default function ConversationPage() {
                       </View>
                       <Text style={[styles.timestamp, mine && styles.mineTimestamp]}>{formatTime(item.createdAt)}</Text>
                     </View>
+                  ) : isSticker ? (
+                    <StickerMessage message={item} isMine={mine} onLongPress={() => setActiveMessage(item)} />
                   ) : isVoice ? (
                     <View>
                       <VoiceMessageBubble message={item} isMine={mine} onLongPress={() => setActiveMessage(item)} />
@@ -773,6 +795,9 @@ export default function ConversationPage() {
             </View>
           ) : null}
           <View style={styles.composer}>
+            <Pressable style={styles.stickerButton} onPress={() => setStickerPickerVisible(true)} accessibilityRole="button" accessibilityLabel="Open sticker picker">
+              <Ionicons name="happy-outline" size={22} color={colors.brand} />
+            </Pressable>
             <VoiceRecorderBar
               conversationId={conversationId}
               onVoiceSent={sendVoiceMessage}
@@ -804,6 +829,8 @@ export default function ConversationPage() {
         </View>
       ) : null}
       </KeyboardAvoidingView>
+
+      <StickerPicker visible={stickerPickerVisible} onClose={() => setStickerPickerVisible(false)} onSelect={sendSticker} />
 
       {/* Message Context Actions Sheet */}
       <Modal visible={!!activeMessage} transparent animationType="fade" onRequestClose={closeSheet}>

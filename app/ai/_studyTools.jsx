@@ -46,11 +46,6 @@ export const MODE_FIELDS = {
     { key: 'angle', label: 'Focus or angle (optional)', placeholder: 'e.g. historical context, current debate' },
   ],
 };
-
-// Builds a single well-structured prompt from the form values. The AI is
-// asked to reply with clear markdown headings — this is what turns a plain
-// chat answer into a "mini study resource" without needing any backend or
-// response-schema changes: MarkdownText already renders the structure.
 export function buildPrompt(modeId, values = {}) {
   const v = (key) => (values[key] || '').trim();
 
@@ -113,10 +108,6 @@ export const LOADING_LABELS = {
   research: 'Researching your topic…',
   default: 'Thinking it through…',
 };
-
-// Contextual follow-ups shown under each AI response. These stand in for
-// "Like / Dislike / Share" — the point is to keep the student in a learning
-// loop instead of a chat loop.
 export const CONTEXTUAL_ACTIONS = {
   solve: ['Try a similar question', 'Show a simpler method', 'Go deeper on that step'],
   explain: ['Make this simpler', 'Give me an example', 'Test me on this'],
@@ -127,9 +118,6 @@ export const CONTEXTUAL_ACTIONS = {
   default: ['Explain deeper', 'Give me an example', 'Test me on this'],
 };
 
-// ---------------------------------------------------------------------------
-// ModeCard — a single academic tool on the workspace home screen.
-// ---------------------------------------------------------------------------
 export function ModeCard({ mode, onPress, disabled }) {
   const { colors } = useTheme();
   const styles = useThemeStyles((c, s, r) => ({
@@ -171,13 +159,6 @@ export function ModeCard({ mode, onPress, disabled }) {
     </Pressable>
   );
 }
-
-// ---------------------------------------------------------------------------
-// ContextForm — the "guide the student toward useful context" panel that
-// appears after picking a mode. Submitting builds the structured prompt
-// via buildPrompt() and hands it back to the parent unchanged in shape
-// from a normal composer send (same sendMessage() call underneath).
-// ---------------------------------------------------------------------------
 export function ContextForm({ mode, onSubmit, onSkip, onCancel, submitting }) {
   const { colors } = useTheme();
   const fields = MODE_FIELDS[mode.id] || [];

@@ -9,7 +9,7 @@ import { useAuth } from '../../context/AuthContext';
 import { db } from '../../firebase/config';
 import { collection, getDocs, orderBy, query, limit } from 'firebase/firestore';
 import { COLLECTIONS } from '../../src/shared/firestoreSchema';
-import { getJson, deleteJson } from '../../src/shared/services/backend';
+import { getJson, putJson, deleteJson } from '../../src/shared/services/backend';
 import { blockUser, createAnnouncement, unblockUser } from '../../services/firestoreSync';
 import PromoSpotlightManager from '../../src/admin/PromoSpotlightManager';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
@@ -20,6 +20,7 @@ const TABS = [
   { key: 'support', label: 'Support Center', icon: 'headset-outline' },
   { key: 'notifications', label: 'Send Notification', icon: 'notifications-outline' },
   { key: 'promoSpotlights', label: 'Promo Spotlights', icon: 'sparkles-outline' },
+  { key: 'streakRewards', label: 'Streak Rewards', icon: 'gift-outline' },
   { key: 'migration', label: 'Migration Tracker', icon: 'server-outline' },
 ];
 
@@ -205,6 +206,8 @@ export default function AdminPanelPage() {
         </View>
       ) : activeTab === 'promoSpotlights' ? (
         <PromoSpotlightManager />
+      ) : activeTab === 'streakRewards' ? (
+        <StreakRewardsAdmin colors={colors} />
       ) : activeTab === 'listings' ? (
         <View style={pageStyles.listingToggleWrap}>
           <View style={pageStyles.listingToggleContainer}>
@@ -306,6 +309,56 @@ export default function AdminPanelPage() {
         <CreateAnnouncementForm colors={colors} />
       )}
     </ScreenShell>
+  );
+}
+
+function StreakRewardsAdmin({ colors }) {
+  const styles = useMemo(() => StyleSheet.create({
+    container: { gap: 14 },
+    intro: { color: colors.textSecondary, lineHeight: 20 },
+    input: { minHeight: 360, borderWidth: 1, borderColor: colors.borderDefault, borderRadius: 14, padding: 14, color: colors.textPrimary, backgroundColor: colors.card, fontFamily: 'monospace', textAlignVertical: 'top' },
+    button: { backgroundColor: colors.brand, borderRadius: 999, paddingVertical: 14, alignItems: 'center' },
+    buttonText: { color: colors.onBrand, fontWeight: '800' },
+  }), [colors]);
+  const [value, setValue] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    getJson('/api/streak/admin/config').then((response) => {
+      setValue(JSON.stringify(response.data || [], null, 2));
+    }).catch((error) => Alert.alert('Error', error.message || 'Could not load streak configuration.')).finally(() => setLoading(false));
+  }, []);
+
+  const save = async () => {
+    let milestones;
+    try {
+      milestones = JSON.parse(value);
+      if (!Array.isArray(milestones)) throw new Error('Configuration must be an array.');
+    } catch (error) {
+      Alert.alert('Invalid configuration', error.message);
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await putJson('/api/streak/admin/config', { milestones });
+      setValue(JSON.stringify(response.data || milestones, null, 2));
+      Alert.alert('Saved', 'Streak reward configuration updated.');
+    } catch (error) {
+      Alert.alert('Could not save', error.message || 'The backend rejected this configuration.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.intro}>Edit milestone days, reward types, values, enabled states, and weights. The backend validates every change before saving.</Text>
+      <TextInput value={value} onChangeText={setValue} editable={!loading && !saving} multiline style={styles.input} />
+      <Pressable onPress={save} disabled={loading || saving} style={styles.button}>
+        <Text style={styles.buttonText}>{loading ? 'Loading...' : saving ? 'Saving...' : 'Save Reward Configuration'}</Text>
+      </Pressable>
+    </View>
   );
 }
 

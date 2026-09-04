@@ -65,6 +65,9 @@ export {
   unblockUser,
   recordDailyStreak,
   fetchDailyStreak,
+  fetchStreakRewards,
+  fetchStreakMilestones,
+  spinStreakReward,
   
 } from '../src/shared/services/firestore';
 

@@ -115,12 +115,17 @@ service cloud.firestore {
           'premium', 'verified', 'subscriptionProvider', 'subscriptionProductId',
           'subscriptionPlan', 'subscriptionBilling', 'subscriptionAmount',
           'subscriptionStatus', 'subscriptionExpiresAt', 'premiumExpiresAt',
-          'subscriptionAutoRenewing'
+          'subscriptionAutoRenewing', 'streakCount', 'bestStreak', 'streakDates',
+          'lastActiveDate', 'lastActiveAt', 'aiTokenBalance', 'streakFreezeBalance',
+          'streakFreezeResetAt', 'streakFreezeLastUsedAt'
         ]);
       allow delete: if false;
 
       match /{subPath=**} {
-        allow read, write: if isUser(uid);
+        allow read: if isUser(uid);
+        allow write: if isUser(uid) &&
+          !subPath.matches('^streakRewards/.*') &&
+          !subPath.matches('^streakSpins/.*');
       }
     }
 
@@ -230,6 +235,34 @@ service cloud.firestore {
         request.resource.data.userId == request.auth.uid ||
         request.resource.data.recipientId == request.auth.uid
       );
+    }
+
+    match /stickers/{stickerId} {
+      allow read, write: if false;
+    }
+
+    match /stickerPacks/{packId} {
+      allow read, write: if false;
+    }
+
+    match /stickerUploads/{uploadId} {
+      allow read, write: if false;
+    }
+
+    match /users/{uid}/stickerRecent/{stickerId} {
+      allow read, write: if false;
+    }
+
+    match /users/{uid}/stickerFavorites/{stickerId} {
+      allow read, write: if false;
+    }
+
+    match /users/{uid}/stickerOperations/{operationId} {
+      allow read, write: if false;
+    }
+
+    match /rewardCoupons/{couponId} {
+      allow read, write: if false;
     }
 
     match /tasks/{taskId} {

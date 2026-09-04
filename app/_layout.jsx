@@ -67,7 +67,9 @@ function AppContent() {
           <Stack.Screen name="offline-center" options={{ presentation: 'card' }} />
           <Stack.Screen name="leaderboard/index" options={{ presentation: 'card' }} />
           <Stack.Screen name="achievements/index" options={{ presentation: 'card' }} />
+          <Stack.Screen name="rewards/index" options={{ presentation: 'card' }} />
           <Stack.Screen name="payment-success/index" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="stickers/create" options={{ presentation: 'card' }} />
         </Stack>
       </RoleGuard>
       <PromoSpotlight

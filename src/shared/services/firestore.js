@@ -833,45 +833,13 @@ export async function recordDailyStreak() {
   const todayKey = new Date().toISOString().slice(0, 10);
   const cacheKey = `${userId}:${todayKey}`;
   if (dailyStreakWriteCache.has(cacheKey)) {
-    return {
-      streakCount: dailyStreakWriteCache.get(cacheKey),
-      streakDates: [],
-      todayKey,
-    };
+    return fetchDailyStreak();
   }
 
-  const userRef = doc(db, COLLECTIONS.users, userId);
-  const snap = await getDoc(userRef);
-  const userData = snap.exists() ? snap.data() : {};
-
-  const yesterdayKey = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-
-  let streakCount = userData.streakCount || 0;
-  let streakDates = userData.streakDates || [];
-
-  if (streakDates.includes(todayKey)) {
-    dailyStreakWriteCache.set(cacheKey, streakCount);
-    return { streakCount, streakDates, todayKey };
-  }
-
-  if (streakDates.includes(yesterdayKey) || streakDates.length === 0) {
-    streakCount += 1;
-  } else {
-    const lastDate = streakDates[streakDates.length - 1];
-    streakCount = lastDate === yesterdayKey ? streakCount + 1 : 1;
-  }
-
-  streakDates = [...new Set([...streakDates, todayKey])].slice(-60);
-
-  await updateDoc(userRef, {
-    streakCount,
-    lastActiveDate: todayKey,
-    streakDates,
-    lastActiveAt: serverTimestamp(),
-  });
-
-  dailyStreakWriteCache.set(cacheKey, streakCount);
-  return { streakCount, streakDates, todayKey };
+  const response = await postJson('/api/streak/check-in', {});
+  const result = response.data || {};
+  dailyStreakWriteCache.set(cacheKey, result.streakCount || 0);
+  return { ...result, todayKey };
 }
 
 /**
@@ -880,13 +848,24 @@ export async function recordDailyStreak() {
 export async function fetchDailyStreak() {
   if (!auth.currentUser?.uid) return { streakCount: 0, streakDates: [], lastActiveDate: '' };
 
-  const snap = await getDoc(doc(db, COLLECTIONS.users, auth.currentUser.uid));
-  if (!snap.exists()) return { streakCount: 0, streakDates: [], lastActiveDate: '' };
+  const response = await getJson('/api/streak');
+  return response.data || { streakCount: 0, streakDates: [], lastActiveDate: '' };
+}
 
-  const data = snap.data();
-  return {
-    streakCount: data.streakCount || 0,
-    streakDates: data.streakDates || [],
-    lastActiveDate: data.lastActiveDate || '',
-  };
+export async function fetchStreakRewards() {
+  if (!auth.currentUser?.uid) return { rewards: [], history: [] };
+  const response = await getJson('/api/streak/rewards');
+  return response.data || { rewards: [], history: [] };
+}
+
+export async function fetchStreakMilestones() {
+  if (!auth.currentUser?.uid) return [];
+  const response = await getJson('/api/streak/milestones');
+  return response.data || [];
+}
+
+export async function spinStreakReward(rewardId, idempotencyKey) {
+  if (!auth.currentUser?.uid) throw new Error('No authenticated user');
+  const response = await postJson(`/api/streak/rewards/${encodeURIComponent(rewardId)}/spin`, { idempotencyKey });
+  return response.data;
 }

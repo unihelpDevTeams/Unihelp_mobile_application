@@ -149,6 +149,27 @@ export async function uploadFeatureMedia(file, { feature = 'stories', resourceTy
   return data;
 }
 
+export async function uploadStickerMedia(file, { onProgress, rotation = 0 } = {}) {
+  const headers = await buildHeaders({});
+  delete headers['Content-Type'];
+  const formData = new FormData();
+  formData.append('file', {
+    uri: file.uri,
+    name: file.name || file.fileName || 'sticker-media',
+    type: file.type || file.mimeType || 'application/octet-stream',
+  });
+  formData.append('rotation', String(rotation));
+  const response = await fetch(`${getApiUrl()}/api/stickers/upload`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || data.error || 'Sticker upload failed');
+  onProgress?.(100);
+  return data.data || data;
+}
+
 export async function sendAppNotification({
   userIds,
   title,
