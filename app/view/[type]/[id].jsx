@@ -53,90 +53,6 @@ const TYPE_META = {
   formula: { label: 'Formula sheet', icon: 'calculator' },
 };
 
-const pdfExportLockdownScript = `
-  (function () {
-    const hideSelectors = [
-      '.download',
-      '.print',
-      '[aria-label*="Download"]',
-      '[aria-label*="Print"]',
-      '[title*="Download"]',
-      '[title*="Print"]',
-      '[data-l10n-id*="download"]',
-      '[data-l10n-id*="print"]',
-      '.toolbarButton',
-      '.secondaryToolbarButton'
-    ];
-
-    const removeToolbarButtons = () => {
-      document.querySelectorAll(hideSelectors.join(',')).forEach((element) => {
-        const text = (element.textContent || '').toLowerCase();
-        if (text.includes('download') || text.includes('print') || text.includes('save')) {
-          element.remove();
-          return;
-        }
-
-        const label = (element.getAttribute('aria-label') || '').toLowerCase();
-        const title = (element.getAttribute('title') || '').toLowerCase();
-        if (label.includes('download') || label.includes('print') || title.includes('download') || title.includes('print')) {
-          element.remove();
-        }
-      });
-
-      const viewer = document.querySelector('#mainContainer');
-      if (viewer) {
-        viewer.style.setProperty('user-select', 'none', 'important');
-        viewer.style.setProperty('-webkit-user-select', 'none', 'important');
-      }
-    };
-
-    const blockPrint = () => {
-      window.print = function () {};
-      document.addEventListener('contextmenu', function (event) {
-        event.preventDefault();
-      }, { passive: false });
-      document.addEventListener('copy', function (event) {
-        event.preventDefault();
-      }, { passive: false });
-      document.addEventListener('keydown', function (event) {
-        const isPrintShortcut = event.ctrlKey && (event.key === 'p' || event.key === 'P');
-        if (isPrintShortcut) {
-          event.preventDefault();
-          event.stopPropagation();
-        }
-      }, { passive: false });
-    };
-
-    const style = document.createElement('style');
-    style.innerHTML = [
-      'html, body, #outerContainer, #mainContainer, #viewerContainer, .page {',
-      '  user-select: none !important;',
-      '  -webkit-user-select: none !important;',
-      '  -webkit-touch-callout: none !important;',
-      '}',
-      '.download, .print, [aria-label*="Download"], [aria-label*="Print"],',
-      '[title*="Download"], [title*="Print"],',
-      '[data-l10n-id*="download"], [data-l10n-id*="print"] {',
-      '  display: none !important;',
-      '}'
-    ].join(' ');
-    document.head.appendChild(style);
-
-    removeToolbarButtons();
-    blockPrint();
-
-    const observer = new MutationObserver(() => {
-      removeToolbarButtons();
-    });
-
-    const target = document.body || document.documentElement;
-    if (target) {
-      observer.observe(target, { childList: true, subtree: true });
-    }
-  })();
-  true;
-`;
-
 const formatDate = (value) => {
   if (!value) return '';
   const rawDate = typeof value === 'string' ? new Date(value) : value?.toDate ? value.toDate() : value;
@@ -168,6 +84,22 @@ const toWhatsAppNumber = (rawPhone) => {
 // string, so without this, a record opened via certain deep links could
 // silently fail to load or crash on the collectionMap[type] lookup.
 const normalizeParam = (value) => (Array.isArray(value) ? value[0] : value);
+
+const normalizeResourceType = (value) => {
+  const rawType = String(normalizeParam(value) || '').trim();
+  const aliases = {
+    notes: 'note',
+    pastQuestion: 'question',
+    pastQuestions: 'question',
+    questions: 'question',
+    studyMaterials: 'studyMaterial',
+    studies: 'studyMaterial',
+    marketplace: 'listing',
+    listings: 'listing',
+    hostels: 'hostel',
+  };
+  return aliases[rawType] || rawType;
+};
 
 // Builds a type-aware list of {icon, label, value} fields from whatever
 // the record actually has, instead of one fixed field list for every type.
@@ -246,7 +178,7 @@ const buildFields = (item, type) => {
 
 export default function RecordViewPage() {
   const params = useLocalSearchParams();
-  const type = normalizeParam(params.type);
+  const type = normalizeResourceType(params.type);
   const id = normalizeParam(params.id);
   const router = useRouter();
   const { user, profile } = useAuth();
@@ -507,7 +439,7 @@ export default function RecordViewPage() {
       }
       previewFileRef.current = result.uri;
       if (isMounted.current) setPdfPreviewUrl(result.uri);
-      console.log('[PDF preview] ready for WebView', { previewUri: result.uri, viewerUrl: pdfViewerUrl || result.uri });
+      console.log('[PDF preview] ready for native renderer', { previewUri: result.uri });
     } catch (_error) {
       console.error('[PDF preview] failed', {
         type,
@@ -734,10 +666,6 @@ export default function RecordViewPage() {
   };
 
   const showStickyFooter = showContactCta || hasFileAsset;
-  const pdfViewerUrl = useMemo(() => {
-    if (!pdfPreviewUrl || pdfPreviewUrl.startsWith('file://')) return pdfPreviewUrl;
-    return `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(pdfPreviewUrl)}`;
-  }, [pdfPreviewUrl]);
 
   return (
     <ScreenShell title="Details" subtitle={item?.title || item?.name || 'Record details'} showBack loading={loading}>
@@ -1212,53 +1140,18 @@ export default function RecordViewPage() {
             </View>
           ) : pdfPreviewUrl ? (
             <WebView
-              source={{ uri: pdfViewerUrl || pdfPreviewUrl }}
+              source={{ uri: pdfPreviewUrl }}
               style={styles.webview}
-              originWhitelist={['*']}
+              originWhitelist={['file://*']}
               allowFileAccess
-              allowUniversalAccessFromFileURLs={false}
-              onShouldStartLoadWithRequest={(request) => {
-                const url = request.url || '';
-                return url.startsWith('file://') || url.startsWith('http://') || url.startsWith('https://') || url.startsWith('about:blank');
-              }}
-              startInLoadingState
-              javaScriptEnabled
-              injectedJavaScript={pdfExportLockdownScript}
-              allowsBackForwardNavigationGestures={false}
-              onLoadStart={() => {
-                console.log('[PDF preview] WebView started loading', { uri: pdfViewerUrl || pdfPreviewUrl });
-                setPdfPreviewLoading(true);
-              }}
               onLoad={() => {
-                console.log('[PDF preview] WebView loaded successfully', { uri: pdfViewerUrl || pdfPreviewUrl });
                 setPdfPreviewLoading(false);
               }}
-              onLoadEnd={() => {
-                console.log('[PDF preview] WebView load end', { uri: pdfViewerUrl || pdfPreviewUrl, pdfPreviewUrl, pdfViewerUrl });
-                setPdfPreviewLoading(false);
-              }}
-              onHttpError={(syntheticEvent) => {
-                console.error('[PDF preview] WebView HTTP error', {
-                  uri: pdfViewerUrl || pdfPreviewUrl,
-                  nativeEvent: syntheticEvent?.nativeEvent,
-                });
+              onError={(event) => {
+                console.error('[PDF preview] WebView error', { uri: pdfPreviewUrl, event: event?.nativeEvent });
                 setPdfPreviewError(true);
                 setPdfPreviewLoading(false);
               }}
-              onError={(syntheticEvent) => {
-                console.error('[PDF preview] WebView error', {
-                  uri: pdfViewerUrl || pdfPreviewUrl,
-                  nativeEvent: syntheticEvent?.nativeEvent,
-                });
-                setPdfPreviewError(true);
-                setPdfPreviewLoading(false);
-              }}
-              renderLoading={() => (
-                <View style={styles.webviewLoading}>
-                  <ActivityIndicator color={colors.brand} />
-                  <Text style={styles.loadingText}>Opening document...</Text>
-                </View>
-              )}
             />
           ) : (
             <View style={styles.webviewLoading}>

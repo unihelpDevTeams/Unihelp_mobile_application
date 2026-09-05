@@ -129,10 +129,9 @@ export function AuthProvider({ children }) {
       } catch (e) {
         console.error(e);
       }
-      await firebaseSignOut(auth);
-      throw new Error(
-        "Please verify your email before logging in. Check your inbox for a verification link."
-      );
+      const error = new Error("Please verify your email before continuing.");
+      error.code = "auth/email-not-verified";
+      throw error;
     }
 
     const profileData = await ensureCurrentUserProfile({ email: credential.user.email });
@@ -160,8 +159,6 @@ export function AuthProvider({ children }) {
     } catch (e) {
       console.error(e);
     }
-    await firebaseSignOut(auth);
-
     return credential;
   };
 

@@ -55,18 +55,15 @@ export default function SignupFlow() {
         
         try {
           const { auth } = require('../../firebase/config');
-          const { sendEmailVerification, signOut } = require('firebase/auth');
+           const { sendEmailVerification } = require('firebase/auth');
           if (auth.currentUser) {
              await sendEmailVerification(auth.currentUser);
-             await signOut(auth);
           }
         } catch (e) {
           console.error('Email verification error:', e);
         }
 
-        Alert.alert('Account created', 'Please check your email to verify your account before signing in.', [
-          { text: 'OK', onPress: () => router.replace('/login') }
-        ]);
+        router.replace({ pathname: '/(auth)/verify-email', params: { email: formData.email } });
       } catch (accountError) {
         if (uploadedPhotoAsset) {
           await deleteCloudinaryAssets({ assets: [uploadedPhotoAsset] }).catch(() => {});

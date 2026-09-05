@@ -148,6 +148,10 @@ export default function Login() {
       );
       router.replace('/(tabs)');
     } catch (submitError) {
+      if (submitError?.code === 'auth/email-not-verified') {
+        router.replace({ pathname: '/(auth)/verify-email', params: { email: email.trim() } });
+        return;
+      }
       setError(
         submitError?.code === 'auth/invalid-credential' || submitError?.code === 'auth/wrong-password'
           ? 'Incorrect email or password. If you signed up with Google, please use "Forgot password" to set a password.'

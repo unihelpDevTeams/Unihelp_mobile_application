@@ -9,6 +9,7 @@ export default function RoleGuard({ children }) {
   const path = getPathFromSegments(segments);
   const role = profile?.role || 'university';
   const isAuthPath = path.startsWith('/(auth)');
+  const isVerificationPath = path === '/(auth)/verify-email';
 
   if (loading) {
     return null;
@@ -20,6 +21,11 @@ export default function RoleGuard({ children }) {
     }
 
     return <Redirect href="/(auth)/onboarding" />;
+  }
+
+  if (!user.emailVerified) {
+    if (isVerificationPath) return children;
+    return <Redirect href="/(auth)/verify-email" />;
   }
 
   if (isAuthPath) {

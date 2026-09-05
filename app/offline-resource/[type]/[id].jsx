@@ -19,23 +19,6 @@ const TYPE_CONFIG = {
   notes: { label: 'Notes & Study Materials', icon: 'document-text-outline' },
 };
 
-const offlineViewerLockdownScript = `
-  (function () {
-    const style = document.createElement('style');
-    style.textContent = 'html, body, embed, iframe { user-select: none !important; -webkit-user-select: none !important; -webkit-touch-callout: none !important; }';
-    document.head.appendChild(style);
-    document.addEventListener('contextmenu', (event) => event.preventDefault(), { passive: false });
-    document.addEventListener('copy', (event) => event.preventDefault(), { passive: false });
-    document.addEventListener('keydown', (event) => {
-      if (event.ctrlKey && ['p', 's', 'u'].includes(String(event.key).toLowerCase())) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-    }, { passive: false });
-  })();
-  true;
-`;
-
 export default function OfflineResourceScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -502,14 +485,11 @@ export default function OfflineResourceScreen() {
         <View style={styles.webviewWrap}>
           <WebView
             source={{ uri: record.localReference }}
+            style={styles.webview}
             originWhitelist={['file://*']}
             allowFileAccess
-            allowUniversalAccessFromFileURLs={false}
-            javaScriptEnabled
-            injectedJavaScript={offlineViewerLockdownScript}
-            onShouldStartLoadWithRequest={(request) => request.url.startsWith('file://')}
+            onLoad={() => setReaderError(false)}
             onError={() => setReaderError(true)}
-            startInLoadingState
           />
         </View>
       </ScreenShell>
