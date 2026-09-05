@@ -48,7 +48,7 @@ const IMAGES = {
 const FAB_SIZE = 56;
 const MARQUEE_PX_PER_SECOND = 46;
 const MARQUEE_MESSAGE = 'study offline, unlimited downloads & priority AI access.';
-const HERO_AUTO_ADVANCE_MS = 7000;
+const HERO_AUTO_ADVANCE_MS = 9000;
 
 const pickMediaUrl = (value) => {
   if (!value) return null;
@@ -104,51 +104,56 @@ const formatPrice = (value) => {
 
 const friendlyPersonName = (person = {}) => person.username || person.name || person.displayName || person.email || 'Student';
 
-const buildHeroSlides = (streakCount = 0) => [
-  {
-    slide: 'smart-today',
-    icon: 'flash-outline',
-    eyebrow: "TODAY'S FOCUS",
-    title: 'Calculus & Chemistry need you today',
-    stat: '30 min deep focus · 5 topics due for review',
-    cta: { label: 'Start studying', route: '/(tabs)/studyMaterials' },
-  },
-  {
-    slide: 'weak-areas',
-    icon: 'trending-up-outline',
-    eyebrow: 'GROWTH AREA',
-    title: 'struggling with calculations? Strengthen your weak areas',
-    stat: 'Targeted practice improves retention by up to 80%',
-    cta: { label: 'Strengthen weak areas', route: '/formula-hub' },
-  },
-  {
-    slide: 'streak-power',
+const buildHeroSlides = ({ streakCount = 0, announcements = [], notes = [], questions = [] } = {}) => {
+  const latestAnnouncement = announcements[0];
+  const latestNote = notes[0];
+  const latestQuestion = questions[0];
+  const slides = [];
+
+  if (latestAnnouncement) {
+    slides.push({
+      slide: 'latest-announcement',
+      icon: 'megaphone-outline',
+      eyebrow: 'Latest update',
+      title: latestAnnouncement.title || latestAnnouncement.name || 'A new UniHelp update is available',
+      stat: latestAnnouncement.description || latestAnnouncement.body || 'Open announcements to view the full update.',
+      cta: { label: 'View update', route: '/announcements' },
+    });
+  }
+
+  if (latestNote) {
+    slides.push({
+      slide: 'latest-resource',
+      icon: 'book-outline',
+      eyebrow: 'New resource',
+      title: latestNote.title || latestNote.name || 'A study resource is ready',
+      stat: `${notes.length} resource${notes.length === 1 ? '' : 's'} available in your library.`,
+      cta: { label: 'Open resources', route: '/(tabs)/studyMaterials' },
+    });
+  }
+
+  if (latestQuestion) {
+    slides.push({
+      slide: 'latest-question',
+      icon: 'help-circle-outline',
+      eyebrow: 'Practice ready',
+      title: latestQuestion.title || latestQuestion.name || 'Practice questions are ready',
+      stat: `${questions.length} question${questions.length === 1 ? '' : 's'} available for revision.`,
+      cta: { label: 'Practice now', route: '/cbt' },
+    });
+  }
+
+  slides.push({
+    slide: 'study-streak',
     icon: 'flame',
-    eyebrow: 'STUDY STREAK',
-    title: streakCount > 0 ? `${streakCount}-day streak, keep it alive` : 'Start your study streak today',
-    stat:
-      streakCount > 0
-        ? 'Consistent daily learners retain up to 3× more'
-        : 'One session today gets your streak going',
-    cta: { label: streakCount > 0 ? 'Continue streak' : 'Start today', route: '/streak' },
-  },
-  {
-    slide: 'spaced-repeat',
-    icon: 'sync-outline',
-    eyebrow: 'DUE FOR REVIEW',
-    title: '12 topics are ready to review',
-    stat: 'Spaced review beats cramming by up to 250%',
-    cta: { label: 'Start review', route: '/formula-hub/flashcards' },
-  },
-  {
-    slide: 'exam-mode',
-    icon: 'rocket-outline',
-    eyebrow: 'EXAM COUNTDOWN',
-    title: '21 days to your Physics final',
-    stat: '89% syllabus covered · 12 practice tests ready',
-    cta: { label: 'Enter exam mode', route: '/cbt' },
-  },
-];
+    eyebrow: 'Study streak',
+    title: streakCount > 0 ? `${streakCount}-day streak in progress` : 'Start your study streak today',
+    stat: streakCount > 0 ? 'Return today to keep your progress active.' : 'Complete a study session to begin tracking your progress.',
+    cta: { label: streakCount > 0 ? 'Continue streak' : 'Start studying', route: '/streak' },
+  });
+
+  return slides;
+};
 
 // Slim, always-visible upgrade prompt: a single scrolling line instead of a big
 // stacked card, so it earns its place at the very top without competing with
@@ -257,140 +262,108 @@ function PremiumMarquee({ onPress }) {
   );
 }
 
-// A single-message-at-a-time hero: one clear insight, one stat, one call to
-// action per slide, on the app's own brand gradient — no stock photography,
-// no borrowed accent colors. User-swipeable, with a slow auto-advance that
-// backs off the moment someone interacts with it.
+// One quiet accent color per slide type — reuses the same worked-out
+// palette the Academic Toolkit grid already uses below, so the hero
+// doesn't introduce its own separate visual language. No gradients,
+// no glow: the color lives in one small icon chip and a 3px edge, and
+// nowhere else on the card.
+const HERO_ACCENTS = {
+  'latest-announcement': { tint: '#EEF2FF', fg: '#4F46E5' },
+  'latest-resource': { tint: '#ECFDF5', fg: '#10B981' },
+  'latest-question': { tint: '#F3E8FF', fg: '#9333EA' },
+  'study-streak': { tint: '#FFF7ED', fg: '#F97316' },
+};
+
+// A flat, bordered card that matches the toolCard/discoveryCard language
+// used everywhere else on this screen — same radius scale, same hairline
+// border, same near-invisible shadow. Swipeable between slides, with a
+// slow auto-advance that pauses the moment someone drags it.
 function HeroCarousel({ slides, router }) {
   const { colors } = useTheme();
   const { width: screenWidth } = useWindowDimensions();
   const cardWidth = screenWidth - layout.screenPadding * 2;
 
   const scrollRef = useRef(null);
-  const scrollX = useRef(new Animated.Value(0)).current;
   const autoTimerRef = useRef(null);
-  const [, setActiveIndex] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(0);
 
   const styles = useThemeStyles((c, s, r) => ({
-    shadowWrap: {
-      borderRadius: r['3xl'],
+    wrap: {
       marginBottom: s.xl,
-      shadowColor: c.brand,
-      shadowOffset: { width: 0, height: 12 },
-      shadowOpacity: 0.18,
-      shadowRadius: 24,
-      elevation: 8,
     },
     card: {
-      borderRadius: r['3xl'],
+      flexDirection: 'row',
+      borderRadius: r.xl,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.borderLight || c.border,
+      shadowColor: c.shadow,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.04,
+      shadowRadius: 8,
+      elevation: 2,
       overflow: 'hidden',
     },
-    gradient: {
-      height: 214,
+    accentBar: {
+      width: 3,
     },
-    haloTop: {
-      position: 'absolute',
-      width: 180,
-      height: 180,
-      borderRadius: 90,
-      right: -50,
-      top: -60,
-      backgroundColor: 'rgba(255,255,255,0.12)',
-    },
-    haloBottom: {
-      position: 'absolute',
-      width: 140,
-      height: 140,
-      borderRadius: 70,
-      left: -40,
-      bottom: -70,
-      backgroundColor: 'rgba(255,255,255,0.08)',
-    },
-    slide: {
+    body: {
       flex: 1,
-      padding: s.xl,
-      justifyContent: 'space-between',
+      padding: s.lg,
     },
-    eyebrowPill: {
+    topRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 6,
-      alignSelf: 'flex-start',
-      backgroundColor: 'rgba(255,255,255,0.16)',
-      paddingLeft: 6,
-      paddingRight: s.md,
-      paddingVertical: 5,
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: 'rgba(255,255,255,0.2)',
+      marginBottom: s.sm,
     },
-    eyebrowIconWrap: {
-      width: 20,
-      height: 20,
-      borderRadius: 10,
-      backgroundColor: 'rgba(255,255,255,0.22)',
+    iconChip: {
+      width: 30,
+      height: 30,
+      borderRadius: r.md,
       alignItems: 'center',
       justifyContent: 'center',
+      marginRight: s.sm,
     },
-    eyebrowText: {
-      color: c.onBrand,
-      fontSize: 10.5,
-      fontWeight: '800',
-      letterSpacing: 0.6,
-    },
-    slideTitle: {
-      color: c.onBrand,
-      fontSize: 22,
-      fontWeight: '900',
-      letterSpacing: -0.4,
-      lineHeight: 27,
-    },
-    slideStat: {
-      color: 'rgba(255,255,255,0.82)',
-      fontSize: 13,
+    label: {
+      fontSize: 12,
       fontWeight: '600',
-      marginTop: 6,
+      color: c.grey,
+    },
+    title: {
+      fontSize: 17,
+      fontWeight: '800',
+      color: c.ink,
+      lineHeight: 22,
+      marginBottom: 4,
+    },
+    stat: {
+      fontSize: 13,
+      color: c.grey,
+      fontWeight: '500',
       lineHeight: 18,
     },
-    cta: {
-      alignSelf: 'flex-start',
+    bottomRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 6,
-      backgroundColor: c.surface,
-      paddingHorizontal: s.lg,
-      paddingVertical: 11,
-      borderRadius: r.xl,
+      justifyContent: 'space-between',
+      marginTop: s.md,
+    },
+    ctaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
     },
     ctaText: {
+      fontSize: 13,
+      fontWeight: '700',
       color: c.brandText,
-      fontSize: 13.5,
-      fontWeight: '800',
     },
-    dotsRow: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: s.md,
-      flexDirection: 'row',
-      justifyContent: 'center',
-      alignItems: 'center',
-      gap: 5,
-    },
-    dot: {
-      width: 6,
-      height: 6,
-      borderRadius: 3,
-      backgroundColor: c.onBrand,
+    counter: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: c.textSecondary || c.grey,
     },
   }));
-
-  const goToIndex = useCallback(
-    (index) => {
-      scrollRef.current?.scrollTo({ x: index * cardWidth, animated: true });
-    },
-    [cardWidth]
-  );
 
   const restartAutoAdvance = useCallback(() => {
     if (autoTimerRef.current) clearInterval(autoTimerRef.current);
@@ -398,11 +371,11 @@ function HeroCarousel({ slides, router }) {
     autoTimerRef.current = setInterval(() => {
       setActiveIndex((prev) => {
         const next = (prev + 1) % slides.length;
-        goToIndex(next);
+        scrollRef.current?.scrollTo({ x: next * cardWidth, animated: true });
         return next;
       });
     }, HERO_AUTO_ADVANCE_MS);
-  }, [slides.length, goToIndex]);
+  }, [slides.length, cardWidth]);
 
   useEffect(() => {
     restartAutoAdvance();
@@ -410,10 +383,6 @@ function HeroCarousel({ slides, router }) {
       if (autoTimerRef.current) clearInterval(autoTimerRef.current);
     };
   }, [restartAutoAdvance]);
-
-  const handleScroll = Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], {
-    useNativeDriver: true,
-  });
 
   const handleMomentumEnd = (event) => {
     const index = Math.round(event.nativeEvent.contentOffset.x / cardWidth);
@@ -426,84 +395,55 @@ function HeroCarousel({ slides, router }) {
   };
 
   return (
-    <View style={styles.shadowWrap}>
-      <View style={styles.card}>
-        <LinearGradient
-          colors={[colors.brand, colors.purple || colors.brand]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.gradient}
-        >
-          <View style={styles.haloTop} />
-          <View style={styles.haloBottom} />
-
-          <Animated.ScrollView
-            ref={scrollRef}
-            horizontal
-            pagingEnabled
-            decelerationRate="fast"
-            showsHorizontalScrollIndicator={false}
-            onScroll={handleScroll}
-            scrollEventThrottle={16}
-            onScrollBeginDrag={pauseAutoAdvance}
-            onMomentumScrollEnd={handleMomentumEnd}
-          >
-            {slides.map((slide) => (
-              <View key={slide.slide} style={[styles.slide, { width: cardWidth }]}>
-                <View style={styles.eyebrowPill}>
-                  <View style={styles.eyebrowIconWrap}>
-                    <Ionicons name={slide.icon} size={12} color={colors.onBrand} />
+    <View style={styles.wrap}>
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        pagingEnabled
+        decelerationRate="fast"
+        showsHorizontalScrollIndicator={false}
+        onScrollBeginDrag={pauseAutoAdvance}
+        onMomentumScrollEnd={handleMomentumEnd}
+      >
+        {slides.map((slide, index) => {
+          const accent = HERO_ACCENTS[slide.slide] || { tint: colors.brandLight, fg: colors.brandText };
+          return (
+            <View key={slide.slide} style={{ width: cardWidth }}>
+              <View style={styles.card}>
+                <View style={[styles.accentBar, { backgroundColor: accent.fg }]} />
+                <View style={styles.body}>
+                  <View style={styles.topRow}>
+                    <View style={[styles.iconChip, { backgroundColor: accent.tint }]}>
+                      <Ionicons name={slide.icon} size={16} color={accent.fg} />
+                    </View>
+                    <Text style={styles.label}>{slide.eyebrow}</Text>
                   </View>
-                  <Text style={styles.eyebrowText}>{slide.eyebrow}</Text>
-                </View>
 
-                <View>
-                  <Text style={styles.slideTitle} numberOfLines={2}>
-                    {slide.title}
-                  </Text>
-                  <Text style={styles.slideStat} numberOfLines={2}>
-                    {slide.stat}
-                  </Text>
-                </View>
+                  <Text style={styles.title} numberOfLines={2}>{slide.title}</Text>
+                  <Text style={styles.stat} numberOfLines={2}>{slide.stat}</Text>
 
-                <Pressable
-                  onPress={() => router.navigate(slide.cta.route)}
-                  style={({ pressed }) => [styles.cta, pressed && { opacity: 0.9, transform: [{ scale: 0.97 }] }]}
-                  accessibilityRole="button"
-                  accessibilityLabel={slide.cta.label}
-                >
-                  <Text style={styles.ctaText}>{slide.cta.label}</Text>
-                  <Ionicons name="arrow-forward" size={15} color={colors.brandText} />
-                </Pressable>
+                  <View style={styles.bottomRow}>
+                    <Pressable
+                      onPress={() => router.navigate(slide.cta.route)}
+                      hitSlop={8}
+                      style={styles.ctaRow}
+                      accessibilityRole="button"
+                      accessibilityLabel={slide.cta.label}
+                    >
+                      <Text style={styles.ctaText}>{slide.cta.label}</Text>
+                      <Ionicons name="arrow-forward" size={13} color={colors.brandText} />
+                    </Pressable>
+
+                    {slides.length > 1 ? (
+                      <Text style={styles.counter}>{index + 1} / {slides.length}</Text>
+                    ) : null}
+                  </View>
+                </View>
               </View>
-            ))}
-          </Animated.ScrollView>
-
-          {slides.length > 1 ? (
-            <View style={styles.dotsRow} pointerEvents="none">
-              {slides.map((slide, index) => {
-                const inputRange = [(index - 1) * cardWidth, index * cardWidth, (index + 1) * cardWidth];
-                const dotOpacity = scrollX.interpolate({
-                  inputRange,
-                  outputRange: [0.4, 1, 0.4],
-                  extrapolate: 'clamp',
-                });
-                const dotScale = scrollX.interpolate({
-                  inputRange,
-                  outputRange: [1, 1.6, 1],
-                  extrapolate: 'clamp',
-                });
-                return (
-                  <Animated.View
-                    key={slide.slide}
-                    style={[styles.dot, { opacity: dotOpacity, transform: [{ scale: dotScale }] }]}
-                  />
-                );
-              })}
             </View>
-          ) : null}
-        </LinearGradient>
-      </View>
+          );
+        })}
+      </ScrollView>
     </View>
   );
 }
@@ -517,6 +457,7 @@ export default function HomeScreen() {
 
   const [streakCount, setStreakCount] = useState(0);
   const [streakDates, setStreakDates] = useState([]);
+  const [heroContent, setHeroContent] = useState({ announcements: [], notes: [], questions: [] });
   const [, setIsFabDragging] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [discoverData, setDiscoverData] = useState({
@@ -527,7 +468,7 @@ export default function HomeScreen() {
     error: null,
   });
 
-  const heroSlides = useMemo(() => buildHeroSlides(streakCount), [streakCount]);
+  const heroSlides = useMemo(() => buildHeroSlides({ streakCount, ...heroContent }), [streakCount, heroContent]);
 
   // Reset avatar-error state whenever the source photo actually changes,
   // otherwise a newly-uploaded photo can never recover from a prior failed load.
@@ -914,12 +855,17 @@ export default function HomeScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      const [, , , streakData] = await Promise.all([
+      const [announcements, notes, questions, streakData] = await Promise.all([
         fetchAnnouncements(),
         fetchNotes(),
         fetchQuestions(),
         fetchDailyStreak(),
       ]);
+      setHeroContent({
+        announcements: Array.isArray(announcements) ? announcements : [],
+        notes: Array.isArray(notes) ? notes : [],
+        questions: Array.isArray(questions) ? questions : [],
+      });
       if (streakData) {
         setStreakCount(streakData.streakCount || 0);
         setStreakDates(streakData.streakDates || []);
