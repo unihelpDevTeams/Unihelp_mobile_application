@@ -98,6 +98,7 @@ export async function createCompleteAccount(formData) {
     username: username.trim(),
     usernameLower: username.trim().toLowerCase(),
     email: email.trim().toLowerCase(),
+    premium: false,
     photoURL: photoURL || '',
     photo: photoURL || '',
     photoAsset: photoAsset || null,

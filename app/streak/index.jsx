@@ -87,7 +87,7 @@ export default function StreakScreen() {
         );
         return;
       }
-      router.navigate('/challenge/categories');
+      router.navigate('/challenge');
     } catch {}
   };
 

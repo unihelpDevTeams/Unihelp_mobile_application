@@ -30,6 +30,7 @@ export default function PremiumPage() {
   const [billing, setBilling] = useState('monthly');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [billingError, setBillingError] = useState('');
   const [planLoading, setPlanLoading] = useState(true);
   const [googleProducts, setGoogleProducts] = useState([]);
 
@@ -40,74 +41,85 @@ export default function PremiumPage() {
       backgroundColor: c.brandLight || c.surfaceSecondary,
       borderRadius: r.xl,
       padding: s.xl,
-      marginBottom: s.xl,
+      marginBottom: s.lg,
       alignItems: 'center',
+      borderWidth: 1,
+      borderColor: c.borderDefault,
     },
     heroIcon: {
-      width: 72,
-      height: 72,
-      borderRadius: r.xl,
+      width: 64,
+      height: 64,
+      borderRadius: r.lg,
       backgroundColor: c.card,
       alignItems: 'center',
       justifyContent: 'center',
-      marginBottom: s.lg,
+      marginBottom: s.md,
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.04,
+      shadowOpacity: 0.06,
       shadowRadius: 8,
       elevation: 2,
     },
     heroTitle: {
       color: c.textPrimary,
-      fontSize: 24,
+      fontSize: 22,
       fontWeight: '800',
       textAlign: 'center',
-      marginBottom: s.sm,
+      marginBottom: s.xs,
       letterSpacing: -0.3,
     },
     heroText: {
       color: c.textSecondary,
-      fontSize: 15,
-      lineHeight: 22,
+      fontSize: 14,
+      lineHeight: 20,
       textAlign: 'center',
-      maxWidth: '90%',
+      maxWidth: '92%',
     },
-    billingCard: {
+    heroProgressTrack: {
+      width: '100%',
+      height: 6,
+      borderRadius: r.full,
       backgroundColor: c.card,
-      borderRadius: r.xl,
-      borderWidth: 1,
-      borderColor: c.borderDefault,
-      padding: s.lg,
-      marginBottom: s.lg,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.04,
-      shadowRadius: 8,
-      elevation: 2,
+      marginTop: s.lg,
+      overflow: 'hidden',
+    },
+    heroProgressFill: {
+      height: '100%',
+      backgroundColor: c.brand,
+      borderRadius: r.full,
     },
     sectionTitle: {
       color: c.textPrimary,
-      fontSize: 15,
+      fontSize: 13,
       fontWeight: '800',
+      textTransform: 'uppercase',
+      letterSpacing: 0.4,
       marginBottom: s.md,
+    },
+    billingCard: {
+      marginBottom: s.lg,
     },
     segment: {
       flexDirection: 'row',
-      backgroundColor: c.brandLight || c.surfaceSecondary,
+      backgroundColor: c.surfaceSecondary,
       borderRadius: r.full,
       padding: 4,
+      gap: 4,
     },
     segmentButton: {
       flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
       borderRadius: r.full,
       paddingVertical: s.md,
-      alignItems: 'center',
     },
     segmentButtonActive: {
       backgroundColor: c.card,
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.02,
+      shadowOpacity: 0.06,
       shadowRadius: 4,
       elevation: 1,
     },
@@ -119,94 +131,112 @@ export default function PremiumPage() {
     segmentTextActive: {
       color: c.brand,
     },
+    savingsBadge: {
+      backgroundColor: c.brand,
+      borderRadius: r.full,
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+    },
+    savingsBadgeText: {
+      color: c.onBrand,
+      fontSize: 10,
+      fontWeight: '800',
+    },
     planCard: {
       backgroundColor: c.card,
       borderRadius: r.xl,
       borderWidth: 1,
       borderColor: c.borderDefault,
-      padding: s.xl,
+      padding: s.lg,
       marginBottom: s.lg,
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.04,
-      shadowRadius: 8,
+      shadowOpacity: 0.05,
+      shadowRadius: 10,
       elevation: 2,
     },
     planHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: s.lg,
       gap: s.md,
-      marginBottom: s.xl,
+    },
+    planHeaderCopy: {
+      flex: 1,
     },
     planName: {
       color: c.textPrimary,
-      fontSize: 22,
+      fontSize: 19,
       fontWeight: '800',
+      marginBottom: 2,
     },
     planSubtitle: {
       color: c.textSecondary,
-      fontSize: 14,
+      fontSize: 13,
     },
     pricePill: {
-      alignSelf: 'flex-start',
+      alignItems: 'flex-end',
+    },
+    priceRow: {
       flexDirection: 'row',
       alignItems: 'flex-end',
-      backgroundColor: c.brandLight || c.surfaceSecondary,
-      borderRadius: r.full,
-      paddingHorizontal: s.md,
-      paddingVertical: s.sm,
+      gap: 3,
     },
     priceText: {
-      color: c.brand,
+      color: c.textPrimary,
       fontSize: 20,
       fontWeight: '800',
     },
     priceCycle: {
-      color: c.brand,
-      fontSize: 14,
-      fontWeight: '700',
+      color: c.textSecondary,
+      fontSize: 13,
+      fontWeight: '600',
       marginBottom: 2,
-      opacity: 0.7,
     },
     featureList: {
-      gap: s.sm,
-      marginBottom: s.xl,
+      gap: s.md,
+      marginBottom: s.lg,
+      paddingTop: s.lg,
+      borderTopWidth: 1,
+      borderTopColor: c.borderDefault,
     },
     featureRow: {
       flexDirection: 'row',
-      gap: s.sm,
-      alignItems: 'center',
+      gap: s.md,
+      alignItems: 'flex-start',
     },
     checkIcon: {
-      width: 24,
-      height: 24,
-      borderRadius: 12,
-      backgroundColor: c.surfaceSecondary,
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      backgroundColor: c.brandLight || c.surfaceSecondary,
       alignItems: 'center',
       justifyContent: 'center',
+      marginTop: 1,
     },
     featureCopy: {
       flex: 1,
     },
     featureText: {
-      flex: 1,
       color: c.textPrimary,
       fontSize: 14,
-      fontWeight: '600',
+      fontWeight: '700',
     },
     featureDescription: {
       color: c.textSecondary,
       fontSize: 12,
       marginTop: 2,
+      lineHeight: 16,
     },
     successBox: {
       flexDirection: 'row',
       gap: s.sm,
       alignItems: 'center',
-      backgroundColor: c.surfaceSecondary,
+      backgroundColor: c.brandLight || c.surfaceSecondary,
       borderRadius: r.md,
       padding: s.md,
-      marginBottom: s.lg,
-      borderLeftWidth: 3,
-      borderLeftColor: c.brand,
+      marginBottom: s.md,
     },
     successText: {
       flex: 1,
@@ -224,15 +254,16 @@ export default function PremiumPage() {
       paddingVertical: s.lg,
       shadowColor: c.brand,
       shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.3,
-      shadowRadius: 8,
-      elevation: 5,
+      shadowOpacity: 0.25,
+      shadowRadius: 10,
+      elevation: 4,
     },
     subscribeButtonPressed: {
       opacity: 0.9,
     },
     subscribeButtonDisabled: {
       opacity: 0.6,
+      shadowOpacity: 0,
     },
     subscribeText: {
       color: c.onBrand,
@@ -245,13 +276,8 @@ export default function PremiumPage() {
       borderWidth: 1,
       borderColor: c.borderDefault,
       padding: s.lg,
-      marginBottom: s.lg,
+      marginBottom: s.md,
       gap: s.md,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.04,
-      shadowRadius: 8,
-      elevation: 2,
     },
     featureActionHeader: {
       flexDirection: 'row',
@@ -259,10 +285,10 @@ export default function PremiumPage() {
       alignItems: 'flex-start',
     },
     featureActionIcon: {
-      width: 40,
-      height: 40,
+      width: 38,
+      height: 38,
       borderRadius: r.lg,
-      backgroundColor: c.surfaceSecondary,
+      backgroundColor: c.brandLight || c.surfaceSecondary,
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: 0,
@@ -272,14 +298,14 @@ export default function PremiumPage() {
     },
     featureActionTitle: {
       color: c.textPrimary,
-      fontSize: 15,
+      fontSize: 14,
       fontWeight: '800',
       marginBottom: 2,
     },
     featureActionDescription: {
       color: c.textSecondary,
-      fontSize: 13,
-      lineHeight: 18,
+      fontSize: 12.5,
+      lineHeight: 17,
     },
     featureActionButton: {
       flexDirection: 'row',
@@ -290,35 +316,39 @@ export default function PremiumPage() {
       borderRadius: r.lg,
       paddingVertical: s.md,
     },
+    featureActionButtonSecondary: {
+      backgroundColor: c.surfaceSecondary,
+    },
     featureActionButtonPressed: {
-      opacity: 0.9,
+      opacity: 0.85,
     },
     featureActionButtonText: {
       color: c.onBrand,
-      fontSize: 14,
+      fontSize: 13.5,
       fontWeight: '800',
       flexShrink: 1,
       textAlign: 'center',
+    },
+    featureActionButtonTextSecondary: {
+      color: c.textPrimary,
     },
     noteBox: {
       flexDirection: 'row',
       gap: s.md,
       backgroundColor: c.surfaceSecondary,
       borderRadius: r.xl,
-      borderLeftWidth: 3,
-      borderLeftColor: c.brand,
       padding: s.lg,
+      marginBottom: s.md,
     },
     noteText: {
       flex: 1,
-      color: c.textPrimary,
-      fontSize: 13,
+      color: c.textSecondary,
+      fontSize: 12.5,
       lineHeight: 18,
-      fontWeight: '600',
+      fontWeight: '500',
     },
     androidActions: {
       gap: s.sm,
-      marginBottom: s.lg,
     },
     loadingCard: {
       backgroundColor: c.card,
@@ -328,11 +358,6 @@ export default function PremiumPage() {
       padding: s['3xl'],
       alignItems: 'center',
       justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.04,
-      shadowRadius: 8,
-      elevation: 2,
     },
     loadingText: {
       marginTop: s.md,
@@ -347,11 +372,6 @@ export default function PremiumPage() {
       borderColor: c.borderDefault,
       padding: s.lg,
       marginBottom: s.lg,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.04,
-      shadowRadius: 8,
-      elevation: 2,
     },
     activeRow: {
       flexDirection: 'row',
@@ -359,9 +379,10 @@ export default function PremiumPage() {
       alignItems: 'center',
     },
     activeLabel: {
-      fontSize: 13,
+      fontSize: 12,
       color: c.textSecondary,
       fontWeight: '600',
+      marginBottom: 2,
     },
     activeValue: {
       fontSize: 15,
@@ -369,7 +390,7 @@ export default function PremiumPage() {
       fontWeight: '700',
     },
     activePill: {
-      backgroundColor: c.surfaceSecondary,
+      backgroundColor: c.brandLight || c.surfaceSecondary,
       borderRadius: r.full,
       paddingHorizontal: s.md,
       paddingVertical: 6,
@@ -401,20 +422,40 @@ export default function PremiumPage() {
     let mounted = true;
     loadGooglePlayProducts()
       .then((products) => { if (mounted) setGoogleProducts(products || []); })
-      .catch((error) => console.log('[Premium] Google Play unavailable:', error?.message));
+      .catch((error) => {
+        console.log('[Premium] Google Play unavailable:', error?.message);
+        if (mounted) setBillingError(error?.message || 'Google Play products are unavailable.');
+      });
     return () => { mounted = false; };
   }, []);
 
   const amount = getPremiumAmount(billing);
+  const monthlyAmount = getPremiumAmount('monthly');
+  const yearlyAmount = getPremiumAmount('yearly');
+  const yearlySavingsPct = useMemo(() => {
+    if (!monthlyAmount || !yearlyAmount) return 0;
+    const fullYearAtMonthlyRate = monthlyAmount * 12;
+    if (fullYearAtMonthlyRate <= 0) return 0;
+    const pct = Math.round((1 - yearlyAmount / fullYearAtMonthlyRate) * 100);
+    return pct > 0 ? pct : 0;
+  }, [monthlyAmount, yearlyAmount]);
+
   const googleProductId = billing === 'yearly'
     ? GOOGLE_PLAY_PRODUCT_IDS[1]
     : GOOGLE_PLAY_PRODUCT_IDS[0];
   const googleProduct = googleProducts.find((product) => product.id === googleProductId);
   const daysLeft = useMemo(() => getDaysLeft(profile?.subscriptionExpiresAt), [profile?.subscriptionExpiresAt]);
   const expiryDate = useMemo(() => getSubscriptionExpiry(profile?.subscriptionExpiresAt), [profile?.subscriptionExpiresAt]);
+  const progressPct = useMemo(() => {
+    if (daysLeft == null) return null;
+    const totalDays = PREMIUM_PLAN?.durationDays || 30;
+    const pct = Math.max(0, Math.min(100, (daysLeft / totalDays) * 100));
+    return pct;
+  }, [daysLeft]);
 
   const subscribe = async () => {
     setMessage('');
+    setBillingError('');
     setLoading(true);
 
     try {
@@ -429,6 +470,7 @@ export default function PremiumPage() {
     } catch (error) {
       const text = error?.message || 'Payment could not be completed.';
       if (text !== 'Payment was cancelled.') {
+        setBillingError(text);
         Alert.alert('Premium upgrade', text);
       }
     } finally {
@@ -437,6 +479,7 @@ export default function PremiumPage() {
   };
 
   const restore = async () => {
+    setBillingError('');
     setLoading(true);
     try {
       if (Platform.OS !== 'android') throw new Error('Restore Purchases is available on Android only.');
@@ -444,7 +487,9 @@ export default function PremiumPage() {
       await refreshProfile?.();
       setMessage('Purchases restored and verified.');
     } catch (error) {
-      Alert.alert('Restore purchases', error?.message || 'Could not restore purchases.');
+      const text = error?.message || 'Could not restore purchases.';
+      setBillingError(text);
+      Alert.alert('Restore purchases', text);
     } finally {
       setLoading(false);
     }
@@ -462,24 +507,31 @@ export default function PremiumPage() {
   }
 
   return (
-    <ScreenShell title="Premium" subtitle="Upgrade your Unihelp account." showBack scrollable={false}>
+    <ScreenShell title="Premium" subtitle="Upgrade your Unihelp account." showBack>
       {premiumActive ? (
         <View style={styles.hero}>
           <View style={styles.heroIcon}>
-            <Ionicons name="diamond-outline" size={40} color={colors.gold} />
+            <Ionicons name="diamond-outline" size={32} color={colors.brand} />
           </View>
           <Text style={styles.heroTitle}>Premium Active</Text>
           <Text style={styles.heroText}>
-            {daysLeft ?? 'Active'} days remaining. Your plan includes up to {COMMERCE_UPLOAD_LIMITS.premium} hostel and {COMMERCE_UPLOAD_LIMITS.premium} product uploads.
+            {daysLeft ?? 'Active'} days remaining · up to {COMMERCE_UPLOAD_LIMITS.premium} hostel and {COMMERCE_UPLOAD_LIMITS.premium} product uploads
           </Text>
+          {progressPct != null ? (
+            <View style={styles.heroProgressTrack}>
+              <View style={[styles.heroProgressFill, { width: `${progressPct}%` }]} />
+            </View>
+          ) : null}
         </View>
       ) : (
         <View style={styles.hero}>
           <View style={styles.heroIcon}>
-            <Ionicons name="diamond-outline" size={40} color={colors.gold} />
+            <Ionicons name="diamond-outline" size={32} color={colors.brand} />
           </View>
           <Text style={styles.heroTitle}>Unlock Student Premium</Text>
-          <Text style={styles.heroText}>Get more downloads, stronger AI help, a verified badge, and up to {COMMERCE_UPLOAD_LIMITS.premium} hostel plus {COMMERCE_UPLOAD_LIMITS.premium} product uploads.</Text>
+          <Text style={styles.heroText}>
+            More downloads, stronger AI help, a verified badge, and up to {COMMERCE_UPLOAD_LIMITS.premium} hostel plus {COMMERCE_UPLOAD_LIMITS.premium} product uploads.
+          </Text>
         </View>
       )}
 
@@ -519,6 +571,11 @@ export default function PremiumPage() {
                 <Text style={[styles.segmentText, billing === item && styles.segmentTextActive]}>
                   {item === 'monthly' ? 'Monthly' : 'Yearly'}
                 </Text>
+                {item === 'yearly' && yearlySavingsPct > 0 ? (
+                  <View style={styles.savingsBadge}>
+                    <Text style={styles.savingsBadgeText}>-{yearlySavingsPct}%</Text>
+                  </View>
+                ) : null}
               </Pressable>
             ))}
           </View>
@@ -528,13 +585,17 @@ export default function PremiumPage() {
       {premiumActive ? null : (
         <View style={styles.planCard}>
           <View style={styles.planHeader}>
-            <View>
+            <View style={styles.planHeaderCopy}>
               <Text style={styles.planName}>{PREMIUM_PLAN.name}</Text>
               <Text style={styles.planSubtitle}>One plan for all student tools</Text>
             </View>
             <View style={styles.pricePill}>
-              <Text style={styles.priceText}>{Platform.OS === 'android' ? (googleProduct?.displayPrice || 'Price unavailable') : `NGN ${amount.toLocaleString()}`}</Text>
-              <Text style={styles.priceCycle}>/{billing === 'monthly' ? 'mo' : 'yr'}</Text>
+              <View style={styles.priceRow}>
+                <Text style={styles.priceText}>
+                  {Platform.OS === 'android' ? (googleProduct?.displayPrice || 'Price unavailable') : `NGN ${amount.toLocaleString()}`}
+                </Text>
+                <Text style={styles.priceCycle}>/{billing === 'monthly' ? 'mo' : 'yr'}</Text>
+              </View>
             </View>
           </View>
 
@@ -542,7 +603,7 @@ export default function PremiumPage() {
             {PREMIUM_PLAN.features.map((feature) => (
               <View key={feature.key || feature.title} style={styles.featureRow}>
                 <View style={styles.checkIcon}>
-                  <Ionicons name="checkmark" size={14} color={colors.teal} />
+                  <Ionicons name="checkmark" size={13} color={colors.brand} />
                 </View>
                 <View style={styles.featureCopy}>
                   <Text style={styles.featureText}>{feature.title}</Text>
@@ -554,8 +615,15 @@ export default function PremiumPage() {
 
           {message ? (
             <View style={styles.successBox}>
-              <Ionicons name="checkmark-circle" size={17} color={colors.teal} />
+              <Ionicons name="checkmark-circle" size={17} color={colors.brand} />
               <Text style={styles.successText}>{message}</Text>
+            </View>
+          ) : null}
+
+          {billingError ? (
+            <View style={styles.noteBox}>
+              <Ionicons name="alert-circle-outline" size={18} color={colors.orange} />
+              <Text style={styles.noteText}>{billingError}</Text>
             </View>
           ) : null}
 
@@ -628,25 +696,35 @@ export default function PremiumPage() {
             : 'Payment opens securely with Flutterwave. The backend verifies the transaction before premium is added to your profile.'}
         </Text>
       </View>
+
       {Platform.OS === 'android' ? (
         <View style={styles.androidActions}>
           <Pressable
             onPress={restore}
             disabled={loading}
-            style={({ pressed }) => [styles.featureActionButton, pressed && styles.featureActionButtonPressed, loading && styles.subscribeButtonDisabled]}
+            style={({ pressed }) => [
+              styles.featureActionButton,
+              styles.featureActionButtonSecondary,
+              pressed && styles.featureActionButtonPressed,
+              loading && styles.subscribeButtonDisabled,
+            ]}
           >
-            <Ionicons name="refresh-outline" size={16} color={colors.onBrand} />
-            <Text style={styles.featureActionButtonText}>Restore purchases</Text>
+            <Ionicons name="refresh-outline" size={16} color={colors.textPrimary} />
+            <Text style={[styles.featureActionButtonText, styles.featureActionButtonTextSecondary]}>Restore purchases</Text>
           </Pressable>
           <Pressable
             onPress={() => deepLinkToSubscriptionsAndroid({
               skuAndroid: googleProductId,
               packageNameAndroid: 'com.zenithdev.unihelp',
             }).catch(() => Linking.openURL('https://play.google.com/store/account/subscriptions'))}
-            style={({ pressed }) => [styles.featureActionButton, pressed && styles.featureActionButtonPressed]}
+            style={({ pressed }) => [
+              styles.featureActionButton,
+              styles.featureActionButtonSecondary,
+              pressed && styles.featureActionButtonPressed,
+            ]}
           >
-            <Ionicons name="settings-outline" size={16} color={colors.onBrand} />
-            <Text style={styles.featureActionButtonText}>Manage Google Play subscription</Text>
+            <Ionicons name="settings-outline" size={16} color={colors.textPrimary} />
+            <Text style={[styles.featureActionButtonText, styles.featureActionButtonTextSecondary]}>Manage Google Play subscription</Text>
           </Pressable>
         </View>
       ) : null}

@@ -449,7 +449,9 @@ export default function ProfileScreen() {
 
   const profilePhoto = profile?.photoURL || profile?.photo || user?.photoURL || '';
   const profileCover = profile?.coverPhoto || profile?.cover || profile?.coverUrl || '';
-  const isAdmin = profile?.admin === true;
+  const isAdmin =
+    profile?.admin === true ||
+    user?.email?.trim().toLowerCase() === 'iadejuwon77@gmail.com';
   const totalUploads = stats.listings + stats.hostelListings + stats.stories;
 
   const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }));

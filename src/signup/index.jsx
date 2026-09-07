@@ -53,15 +53,12 @@ export default function SignupFlow() {
       try {
         await createCompleteAccount({ ...formData, photoURL: uploadedPhotoURL, photoAsset: uploadedPhotoAsset });
         
-        try {
-          const { auth } = require('../../firebase/config');
-           const { sendEmailVerification } = require('firebase/auth');
-          if (auth.currentUser) {
-             await sendEmailVerification(auth.currentUser);
-          }
-        } catch (e) {
-          console.error('Email verification error:', e);
+        const { auth } = require('../../firebase/config');
+        const { sendEmailVerification } = require('firebase/auth');
+        if (!auth.currentUser) {
+          throw new Error('Your account was created, but the verification email could not be sent. Please log in and resend it.');
         }
+        await sendEmailVerification(auth.currentUser);
 
         router.replace({ pathname: '/(auth)/verify-email', params: { email: formData.email } });
       } catch (accountError) {

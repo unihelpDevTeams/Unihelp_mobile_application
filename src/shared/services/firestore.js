@@ -6,6 +6,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -297,6 +298,28 @@ export async function fetchNotificationsPage({ uid = auth.currentUser?.uid, page
   };
 }
 
+export function listenUnreadGroupMessageCount(uid = auth.currentUser?.uid, callback) {
+  if (!uid || typeof callback !== 'function') return () => {};
+
+  const notificationsRef = collection(db, COLLECTIONS.notifications, uid, 'items');
+  const unreadQuery = query(notificationsRef, where('read', '==', false), limit(200));
+
+  return onSnapshot(
+    unreadQuery,
+    (snapshot) => {
+      const count = snapshot.docs.reduce(
+        (total, notification) => total + (notification.data()?.type === 'group_message' ? 1 : 0),
+        0
+      );
+      callback(count);
+    },
+    (error) => {
+      console.error('Unable to listen for unread group messages', error);
+      callback(0);
+    }
+  );
+}
+
 export async function fetchConversations(uid = auth.currentUser?.uid) {
   if (!uid) return [];
   const snapshot = await getDocs(query(collection(db, COLLECTIONS.conversations)));
@@ -312,6 +335,30 @@ export async function fetchConversations(uid = auth.currentUser?.uid) {
       const rightTime = right.updatedAt?.toDate?.()?.getTime?.() || 0;
       return rightTime - leftTime;
     });
+}
+
+export function listenUnreadConversationCount(uid = auth.currentUser?.uid, callback) {
+  if (!uid || typeof callback !== 'function') return () => {};
+
+  const conversationsQuery = query(
+    collection(db, COLLECTIONS.conversations),
+    where('memberIds', 'array-contains', uid)
+  );
+
+  return onSnapshot(
+    conversationsQuery,
+    (snapshot) => {
+      const count = snapshot.docs.reduce((total, conversation) => {
+        const unread = Number(conversation.data()?.unread?.[uid] || 0);
+        return total + (Number.isFinite(unread) && unread > 0 ? unread : 0);
+      }, 0);
+      callback(count);
+    },
+    (error) => {
+      console.error('Unable to listen for unread conversations', error);
+      callback(0);
+    }
+  );
 }
 
 export async function fetchConversationMessages(conversationId) {

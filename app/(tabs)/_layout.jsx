@@ -1,13 +1,37 @@
 import React from 'react';
-import { Platform } from 'react-native';
+import { Platform, Text, View } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { layout } from '../../src/shared/theme';
 import ProtectedRoute from '../../components/ProtectedRoute';
+import { useAuth } from '../../context/AuthContext';
+import {
+  listenUnreadConversationCount,
+  listenUnreadGroupMessageCount,
+} from '../../services/firestoreSync';
 
 export default function TabsLayout() {
   const { colors } = useTheme();
+  const { user } = useAuth();
+  const [unreadChats, setUnreadChats] = React.useState(0);
+  const [unreadGroupMessages, setUnreadGroupMessages] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!user?.uid) {
+      setUnreadChats(0);
+      setUnreadGroupMessages(0);
+      return undefined;
+    }
+
+    const unsubscribeChats = listenUnreadConversationCount(user.uid, setUnreadChats);
+    const unsubscribeGroups = listenUnreadGroupMessageCount(user.uid, setUnreadGroupMessages);
+
+    return () => {
+      unsubscribeChats();
+      unsubscribeGroups();
+    };
+  }, [user?.uid]);
 
   return (
     <ProtectedRoute>
@@ -66,11 +90,35 @@ export default function TabsLayout() {
           options={{
             title: 'Chats',
             tabBarIcon: ({ color, size, focused }) => (
-              <Ionicons
-                name={focused ? 'chatbubbles' : 'chatbubbles-outline'}
-                size={size ?? 22}
-                color={color}
-              />
+              <View>
+                <Ionicons
+                  name={focused ? 'chatbubbles' : 'chatbubbles-outline'}
+                  size={size ?? 22}
+                  color={color}
+                />
+                {unreadChats > 0 ? (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: -7,
+                      right: -10,
+                      minWidth: 17,
+                      height: 17,
+                      paddingHorizontal: 3,
+                      borderRadius: 9,
+                      backgroundColor: colors.red || '#EF4444',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderWidth: 1.5,
+                      borderColor: colors.tabBarBackground,
+                    }}
+                  >
+                    <Text style={{ color: '#FFFFFF', fontSize: 9, fontWeight: '800' }}>
+                      {unreadChats > 99 ? '99+' : unreadChats}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
             ),
           }}
         />
@@ -92,11 +140,35 @@ export default function TabsLayout() {
           options={{
             title: 'Groups',
             tabBarIcon: ({ color, size, focused }) => (
-              <Ionicons
-                name={focused ? 'people' : 'people-outline'}
-                size={size ?? 22}
-                color={color}
-              />
+              <View>
+                <Ionicons
+                  name={focused ? 'people' : 'people-outline'}
+                  size={size ?? 22}
+                  color={color}
+                />
+                {unreadGroupMessages > 0 ? (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: -7,
+                      right: -10,
+                      minWidth: 17,
+                      height: 17,
+                      paddingHorizontal: 3,
+                      borderRadius: 9,
+                      backgroundColor: colors.red || '#EF4444',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderWidth: 1.5,
+                      borderColor: colors.tabBarBackground,
+                    }}
+                  >
+                    <Text style={{ color: '#FFFFFF', fontSize: 9, fontWeight: '800' }}>
+                      {unreadGroupMessages > 99 ? '99+' : unreadGroupMessages}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
             ),
           }}
         />

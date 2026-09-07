@@ -46,13 +46,20 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
     setLoading(true); setError('');
     Promise.all([fetchStickerPacks(), tab === 'recent' ? fetchRecentStickers() : tab === 'favorites' ? fetchFavoriteStickers() : fetchStickers(selectedPackId ? { packId: selectedPackId } : {})])
       .then(([packData, stickerData]) => { if (!cancelled) { setPacks(packData); setStickers(stickerData); } })
-      .catch((loadError) => { if (!cancelled) setError(loadError.message || 'Could not load stickers.'); })
+      .catch((loadError) => {
+        console.error('[StickerPicker] Failed to load stickers/packs:', loadError);
+        if (!cancelled) setError(loadError.message || 'Could not load stickers.');
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [visible, tab, selectedPackId]);
 
   const select = async (sticker) => {
-    try { await recordStickerUse(sticker.id); } catch {}
+    try {
+      await recordStickerUse(sticker.id);
+    } catch (recordError) {
+      console.error('[StickerPicker] Failed to record sticker use:', recordError);
+    }
     onSelect(sticker);
     onClose();
   };

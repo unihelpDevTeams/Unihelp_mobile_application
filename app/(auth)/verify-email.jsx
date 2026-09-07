@@ -53,20 +53,32 @@ export default function VerifyEmailScreen() {
   };
 
   const resendVerification = async () => {
-    if (!auth.currentUser) {
-      router.replace('/(auth)/login');
-      return;
-    }
-    setResending(true);
-    try {
-      await sendEmailVerification(auth.currentUser);
-      Alert.alert('Email sent', `A new verification link was sent to ${email}.`);
-    } catch (error) {
-      Alert.alert('Could not resend email', error?.message || 'Please wait a moment and try again.');
-    } finally {
-      setResending(false);
-    }
-  };
+  if (!auth.currentUser) {
+    Alert.alert("No user", "auth.currentUser is null");
+    return;
+  }
+
+  setResending(true);
+
+  try {
+    console.log("UID:", auth.currentUser.uid);
+    console.log("Email:", auth.currentUser.email);
+    console.log("Verified:", auth.currentUser.emailVerified);
+
+    await sendEmailVerification(auth.currentUser);
+
+    console.log("Verification email request sent");
+    Alert.alert("Success", "Verification email sent.");
+  } catch (error) {
+    console.log("Firebase error:", error);
+    console.log("Code:", error.code);
+    console.log("Message:", error.message);
+
+    Alert.alert(error.code || "Error", error.message);
+  } finally {
+    setResending(false);
+  }
+};
 
   return (
     <SafeAreaView style={styles.screen}>
