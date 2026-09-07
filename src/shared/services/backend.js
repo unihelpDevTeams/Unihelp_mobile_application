@@ -13,14 +13,23 @@ export const getApiUrl = () => {
  * Get a Firebase auth token for authenticated API requests.
  */
 async function getAuthToken() {
-  try {
-    if (auth?.currentUser) {
-      return await auth.currentUser.getIdToken();
-    }
-  } catch {
-    // Not authenticated
+  const currentUser = auth?.currentUser;
+  if (!currentUser) {
+    throw new Error('Authentication is still loading. Please try again.');
   }
-  return null;
+
+  try {
+    const token = await currentUser.getIdToken();
+    if (!token) throw new Error('Firebase did not return an auth token.');
+    return token;
+  } catch (error) {
+    console.error('[API auth] Failed to get Firebase ID token', {
+      uid: currentUser.uid,
+      email: currentUser.email,
+      error,
+    });
+    throw new Error('Your login session expired. Please sign in again.');
+  }
 }
 
 /**
@@ -29,9 +38,7 @@ async function getAuthToken() {
 async function buildHeaders(extraHeaders = {}) {
   const headers = { 'Content-Type': 'application/json', ...extraHeaders };
   const token = await getAuthToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
+  headers['Authorization'] = `Bearer ${token}`;
   return headers;
 }
 
