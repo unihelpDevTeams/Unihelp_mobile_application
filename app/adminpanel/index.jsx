@@ -12,6 +12,7 @@ import { COLLECTIONS } from '../../src/shared/firestoreSchema';
 import { getJson, putJson, deleteJson } from '../../src/shared/services/backend';
 import { blockUser, createAnnouncement, unblockUser } from '../../services/firestoreSync';
 import PromoSpotlightManager from '../../src/admin/PromoSpotlightManager';
+import StickerManager from '../../src/admin/StickerManager';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 
 const TABS = [
@@ -21,6 +22,7 @@ const TABS = [
   { key: 'notifications', label: 'Send Notification', icon: 'notifications-outline' },
   { key: 'promoSpotlights', label: 'Promo Spotlights', icon: 'sparkles-outline' },
   { key: 'streakRewards', label: 'Streak Rewards', icon: 'gift-outline' },
+  { key: 'stickers', label: 'Stickers', icon: 'happy-outline' },
   { key: 'migration', label: 'Migration Tracker', icon: 'server-outline' },
 ];
 
@@ -208,6 +210,8 @@ export default function AdminPanelPage() {
         <PromoSpotlightManager />
       ) : activeTab === 'streakRewards' ? (
         <StreakRewardsAdmin colors={colors} />
+      ) : activeTab === 'stickers' ? (
+        <StickerManager colors={colors} />
       ) : activeTab === 'listings' ? (
         <View style={pageStyles.listingToggleWrap}>
           <View style={pageStyles.listingToggleContainer}>

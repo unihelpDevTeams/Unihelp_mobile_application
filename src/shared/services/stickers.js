@@ -14,6 +14,11 @@ export const deleteSticker = async (stickerId) => (await deleteJson(`/api/sticke
 export const uploadStickerMedia = async (file, onProgress, options = {}) => uploadStickerAsset(file, { onProgress, ...options });
 export const createSticker = async (payload) => (await postJson('/api/stickers', payload)).data;
 export const createStickerPack = async (payload) => (await postJson('/api/stickers/packs', payload)).data;
+export const seedDefaultFreeStickers = async () => (await postJson('/api/stickers/admin/seed-defaults', {})).data;
+export const createOfficialPack = async (payload) => (await postJson('/api/stickers/admin/packs', payload)).data;
+export const createOfficialSticker = async (payload) => (await postJson('/api/stickers/admin/stickers', payload)).data;
+export const updateOfficialPack = async (packId, payload) => (await putJson(`/api/stickers/admin/packs/${encodeURIComponent(packId)}`, payload)).data;
+export const updateOfficialSticker = async (stickerId, payload) => (await putJson(`/api/stickers/admin/stickers/${encodeURIComponent(stickerId)}`, payload)).data;
 export const updateStickerPack = async (packId, payload) => (await putJson(`/api/stickers/packs/${encodeURIComponent(packId)}`, payload)).data;
 export const getStickerStorage = async () => (await getJson('/api/stickers/storage')).data;
 export const removeStickerBackground = async (stickerId) => (await postJson(`/api/stickers/${encodeURIComponent(stickerId)}/remove-background`, {})).data;
