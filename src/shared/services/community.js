@@ -364,7 +364,7 @@ export const sendGroupMessage = async (groupId, user, profile, payload) => {
       await sendAppNotification({
         userIds: recipientIds,
         title: `${summary.name}`,
-        body: payload.text || 'Sent a new message in the group',
+        body: payload.type === 'sticker' ? 'Sent a sticker in the group' : payload.text || 'Sent a new message in the group',
         type: 'group_message',
         category: 'Message',
         url: `/community/${groupId}`,

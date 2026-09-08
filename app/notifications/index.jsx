@@ -95,6 +95,7 @@ export default function NotificationsPage() {
   const [hasMore, setHasMore] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
   const { colors } = useTheme();
   const styles = useThemeStyles(createStyles);
   const typeMeta = useMemo(() => getTypeMeta(colors), [colors]);
@@ -180,16 +181,18 @@ export default function NotificationsPage() {
 
     const deletingItem = pendingDelete;
     setDeletingId(deletingItem.id);
+    setDeleteError('');
     setPendingDelete(null);
     setItems((current) => current.filter((entry) => entry.id !== deletingItem.id));
 
     try {
       await deleteNotification(deletingItem.id);
-    } catch {
+    } catch (error) {
       setItems((current) => {
         if (current.some((entry) => entry.id === deletingItem.id)) return current;
         return [deletingItem, ...current];
       });
+      setDeleteError(error?.message || 'Could not delete this notification. Please try again.');
     } finally {
       setDeletingId(null);
     }
@@ -217,6 +220,7 @@ export default function NotificationsPage() {
 
   return (
     <ScreenShell title="Notifications" subtitle="Stay updated with your activity" showBack loading={loading} scrollable={false}>
+      {deleteError ? <Text style={styles.deleteError}>{deleteError}</Text> : null}
       {items.length ? (
         <>
           {/* Header Bar */}
@@ -342,6 +346,14 @@ const createStyles = (colors, spacing, borderRadius) => ({
     alignItems: 'center',
     marginBottom: spacing.md,
     paddingHorizontal: spacing.xs,
+  },
+  deleteError: {
+    color: colors.danger,
+    backgroundColor: colors.dangerLight,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
   },
   unreadBadge: {
     flexDirection: 'row',

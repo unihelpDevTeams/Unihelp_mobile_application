@@ -48,6 +48,7 @@ export {
   fetchUserActivity,
   getCurrentUserProfile as getUserProfile,
   groupPaths,
+  deleteNotification,
   markNotificationRead,
   notifyInactiveUsers,
   saveBookmark,

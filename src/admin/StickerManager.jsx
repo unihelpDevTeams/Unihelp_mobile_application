@@ -42,6 +42,7 @@ export default function StickerManager({ colors }) {
   const [media, setMedia] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [operationError, setOperationError] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -62,12 +63,14 @@ export default function StickerManager({ colors }) {
 
   const seedDefaults = async () => {
     setSaving(true);
+    setOperationError('');
     try {
       await seedDefaultFreeStickers();
       await load();
       Alert.alert('Defaults added', 'The free default sticker pack is ready.');
     } catch (error) {
       console.error('[StickerManager] Failed to seed default stickers', error);
+      setOperationError(error.message || 'Could not seed default stickers.');
       Alert.alert('Could not seed defaults', error.message || 'Please try again.');
     } finally {
       setSaving(false);
@@ -77,6 +80,7 @@ export default function StickerManager({ colors }) {
   const createPack = async () => {
     if (!packName.trim()) return Alert.alert('Pack name required', 'Enter a name for the official pack.');
     setSaving(true);
+    setOperationError('');
     try {
       const result = await createOfficialPack({ name: packName.trim(), description: packDescription.trim(), isPremium: false });
       setPackName('');
@@ -86,6 +90,7 @@ export default function StickerManager({ colors }) {
       Alert.alert('Pack created', 'You can now upload stickers into this pack.');
     } catch (error) {
       console.error('[StickerManager] Failed to create official pack', error);
+      setOperationError(error.message || 'Could not create the official pack.');
       Alert.alert('Could not create pack', error.message || 'Please try again.');
     } finally {
       setSaving(false);
@@ -106,6 +111,7 @@ export default function StickerManager({ colors }) {
     if (!selectedPackId) return Alert.alert('Select a pack', 'Choose an official pack first.');
     if (!media) return Alert.alert('Media required', 'Choose an image or video for the sticker.');
     setSaving(true);
+    setOperationError('');
     try {
       const upload = await uploadStickerMedia(media);
       await createOfficialSticker({
@@ -120,6 +126,7 @@ export default function StickerManager({ colors }) {
       Alert.alert('Sticker added', 'The official sticker is now available to users.');
     } catch (error) {
       console.error('[StickerManager] Failed to upload official sticker', error);
+      setOperationError(error.message || 'Could not add the official sticker.');
       Alert.alert('Could not add sticker', error.message || 'Please try again.');
     } finally {
       setSaving(false);
@@ -128,6 +135,11 @@ export default function StickerManager({ colors }) {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      {operationError ? (
+        <View style={[styles.section, { borderColor: colors.danger, backgroundColor: colors.dangerLight }]}>
+          <Text style={[styles.text, { color: colors.danger }]}>{operationError}</Text>
+        </View>
+      ) : null}
       <View style={styles.section}>
         <Text style={styles.title}>Default free stickers</Text>
         <Text style={styles.text}>Create or restore the built-in free reaction pack. Running this again safely updates the same default stickers.</Text>

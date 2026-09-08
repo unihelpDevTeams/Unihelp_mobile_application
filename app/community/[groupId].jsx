@@ -20,6 +20,8 @@ import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
+import StickerPicker from '../../src/shared/components/StickerPicker';
+import StickerMessage from '../../src/shared/components/StickerMessage';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { useAuth } from '../../context/AuthContext';
@@ -103,6 +105,7 @@ export default function GroupDetailPage() {
   const [requestMessage, setRequestMessage] = useState('');
   const [processingRequestId, setProcessingRequestId] = useState(null);
   const [draft, setDraft] = useState('');
+  const [stickerPickerVisible, setStickerPickerVisible] = useState(false);
   const [replyTo, setReplyTo] = useState(null);
   const scrollRef = useRef(null);
 
@@ -735,6 +738,16 @@ export default function GroupDetailPage() {
       alignItems: 'flex-end',
       gap: 8,
     },
+    stickerButton: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.inputBackground,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+    },
     inputPill: {
       flex: 1,
       backgroundColor: c.inputBackground,
@@ -1095,6 +1108,35 @@ export default function GroupDetailPage() {
     }
   };
 
+  const sendSticker = async (sticker) => {
+    if (!sticker || !group || !user || !isMember || !canSendMessages || busy) return;
+    setBusy(true);
+    try {
+      await sendGroupMessage(groupId, user, profile || {}, {
+        type: 'sticker',
+        stickerId: sticker.id,
+        sticker: {
+          id: sticker.id,
+          type: sticker.type,
+          assetUrl: sticker.assetUrl,
+          thumbnailUrl: sticker.thumbnailUrl,
+          name: sticker.name,
+        },
+        replyTo: replyTo
+          ? {
+              id: replyTo.id,
+              senderId: replyTo.senderId || '',
+              senderName: replyTo.senderName || 'Student',
+              text: messagePreview(replyTo) || '[Sticker]',
+            }
+          : null,
+      });
+      setReplyTo(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const showReactionError = (message) => {
     clearTimeout(reactionErrorTimer.current);
     setReactionError(message);
@@ -1442,6 +1484,14 @@ export default function GroupDetailPage() {
                   </View>
                 ) : null}
                 <View style={styles.composerInputRow}>
+                  <Pressable
+                    accessibilityLabel="Open sticker picker"
+                    style={styles.stickerButton}
+                    onPress={() => setStickerPickerVisible(true)}
+                    disabled={!canSendMessages || busy}
+                  >
+                    <Ionicons name="happy-outline" size={22} color={canSendMessages ? colors.brand : colors.textTertiary} />
+                  </Pressable>
                   <View style={styles.inputPill}>
                     <TextInput
                       value={draft}
@@ -1464,6 +1514,11 @@ export default function GroupDetailPage() {
               </View>
             </KeyboardAvoidingView>
           ) : null}
+          <StickerPicker
+            visible={stickerPickerVisible}
+            onClose={() => setStickerPickerVisible(false)}
+            onSelect={sendSticker}
+          />
         </View>
       ) : (
         <EmptyState title="Group not found" description="This group may have been deleted or is unavailable." />
@@ -1921,7 +1976,11 @@ function MessageRow({
             </View>
           ) : null}
 
-          <Text style={[styles.messageBody, mine && styles.messageBodyMine]}>{message.text || 'Attachment'}</Text>
+          {message.type === 'sticker' ? (
+            <StickerMessage message={message} isMine={mine} onLongPress={() => onOpenReactionPicker(message)} />
+          ) : (
+            <Text style={[styles.messageBody, mine && styles.messageBodyMine]}>{message.text || 'Attachment'}</Text>
+          )}
 
           <View style={styles.bubbleFooter}>
             {isReacting ? (

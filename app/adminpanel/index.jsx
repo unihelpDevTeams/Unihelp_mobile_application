@@ -23,7 +23,6 @@ const TABS = [
   { key: 'promoSpotlights', label: 'Promo Spotlights', icon: 'sparkles-outline' },
   { key: 'streakRewards', label: 'Streak Rewards', icon: 'gift-outline' },
   { key: 'stickers', label: 'Stickers', icon: 'happy-outline' },
-  { key: 'migration', label: 'Migration Tracker', icon: 'server-outline' },
 ];
 
 const ADMIN_COLLECTION_MAP = {
@@ -189,21 +188,6 @@ export default function AdminPanelPage() {
           >
             <Ionicons name="arrow-forward-outline" size={18} color={colors.onBrand || '#FFF'} />
             <Text style={pageStyles.notificationButtonText}>Open Support Center</Text>
-          </Pressable>
-        </View>
-      ) : activeTab === 'migration' ? (
-        <View style={pageStyles.notificationPlaceholder}>
-          <Ionicons name="server-outline" size={48} color={colors.brand} />
-          <Text style={pageStyles.notificationTitle}>Postgres Migration Tracker</Text>
-          <Text style={pageStyles.notificationText}>
-            Track the status of the backend migration from Firebase to PostgreSQL.
-          </Text>
-          <Pressable
-            style={pageStyles.notificationButton}
-            onPress={() => router.navigate('/adminpanel/migration-checklist')}
-          >
-            <Ionicons name="arrow-forward-outline" size={18} color={colors.onBrand || '#FFF'} />
-            <Text style={pageStyles.notificationButtonText}>Open Migration Checklist</Text>
           </Pressable>
         </View>
       ) : activeTab === 'promoSpotlights' ? (

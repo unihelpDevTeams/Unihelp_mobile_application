@@ -160,10 +160,22 @@ export async function uploadStickerMedia(file, { onProgress, rotation = 0 } = {}
   const headers = await buildHeaders({});
   delete headers['Content-Type'];
   const formData = new FormData();
+  const fileName = file.name || file.fileName || `sticker-media.${file.type === 'video' ? 'mp4' : 'jpg'}`;
+  const extension = fileName.split('.').pop()?.toLowerCase();
+  const extensionMimeTypes = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    mp4: 'video/mp4',
+    webm: 'video/webm',
+    mov: 'video/quicktime',
+  };
+  const mimeType = file.mimeType || (file.type?.includes('/') ? file.type : extensionMimeTypes[extension]) || (file.type === 'video' ? 'video/mp4' : 'image/jpeg');
   formData.append('file', {
     uri: file.uri,
-    name: file.name || file.fileName || 'sticker-media',
-    type: file.type || file.mimeType || 'application/octet-stream',
+    name: fileName,
+    type: mimeType,
   });
   formData.append('rotation', String(rotation));
   const response = await fetch(`${getApiUrl()}/api/stickers/upload`, {
