@@ -7,6 +7,7 @@ export function useUsernameCheck() {
   const [errorMessage, setErrorMessage] = useState('');
   const timerRef = useRef(null);
   const mountedRef = useRef(true);
+  const requestRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -17,6 +18,7 @@ export function useUsernameCheck() {
   }, []);
 
   const checkUsername = useCallback(async (value) => {
+    const requestId = ++requestRef.current;
     if (!value || value.trim().length < 3) {
       setStatus('idle');
       setErrorMessage('');
@@ -26,7 +28,7 @@ export function useUsernameCheck() {
     setStatus('checking');
     try {
       const result = await checkUsernameAvailability(value.trim());
-      if (mountedRef.current) {
+      if (mountedRef.current && requestId === requestRef.current) {
         if (result.available) {
           setStatus('available');
           setErrorMessage('');
@@ -36,7 +38,7 @@ export function useUsernameCheck() {
         }
       }
     } catch (error) {
-      if (mountedRef.current) {
+      if (mountedRef.current && requestId === requestRef.current) {
         setStatus('error');
         setErrorMessage(error?.message || 'Could not check username availability.');
       }
@@ -50,6 +52,7 @@ export function useUsernameCheck() {
       if (timerRef.current) clearTimeout(timerRef.current);
 
       if (!value || value.trim().length < 3) {
+        requestRef.current += 1;
         setStatus('idle');
         setErrorMessage('');
         return;

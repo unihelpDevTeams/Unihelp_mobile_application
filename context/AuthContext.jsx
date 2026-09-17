@@ -10,7 +10,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../firebase/config";
 import { ensureCurrentUserProfile } from "../src/shared/services/firestore";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, onSnapshot, setDoc } from "firebase/firestore";
 
 const AuthContext = createContext(null);
 
@@ -30,7 +30,15 @@ async function persistProfileCache(profile) {
         email: profile.email,
         role: profile.role,
         photo: profile.photo,
+        photoThumb: profile.photoThumb,
         premium: profile.premium,
+        premiumExpiresAt: profile.premiumExpiresAt,
+        subscriptionExpiresAt: profile.subscriptionExpiresAt,
+        subscriptionExpireAt: profile.subscriptionExpireAt,
+        subscriptionExpireAT: profile.subscriptionExpireAT,
+        subscriptionStatus: profile.subscriptionStatus,
+        subscriptionProvider: profile.subscriptionProvider,
+        subscriptionBilling: profile.subscriptionBilling,
         usernameLower: profile.usernameLower,
       };
       await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(slim));
@@ -91,7 +99,14 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let unsubscribeProfile = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (unsubscribeProfile) {
+        unsubscribeProfile();
+        unsubscribeProfile = null;
+      }
+
       if (firebaseUser) {
         // Step 1: read local cache immediately so the rest of the app can render
         const cachedProfile = await readProfileCache(firebaseUser.uid);
@@ -100,6 +115,19 @@ export function AuthProvider({ children }) {
         setUser(firebaseUser);
         setProfile(cachedProfile);
         setLoading(false);
+
+        unsubscribeProfile = onSnapshot(
+          doc(db, "users", firebaseUser.uid),
+          (snapshot) => {
+            if (!snapshot.exists()) return;
+            const liveProfile = { uid: firebaseUser.uid, id: snapshot.id, ...snapshot.data() };
+            setProfile(liveProfile);
+            persistProfileCache(liveProfile);
+          },
+          (error) => {
+            console.log("[AuthContext] Profile listener failed:", error?.message);
+          }
+        );
 
         // Step 3: fetch fresh profile in background (non-blocking)
         const provider =
@@ -117,7 +145,10 @@ export function AuthProvider({ children }) {
       }
     });
 
-    return unsubscribe;
+    return () => {
+      if (unsubscribeProfile) unsubscribeProfile();
+      unsubscribe();
+    };
   }, []);
 
   const signIn = async (email, password) => {

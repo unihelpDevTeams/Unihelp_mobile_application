@@ -82,7 +82,8 @@ export default function ViewUserProfile() {
       .join('') || 'S';
   }, [profile]);
 
-  const avatarUrl = typeof profile?.photo === 'string' ? profile.photo.trim() : profile?.photo || '';
+  const avatarUrl = String(profile?.photo || profile?.photoURL || '').trim();
+  const avatarThumbUrl = String(profile?.photoThumb || avatarUrl).trim();
   const coverUrl = String(profile?.coverPhoto || profile?.cover || profile?.coverUrl || profile?.banner || '').trim();
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [coverFailed, setCoverFailed] = useState(false);
@@ -327,9 +328,9 @@ export default function ViewUserProfile() {
             </View>
             <View style={styles.avatarWrapper}>
               <View style={[styles.avatarBorder, { backgroundColor: colors.surfacePrimary, shadowColor: colors.shadow }]}>
-                {avatarUrl && !avatarFailed && !isBlocked ? (
+                {avatarThumbUrl && !avatarFailed && !isBlocked ? (
                   <Image
-                    source={{ uri: avatarUrl }}
+                    source={{ uri: avatarThumbUrl }}
                     style={styles.avatarImage}
                     contentFit="cover"
                     onError={() => setAvatarFailed(true)}

@@ -23,6 +23,7 @@ import { useRouter } from 'expo-router';
 import { useAI } from '../../src/shared/context/AIContext';
 import { uploadFile } from '../../services/cloudinary';
 import { ChatThinkingLoader, UploadingLoader, ButtonLoader } from '../../src/shared/components/AILoaders';
+import { isPremiumActive } from '../../src/shared/services/premium';
 import {
   MODES,
   MODE_BY_ID,
@@ -179,7 +180,7 @@ export default function AiPage() {
   }));
 
   const profileKey = profile?.uid || profile?.id || 'guest';
-  const isPremium = Boolean(profile?.premium);
+  const isPremium = isPremiumActive(profile);
 
   useEffect(() => {
     if (messages.length === 0) {
@@ -365,7 +366,7 @@ export default function AiPage() {
                 <Text style={[styles.topBarSubtitle, lowQuota && styles.topBarSubtitleWarn]} numberOfLines={1}>
                   {usageStatus
                     ? `${usageStatus.remaining} AI ${usageStatus.remaining === 1 ? 'token' : 'tokens'} left today`
-                    : profile?.premium
+                    : isPremium
                       ? 'Premium answers are longer and more detailed'
                       : 'Upgrade to Premium for longer AI answers'}
                 </Text>
@@ -374,7 +375,7 @@ export default function AiPage() {
               <Text style={styles.topBarSubtitle}>Loading usage…</Text>
             )}
           </View>
-          {profile?.premium ? (
+          {isPremium ? (
             <View style={styles.premiumBadge}>
               <Ionicons name="star" size={11} color={colors.indigoDark} />
               <Text style={styles.premiumBadgeText}>PRO</Text>

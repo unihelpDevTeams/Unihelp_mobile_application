@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { postJson } from './backend';
+import { isPremiumActive } from './premium';
 
 const AI_USAGE_PREFIX = '@unihelp_ai_usage';
 const DAILY_AI_LIMITS = {
@@ -17,7 +18,7 @@ const getTodayKey = () => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 };
 
-export const getAiUsageLimit = (profile = {}) => (profile?.premium ? DAILY_AI_LIMITS.premium : DAILY_AI_LIMITS.free);
+export const getAiUsageLimit = (profile = {}) => (isPremiumActive(profile) ? DAILY_AI_LIMITS.premium : DAILY_AI_LIMITS.free);
 
 export const getAiUsageStatus = async (profile = {}) => {
   const key = `${getUsageKey(profile)}:${getTodayKey()}`;
@@ -73,7 +74,7 @@ export const createAiContextPayload = (profile = {}, extra = {}) => ({
     uid: profile?.uid || profile?.id || '',
     username: profile?.username || profile?.displayName || '',
     role: profile?.role || 'student',
-    premium: Boolean(profile?.premium),
+    premium: isPremiumActive(profile),
   },
   ...extra,
 });
@@ -82,7 +83,7 @@ export async function askStudyAi({ prompt, profile, attachment, context = {} }) 
   const usage = await consumeAiUsage(profile);
   if (!usage.allowed) {
     const limit = usage.limit;
-    const detail = profile?.premium
+    const detail = isPremiumActive(profile)
       ? 'Premium users get 10 AI messages per day.'
       : 'Free users get 5 AI messages per day.';
 

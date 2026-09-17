@@ -16,15 +16,17 @@ const INITIAL_FORM_DATA = {
   departmentName: '',
   faculty: '',
   level: '',
-  studentType: '',
+  studentType: 'university',
   // Step 3
+  heardFrom: '',
+  heardFromOther: '',
   photoURI: null,
   photoURL: '',
   bio: '',
   interests: [],
 };
 
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 5;
 
 /**
  * Central hook managing multi-step signup form state, validation, and navigation.

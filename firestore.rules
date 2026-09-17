@@ -334,6 +334,11 @@ service cloud.firestore {
       allow create, update, delete: if isAdminRequest();
     }
 
+    match /marketingSources/{sourceId} {
+      allow read: if signedIn() || resource.data.active == true;
+      allow create, update, delete: if isAdminRequest();
+    }
+
     match /promoSpotlightEvents/{eventId} {
       allow create: if signedIn() &&
         request.resource.data.promoId is string &&

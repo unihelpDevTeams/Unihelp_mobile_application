@@ -5,6 +5,7 @@ import { postJson, sendAppNotification } from './backend';
 export const PREMIUM_PLAN = {
   id: 'student-premium',
   name: 'Student Premium',
+  durationDays: 30,
   monthly: 1000,
   yearly: 10000,
   features: [
@@ -59,6 +60,9 @@ export const PREMIUM_PLAN = {
   ],
 };
 
+export const ADMIN_PREMIUM_GIFT_DAYS = 15;
+export const PREMIUM_EXPIRY_WARNING_DAYS = 10;
+
 export const COMMERCE_UPLOAD_LIMITS = {
   free: 5,
   premium: 10,
@@ -69,8 +73,22 @@ export const getPremiumAmount = (billing) => (billing === 'yearly' ? PREMIUM_PLA
 export const getSubscriptionExpiry = (value) => {
   if (!value) return null;
   if (typeof value.toDate === 'function') return value.toDate();
+  if (typeof value === 'object' && typeof value.seconds === 'number') {
+    return new Date(value.seconds * 1000);
+  }
   const date = value instanceof Date ? value : new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
+};
+
+export const getPremiumExpiry = (profile = {}) => {
+  const safeProfile = profile || {};
+  return getSubscriptionExpiry(
+    safeProfile.subscriptionExpiresAt ||
+      safeProfile.subscriptionExpireAt ||
+      safeProfile.subscriptionExpireAT ||
+      safeProfile.premiumExpiresAt ||
+      safeProfile.expiresAt
+  );
 };
 
 export const getDaysLeft = (expiresAt) => {
@@ -81,18 +99,34 @@ export const getDaysLeft = (expiresAt) => {
 };
 
 export const isPremiumActive = (profile = {}) => {
-  if (!profile?.premium) return false;
+  const safeProfile = profile || {};
+  if (!safeProfile.premium) return false;
 
-  const status = String(profile.subscriptionStatus || '').trim().toLowerCase();
+  const status = String(safeProfile.subscriptionStatus || '').trim().toLowerCase();
   if (status === 'expired') return false;
 
-  const expiry = getSubscriptionExpiry(
-    profile.subscriptionExpiresAt ||
-      profile.premiumExpiresAt ||
-      profile.expiresAt
-  );
+  const expiry = getPremiumExpiry(safeProfile);
 
   return !expiry || expiry.getTime() > Date.now();
+};
+
+export const getPremiumEntitlementStatus = (profile = {}) => {
+  const safeProfile = profile || {};
+  const active = isPremiumActive(safeProfile);
+  const expiresAt = getPremiumExpiry(safeProfile);
+  const daysLeft = active && expiresAt ? getDaysLeft(expiresAt) : null;
+  const subscriptionStatus = String(safeProfile.subscriptionStatus || '').trim().toLowerCase();
+  const isAdminGift = active && subscriptionStatus === 'admin_grant';
+  const warning = Boolean(active && daysLeft !== null && daysLeft <= PREMIUM_EXPIRY_WARNING_DAYS);
+
+  return {
+    active,
+    expiresAt,
+    daysLeft,
+    isAdminGift,
+    warning,
+    expiryLabel: expiresAt ? expiresAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '',
+  };
 };
 
 const parseReturnUrl = (url = '') => {

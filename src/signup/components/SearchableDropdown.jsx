@@ -125,7 +125,7 @@ export default function SearchableDropdown({
     if (!isOpen && !isControlledSearch && internalSearch) {
       setInternalSearch('');
     }
-  }, [isOpen, isControlledSearch]);
+  }, [isOpen, isControlledSearch, internalSearch]);
 
   return (
     <View style={st.container}>

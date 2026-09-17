@@ -57,6 +57,13 @@ export const isUsableUrl = (url = "") => {
   );
 };
 
+export const getCloudinaryThumbnailUrl = (url = "", size = 160) => {
+  const value = String(url || '').trim();
+  if (!isUsableUrl(value) || !value.includes('/upload/')) return value;
+  const boundedSize = Math.max(64, Math.min(Number(size) || 160, 320));
+  return value.replace('/upload/', `/upload/c_fill,w_${boundedSize},h_${boundedSize},g_face,q_auto,f_auto/`);
+};
+
 export const isPreviewImageUrl = (url = "") =>
   typeof url === "string" &&
   (url.startsWith("blob:") ||

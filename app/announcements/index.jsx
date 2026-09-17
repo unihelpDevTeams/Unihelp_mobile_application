@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
@@ -36,6 +37,7 @@ export default function AnnouncementsScreen() {
     cardTitle: { fontSize: 15, fontWeight: '800', color: c.textPrimary },
     cardMeta: { fontSize: 11.5, color: c.textSecondary, marginTop: s.xs },
     cardText: { fontSize: 13, color: c.textSecondary, lineHeight: 19 },
+    cardImage: { width: '100%', height: 150, borderRadius: r.lg, marginTop: s.md, backgroundColor: c.canvasLight },
     pinnedBadge: { backgroundColor: c.brandLight, borderRadius: r.full, paddingHorizontal: s.sm, paddingVertical: 4 },
     pinnedBadgeText: { fontSize: 10, fontWeight: '800', color: c.brand },
     priorityTag: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: s.sm, backgroundColor: c.dangerLight, alignSelf: 'flex-start', paddingHorizontal: s.sm, paddingVertical: 4, borderRadius: r.full },
@@ -205,6 +207,9 @@ export default function AnnouncementsScreen() {
               <Text style={styles.cardText} numberOfLines={3}>
                 {item.body || item.description || 'No additional details.'}
               </Text>
+              {item.image || item.imageUrl ? (
+                <Image source={{ uri: item.image || item.imageUrl }} style={styles.cardImage} contentFit="cover" cachePolicy="disk" />
+              ) : null}
               {(item.priority === 'high' || item.priority === 'urgent') && (
                 <View style={styles.priorityTag}>
                   <Ionicons name="alert-circle" size={12} color={getPriorityColor(item.priority)} />

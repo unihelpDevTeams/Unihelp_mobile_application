@@ -10,16 +10,23 @@ import {
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
   updateProfile as updateFirebaseAuthProfile,
 } from 'firebase/auth';
 import { auth, db } from '../../firebase/config';
-import { toCloudinaryAsset, uploadToCloudinary } from '../../services/cloudinary';
+import { getCloudinaryThumbnailUrl, toCloudinaryAsset, uploadToCloudinary } from '../../services/cloudinary';
 
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 
 export async function checkUsernameAvailability(username) {
   if (!username || username.trim().length < 3) {
     return { available: false, error: 'Username must be at least 3 characters.' };
+  }
+
+  // Firestore user reads require authentication. The authoritative check is
+  // repeated after account creation, when the new user is signed in.
+  if (!auth.currentUser) {
+    return { available: true, skipped: true };
   }
 
   const normalized = username.trim().toLowerCase();
@@ -77,11 +84,21 @@ export async function createCompleteAccount(formData) {
     studentType,
     bio,
     interests,
+    heardFrom,
+    heardFromOther,
   } = formData;
 
   // Step 1: Create Firebase Auth account
   const credential = await createUserWithEmailAndPassword(auth, email, password);
   const displayName = `${firstName} ${lastName}`.trim();
+
+  const usernameResult = await checkUsernameAvailability(username);
+  if (!usernameResult.available) {
+    await deleteUser(credential.user).catch(() => {});
+    const error = new Error(usernameResult.error || 'Username is already taken.');
+    error.code = 'auth/username-already-in-use';
+    throw error;
+  }
 
   await updateFirebaseAuthProfile(credential.user, {
     displayName,
@@ -101,6 +118,7 @@ export async function createCompleteAccount(formData) {
     premium: false,
     photoURL: photoURL || '',
     photo: photoURL || '',
+    photoThumb: getCloudinaryThumbnailUrl(photoURL || ''),
     photoAsset: photoAsset || null,
     universityId: universityId || '',
     universityName: universityName || '',
@@ -111,6 +129,8 @@ export async function createCompleteAccount(formData) {
     studentType: studentType || '',
     bio: bio || '',
     interests: interests || [],
+    heardFrom: heardFrom || '',
+    heardFromOther: heardFromOther || '',
     points: 0,
     xp: 0,
     currentStreak: 0,

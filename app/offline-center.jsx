@@ -498,7 +498,7 @@ export default function OfflineCenterScreen() {
     ? isConnected === false
       ? 'You\'re offline — your saved resources are still available on this device.'
       : 'Your saved learning materials are ready for offline studying anytime.'
-    : entitlement?.premium === false || !profile?.premium
+    : entitlement?.premium === false || !premiumUnlocked
       ? 'Save your favorite learning materials and study anywhere with UniHelp Premium.'
       : 'Premium status requires internet validation before granting offline access.';
   const statusText = isConnected === false ? 'Last synced: offline' : syncStatus === 'success' ? 'Last synced: just now' : 'Last synced: just now';

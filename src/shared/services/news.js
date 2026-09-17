@@ -4,6 +4,11 @@ let cache = null;
 let lastFetchTime = 0;
 const CACHE_DURATION = 10 * 60 * 1000;
 
+export const invalidateNewsCache = () => {
+  cache = null;
+  lastFetchTime = 0;
+};
+
 const categorize = (text = '') => {
   const value = text.toLowerCase();
   if (value.includes('president') || value.includes('government') || value.includes('senate') || value.includes('minister')) return 'Politics';
@@ -34,6 +39,7 @@ export const fetchNigeriaNews = async () => {
   combined = combined.filter((item) => {
     const text = `${item.title || ''} ${item.description || ''}`.toLowerCase();
     return (
+      item.source === 'Unihelp Admin' ||
       text.includes('nigeria') ||
       text.includes('lagos') ||
       text.includes('abuja') ||
@@ -52,7 +58,8 @@ export const fetchNigeriaNews = async () => {
     link: item.link,
     image: item.image,
     source: item.source,
-    category: categorize(`${item.title} ${item.description}`),
+    category: item.source === 'Unihelp Admin' ? item.category || 'Campus News' : categorize(`${item.title} ${item.description}`),
+    badge: item.source === 'Unihelp Admin' ? item.badge || 'Update' : '',
   }));
 
   cache = finalData;

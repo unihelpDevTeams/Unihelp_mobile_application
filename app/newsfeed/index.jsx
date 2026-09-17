@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Linking, Pressable, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
@@ -39,6 +39,8 @@ export default function NewsFeedPage() {
     imageFallback: { height: 180, backgroundColor: c.borderDefault },
     body: { padding: s.lg },
     title: { fontSize: 16, fontWeight: '800', color: c.textPrimary },
+    badge: { alignSelf: 'flex-start', marginBottom: 8, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: c.redLight || '#FEF2F2' },
+    badgeText: { color: c.error || '#DC2626', fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
     description: { marginTop: 6, fontSize: 13, lineHeight: 19, color: c.textSecondary },
     metaRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
     meta: { fontSize: 11, fontWeight: '700', color: c.textTertiary },
@@ -90,6 +92,7 @@ export default function NewsFeedPage() {
         <Pressable key={`${item.id}-${item.title}`} style={styles.card} onPress={() => item.link && Linking.openURL(item.link).catch(() => {})}>
           {item.image ? <Image source={{ uri: item.image }} style={styles.image} contentFit="cover" cachePolicy="disk" /> : <View style={styles.imageFallback} />}
           <View style={styles.body}>
+            {item.badge ? <View style={styles.badge}><Text style={styles.badgeText}>{item.badge}</Text></View> : null}
             <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
             <Text style={styles.description} numberOfLines={3}>{item.description || 'No description available.'}</Text>
             <View style={styles.metaRow}>

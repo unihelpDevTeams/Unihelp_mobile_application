@@ -15,7 +15,7 @@ import ConfirmDialog from './ConfirmDialog';
 import { useAuth } from '../../../context/AuthContext';
 import { filterMenuSectionsByRole } from '../navigation/routePermissions';
 import { countUserUploads, fetchNotifications } from '../../../services/firestoreSync';
-import { isPremiumActive } from '../services/premium';
+import { getPremiumEntitlementStatus, isPremiumActive } from '../services/premium';
 import { COLLECTIONS } from '../firestoreSchema';
 import logo from '../../../assets/images/favicon.png';
 
@@ -57,6 +57,7 @@ export default function ScreenShell({
   footerProps = {},
   onProfilePress,
   menuFooterNote,
+  showPremiumExpiryWarning = true,
 }) {
   const router = useRouter();
   const { profile, user, logout } = useAuth();
@@ -96,6 +97,34 @@ export default function ScreenShell({
     offlineBannerText: { flex: 1 },
     offlineBannerTitle: { fontSize: 13, fontWeight: '800', color: c.brandText },
     offlineBannerSubtitle: { marginTop: 2, fontSize: 12, color: c.textSecondary, lineHeight: 17 },
+    premiumExpiryBanner: {
+      marginHorizontal: layout.screenPadding,
+      marginTop: s.md,
+      paddingHorizontal: s.lg,
+      paddingVertical: s.md,
+      borderRadius: r.xl,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.sm,
+      backgroundColor: c.goldLight || c.warningLight || c.brandLight,
+      borderWidth: 1,
+      borderColor: c.gold || c.warning || c.brandBorder,
+    },
+    premiumExpiryText: { flex: 1 },
+    premiumExpiryTitle: { fontSize: 13, fontWeight: '900', color: c.textPrimary },
+    premiumExpirySubtitle: { marginTop: 2, fontSize: 12, color: c.textSecondary, lineHeight: 17 },
+    premiumExpiryAction: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      paddingHorizontal: s.sm,
+      paddingVertical: 6,
+      borderRadius: r.full,
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+    },
+    premiumExpiryActionText: { color: c.brand, fontSize: 11, fontWeight: '900' },
     notificationDot: {
       position: 'absolute', top: 4, right: 4, width: 10, height: 10, borderRadius: 5,
       backgroundColor: c.red, borderWidth: 2, borderColor: c.surface,
@@ -315,9 +344,20 @@ export default function ScreenShell({
     }, [uid])
   );
 
+  const premiumUnlocked = isPremiumActive(profile);
+  const premiumStatus = useMemo(() => getPremiumEntitlementStatus(profile), [profile]);
+  const showExpiryWarning = showPremiumExpiryWarning && title !== 'Premium' && premiumStatus.warning;
+  const premiumExpiryNotice = showExpiryWarning ? (
+    <PremiumExpiryNotice
+      status={premiumStatus}
+      onPress={() => router.navigate('/premium')}
+      colors={colors}
+      styles={styles}
+    />
+  ) : null;
+
   const filteredMenuSections = useMemo(() => {
     const roleFilteredSections = profile?.role ? filterMenuSectionsByRole(menuSections, profile.role) : menuSections;
-    const premiumUnlocked = isPremiumActive(profile);
     return roleFilteredSections
       .map((section) => ({
         ...section,
@@ -327,7 +367,7 @@ export default function ScreenShell({
           .map((item) => (item.requiresUpload ? { ...item, count: uploadCounts[item.requiresUpload] } : item)),
       }))
       .filter((section) => section.items.length > 0);
-  }, [menuSections, profile, profile?.role, uploadCounts]);
+  }, [menuSections, premiumUnlocked, profile?.role, uploadCounts]);
 
   const showUniversityIcons = !profile?.role || profile?.role === 'university';
   const body = loading ? <FullScreenLoader label="Loading..." /> : children;
@@ -341,12 +381,14 @@ export default function ScreenShell({
   const content = scrollable ? (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
       <OfflineNotice visible={isConnected === false} colors={colors} styles={styles} />
+      {premiumExpiryNotice}
       {body}
       {footer}
     </ScrollView>
   ) : (
     <View style={styles.staticContent}>
       <OfflineNotice visible={isConnected === false} colors={colors} styles={styles} />
+      {premiumExpiryNotice}
       {body}
       {footer}
     </View>
@@ -385,6 +427,7 @@ export default function ScreenShell({
         onProfilePress={onProfilePress ? () => { setMenuOpen(false); onProfilePress(); } : null}
         onLogout={confirmLogout}
         footerNote={menuFooterNote}
+        premiumUnlocked={premiumUnlocked}
         colors={colors}
         styles={styles}
       />
@@ -415,6 +458,34 @@ function OfflineNotice({ visible, colors, styles }) {
         <Text style={styles.offlineBannerSubtitle}>You’re offline — downloaded learning materials are still available.</Text>
       </View>
     </View>
+  );
+}
+
+function PremiumExpiryNotice({ status, onPress, colors, styles }) {
+  const dayCopy = status.daysLeft === 0
+    ? 'today'
+    : `in ${status.daysLeft} ${status.daysLeft === 1 ? 'day' : 'days'}`;
+  const accessCopy = status.isAdminGift ? 'Gifted Premium' : 'Premium';
+
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.premiumExpiryBanner, pressed && { opacity: 0.9 }]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${accessCopy} expires ${dayCopy}. View Premium plan.`}
+    >
+      <Ionicons name="time-outline" size={18} color={colors.gold || colors.brand} />
+      <View style={styles.premiumExpiryText}>
+        <Text style={styles.premiumExpiryTitle}>{accessCopy} expires {dayCopy}</Text>
+        <Text style={styles.premiumExpirySubtitle}>
+          Access remains active until {status.expiryLabel}. Tap to review your plan.
+        </Text>
+      </View>
+      <View style={styles.premiumExpiryAction}>
+        <Text style={styles.premiumExpiryActionText}>View</Text>
+        <Ionicons name="chevron-forward" size={12} color={colors.brand} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -466,7 +537,7 @@ function HeaderBar({
 // that only appears once there are enough items to be worth filtering, then
 // grouped sections with count badges, and an optional footer note.
 // ---------------------------------------------------------------------------
-function MenuDrawer({ visible, onClose, onNavigate, sections, profile, onProfilePress, onLogout, footerNote, colors, styles }) {
+function MenuDrawer({ visible, onClose, onNavigate, sections, profile, onProfilePress, onLogout, footerNote, premiumUnlocked, colors, styles }) {
   const { width: screenWidth } = useWindowDimensions();
   const { isDark } = useTheme();
   const drawerX = useRef(new Animated.Value(screenWidth)).current;
@@ -547,7 +618,7 @@ function MenuDrawer({ visible, onClose, onNavigate, sections, profile, onProfile
                       <Text style={styles.menuRolePillText}>{roleLabel}</Text>
                     </View>
                   ) : null}
-                  {profile?.premium ? (
+                  {premiumUnlocked ? (
                     <View style={styles.menuPremiumPill}>
                       <Ionicons name="star" size={9} color={colors.onBrand} />
                       <Text style={styles.menuPremiumPillText}>PRO</Text>

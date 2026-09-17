@@ -728,6 +728,14 @@ export async function fetchDetailRecord(type, id) {
   if (type === 'hostel') return getJson(`/api/hostels/${encodeURIComponent(id)}`);
   if (type === 'listing') return getJson(`/api/marketplace/${encodeURIComponent(id)}`);
   if (type === 'story') return getJson(`/api/stories/${encodeURIComponent(id)}`);
+  if (type === 'question') {
+    try {
+      const response = await getJson(`/api/past-questions/${encodeURIComponent(id)}`);
+      if (response?.item) return response.item;
+    } catch (error) {
+      console.warn('[past-questions] API fallback unavailable, trying Firestore:', error?.message);
+    }
+  }
 
   const collectionName = collectionMapForType[type] || type;
   const snapshot = await getDoc(doc(db, collectionName, id));

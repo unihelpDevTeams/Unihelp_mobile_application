@@ -48,10 +48,6 @@ export const ACADEMIC_LEVELS = [
   { label: 'Postgraduate', value: 'postgraduate' },
 ];
 
-export const STUDENT_TYPES = [
-  { label: 'University Student', value: 'university' },
-];
-
 export const INTEREST_OPTIONS = [
   'Programming',
   'Medicine',
@@ -116,21 +112,21 @@ export function validateStep(step, data) {
       if (!data.universityId) {
         errors.university = 'Please select a university.';
       }
-      if (data.studentType === 'university') {
-        if (!data.departmentId) {
-          errors.department = 'Please select a department.';
-        }
-        if (!data.level) {
-          errors.level = 'Please select your academic level.';
-        }
+      if (!data.departmentId) {
+        errors.department = 'Please select a department.';
       }
-      if (!data.studentType) {
-        errors.studentType = 'Please select your student type.';
+      if (!data.level) {
+        errors.level = 'Please select your academic level.';
       }
       break;
     }
     case 3: {
-      // All fields are optional in step 3
+      if (!data.heardFrom) {
+        errors.heardFrom = 'Please tell us where you heard about UniHelp.';
+      }
+      if ((data.heardFrom === 'Other' || data.heardFrom === 'other') && !String(data.heardFromOther || '').trim()) {
+        errors.heardFromOther = 'Please tell us which source or partner you heard about us from.';
+      }
       break;
     }
     default:

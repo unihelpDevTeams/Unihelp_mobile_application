@@ -67,17 +67,19 @@ export default function Step4Confirmation({ formData, onEditStep }) {
       <View style={styles.card}>
         <SectionHeader title="Academic Information" step={2} onEdit={() => onEditStep(2)} />
         <SummaryRow label="University" value={formData.universityName} />
-        <SummaryRow
-          label="Student Type"
-          value="University Student"
-        />
         <SummaryRow label="Department" value={formData.departmentName} />
         <SummaryRow label="Faculty" value={formData.faculty} />
         <SummaryRow label="Level" value={formData.level ? `${formData.level} Level` : ''} />
       </View>
 
       <View style={styles.card}>
-        <SectionHeader title="Profile" step={3} onEdit={() => onEditStep(3)} />
+        <SectionHeader title="How you found Unihelp" step={3} onEdit={() => onEditStep(3)} />
+        <SummaryRow label="Source" value={formData.heardFrom} />
+        <SummaryRow label="Source details" value={formData.heardFromOther} />
+      </View>
+
+      <View style={styles.card}>
+        <SectionHeader title="Profile" step={4} onEdit={() => onEditStep(4)} />
         <SummaryRow label="Bio" value={formData.bio} />
         {formData.interests?.length > 0 && (
           <View style={styles.interestsSection}>

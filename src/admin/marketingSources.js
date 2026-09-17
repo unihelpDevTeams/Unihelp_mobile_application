@@ -1,0 +1,15 @@
+export const DEFAULT_MARKETING_SOURCES = [
+  ['Friend', 'Personal referral', 'people-outline'],
+  ['Family', 'Personal referral', 'heart-outline'],
+  ['WhatsApp', 'Social Media', 'logo-whatsapp'],
+  ['Instagram', 'Social Media', 'logo-instagram'],
+  ['TikTok', 'Social Media', 'logo-tiktok'],
+  ['Facebook', 'Social Media', 'logo-facebook'],
+  ['X (Twitter)', 'Social Media', 'logo-twitter'],
+  ['Campus Event', 'Campus Community', 'calendar-outline'],
+  ['Campus Group', 'Campus Community', 'people-outline'],
+  ['School Poster', 'Campus Community', 'easel-outline'],
+  ['Google Search', 'Search', 'logo-google'],
+  ['GTM Media', 'Media Partner', 'megaphone-outline'],
+  ['Other', 'Other', 'ellipsis-horizontal-circle-outline'],
+];

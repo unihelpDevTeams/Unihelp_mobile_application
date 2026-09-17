@@ -5,9 +5,11 @@ import { useRouter } from 'expo-router';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { useAuth } from '../../context/AuthContext';
 import {
+  ADMIN_PREMIUM_GIFT_DAYS,
   COMMERCE_UPLOAD_LIMITS,
-  getDaysLeft,
+  getPremiumEntitlementStatus,
   getPremiumAmount,
+  getPremiumExpiry,
   getSubscriptionExpiry,
   isPremiumActive,
   PREMIUM_PLAN,
@@ -23,6 +25,33 @@ import {
 } from '../../src/shared/services/googlePlayBilling';
 import { deepLinkToSubscriptionsAndroid } from 'expo-iap';
 
+const SECOND_MS = 1000;
+const MINUTE_MS = 60 * SECOND_MS;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+const padTime = (value) => String(value).padStart(2, '0');
+
+function getPremiumCountdownParts(expiresAt, nowMs = Date.now()) {
+  if (!expiresAt) return null;
+  const expiryMs = getSubscriptionExpiry(expiresAt)?.getTime();
+  if (!expiryMs) return null;
+
+  const totalMs = Math.max(0, expiryMs - nowMs);
+  const days = Math.floor(totalMs / DAY_MS);
+  const hours = Math.floor((totalMs % DAY_MS) / HOUR_MS);
+  const minutes = Math.floor((totalMs % HOUR_MS) / MINUTE_MS);
+  const seconds = Math.floor((totalMs % MINUTE_MS) / SECOND_MS);
+
+  return { totalMs, days, hours, minutes, seconds };
+}
+
+function formatCountdownLabel(parts) {
+  if (!parts) return 'Active';
+  if (parts.days > 0) return `${parts.days}d ${padTime(parts.hours)}h ${padTime(parts.minutes)}m ${padTime(parts.seconds)}s`;
+  return `${padTime(parts.hours)}h ${padTime(parts.minutes)}m ${padTime(parts.seconds)}s`;
+}
+
 export default function PremiumPage() {
   const router = useRouter();
   const { user, profile, refreshProfile } = useAuth();
@@ -33,6 +62,7 @@ export default function PremiumPage() {
   const [billingError, setBillingError] = useState('');
   const [planLoading, setPlanLoading] = useState(true);
   const [googleProducts, setGoogleProducts] = useState([]);
+  const [now, setNow] = useState(Date.now());
 
   const premiumActive = isPremiumActive(profile);
 
@@ -75,6 +105,53 @@ export default function PremiumPage() {
       textAlign: 'center',
       maxWidth: '92%',
     },
+    countdownCard: {
+      width: '100%',
+      backgroundColor: c.card,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      padding: s.lg,
+      marginTop: s.lg,
+      alignItems: 'center',
+      gap: s.md,
+    },
+    countdownLabel: {
+      color: c.textSecondary,
+      fontSize: 11,
+      fontWeight: '900',
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+    },
+    countdownValue: {
+      color: c.textPrimary,
+      fontSize: 25,
+      fontWeight: '900',
+      textAlign: 'center',
+    },
+    countdownUnitsRow: {
+      width: '100%',
+      flexDirection: 'row',
+      gap: s.sm,
+    },
+    countdownUnit: {
+      flex: 1,
+      backgroundColor: c.surfaceSecondary,
+      borderRadius: r.md,
+      paddingVertical: s.sm,
+      alignItems: 'center',
+    },
+    countdownUnitValue: {
+      color: c.brand,
+      fontSize: 15,
+      fontWeight: '900',
+    },
+    countdownUnitLabel: {
+      marginTop: 1,
+      color: c.textSecondary,
+      fontSize: 10,
+      fontWeight: '800',
+    },
     heroProgressTrack: {
       width: '100%',
       height: 6,
@@ -87,6 +164,25 @@ export default function PremiumPage() {
       height: '100%',
       backgroundColor: c.brand,
       borderRadius: r.full,
+    },
+    heroStatusPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      backgroundColor: c.card,
+      borderRadius: r.full,
+      paddingHorizontal: s.md,
+      paddingVertical: 7,
+      marginBottom: s.md,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+    },
+    heroStatusText: {
+      color: c.brand,
+      fontSize: 11,
+      fontWeight: '900',
+      textTransform: 'uppercase',
+      letterSpacing: 0.4,
     },
     sectionTitle: {
       color: c.textPrimary,
@@ -372,11 +468,13 @@ export default function PremiumPage() {
       borderColor: c.borderDefault,
       padding: s.lg,
       marginBottom: s.lg,
+      gap: s.md,
     },
     activeRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
+      gap: s.md,
     },
     activeLabel: {
       fontSize: 12,
@@ -388,6 +486,7 @@ export default function PremiumPage() {
       fontSize: 15,
       color: c.textPrimary,
       fontWeight: '700',
+      flexShrink: 1,
     },
     activePill: {
       backgroundColor: c.brandLight || c.surfaceSecondary,
@@ -403,7 +502,74 @@ export default function PremiumPage() {
     divider: {
       height: 1,
       backgroundColor: c.borderDefault,
-      marginVertical: s.md,
+    },
+    giftNotice: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: s.md,
+      backgroundColor: c.goldLight || c.brandLight,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.gold || c.brand,
+      padding: s.lg,
+      marginBottom: s.lg,
+    },
+    giftNoticeIcon: {
+      width: 38,
+      height: 38,
+      borderRadius: r.lg,
+      backgroundColor: c.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    giftNoticeCopy: {
+      flex: 1,
+    },
+    giftNoticeTitle: {
+      color: c.textPrimary,
+      fontSize: 14,
+      fontWeight: '900',
+      marginBottom: 3,
+    },
+    giftNoticeText: {
+      color: c.textSecondary,
+      fontSize: 12.5,
+      lineHeight: 18,
+      fontWeight: '600',
+    },
+    expiryWarningCard: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: s.md,
+      backgroundColor: c.orangeLight || c.goldLight || c.brandLight,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.orange || c.gold || c.brand,
+      padding: s.lg,
+      marginBottom: s.lg,
+    },
+    expiryWarningIcon: {
+      width: 38,
+      height: 38,
+      borderRadius: r.lg,
+      backgroundColor: c.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    expiryWarningCopy: {
+      flex: 1,
+    },
+    expiryWarningTitle: {
+      color: c.textPrimary,
+      fontSize: 14,
+      fontWeight: '900',
+      marginBottom: 3,
+    },
+    expiryWarningText: {
+      color: c.textSecondary,
+      fontSize: 12.5,
+      lineHeight: 18,
+      fontWeight: '600',
     },
   }));
 
@@ -444,14 +610,48 @@ export default function PremiumPage() {
     ? GOOGLE_PLAY_PRODUCT_IDS[1]
     : GOOGLE_PLAY_PRODUCT_IDS[0];
   const googleProduct = googleProducts.find((product) => product.id === googleProductId);
-  const daysLeft = useMemo(() => getDaysLeft(profile?.subscriptionExpiresAt), [profile?.subscriptionExpiresAt]);
-  const expiryDate = useMemo(() => getSubscriptionExpiry(profile?.subscriptionExpiresAt), [profile?.subscriptionExpiresAt]);
+  const premiumStatus = useMemo(() => getPremiumEntitlementStatus(profile), [profile]);
+  const premiumExpiry = useMemo(() => getPremiumExpiry(profile), [profile]);
+  const countdownParts = useMemo(() => getPremiumCountdownParts(premiumExpiry, now), [premiumExpiry, now]);
+  const countdownLabel = useMemo(() => formatCountdownLabel(countdownParts), [countdownParts]);
+  const daysLeft = useMemo(() => {
+    const expiry = getSubscriptionExpiry(premiumExpiry);
+    if (!expiry) return null;
+    return Math.max(0, Math.ceil((expiry.getTime() - now) / DAY_MS));
+  }, [premiumExpiry, now]);
+  const expiryDate = useMemo(() => getSubscriptionExpiry(premiumExpiry), [premiumExpiry]);
+  const subscriptionStatus = String(profile?.subscriptionStatus || '').trim().toLowerCase();
+  const isAdminGift = premiumStatus.isAdminGift || (premiumActive && subscriptionStatus === 'admin_grant');
+  const expiryLabel = expiryDate ? expiryDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'No expiry set';
+  const expiryDayCopy = premiumStatus.daysLeft === 0
+    ? 'today'
+    : `${premiumStatus.daysLeft} ${premiumStatus.daysLeft === 1 ? 'day' : 'days'}`;
+  const activeAccessLabel = isAdminGift
+    ? 'Admin gift'
+    : Platform.OS === 'android'
+      ? 'Google Play'
+      : 'Premium subscription';
+  const activeHeroTitle = isAdminGift ? 'Premium Gift Active' : 'Premium Active';
+  const activeHeroText = isAdminGift
+    ? daysLeft == null
+      ? `Your gifted Premium access is active until ${expiryLabel}.`
+      : `You have ${daysLeft} days of gifted Premium. Your access stays active until ${expiryLabel}.`
+    : countdownParts
+      ? `Your Premium plan is active until ${expiryLabel}. Keep using up to ${COMMERCE_UPLOAD_LIMITS.premium} hostel and ${COMMERCE_UPLOAD_LIMITS.premium} product uploads.`
+      : `Premium is active - up to ${COMMERCE_UPLOAD_LIMITS.premium} hostel and ${COMMERCE_UPLOAD_LIMITS.premium} product uploads`;
   const progressPct = useMemo(() => {
-    if (daysLeft == null) return null;
-    const totalDays = PREMIUM_PLAN?.durationDays || 30;
-    const pct = Math.max(0, Math.min(100, (daysLeft / totalDays) * 100));
+    if (!countdownParts) return null;
+    const totalDays = isAdminGift ? ADMIN_PREMIUM_GIFT_DAYS : (PREMIUM_PLAN?.durationDays || 30);
+    const pct = Math.max(0, Math.min(100, (countdownParts.totalMs / (totalDays * DAY_MS)) * 100));
     return pct;
-  }, [daysLeft]);
+  }, [countdownParts, isAdminGift]);
+
+  useEffect(() => {
+    if (!premiumActive || !premiumExpiry) return undefined;
+    setNow(Date.now());
+    const interval = setInterval(() => setNow(Date.now()), SECOND_MS);
+    return () => clearInterval(interval);
+  }, [premiumActive, premiumExpiry]);
 
   const subscribe = async () => {
     setMessage('');
@@ -510,13 +710,34 @@ export default function PremiumPage() {
     <ScreenShell title="Premium" subtitle="Upgrade your Unihelp account." showBack>
       {premiumActive ? (
         <View style={styles.hero}>
-          <View style={styles.heroIcon}>
-            <Ionicons name="diamond-outline" size={32} color={colors.brand} />
+          <View style={styles.heroStatusPill}>
+            <Ionicons name={isAdminGift ? 'gift-outline' : 'checkmark-circle-outline'} size={13} color={colors.brand} />
+            <Text style={styles.heroStatusText}>{activeAccessLabel}</Text>
           </View>
-          <Text style={styles.heroTitle}>Premium Active</Text>
-          <Text style={styles.heroText}>
-            {daysLeft ?? 'Active'} days remaining · up to {COMMERCE_UPLOAD_LIMITS.premium} hostel and {COMMERCE_UPLOAD_LIMITS.premium} product uploads
-          </Text>
+          <View style={styles.heroIcon}>
+            <Ionicons name={isAdminGift ? 'gift-outline' : 'diamond-outline'} size={32} color={colors.brand} />
+          </View>
+          <Text style={styles.heroTitle}>{activeHeroTitle}</Text>
+          <Text style={styles.heroText}>{activeHeroText}</Text>
+          <View style={styles.countdownCard}>
+            <Text style={styles.countdownLabel}>{countdownParts ? 'Premium countdown' : 'Premium status'}</Text>
+            <Text style={styles.countdownValue}>{countdownLabel}</Text>
+            {countdownParts ? (
+              <View style={styles.countdownUnitsRow}>
+                {[
+                  ['Days', countdownParts.days],
+                  ['Hours', countdownParts.hours],
+                  ['Mins', countdownParts.minutes],
+                  ['Secs', countdownParts.seconds],
+                ].map(([label, value]) => (
+                  <View key={label} style={styles.countdownUnit}>
+                    <Text style={styles.countdownUnitValue}>{label === 'Days' ? value : padTime(value)}</Text>
+                    <Text style={styles.countdownUnitLabel}>{label}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+          </View>
           {progressPct != null ? (
             <View style={styles.heroProgressTrack}>
               <View style={[styles.heroProgressFill, { width: `${progressPct}%` }]} />
@@ -549,11 +770,31 @@ export default function PremiumPage() {
           <View style={styles.divider} />
           <View style={styles.activeRow}>
             <View>
+              <Text style={styles.activeLabel}>Access type</Text>
+              <Text style={styles.activeValue}>{activeAccessLabel}</Text>
+            </View>
+            <View style={styles.activePill}>
+              <Text style={styles.activePillText}>{isAdminGift ? 'Gifted' : 'Verified'}</Text>
+            </View>
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.activeRow}>
+            <View>
               <Text style={styles.activeLabel}>Expires</Text>
-              <Text style={styles.activeValue}>{expiryDate ? expiryDate.toLocaleDateString() : 'Unknown'}</Text>
+              <Text style={styles.activeValue}>{expiryLabel}</Text>
             </View>
             <View style={styles.activePill}>
               <Text style={styles.activePillText}>{daysLeft ?? '--'} days left</Text>
+            </View>
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.activeRow}>
+            <View>
+              <Text style={styles.activeLabel}>Time remaining</Text>
+              <Text style={styles.activeValue}>{countdownLabel}</Text>
+            </View>
+            <View style={styles.activePill}>
+              <Text style={styles.activePillText}>{countdownParts ? 'Live' : 'Active'}</Text>
             </View>
           </View>
         </View>
@@ -651,6 +892,38 @@ export default function PremiumPage() {
         </View>
       )}
 
+      {isAdminGift ? (
+        <View style={styles.giftNotice}>
+          <View style={styles.giftNoticeIcon}>
+            <Ionicons name="sparkles" size={18} color={colors.gold || colors.brand} />
+          </View>
+          <View style={styles.giftNoticeCopy}>
+            <Text style={styles.giftNoticeTitle}>Gift applied to your account</Text>
+            <Text style={styles.giftNoticeText}>
+              This Premium access was granted by UniHelp admin. It unlocks all Premium tools until {expiryLabel} and does not start a recurring subscription.
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {premiumStatus.warning ? (
+        <View style={styles.expiryWarningCard}>
+          <View style={styles.expiryWarningIcon}>
+            <Ionicons name="time-outline" size={18} color={colors.orange || colors.gold || colors.brand} />
+          </View>
+          <View style={styles.expiryWarningCopy}>
+            <Text style={styles.expiryWarningTitle}>
+              {isAdminGift ? 'Gifted Premium expires soon' : 'Premium renewal reminder'}
+            </Text>
+            <Text style={styles.expiryWarningText}>
+              {isAdminGift
+                ? `Your gifted Premium access expires ${premiumStatus.daysLeft === 0 ? 'today' : `in ${expiryDayCopy}`}. You keep all Premium features until ${expiryLabel}.`
+                : `Your Premium access expires ${premiumStatus.daysLeft === 0 ? 'today' : `in ${expiryDayCopy}`}. Renew before ${expiryLabel} to avoid losing Premium features.`}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
       <View style={styles.featureActionCard}>
         <View style={styles.featureActionHeader}>
           <View style={styles.featureActionIcon}>
@@ -691,13 +964,17 @@ export default function PremiumPage() {
       <View style={styles.noteBox}>
         <Ionicons name="shield-checkmark-outline" size={18} color={colors.brand} />
         <Text style={styles.noteText}>
-          {Platform.OS === 'android'
-            ? 'Google Play processes this recurring subscription. UniHelp verifies the purchase before premium access is granted.'
-            : 'Payment opens securely with Flutterwave. The backend verifies the transaction before premium is added to your profile.'}
+          {premiumActive
+            ? isAdminGift
+              ? 'Gifted Premium remains active on this account until the expiry date shown above. The app refreshes your plan automatically when admin grants or expiry changes.'
+              : 'Your Premium access is verified on your account and will keep reflecting until the expiry date shown above.'
+            : Platform.OS === 'android'
+              ? 'Google Play processes this recurring subscription. UniHelp verifies the purchase before premium access is granted.'
+              : 'Payment opens securely with Flutterwave. The backend verifies the transaction before premium is added to your profile.'}
         </Text>
       </View>
 
-      {Platform.OS === 'android' ? (
+      {Platform.OS === 'android' && !isAdminGift ? (
         <View style={styles.androidActions}>
           <Pressable
             onPress={restore}

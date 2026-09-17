@@ -12,6 +12,7 @@
  */
 
 import { postJson } from './backend';
+import { isPremiumActive } from './premium';
 
 /* =========================================================
    Chat - Unified endpoint
@@ -24,7 +25,7 @@ export async function sendChatMessage({ prompt, profile, attachment = null, hist
       uid: profile?.uid || profile?.id || '',
       username: profile?.username || profile?.displayName || '',
       role: profile?.role || 'student',
-      premium: Boolean(profile?.premium),
+      premium: isPremiumActive(profile),
     },
     attachment,
     history,
@@ -49,7 +50,7 @@ export async function executeAiTool({ tool, input, profile, context = {} }) {
       uid: profile?.uid || profile?.id || '',
       username: profile?.username || profile?.displayName || '',
       role: profile?.role || 'student',
-      premium: Boolean(profile?.premium),
+      premium: isPremiumActive(profile),
     },
     context,
   });
@@ -73,7 +74,7 @@ export async function fetchAiUsage(profile = {}) {
     const response = await postJson('/api/ai/usage', {
       profile: {
         uid: profile?.uid || profile?.id || '',
-        premium: Boolean(profile?.premium),
+        premium: isPremiumActive(profile),
       },
     });
     return response.usage || null;
@@ -81,8 +82,8 @@ export async function fetchAiUsage(profile = {}) {
     // Fallback if endpoint fails
     return {
       used: 0,
-      limit: profile?.premium ? 10 : 5,
-      remaining: profile?.premium ? 10 : 5,
+      limit: isPremiumActive(profile) ? 10 : 5,
+      remaining: isPremiumActive(profile) ? 10 : 5,
       allowed: true,
     };
   }

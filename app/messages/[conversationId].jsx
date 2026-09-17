@@ -21,6 +21,7 @@ import VoiceMessageBubble from '../../src/shared/components/VoiceMessageBubble';
 import VoiceRecorderBar from '../../src/shared/components/VoiceRecorderBar';
 import StickerPicker from '../../src/shared/components/StickerPicker';
 import StickerMessage from '../../src/shared/components/StickerMessage';
+import FriendRequestModal from '../../src/shared/components/FriendRequestModal';
 import { fetchRecord } from '../../services/firestoreSync';
 import {
   markConversationRead,
@@ -84,6 +85,7 @@ export default function ConversationPage() {
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [stickerPickerVisible, setStickerPickerVisible] = useState(false);
+  const [friendRequestVisible, setFriendRequestVisible] = useState(false);
   const [typingName, setTypingName] = useState('');
   let typingTimeout = useRef(null);
 
@@ -530,6 +532,10 @@ export default function ConversationPage() {
   };
 
   const showSendError = (error) => {
+    if (error?.message === 'Become friends before chatting freely.') {
+      setFriendRequestVisible(true);
+      return;
+    }
     showAlertDialog('Message not sent', error.message || 'You can only send direct messages to friends.');
     console.error('Failed to send message', error);
   };
@@ -674,6 +680,17 @@ export default function ConversationPage() {
 
   return (
     <ScreenShell title={headerTitle} subtitle={headerSubtitle} showBack loading={loading} scrollable={false}>
+      <FriendRequestModal
+        visible={friendRequestVisible}
+        person={{ ...otherUser, uid: otherId }}
+        onClose={() => setFriendRequestVisible(false)}
+        onAdd={() => sendFriendRequest({
+          currentUid,
+          targetUid: otherId,
+          currentProfile: profile,
+          targetProfile: { ...otherUser, uid: otherId },
+        })}
+      />
       <View style={styles.headerRow}>
         <Pressable
           style={styles.avatarWrapper}

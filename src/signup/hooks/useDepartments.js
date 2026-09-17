@@ -93,9 +93,9 @@ export function useDepartments() {
   }, [selectedUniversityId, searchText, fetchDepartments]);
 
   const selectUniversity = useCallback((universityId) => {
-    setSelectedUniversityId(universityId);
-    setSearchText('');
-    setDepartments([]);
+    setSelectedUniversityId((previousId) => (previousId === universityId ? previousId : universityId));
+    setSearchText((previousSearch) => (previousSearch ? '' : previousSearch));
+    setDepartments((previousDepartments) => (previousDepartments.length === 0 ? previousDepartments : []));
   }, []);
 
   return {

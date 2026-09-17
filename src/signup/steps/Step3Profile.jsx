@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, Image as RNImage } from 'react-native';
+import { Alert, View, Text, TextInput, Pressable, StyleSheet, Image as RNImage } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { colors, spacing, borderRadius } from '../../shared/theme';
@@ -8,7 +8,10 @@ import InterestSelector from '../components/InterestSelector';
 export default function Step3Profile({ formData, errors, updateField }) {
   const pickPhoto = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
+    if (!perm.granted) {
+      Alert.alert('Photo permission needed', 'Allow photo access in your device settings to add a profile picture.');
+      return;
+    }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
@@ -20,7 +23,7 @@ export default function Step3Profile({ formData, errors, updateField }) {
 
     const asset = result.assets[0];
     if (asset.fileSize && asset.fileSize > 30 * 1024 * 1024) {
-      alert('Image is too large. Please upload an image smaller than 30MB.');
+      Alert.alert('Image too large', 'Please upload an image smaller than 30MB.');
       return;
     }
 

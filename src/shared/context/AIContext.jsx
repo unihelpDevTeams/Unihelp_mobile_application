@@ -15,6 +15,7 @@
 import React, { createContext, useCallback, useMemo, useState } from 'react';
 import { sendChatMessage, executeAiTool, fetchAiUsage } from '../services/aiService';
 import { useAuth } from '../../../context/AuthContext';
+import { isPremiumActive } from '../services/premium';
 
 // Export the context so the useAI hook can import it
 export const AIContext = createContext(null);
@@ -33,6 +34,7 @@ export function AIProvider({ children }) {
   const [loading, setLoading] = useState(false);
   const [usageStatus, setUsageStatus] = useState(null);
   const [error, setError] = useState('');
+  const premiumActive = isPremiumActive(profile);
 
   // Widget state - results from tool executions shown in context
   const [widgetResult, setWidgetResult] = useState(null);
@@ -50,14 +52,14 @@ export function AIProvider({ children }) {
     } catch {
       const fallback = {
         used: 0,
-        limit: profile?.premium ? 10 : 5,
-        remaining: profile?.premium ? 10 : 5,
+        limit: premiumActive ? 10 : 5,
+        remaining: premiumActive ? 10 : 5,
         allowed: true,
       };
       setUsageStatus(fallback);
       return fallback;
     }
-  }, [profile]);
+  }, [premiumActive, profile]);
 
   /* =========================================================
      Send Chat Message (with tool calling)
@@ -206,12 +208,12 @@ export function AIProvider({ children }) {
     refreshUsage,
 
     // Profile
-    isPremium: Boolean(profile?.premium),
+    isPremium: premiumActive,
     profile,
   }), [
     messages, loading, error, sendMessage, resetMessages,
     executeTool, widgetResult, widgetLoading, clearWidgetResult,
-    usageStatus, refreshUsage, profile,
+    usageStatus, refreshUsage, premiumActive, profile,
   ]);
 
   return <AIContext.Provider value={value}>{children}</AIContext.Provider>;

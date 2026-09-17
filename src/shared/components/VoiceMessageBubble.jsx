@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAudioPlayback } from '../hooks/useAudioPlayback';
 import { useAuth } from '../../../context/AuthContext';
+import { isPremiumActive } from '../services/premium';
 
 const COLORS = {
   indigo: '#6366F1',
@@ -26,7 +27,7 @@ const WAVE_BARS = 4;
 const VoiceMessageBubble = memo(({ message, isMine, onLongPress }) => {
   const router = useRouter();
   const { profile } = useAuth();
-  const isPremium = Boolean(profile?.premium && profile?.subscriptionStatus !== 'expired');
+  const isPremium = isPremiumActive(profile);
   const { isPlaying, isLoading, progress, remaining, duration, error, formatTime, play, pause, resume } =
     useAudioPlayback({ isPremium });
 

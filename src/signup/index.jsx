@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { darkGradients, gradients, layout, shadows } from '../shared/theme';
+import { darkGradients, gradients, layout } from '../shared/theme';
 import { useTheme } from '../shared/theme/ThemeContext';
 import { useThemeStyles } from '../shared/theme/createStyles';
 import logo from '../../assets/images/favicon.png';
@@ -16,10 +16,27 @@ import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 import { Button } from '../shared/components/Button';
 import Step1BasicInfo from './steps/Step1BasicInfo';
 import Step2AcademicInfo from './steps/Step2AcademicInfo';
-import Step3Profile from './steps/Step3Profile';
-import Step4Confirmation from './steps/Step4Confirmation';
+import Step3HeardFrom from './steps/Step3HeardFrom';
+import Step4Profile from './steps/Step3Profile';
+import Step5Confirmation from './steps/Step4Confirmation';
 
-const STEP_LABELS = { 1: 'Basic Information', 2: 'Academic Information', 3: 'Your Profile', 4: 'Confirmation' };
+const STEP_LABELS = { 1: 'Basic Information', 2: 'Academic Information', 3: 'Where do you hear us from?', 4: 'Your Profile', 5: 'Confirmation' };
+
+const getSignupErrorMessage = (error) => {
+  const code = error?.code || '';
+  const messages = {
+    'auth/email-already-in-use': 'An account already exists with this email. Try signing in instead.',
+    'auth/username-already-in-use': 'That username is already taken. Please choose another one.',
+    'auth/invalid-email': 'Please enter a valid email address.',
+    'auth/weak-password': 'Your password is too weak. Use at least 8 characters with uppercase, lowercase, and a number.',
+    'auth/network-request-failed': 'Network error. Check your connection and try again.',
+    'auth/too-many-requests': 'Too many attempts. Please wait a moment and try again.',
+    'auth/operation-not-allowed': 'Email signup is currently unavailable. Please contact support.',
+    'permission-denied': 'Your account could not be saved because access was denied. Please try again or contact support.',
+    'unavailable': 'The service is temporarily unavailable. Check your connection and try again.',
+  };
+  return messages[code] || error?.message || 'Unable to create account. Please try again.';
+};
 
 export default function SignupFlow() {
   const router = useRouter();
@@ -30,10 +47,11 @@ export default function SignupFlow() {
   const scrollRef = useRef(null);
 
   const handleNext = useCallback(() => {
+    setSubmitError('');
     const stepErrors = validateStep(currentStep, formData);
     setErrors(stepErrors);
     if (Object.keys(stepErrors).length > 0) return;
-    if (currentStep < 4) {
+    if (currentStep < 5) {
       goToStep(currentStep + 1);
       scrollRef.current?.scrollTo?.({ y: 0, animated: true });
     }
@@ -41,6 +59,22 @@ export default function SignupFlow() {
 
   const handleSubmit = useCallback(async () => {
     try {
+      const combinedErrors = [1, 2, 3].reduce((allErrors, step) => ({
+        ...allErrors,
+        ...validateStep(step, formData),
+      }), {});
+      if (Object.keys(combinedErrors).length > 0) {
+        const firstInvalidStep = Object.keys(combinedErrors).some((field) => ['firstName', 'lastName', 'username', 'email', 'password', 'confirmPassword'].includes(field))
+          ? 1
+          : Object.keys(combinedErrors).some((field) => ['university', 'department', 'studentType', 'level'].includes(field))
+            ? 2
+            : 3;
+        goToStep(firstInvalidStep);
+        setErrors(combinedErrors);
+        setSubmitError('Please review the highlighted fields before creating your account.');
+        return;
+      }
+
       setLoading(true);
       setSubmitError('');
       let uploadedPhotoURL = '';
@@ -68,20 +102,33 @@ export default function SignupFlow() {
         throw accountError;
       }
     } catch (error) {
-      const errorMessage = error?.message || 'Unable to create account.';
+      const errorMessage = getSignupErrorMessage(error);
       setSubmitError(errorMessage);
       Alert.alert('Error', errorMessage);
     } finally {
       setLoading(false);
     }
-  }, [formData, router]);
+  }, [formData, goToStep, router, setErrors]);
+
+  const confirmSubmit = useCallback(() => {
+    if (loading) return;
+    Alert.alert(
+      'Create your account?',
+      'Please confirm that your signup details are correct.',
+      [
+        { text: 'Go back', style: 'cancel' },
+        { text: 'Create Account', style: 'default', onPress: handleSubmit },
+      ]
+    );
+  }, [handleSubmit, loading]);
 
   const renderStep = () => {
     switch (currentStep) {
       case 1: return <Step1BasicInfo formData={formData} errors={errors} updateField={updateField} />;
       case 2: return <Step2AcademicInfo formData={formData} errors={errors} updateField={updateField} />;
-      case 3: return <Step3Profile formData={formData} errors={errors} updateField={updateField} />;
-      case 4: return <Step4Confirmation formData={formData} onEditStep={goToStep} />;
+      case 3: return <Step3HeardFrom formData={formData} errors={errors} updateField={updateField} />;
+      case 4: return <Step4Profile formData={formData} errors={errors} updateField={updateField} />;
+      case 5: return <Step5Confirmation formData={formData} onEditStep={goToStep} />;
       default: return null;
     }
   };
@@ -126,18 +173,26 @@ export default function SignupFlow() {
             <Image source={logo} style={styles.logoImage} contentFit="contain" />
             <Text style={styles.logoBadgeText}>Unihelp</Text>
           </View>
-          {currentStep > 1 && (
+          {(
             <Pressable
-              onPress={() => goToStep(currentStep - 1)}
-              style={({ pressed }) => [styles.backButton, shadows.sm, pressed && styles.backButtonPressed]}
+              onPress={() => {
+                if (currentStep > 1) {
+                  goToStep(currentStep - 1);
+                } else {
+                  router.replace('/(auth)/login');
+                }
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={currentStep > 1 ? 'Go to previous signup step' : 'Return to sign in'}
+              style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
             >
-              <Ionicons name="chevron-back" size={22} color={colors.ink} />
+              <Ionicons name={currentStep > 1 ? 'chevron-back' : 'close'} size={22} color={colors.ink} />
             </Pressable>
           )}
         </View>
-        <ProgressIndicator currentStep={currentStep} totalSteps={4} />
+        <ProgressIndicator currentStep={currentStep} totalSteps={5} />
         <View style={styles.stepLabelContainer}>
-          <Text style={styles.stepLabelEyebrow}>Step {currentStep} of 4</Text>
+          <Text style={styles.stepLabelEyebrow}>Step {currentStep} of 5</Text>
           <Text style={styles.stepLabelTitle}>{STEP_LABELS[currentStep]}</Text>
         </View>
         {submitError && (
@@ -156,8 +211,8 @@ export default function SignupFlow() {
           {renderStep()}
         </ScrollView>
         <View style={styles.actionContainer}>
-          {currentStep === 4
-            ? <Button label="Create Account" onPress={handleSubmit} loading={loading} fullWidth icon="checkmark-circle" iconPosition="left" size="lg" />
+          {currentStep === 5
+            ? <Button label="Create Account" onPress={confirmSubmit} loading={loading} fullWidth icon="checkmark-circle" iconPosition="left" size="lg" />
             : <Button label="Continue" onPress={handleNext} fullWidth icon="arrow-forward" iconPosition="right" size="lg" />}
         </View>
       </KeyboardAvoidingView>

@@ -36,8 +36,9 @@ import { getDocs, collection, query, where } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { COLLECTIONS } from '../../src/shared/firestoreSchema';
 import { fetchChallengeStats } from './../../src/shared/challenge/service';
-import { toCloudinaryAsset, uploadToCloudinary } from '../../services/cloudinary';
+import { getCloudinaryThumbnailUrl, toCloudinaryAsset, uploadToCloudinary } from '../../services/cloudinary';
 import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
+import { isPremiumActive } from '../../src/shared/services/premium';
 
 const BIO_MAX_LENGTH = 160;
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
@@ -97,7 +98,7 @@ const updateProfilePhoto = async ({ kind = 'photo', uri }) => {
   if (kind === 'photo') {
     const photoAsset = toCloudinaryAsset(uploaded, { url: secureUrl, resourceType: 'image' });
     try {
-      await saveUserProfile({ photo: secureUrl, photoURL: secureUrl, photoAsset });
+      await saveUserProfile({ photo: secureUrl, photoURL: secureUrl, photoThumb: getCloudinaryThumbnailUrl(secureUrl), photoAsset });
     } catch (saveError) {
       await deleteCloudinaryAssets({ assets: [photoAsset] }).catch(() => {});
       throw saveError;
@@ -164,6 +165,7 @@ export default function ProfileScreen() {
   const [statsLoading, setStatsLoading] = useState(true);
   const [streakCount, setStreakCount] = useState(0);
   const [streakDates, setStreakDates] = useState([]);
+  const premiumActive = isPremiumActive(profile);
   const [challengeStats, setChallengeStats] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false);
@@ -448,6 +450,7 @@ export default function ProfileScreen() {
   }, [form.username, user?.email]);
 
   const profilePhoto = profile?.photoURL || profile?.photo || user?.photoURL || '';
+  const profilePhotoThumb = profile?.photoThumb || profilePhoto;
   const profileCover = profile?.coverPhoto || profile?.cover || profile?.coverUrl || '';
   const isAdmin =
     profile?.admin === true ||
@@ -701,20 +704,20 @@ export default function ProfileScreen() {
   const renderPlanSheet = () => (
     <View>
       <View style={styles.popupStatsGrid}>
-        <View style={[styles.popupStatCard, { backgroundColor: profile?.premium ? colors.goldLight : colors.canvasLight }]}>
-          <Ionicons name={profile?.premium ? 'star' : 'star-outline'} size={20} color={profile?.premium ? colors.gold : colors.grey} />
-          <Text style={[styles.popupStatValue, { color: profile?.premium ? colors.gold : colors.ink }]}>
-            {profile?.premium ? 'Premium' : 'Standard'}
+        <View style={[styles.popupStatCard, { backgroundColor: premiumActive ? colors.goldLight : colors.canvasLight }]}>
+          <Ionicons name={premiumActive ? 'star' : 'star-outline'} size={20} color={premiumActive ? colors.gold : colors.grey} />
+          <Text style={[styles.popupStatValue, { color: premiumActive ? colors.gold : colors.ink }]}>
+            {premiumActive ? 'Premium' : 'Standard'}
           </Text>
           <Text style={styles.popupStatLabel}>Current Plan</Text>
         </View>
       </View>
       <Text style={{ color: colors.grey, fontSize: 13, lineHeight: 19, marginBottom: 14 }}>
-        {profile?.premium
+        {premiumActive
           ? 'You have full access to AI tutoring, unlimited CBT mock exams and ad-free browsing.'
           : 'Upgrade to Premium for unlimited AI tutoring sessions, full-length JAMB mock exams and an ad-free experience.'}
       </Text>
-      {!profile?.premium ? (
+      {!premiumActive ? (
         <Pressable onPress={() => goTo('/premium')} style={({ pressed }) => [styles.saveButton, pressed && styles.saveButtonPressed]} accessibilityRole="button" accessibilityLabel="Upgrade to premium">
           <Ionicons name="sparkles-outline" size={17} color={colors.onBrand} />
           <Text style={styles.saveButtonText}>Upgrade to Premium</Text>
@@ -904,7 +907,7 @@ export default function ProfileScreen() {
   const sheetMeta = {
     [SHEET.MORE]: { title: 'More', subtitle: 'Account & app settings' },
     [SHEET.APPEARANCE]: { title: 'Appearance', subtitle: 'Choose how UniHelp looks' },
-    [SHEET.PLAN]: { title: 'My Plan', subtitle: profile?.premium ? 'Premium member' : 'Standard member' },
+    [SHEET.PLAN]: { title: 'My Plan', subtitle: premiumActive ? 'Premium member' : 'Standard member' },
     [SHEET.PROGRESS]: { title: 'My Progress', subtitle: 'Challenge stats & streak' },
     [SHEET.UPLOADS]: { title: 'My Uploads', subtitle: `${totalUploads} item${totalUploads === 1 ? '' : 's'} across UniHelp` },
     [SHEET.EDIT_PROFILE]: { title: 'Edit Profile', subtitle: 'Tap a field to update it' },
@@ -961,7 +964,7 @@ export default function ProfileScreen() {
           >
             <View style={styles.avatar}>
               {profilePhoto ? (
-                <Image source={{ uri: profilePhoto }} style={styles.avatarImage} contentFit="cover" />
+                <Image source={{ uri: profilePhotoThumb }} style={styles.avatarImage} contentFit="cover" />
               ) : (
                 <Text style={styles.avatarText}>{initials}</Text>
               )}
@@ -982,10 +985,10 @@ export default function ProfileScreen() {
           </View>
 
           <View style={styles.pillsRow}>
-            <Pressable onPress={() => setSheet(SHEET.PLAN)} style={[styles.pill, profile?.premium ? styles.pillGold : styles.pillMuted]} accessibilityRole="button" accessibilityLabel="View plan details">
-              <Ionicons name={profile?.premium ? 'star' : 'star-outline'} size={12} color={profile?.premium ? colors.gold : colors.grey} />
-              <Text style={[styles.pillText, profile?.premium ? styles.pillTextGold : styles.pillTextMuted]}>
-                {profile?.premium ? 'Premium' : 'Standard'}
+            <Pressable onPress={() => setSheet(SHEET.PLAN)} style={[styles.pill, premiumActive ? styles.pillGold : styles.pillMuted]} accessibilityRole="button" accessibilityLabel="View plan details">
+              <Ionicons name={premiumActive ? 'star' : 'star-outline'} size={12} color={premiumActive ? colors.gold : colors.grey} />
+              <Text style={[styles.pillText, premiumActive ? styles.pillTextGold : styles.pillTextMuted]}>
+                {premiumActive ? 'Premium' : 'Standard'}
               </Text>
             </Pressable>
             {isAdmin ? (
@@ -1032,7 +1035,7 @@ export default function ProfileScreen() {
           <Pressable onPress={() => setSheet(SHEET.PLAN)} style={({ pressed }) => [styles.listRow, styles.rowDivider, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="My plan">
             <View style={styles.rowIconSm}><Ionicons name="star-outline" size={16} color={colors.brand} /></View>
             <Text style={[styles.rowTitle, { flex: 1 }]}>My Plan</Text>
-            <Text style={styles.rowTrailingText}>{profile?.premium ? 'Premium' : 'Standard'}</Text>
+            <Text style={styles.rowTrailingText}>{premiumActive ? 'Premium' : 'Standard'}</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
           </Pressable>
 

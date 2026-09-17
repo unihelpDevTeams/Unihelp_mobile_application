@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { useAuth } from '../../../context/AuthContext';
+import { isPremiumActive } from '../services/premium';
 
 const COLORS = {
   indigo: '#6366F1',
@@ -29,7 +30,7 @@ const WAVE_BARS = 5;
 const VoiceRecorderBar = memo(({ conversationId, onVoiceSent }) => {
   const router = useRouter();
   const { profile } = useAuth();
-  const isPremium = Boolean(profile?.premium && profile?.subscriptionStatus !== 'expired');
+  const isPremium = isPremiumActive(profile);
   const {
     isRecording,
     recordingDuration,

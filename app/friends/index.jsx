@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
+import FriendRequestModal from '../../src/shared/components/FriendRequestModal';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
@@ -103,6 +104,7 @@ export default function FriendsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState('');
+  const [friendPromptPerson, setFriendPromptPerson] = useState(null);
 
   const refreshSuggested = useCallback(async () => {
     if (!uid) return;
@@ -145,7 +147,11 @@ export default function FriendsPage() {
       });
       router.navigate(`/messages/${conversationId}`);
     } catch (error) {
-      Alert.alert('Message unavailable', error.message || 'You need to be friends before messaging.');
+      if (error.message === 'Become friends before chatting freely.') {
+        setFriendPromptPerson(person);
+      } else {
+        Alert.alert('Message unavailable', error.message || 'You need to be friends before messaging.');
+      }
     } finally {
       setBusyId('');
     }
@@ -287,6 +293,17 @@ export default function FriendsPage() {
           ListEmptyComponent={<EmptyState title={emptyCopy[0]} description={emptyCopy[1]} />}
         />
       )}
+      <FriendRequestModal
+        visible={Boolean(friendPromptPerson)}
+        person={friendPromptPerson}
+        onClose={() => setFriendPromptPerson(null)}
+        onAdd={() => sendFriendRequest({
+          currentUid: uid,
+          targetUid: friendPromptPerson?.uid,
+          currentProfile: profile,
+          targetProfile: friendPromptPerson,
+        })}
+      />
     </ScreenShell>
   );
 }

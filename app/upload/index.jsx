@@ -29,7 +29,7 @@ import {
   uploadImage,
   uploadPDF,
 } from '../../services/cloudinary';
-import { uploadFeatureMedia } from '../../src/shared/services/backend';
+import { postJson, uploadFeatureMedia } from '../../src/shared/services/backend';
 import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { canManageResource, canUploadResource } from '../../src/shared/auth/resourcePermissions';
@@ -787,8 +787,38 @@ export default function UploadPage() {
       const payload = buildPayload(uploadedAttachments);
 
       if (uploadType === 'question') {
-        payload.userId = profile.uid;
-        payload.userEmail = profile.email || '';
+        const processed = await postJson('/api/past-questions/process', {
+          ...payload,
+          courseCode: form.courseCode?.trim() || payload.courseCode || '',
+          courseTitle: payload.title || form.title?.trim() || '',
+          department: form.department?.trim() || payload.department || '',
+          institution: form.school?.trim() || payload.school || '',
+          session: form.semester?.trim() || payload.semester || '',
+          year: form.year ? Number(String(form.year).trim()) : undefined,
+          examType: form.examType?.trim() || payload.examType || 'Examination',
+          title: form.title?.trim() || payload.title || 'Past Question',
+          originalFile: {
+            url: uploadedAttachments[0]?.url || '',
+            publicId: uploadedAttachments[0]?.publicId || '',
+            fileName: uploadedAttachments[0]?.name || payload.fileName || 'paper.pdf',
+          },
+          rawText: '',
+          questions: [],
+          createdBy: profile.uid,
+          status: 'draft',
+          userId: profile.uid,
+          userEmail: profile.email || '',
+        });
+
+        const draft = processed?.draft || processed?.item || {};
+        await postJson('/api/past-questions', draft);
+        setMessage('Past question draft created successfully. Review and publish from the structured question record.');
+        setForm(config.defaultForm);
+        setAttachments([]);
+        setProgress({});
+        setPreviewItem(null);
+        router.replace(config.routeAfter);
+        return;
       }
 
       if (uploadType === 'note') {

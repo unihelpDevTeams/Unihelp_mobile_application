@@ -29,6 +29,7 @@ const getTypeMeta = (colors) => ({
   system: { icon: 'megaphone', color: colors.brand, soft: colors.brandLight },
   reminder: { icon: 'alarm', color: colors.green, soft: colors.greenLight },
   alert: { icon: 'alert-circle', color: colors.red, soft: colors.redLight },
+  premium: { icon: 'sparkles', color: colors.gold, soft: colors.goldLight },
   default: { icon: 'notifications', color: colors.brand, soft: colors.brandLight },
 });
 
@@ -81,6 +82,7 @@ const resolveNotificationRoute = (item) => {
   if (item.type === 'direct_message' || item.type === 'message') return '/messages';
   if (String(item.type || '').includes('friend') || String(item.type || '').includes('request') || String(item.type || '').includes('blocked') || String(item.type || '').includes('unblocked')) return '/friends';
   if (item.type === 'group' || item.type === 'group_created' || item.type === 'group_message') return '/community';
+  if (item.type === 'premium') return '/premium';
   return '/notifications';
 };
 
