@@ -19,6 +19,7 @@ import { getDownloadRecord, saveResourceForOffline } from '../../../src/shared/o
 import { getApiUrl } from '../../../src/shared/services/backend';
 import FriendRequestModal from '../../../src/shared/components/FriendRequestModal';
 import { isPremiumActive } from '../../../src/shared/services/premium';
+import PastQuestionDocumentReader from '../../../src/shared/components/PastQuestionDocumentReader';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const SCREEN_PADDING = 18;
@@ -203,6 +204,8 @@ export default function RecordViewPage() {
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [lightboxVisible, setLightboxVisible] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [readingProgress, setReadingProgress] = useState(0);
+  const [readerMetrics, setReaderMetrics] = useState({ y: 0, height: 0 });
   const galleryRef = useRef(null);
   const lightboxRef = useRef(null);
   const previewFileRef = useRef(null);
@@ -336,7 +339,6 @@ export default function RecordViewPage() {
     }
   }, [contactSheetVisible, sheetAnim]);
 
-  const structuredQuestions = Array.isArray(item?.questions) ? item.questions : [];
   const title = item?.title || item?.name || 'Untitled';
   const description = item?.description || item?.body || item?.summary || '';
   const descriptionIsLong = description.length > 220;
@@ -376,6 +378,9 @@ export default function RecordViewPage() {
     return highlights.slice(0, 4);
   }, [isCommerceType, isHostel, item, primaryLocation]);
   const hasFileAsset = Boolean(asset?.hasDocumentUrl);
+  const pastQuestionContent = Array.isArray(item?.content) ? item.content : [];
+  const hasPastQuestionDocument = type === 'question' && pastQuestionContent.length > 0;
+  const showDocumentCard = hasFileAsset && !hasPastQuestionDocument;
 
   useEffect(() => {
     if (!id || !['note', 'question', 'studyMaterial'].includes(type)) {
@@ -593,6 +598,17 @@ export default function RecordViewPage() {
     ]);
   };
 
+  const openOriginalPaper = () => {
+    const originalUrl = item?.originalFile?.url || asset?.fileUrl || asset?.directDownloadUrl || '';
+    if (!originalUrl) {
+      Alert.alert('Original unavailable', 'The original paper is not available for this document.');
+      return;
+    }
+    Linking.openURL(originalUrl).catch(() => {
+      Alert.alert('Could not open paper', 'We could not open the original paper on this device.');
+    });
+  };
+
   const mediaItems = useMemo(() => {
     if (!item) return [];
     const candidates = [];
@@ -639,6 +655,25 @@ export default function RecordViewPage() {
       setGalleryIndex(index);
     }
   };
+
+  const handleReaderLayout = useCallback((event) => {
+    const { y, height } = event.nativeEvent.layout;
+    setReaderMetrics((current) => (
+      current.y === y && current.height === height ? current : { y, height }
+    ));
+  }, []);
+
+  const handleReaderScroll = useCallback((event) => {
+    if (type !== 'question') return;
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const hasReaderMetrics = readerMetrics.height > 0;
+    const startY = hasReaderMetrics ? readerMetrics.y : 0;
+    const readableDistance = hasReaderMetrics
+      ? Math.max(readerMetrics.height - layoutMeasurement.height, 1)
+      : Math.max(contentSize.height - layoutMeasurement.height, 1);
+    const nextProgress = Math.min(Math.max(Math.round(((contentOffset.y - startY) / readableDistance) * 100), 0), 100);
+    setReadingProgress((current) => current === nextProgress ? current : nextProgress);
+  }, [readerMetrics, type]);
 
   const jumpToGallerySlide = (index) => {
     galleryRef.current?.scrollTo({ x: index * GALLERY_STEP, animated: true });
@@ -703,6 +738,8 @@ export default function RecordViewPage() {
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[styles.scrollContent, showStickyFooter && styles.scrollContentWithFooter]}
+          onScroll={type === 'question' ? handleReaderScroll : undefined}
+          scrollEventThrottle={type === 'question' ? 16 : undefined}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} colors={[colors.brand]} />
           }
@@ -769,7 +806,7 @@ export default function RecordViewPage() {
             </View>
           ) : null}
 
-          {hasFileAsset ? (
+          {showDocumentCard ? (
             <View style={styles.documentCard}>
               <View style={styles.previewWrap}>
                 {asset.previewUrl && isPreviewImageUrl(asset.previewUrl) ? (
@@ -961,48 +998,15 @@ export default function RecordViewPage() {
             </View>
           ) : null}
 
-          {type === 'question' && structuredQuestions.length ? (
-            <View style={styles.descriptionCard}>
-              <Text style={styles.sectionLabel}>PAST QUESTION</Text>
-              {structuredQuestions.map((question, index) => (
-                <View key={question.id || `${index}-${question.number}`} style={{ marginBottom: 18 }}>
-                  <Text style={[styles.documentTitle, { fontSize: 18, marginBottom: 8 }]}>
-                    Question {question.number || index + 1}
-                  </Text>
-                  <Text style={styles.descriptionText}>{question.text || 'No question text was extracted yet.'}</Text>
-                  {Array.isArray(question.images) && question.images.length ? (
-                    <View style={{ marginTop: 12, gap: 12 }}>
-                      {question.images.map((image, imageIndex) => (
-                        <View key={`${question.id || index}-image-${imageIndex}`} style={{ gap: 6 }}>
-                          <Image source={{ uri: image.url || image.secure_url || image.previewUrl || image.fileUrl }} style={{ width: '100%', minHeight: 220, borderRadius: 14, backgroundColor: '#E5E7EB' }} contentFit="contain" />
-                          {image.caption ? <Text style={styles.previewErrorHint}>{image.caption}</Text> : null}
-                        </View>
-                      ))}
-                    </View>
-                  ) : null}
-                </View>
-              ))}
-              {item?.warnings?.length ? (
-                <Text style={[styles.previewErrorHint, { marginTop: 8, color: colors.warning || '#D97706' }]}>
-                  ⚠ {item.warnings.join(' ')}
-                </Text>
-              ) : null}
-            </View>
-          ) : null}
 
-          {type === 'question' && item?.originalFile?.url ? (
-            <View style={[styles.descriptionCard, { marginTop: 12 }]}>
-              <Text style={styles.sectionLabel}>ORIGINAL PAPER</Text>
-              <Pressable
-                style={({ pressed }) => [styles.primaryButton, pressed && styles.pressedBrand]}
-                onPress={() => Linking.openURL(item.originalFile.url)}
-                accessibilityRole="button"
-                accessibilityLabel="Open original paper"
-              >
-                <Ionicons name="document-text-outline" size={16} color={colors.onBrand} />
-                <Text style={styles.primaryButtonText}>View Original Paper</Text>
-              </Pressable>
-            </View>
+          {type === 'question' ? (
+            <PastQuestionDocumentReader
+              document={item}
+              onOpenOriginal={openOriginalPaper}
+              canOpenOriginal={Boolean(item?.originalFile?.url || asset?.hasDocumentUrl)}
+              readingProgress={readingProgress}
+              onLayout={handleReaderLayout}
+            />
           ) : null}
 
           {fields.length ? (

@@ -89,6 +89,24 @@ export async function putJson(path, payload) {
   return data;
 }
 
+export async function patchJson(path, payload) {
+  const headers = await buildHeaders();
+  const response = await fetch(`${getApiUrl()}${path}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  const data = await parseResponse(response);
+
+  if (!response.ok) {
+    const message = data.message || data.error || 'Request failed';
+    throw new Error(`${response.status} ${message}`);
+  }
+
+  return data;
+}
+
 export async function deleteJson(path) {
   const headers = await buildHeaders();
   const response = await fetch(`${getApiUrl()}${path}`, {

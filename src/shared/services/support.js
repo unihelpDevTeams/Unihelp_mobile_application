@@ -1,4 +1,23 @@
-import { getJson, postJson, putJson, deleteJson } from './backend';
+import { getJson, postJson, patchJson, deleteJson } from './backend';
+
+const normalizePagedResponse = (res, page = 1, pageSize = 20) => {
+  const items = res.items || res.data || [];
+  const total = Number(res.total || items.length || 0);
+  const offset = Number(res.offset || (page - 1) * pageSize || 0);
+  const limit = Number(res.limit || pageSize);
+  return {
+    items,
+    hasMore: Boolean(res.hasMore ?? (offset + items.length < total)),
+    page: res.page || page,
+  };
+};
+
+const supportRouteFor = (collectionName) => {
+  if (collectionName === 'contactMessages' || collectionName === 'contact') return 'contact';
+  if (collectionName === 'reports' || collectionName === 'report') return 'reports';
+  if (collectionName === 'suggestions') return 'suggestions';
+  return collectionName;
+};
 
 // ============================================================
 // CONTACT MESSAGES
@@ -32,11 +51,7 @@ export async function fetchContactMessages({
   }
 
   const res = await getJson(`/api/contact?${query.toString()}`);
-  return {
-    items: res.items || [],
-    hasMore: res.hasMore || false,
-    page: res.page || 1,
-  };
+  return normalizePagedResponse(res, page, pageSize);
 }
 
 // ============================================================
@@ -44,7 +59,7 @@ export async function fetchContactMessages({
 // ============================================================
 
 export async function submitReport({ reportType, title, description, attachments }) {
-  return postJson('/api/report', {
+  return postJson('/api/reports', {
     reportType,
     title,
     description,
@@ -75,12 +90,8 @@ export async function fetchReports({
     query.append('search', searchQuery);
   }
 
-  const res = await getJson(`/api/report?${query.toString()}`);
-  return {
-    items: res.items || [],
-    hasMore: res.hasMore || false,
-    page: res.page || 1,
-  };
+  const res = await getJson(`/api/reports?${query.toString()}`);
+  return normalizePagedResponse(res, page, pageSize);
 }
 
 // ============================================================
@@ -120,11 +131,7 @@ export async function fetchSuggestions({
   }
 
   const res = await getJson(`/api/suggestions?${query.toString()}`);
-  return {
-    items: res.items || [],
-    hasMore: res.hasMore || false,
-    page: res.page || 1,
-  };
+  return normalizePagedResponse(res, page, pageSize);
 }
 
 // ============================================================
@@ -132,43 +139,31 @@ export async function fetchSuggestions({
 // ============================================================
 
 export async function updateSupportItemStatus(collectionName, itemId, newStatus) {
-  // collectionName should map to the base route (e.g. 'contactMessages' -> 'contact', 'reports' -> 'report', 'suggestions' -> 'suggestions')
-  let route = collectionName;
-  if (collectionName === 'contactMessages') route = 'contact';
-  if (collectionName === 'reports') route = 'report';
-
-  return putJson(`/api/${route}/${itemId}/status`, { status: newStatus });
+  const route = supportRouteFor(collectionName);
+  return patchJson(`/api/${route}/${itemId}/status`, { status: newStatus });
 }
 
 export async function addAdminNote(collectionName, itemId, note) {
-  let route = collectionName;
-  if (collectionName === 'contactMessages') route = 'contact';
-  if (collectionName === 'reports') route = 'report';
+  const route = supportRouteFor(collectionName);
 
   return postJson(`/api/${route}/${itemId}/notes`, { note });
 }
 
 export async function fetchAdminNotes(collectionName, itemId) {
-  let route = collectionName;
-  if (collectionName === 'contactMessages') route = 'contact';
-  if (collectionName === 'reports') route = 'report';
+  const route = supportRouteFor(collectionName);
 
   const res = await getJson(`/api/${route}/${itemId}/notes`);
-  return res.notes || [];
+  return res.notes || res.data || (Array.isArray(res) ? res : []);
 }
 
 export async function fetchSupportItem(collectionName, itemId) {
-  let route = collectionName;
-  if (collectionName === 'contactMessages') route = 'contact';
-  if (collectionName === 'reports') route = 'report';
+  const route = supportRouteFor(collectionName);
 
   return getJson(`/api/${route}/${itemId}`);
 }
 
 export async function deleteSupportItem(collectionName, itemId) {
-  let route = collectionName;
-  if (collectionName === 'contactMessages') route = 'contact';
-  if (collectionName === 'reports') route = 'report';
+  const route = supportRouteFor(collectionName);
 
   return deleteJson(`/api/${route}/${itemId}`);
 }

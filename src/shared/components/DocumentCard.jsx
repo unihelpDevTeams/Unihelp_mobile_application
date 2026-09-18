@@ -14,6 +14,30 @@ const kindMeta = {
 const firstText = (...values) =>
   values.find((value) => typeof value === 'string' && value.trim())?.trim() || '';
 
+const textFromDocumentBlocks = (blocks = []) => {
+  if (!Array.isArray(blocks)) return '';
+  const lines = [];
+  const visit = (block) => {
+    if (!block || typeof block !== 'object') return;
+    const text = firstText(block.text, block.value, block.title, block.label);
+    if (text) lines.push(text);
+    if (Array.isArray(block.items)) {
+      block.items.forEach((item) => {
+        const itemText = typeof item === 'string' ? item : firstText(item?.text, item?.value);
+        if (itemText) lines.push(itemText);
+      });
+    }
+    if (Array.isArray(block.blocks)) block.blocks.forEach(visit);
+  };
+  blocks.forEach(visit);
+  return lines.join(' ').trim();
+};
+
+const resourcePreviewText = (item = {}) =>
+  firstText(item.description, item.summary, item.body, item.text) ||
+  textFromDocumentBlocks(item.content) ||
+  textFromDocumentBlocks(item.questions);
+
 export default function DocumentCard({
   item,
   onPress,
@@ -196,8 +220,8 @@ export default function DocumentCard({
     },
   }));
 
-  const itemTitle = item?.title || item?.name || 'Untitled Resource';
-  const itemDescription = item?.description || item?.content || item?.text || '';
+  const itemTitle = firstText(item?.title, item?.name) || 'Untitled Resource';
+  const itemDescription = resourcePreviewText(item);
   const isLong = itemDescription.length > 110;
   const [expanded, setExpanded] = useState(!isLong);
 

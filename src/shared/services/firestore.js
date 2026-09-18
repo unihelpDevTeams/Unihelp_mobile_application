@@ -17,7 +17,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../../../firebase/config';
 
-import { COLLECTIONS, conversationSubcollections, groupSubcollections, profileDefaults, userSubcollections } from '../firestoreSchema';
+import { COLLECTIONS, conversationSubcollections, groupSubcollections, profileDefaults } from '../firestoreSchema';
 import { sendAppNotification, getJson, postJson, putJson, deleteJson } from './backend';
 
 const mapDocs = (snapshot) => snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
@@ -178,11 +178,19 @@ export async function fetchNotesPage({ pageSize = 20, cursor = null } = {}) {
 }
 
 export async function fetchQuestions(options = {}) {
-  return orderedList(COLLECTIONS.questions, 'createdAt', 'desc', options.pageSize || 20);
+  const page = await fetchQuestionsPage({ pageSize: options.pageSize || 20 });
+  return page.items;
 }
 
 export async function fetchQuestionsPage({ pageSize = 20, cursor = null } = {}) {
-  return orderedPage(COLLECTIONS.questions, 'createdAt', 'desc', pageSize, cursor);
+  if (cursor) return { items: [], cursor: null, hasMore: false };
+  const data = await getJson(`/api/past-questions?limit=${encodeURIComponent(pageSize)}`);
+  const items = Array.isArray(data?.items) ? data.items : [];
+  return {
+    items,
+    cursor: null,
+    hasMore: false,
+  };
 }
 
 export async function fetchGroupsPage({ pageSize = 20, cursor = null } = {}) {
@@ -729,12 +737,8 @@ export async function fetchDetailRecord(type, id) {
   if (type === 'listing') return getJson(`/api/marketplace/${encodeURIComponent(id)}`);
   if (type === 'story') return getJson(`/api/stories/${encodeURIComponent(id)}`);
   if (type === 'question') {
-    try {
-      const response = await getJson(`/api/past-questions/${encodeURIComponent(id)}`);
-      if (response?.item) return response.item;
-    } catch (error) {
-      console.warn('[past-questions] API fallback unavailable, trying Firestore:', error?.message);
-    }
+    const response = await getJson(`/api/past-questions/${encodeURIComponent(id)}`);
+    return response?.item || null;
   }
 
   const collectionName = collectionMapForType[type] || type;
