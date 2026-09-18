@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +16,7 @@ import PromoSpotlightManager from '../../src/admin/PromoSpotlightManager';
 import StickerManager from '../../src/admin/StickerManager';
 import AdminNewsManager from '../../src/admin/AdminNewsManager';
 import PastQuestionReviewManager from '../../src/admin/PastQuestionReviewManager';
+import UniversityManager from '../../src/admin/UniversityManager';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import {
   ADMIN_PREMIUM_GIFT_DAYS,
@@ -25,17 +26,44 @@ import {
   isPremiumActive,
 } from '../../src/shared/services/premium';
 
-const TABS = [
-  { key: 'users', label: 'Users', icon: 'people-outline' },
-  { key: 'mediaSources', label: 'Media Sources', icon: 'megaphone-outline' },
-  { key: 'pastQuestions', label: 'Past Questions', icon: 'clipboard-outline' },
-  { key: 'listings', label: 'Listings', icon: 'storefront-outline' },
-  { key: 'support', label: 'Support Center', icon: 'headset-outline' },
-  { key: 'notifications', label: 'Campus News', icon: 'newspaper-outline' },
-  { key: 'promoSpotlights', label: 'Promo Spotlights', icon: 'sparkles-outline' },
-  { key: 'streakRewards', label: 'Streak Rewards', icon: 'gift-outline' },
-  { key: 'stickers', label: 'Stickers', icon: 'happy-outline' },
+const ADMIN_NAV_SECTIONS = [
+  { label: 'Overview', items: [{ key: 'dashboard', label: 'Dashboard', icon: 'grid-outline' }] },
+  {
+    label: 'People',
+    items: [
+      { key: 'users', label: 'Users', icon: 'people-outline' },
+      { key: 'premium', label: 'Premium', icon: 'star-outline' },
+    ],
+  },
+  {
+    label: 'Content',
+    items: [
+      { key: 'pastQuestions', label: 'Past Questions', icon: 'clipboard-outline' },
+      { key: 'notifications', label: 'Campus News', icon: 'newspaper-outline' },
+      { key: 'mediaSources', label: 'Media Sources', icon: 'megaphone-outline' },
+      { key: 'academicData', label: 'Universities', icon: 'school-outline' },
+    ],
+  },
+  {
+    label: 'Marketplace',
+    items: [
+      { key: 'listings', label: 'Listings', icon: 'storefront-outline' },
+      { key: 'sponsorships', label: 'Sponsorships', icon: 'sparkles-outline' },
+    ],
+  },
+  { label: 'Support', items: [{ key: 'support', label: 'Support Center', icon: 'headset-outline' }] },
+  {
+    label: 'Growth',
+    items: [
+      { key: 'promoSpotlights', label: 'Promo Spotlights', icon: 'sparkles-outline' },
+      { key: 'streakRewards', label: 'Streak Rewards', icon: 'gift-outline' },
+      { key: 'stickers', label: 'Stickers', icon: 'happy-outline' },
+    ],
+  },
+  { label: 'System', items: [{ key: 'access', label: 'Access', icon: 'shield-checkmark-outline' }] },
 ];
+
+const ADMIN_NAV_ITEMS = ADMIN_NAV_SECTIONS.flatMap((section) => section.items.map((item) => ({ ...item, section: section.label })));
 
 const ADMIN_COLLECTION_MAP = {
   marketplace: { endpoint: '/api/marketplace', label: 'Student Marketplace' },
@@ -51,15 +79,20 @@ export default function AdminPanelPage() {
   const router = useRouter();
   const { profile, user } = useAuth();
   const { colors } = useTheme();
+  const { width } = useWindowDimensions();
   const pageStyles = useMemo(() => createPageStyles(colors), [colors]);
 
-  const [activeTab, setActiveTab] = useState('listings');
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [listingType, setListingType] = useState('marketplace');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState(null);
+  const [sponsoringId, setSponsoringId] = useState(null);
+  const [overview, setOverview] = useState({ loading: true, error: '', metrics: {}, queues: {} });
 
   const isAdmin = profile?.admin === true || ['iadejuwon77@gmail.com', 'onakomayaokiki@gmail.com'].includes(String(user?.email || '').trim().toLowerCase());
+  const activeNav = ADMIN_NAV_ITEMS.find((item) => item.key === activeTab) || ADMIN_NAV_ITEMS[0];
+  const isWide = width >= 900;
 
   const fetchItems = useCallback(async () => {
     const config = ADMIN_COLLECTION_MAP[listingType];
@@ -87,6 +120,80 @@ export default function AdminPanelPage() {
     if (!isAdmin) return;
     fetchItems();
   }, [isAdmin, fetchItems]);
+
+  const loadOverview = useCallback(async () => {
+    if (!isAdmin) return;
+    setOverview((current) => ({ ...current, loading: true, error: '' }));
+    try {
+      const [
+        usersResult,
+        marketplaceResult,
+        hostelsResult,
+        pastQuestionsResult,
+        contactResult,
+        reportsResult,
+        suggestionsResult,
+        announcementsResult,
+        sourcesResult,
+        packsResult,
+        stickersResult,
+      ] = await Promise.allSettled([
+        getDocs(collection(db, COLLECTIONS.users)),
+        getJson('/api/marketplace?limit=1'),
+        getJson('/api/hostels?limit=1'),
+        getJson('/api/past-questions?limit=1'),
+        getJson('/api/contact?limit=1&status=pending'),
+        getJson('/api/reports?limit=1&status=pending'),
+        getJson('/api/suggestions?limit=1&status=pending'),
+        getDocs(query(collection(db, 'announcements'), limit(100))),
+        getDocs(query(collection(db, 'marketingSources'), limit(100))),
+        getJson('/api/stickers/packs'),
+        getJson('/api/stickers'),
+      ]);
+
+      const users = usersResult.status === 'fulfilled'
+        ? usersResult.value.docs.map((docItem) => ({ id: docItem.id, ...docItem.data() }))
+        : [];
+      const totalFrom = (result) => {
+        if (result.status !== 'fulfilled') return 0;
+        const value = result.value || {};
+        return Number(value.total ?? value.count ?? value.items?.length ?? value.data?.length ?? (Array.isArray(value) ? value.length : 0)) || 0;
+      };
+
+      setOverview({
+        loading: false,
+        error: '',
+        metrics: {
+          users: users.length,
+          activeUsers: users.filter((item) => !item.blocked).length,
+          blockedUsers: users.filter((item) => item.blocked).length,
+          premiumUsers: users.filter((item) => isPremiumActive(item)).length,
+          marketplace: totalFrom(marketplaceResult),
+          hostels: totalFrom(hostelsResult),
+          pastQuestions: totalFrom(pastQuestionsResult),
+          announcements: announcementsResult.status === 'fulfilled' ? announcementsResult.value.size : 0,
+          marketingSources: sourcesResult.status === 'fulfilled' ? sourcesResult.value.size : 0,
+          stickerPacks: totalFrom(packsResult),
+          stickers: totalFrom(stickersResult),
+        },
+        queues: {
+          contact: totalFrom(contactResult),
+          reports: totalFrom(reportsResult),
+          suggestions: totalFrom(suggestionsResult),
+        },
+      });
+    } catch (error) {
+      setOverview((current) => ({
+        ...current,
+        loading: false,
+        error: error?.message || 'Could not load admin overview.',
+      }));
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    loadOverview();
+  }, [loadOverview]);
 
   const handleDelete = (item) => {
     const config = ADMIN_COLLECTION_MAP[listingType];
@@ -118,6 +225,40 @@ export default function AdminPanelPage() {
         },
       ]
     );
+  };
+
+  const refreshListingItem = (updated) => {
+    if (!updated?.id) return;
+    setItems((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
+  };
+
+  const removeSponsorship = (item) => {
+    setSponsoringId(item.id);
+    deleteJson(`/api/marketplace/${encodeURIComponent(item.id)}/sponsor`)
+      .then(refreshListingItem)
+      .then(() => Alert.alert('Sponsorship removed', `${item.title || 'Listing'} is no longer promoted.`))
+      .catch((error) => Alert.alert('Update failed', error.message || 'Could not remove sponsorship.'))
+      .finally(() => setSponsoringId(null));
+  };
+
+  const manageSponsorship = (item) => {
+    if (listingType !== 'marketplace') return;
+    const actions = item.isSponsored
+      ? [
+          { text: 'Remove Sponsorship', style: 'destructive', onPress: () => removeSponsorship(item) },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      : [
+          {
+            text: 'Paid seller flow only',
+            onPress: () => Alert.alert(
+              'Paid sponsorships',
+              'Sellers must promote their own listings from the mobile listing detail screen and complete Flutterwave payment.'
+            ),
+          },
+          { text: 'Cancel', style: 'cancel' },
+        ];
+    Alert.alert('Marketplace promotion', item.title || 'Listing', actions);
   };
 
   const getImageUrl = (item) => {
@@ -159,75 +300,27 @@ export default function AdminPanelPage() {
     );
   }
 
-  return (
-    <ScreenShell title="Admin Panel" subtitle={`Welcome, ${profile?.username || 'Admin'}`} showBack loading={loading && activeTab !== 'notifications'}>
-      <View style={pageStyles.adminHero}>
-        <View style={pageStyles.heroIcon}>
-          <Ionicons name="shield-checkmark" size={22} color={colors.onBrand || '#FFF'} />
-        </View>
-        <View style={pageStyles.heroCopy}>
-          <Text style={pageStyles.heroEyebrow}>ADMIN CONTROL CENTER</Text>
-          <Text style={pageStyles.heroTitle}>Keep Unihelp running smoothly.</Text>
-          <Text style={pageStyles.heroSubtitle}>Review activity, support students, and publish updates from one place.</Text>
-        </View>
-      </View>
-
-      <View style={pageStyles.sectionHeading}>
-        <View>
-          <Text style={pageStyles.sectionEyebrow}>WORKSPACE</Text>
-          <Text style={pageStyles.sectionTitle}>Choose an area to manage</Text>
-        </View>
-        <View style={pageStyles.adminPill}>
-          <View style={pageStyles.statusDot} />
-          <Text style={pageStyles.adminPillText}>Admin</Text>
-        </View>
-      </View>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={pageStyles.tabBar}
-        contentContainerStyle={pageStyles.tabBarContent}
-      >
-        {TABS.map((tab) => {
-          const isActive = activeTab === tab.key;
-          return (
-            <Pressable
-              key={tab.key}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: isActive }}
-              style={({ pressed }) => [
-                pageStyles.tab,
-                isActive && pageStyles.tabActive,
-                pressed && pageStyles.tabPressed,
-              ]}
-              onPress={() => setActiveTab(tab.key)}
-            >
-              <Ionicons
-                name={tab.icon}
-                size={16}
-                color={isActive ? colors.onBrand || '#FFFFFF' : colors.textSecondary}
-              />
-              <Text style={[pageStyles.tabText, isActive && pageStyles.tabTextActive]}>
-                {tab.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-
-      {/* Main Content Areas */}
-      {activeTab === 'users' ? (
-        <UsersList colors={colors} />
-      ) : activeTab === 'mediaSources' ? (
-        <MarketingSourcesManager colors={colors} />
-      ) : activeTab === 'support' ? (
+  const renderAdminContent = () => {
+    if (activeTab === 'dashboard') {
+      return <AdminDashboard colors={colors} overview={overview} onRefresh={loadOverview} setActiveTab={setActiveTab} />;
+    }
+    if (activeTab === 'users') return <UsersList colors={colors} />;
+    if (activeTab === 'premium') return <UsersList colors={colors} premiumOnly />;
+    if (activeTab === 'mediaSources') return <MarketingSourcesManager colors={colors} />;
+    if (activeTab === 'academicData') return <UniversityManager />;
+    if (activeTab === 'support') {
+      return (
         <View style={pageStyles.notificationPlaceholder}>
-          <Ionicons name="headset-outline" size={48} color={colors.brand} />
+          <Ionicons name="headset-outline" size={42} color={colors.brand} />
           <Text style={pageStyles.notificationTitle}>Support Center</Text>
           <Text style={pageStyles.notificationText}>
-            Manage contact messages, reports, and suggestions from users.
+            Triage contact messages, reports, and product suggestions from the dedicated support queue.
           </Text>
+          <View style={pageStyles.supportQueueRow}>
+            <View style={pageStyles.supportQueuePill}><Text style={pageStyles.supportQueueValue}>{overview.queues.contact || 0}</Text><Text style={pageStyles.supportQueueLabel}>Contact</Text></View>
+            <View style={pageStyles.supportQueuePill}><Text style={pageStyles.supportQueueValue}>{overview.queues.reports || 0}</Text><Text style={pageStyles.supportQueueLabel}>Reports</Text></View>
+            <View style={pageStyles.supportQueuePill}><Text style={pageStyles.supportQueueValue}>{overview.queues.suggestions || 0}</Text><Text style={pageStyles.supportQueueLabel}>Ideas</Text></View>
+          </View>
           <Pressable
             style={pageStyles.notificationButton}
             onPress={() => router.navigate('/adminpanel/support-center')}
@@ -236,15 +329,16 @@ export default function AdminPanelPage() {
             <Text style={pageStyles.notificationButtonText}>Open Support Center</Text>
           </Pressable>
         </View>
-      ) : activeTab === 'promoSpotlights' ? (
-        <PromoSpotlightManager />
-      ) : activeTab === 'streakRewards' ? (
-        <StreakRewardsAdmin colors={colors} />
-      ) : activeTab === 'stickers' ? (
-        <StickerManager colors={colors} />
-      ) : activeTab === 'pastQuestions' ? (
-        <PastQuestionReviewManager />
-      ) : activeTab === 'listings' ? (
+      );
+    }
+    if (activeTab === 'promoSpotlights') return <PromoSpotlightManager />;
+    if (activeTab === 'streakRewards') return <StreakRewardsAdmin colors={colors} />;
+    if (activeTab === 'stickers') return <StickerManager colors={colors} />;
+    if (activeTab === 'pastQuestions') return <PastQuestionReviewManager />;
+    if (activeTab === 'access') return <AdminAccessPage colors={colors} profile={profile} user={user} />;
+    if (activeTab === 'sponsorships') return <MarketplaceSponsorshipRecords colors={colors} />;
+    if (activeTab === 'listings') {
+      return (
         <View style={pageStyles.listingToggleWrap}>
           <View style={pageStyles.contentHeading}>
             <View>
@@ -311,6 +405,14 @@ export default function AdminPanelPage() {
                     <Text style={pageStyles.listingTitle} numberOfLines={1}>
                       {item.title || item.name || 'Untitled'}
                     </Text>
+                    {item.isSponsored ? (
+                      <View style={pageStyles.sponsoredMiniBadge}>
+                        <Ionicons name="sparkles" size={10} color={colors.warning || '#B45309'} />
+                        <Text style={pageStyles.sponsoredMiniText}>
+                          Sponsored{item.sponsoredUntil ? ` until ${new Date(item.sponsoredUntil).toLocaleDateString()}` : ''}
+                        </Text>
+                      </View>
+                    ) : null}
                     {item.price != null && (
                       <Text style={pageStyles.listingPrice}>{formatNaira(item.price)}</Text>
                     )}
@@ -332,7 +434,20 @@ export default function AdminPanelPage() {
                       }
                     >
                       <Ionicons name="eye-outline" size={18} color={colors.brand} />
-                    </Pressable>
+                      </Pressable>
+                    {listingType === 'marketplace' ? (
+                      <Pressable
+                        style={pageStyles.promoteButton}
+                        onPress={() => manageSponsorship(item)}
+                        disabled={sponsoringId === item.id}
+                      >
+                        {sponsoringId === item.id ? (
+                          <ActivityIndicator size="small" color={colors.warning || '#B45309'} />
+                        ) : (
+                          <Ionicons name={item.isSponsored ? 'sparkles' : 'sparkles-outline'} size={18} color={colors.warning || '#B45309'} />
+                        )}
+                      </Pressable>
+                    ) : null}
                     <Pressable
                       style={pageStyles.deleteButton}
                       onPress={() => handleDelete(item)}
@@ -350,10 +465,350 @@ export default function AdminPanelPage() {
             />
           )}
         </View>
-      ) : (
-        <AdminNewsManager />
-      )}
+      );
+    }
+    return <AdminNewsManager />;
+  };
+
+  return (
+    <ScreenShell title="Admin Panel" subtitle={activeNav?.section ? `${activeNav.section} / ${activeNav.label}` : `Welcome, ${profile?.username || 'Admin'}`} showBack loading={loading && activeTab === 'listings'}>
+      <View style={pageStyles.adminHero}>
+        <View style={pageStyles.heroIcon}>
+          <Ionicons name="shield-checkmark" size={22} color={colors.onBrand || '#FFF'} />
+        </View>
+        <View style={pageStyles.heroCopy}>
+          <Text style={pageStyles.heroEyebrow}>UNIHELP ADMIN</Text>
+          <Text style={pageStyles.heroTitle}>{activeNav?.label || 'Dashboard'}</Text>
+          <Text style={pageStyles.heroSubtitle}>Manage real UniHelp data across people, content, support, marketplace, and growth tools.</Text>
+        </View>
+        <Pressable style={pageStyles.refreshButton} onPress={() => { fetchItems(); loadOverview(); }}>
+          <Ionicons name="refresh-outline" size={18} color={colors.onBrand || '#FFF'} />
+        </Pressable>
+      </View>
+
+      <View style={[pageStyles.adminWorkspace, isWide && pageStyles.adminWorkspaceWide]}>
+        <AdminSectionNav
+          colors={colors}
+          styles={pageStyles}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          wide={isWide}
+        />
+        <View style={pageStyles.adminContent}>
+          <View style={pageStyles.contentHeader}>
+            <View>
+              <Text style={pageStyles.sectionEyebrow}>{activeNav?.section || 'Overview'}</Text>
+              <Text style={pageStyles.sectionTitle}>{activeNav?.label || 'Dashboard'}</Text>
+            </View>
+            <View style={pageStyles.adminPill}>
+              <View style={pageStyles.statusDot} />
+              <Text style={pageStyles.adminPillText}>Admin</Text>
+            </View>
+          </View>
+          {renderAdminContent()}
+        </View>
+      </View>
     </ScreenShell>
+  );
+}
+
+function AdminSectionNav({ colors, styles, activeTab, setActiveTab, wide }) {
+  const content = ADMIN_NAV_SECTIONS.map((section) => (
+    <View key={section.label} style={styles.navSection}>
+      <Text style={styles.navSectionLabel}>{section.label}</Text>
+      <View style={wide ? styles.navItemsWide : styles.navItems}>
+        {section.items.map((item) => {
+          const selected = activeTab === item.key;
+          return (
+            <Pressable
+              key={item.key}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              onPress={() => setActiveTab(item.key)}
+              style={({ pressed }) => [
+                styles.navItem,
+                wide && styles.navItemWide,
+                selected && styles.navItemActive,
+                pressed && styles.tabPressed,
+              ]}
+            >
+              <Ionicons
+                name={item.icon}
+                size={16}
+                color={selected ? colors.onBrand || '#FFFFFF' : colors.textSecondary || '#64748B'}
+              />
+              <Text style={[styles.navItemText, selected && styles.navItemTextActive]} numberOfLines={1}>
+                {item.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  ));
+
+  if (wide) {
+    return <View style={styles.sidebarNav}>{content}</View>;
+  }
+
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.mobileNav}
+      contentContainerStyle={styles.mobileNavContent}
+    >
+      {content}
+    </ScrollView>
+  );
+}
+
+function MarketplaceSponsorshipRecords({ colors }) {
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const styles = useMemo(() => StyleSheet.create({
+    wrap: {
+      gap: 12,
+    },
+    stateBox: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 32,
+      paddingHorizontal: 16,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.borderDefault,
+      backgroundColor: colors.surfaceSecondary,
+    },
+    stateText: {
+      marginTop: 8,
+      color: colors.textSecondary,
+      textAlign: 'center',
+      fontWeight: '700',
+    },
+    card: {
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.borderDefault,
+      backgroundColor: colors.surface,
+      padding: 14,
+      gap: 10,
+    },
+    topRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    title: {
+      flex: 1,
+      color: colors.textPrimary,
+      fontSize: 14.5,
+      fontWeight: '900',
+    },
+    pill: {
+      borderRadius: 999,
+      paddingHorizontal: 9,
+      paddingVertical: 5,
+      backgroundColor: colors.brandLight,
+    },
+    pillText: {
+      color: colors.brandDark,
+      fontSize: 10.5,
+      fontWeight: '900',
+      textTransform: 'uppercase',
+    },
+    meta: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      lineHeight: 17,
+      fontWeight: '700',
+    },
+    amount: {
+      color: colors.brandDark,
+      fontSize: 15,
+      fontWeight: '900',
+    },
+  }), [colors]);
+
+  const loadRecords = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const result = await getJson('/api/marketplace/admin/sponsorships');
+      setRecords(result.items || []);
+    } catch (requestError) {
+      setError(requestError.message || 'Could not load sponsorship records.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRecords();
+  }, [loadRecords]);
+
+  const formatRecordDate = (value) => {
+    if (!value) return 'Not set';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? 'Not set' : date.toLocaleDateString();
+  };
+
+  const formatAmount = (record) => {
+    const amount = Number(record.amountNaira ?? Number(record.amount || 0) / 100);
+    return Number.isFinite(amount) ? `₦${amount.toLocaleString()}` : '';
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.stateBox}>
+        <ActivityIndicator color={colors.brand} />
+        <Text style={styles.stateText}>Loading sponsorship records...</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <Pressable style={styles.stateBox} onPress={loadRecords}>
+        <Ionicons name="warning-outline" size={28} color={colors.danger || '#DC2626'} />
+        <Text style={styles.stateText}>{error}</Text>
+      </Pressable>
+    );
+  }
+
+  if (!records.length) {
+    return (
+      <View style={styles.stateBox}>
+        <Ionicons name="sparkles-outline" size={32} color={colors.textSecondary} />
+        <Text style={styles.stateText}>No marketplace sponsorship records yet.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.wrap}>
+      {records.map((record) => (
+        <View key={record.id} style={styles.card}>
+          <View style={styles.topRow}>
+            <Text style={styles.title} numberOfLines={2}>{record.listingTitle || record.listingId}</Text>
+            <View style={styles.pill}>
+              <Text style={styles.pillText}>{record.status || 'pending'}</Text>
+            </View>
+          </View>
+          <Text style={styles.amount}>{formatAmount(record)} · {record.durationDays} days</Text>
+          <Text style={styles.meta}>Seller: {record.sellerId}</Text>
+          <Text style={styles.meta}>Reference: {record.paymentReference}</Text>
+          <Text style={styles.meta}>Runs: {formatRecordDate(record.startsAt)} to {formatRecordDate(record.expiresAt)}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function AdminDashboard({ colors, overview, onRefresh, setActiveTab }) {
+  const styles = useMemo(() => createDashboardStyles(colors), [colors]);
+  const metrics = overview.metrics || {};
+  const queues = overview.queues || {};
+  const metricCards = [
+    { label: 'Users', value: metrics.users || 0, detail: `${metrics.activeUsers || 0} active`, icon: 'people-outline', target: 'users' },
+    { label: 'Premium', value: metrics.premiumUsers || 0, detail: 'Active entitlements', icon: 'star-outline', target: 'premium' },
+    { label: 'Marketplace', value: metrics.marketplace || 0, detail: `${metrics.hostels || 0} hostels`, icon: 'storefront-outline', target: 'listings' },
+    { label: 'Past Questions', value: metrics.pastQuestions || 0, detail: 'Processed documents', icon: 'document-text-outline', target: 'pastQuestions' },
+  ];
+  const operations = [
+    { label: 'Announcements', value: metrics.announcements || 0, icon: 'newspaper-outline', target: 'notifications' },
+    { label: 'Marketing sources', value: metrics.marketingSources || 0, icon: 'megaphone-outline', target: 'mediaSources' },
+    { label: 'Sticker packs', value: metrics.stickerPacks || 0, icon: 'albums-outline', target: 'stickers' },
+    { label: 'Stickers', value: metrics.stickers || 0, icon: 'happy-outline', target: 'stickers' },
+  ];
+  const support = [
+    { label: 'Contact', value: queues.contact || 0 },
+    { label: 'Reports', value: queues.reports || 0 },
+    { label: 'Suggestions', value: queues.suggestions || 0 },
+  ];
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.dashboardHeader}>
+        <View>
+          <Text style={styles.eyebrow}>LIVE OVERVIEW</Text>
+          <Text style={styles.title}>Admin snapshot</Text>
+          <Text style={styles.subtitle}>Counts come from Firebase and existing UniHelp backend endpoints.</Text>
+        </View>
+        <Pressable style={styles.refresh} onPress={onRefresh} disabled={overview.loading}>
+          {overview.loading ? <ActivityIndicator size="small" color={colors.brand || '#4F46E5'} /> : <Ionicons name="refresh-outline" size={17} color={colors.brand || '#4F46E5'} />}
+        </Pressable>
+      </View>
+      {overview.error ? (
+        <View style={styles.notice}>
+          <Ionicons name="alert-circle-outline" size={17} color={colors.danger || '#DC2626'} />
+          <Text style={styles.noticeText}>{overview.error}</Text>
+        </View>
+      ) : null}
+      <View style={styles.metricGrid}>
+        {metricCards.map((item) => (
+          <Pressable key={item.label} style={({ pressed }) => [styles.metricCard, pressed && styles.pressed]} onPress={() => setActiveTab(item.target)}>
+            <View style={styles.metricTop}>
+              <View style={styles.metricIcon}><Ionicons name={item.icon} size={18} color={colors.brand || '#4F46E5'} /></View>
+              <Ionicons name="chevron-forward" size={16} color={colors.textTertiary || '#94A3B8'} />
+            </View>
+            <Text style={styles.metricValue}>{overview.loading ? '...' : item.value.toLocaleString()}</Text>
+            <Text style={styles.metricLabel}>{item.label}</Text>
+            <Text style={styles.metricDetail}>{item.detail}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <View style={styles.panel}>
+        <View style={styles.panelHeader}>
+          <Text style={styles.panelTitle}>Support queue</Text>
+          <Pressable onPress={() => setActiveTab('support')}><Text style={styles.linkText}>Open</Text></Pressable>
+        </View>
+        {support.map((item) => (
+          <View key={item.label} style={styles.queueRow}>
+            <Text style={styles.queueLabel}>{item.label}</Text>
+            <Text style={styles.queueValue}>{overview.loading ? '...' : item.value}</Text>
+          </View>
+        ))}
+      </View>
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>Content and growth</Text>
+        <View style={styles.operationGrid}>
+          {operations.map((item) => (
+            <Pressable key={item.label} style={styles.operationItem} onPress={() => setActiveTab(item.target)}>
+              <Ionicons name={item.icon} size={17} color={colors.brand || '#4F46E5'} />
+              <View style={styles.operationCopy}>
+                <Text style={styles.operationLabel}>{item.label}</Text>
+                <Text style={styles.operationValue}>{overview.loading ? '...' : item.value.toLocaleString()}</Text>
+              </View>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function AdminAccessPage({ colors, profile, user }) {
+  const styles = useMemo(() => createAccessStyles(colors), [colors]);
+  return (
+    <View style={styles.container}>
+      <View style={styles.card}>
+        <Ionicons name="shield-checkmark-outline" size={30} color={colors.brand || '#4F46E5'} />
+        <View style={styles.copy}>
+          <Text style={styles.title}>Admin access</Text>
+          <Text style={styles.text}>This screen uses the existing mobile admin gate: Firestore profile admin flag or the approved admin email allowlist.</Text>
+        </View>
+      </View>
+      <View style={styles.detailCard}>
+        <Text style={styles.label}>Signed in as</Text>
+        <Text style={styles.value}>{user?.email || profile?.email || 'Unknown admin'}</Text>
+        <Text style={styles.label}>Profile admin flag</Text>
+        <Text style={styles.value}>{profile?.admin === true ? 'Enabled' : 'Not enabled'}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -533,14 +988,14 @@ function StreakRewardsAdmin({ colors }) {
   );
 }
 
-function UsersList({ colors }) {
+function UsersList({ colors, premiumOnly = false }) {
   const router = useRouter();
   const userStyles = useMemo(() => createUserStyles(colors), [colors]);
 
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState(premiumOnly ? 'premium' : 'all');
   const [premiumTarget, setPremiumTarget] = useState(null);
   const [feedback, setFeedback] = useState(null);
   const [grantingPremium, setGrantingPremium] = useState(false);
@@ -721,8 +1176,8 @@ function UsersList({ colors }) {
       <View style={userStyles.usersHeader}>
         <View>
           <Text style={userStyles.sectionEyebrow}>DIRECTORY</Text>
-          <Text style={userStyles.sectionTitle}>User management</Text>
-          <Text style={userStyles.sectionSubtitle}>Review accounts and control access.</Text>
+          <Text style={userStyles.sectionTitle}>{premiumOnly ? 'Premium users' : 'User management'}</Text>
+          <Text style={userStyles.sectionSubtitle}>{premiumOnly ? 'Review entitlements and sync expiry data.' : 'Review accounts and control access.'}</Text>
         </View>
         <View style={userStyles.totalBadge}>
           <Text style={userStyles.totalValue}>{users.length}</Text>
@@ -902,6 +1357,16 @@ const createPageStyles = (colors) =>
       shadowRadius: 12,
       elevation: 4,
     },
+    refreshButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 13,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(255,255,255,0.14)',
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.18)',
+    },
     heroIcon: {
       width: 46,
       height: 46,
@@ -974,9 +1439,93 @@ const createPageStyles = (colors) =>
     restricted: {
       flex: 1,
       alignItems: 'center',
-      justify: 'center',
+      justifyContent: 'center',
       paddingHorizontal: 32,
       paddingVertical: 60,
+    },
+    adminWorkspace: {
+      gap: 16,
+    },
+    adminWorkspaceWide: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+    },
+    sidebarNav: {
+      width: 248,
+      gap: 18,
+      padding: 12,
+      borderRadius: 18,
+      backgroundColor: colors.card || '#FFFFFF',
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
+    },
+    mobileNav: {
+      marginBottom: 2,
+    },
+    mobileNavContent: {
+      gap: 12,
+      paddingBottom: 4,
+    },
+    navSection: {
+      gap: 7,
+    },
+    navSectionLabel: {
+      paddingHorizontal: 4,
+      fontSize: 10,
+      fontWeight: '900',
+      letterSpacing: 0.8,
+      textTransform: 'uppercase',
+      color: colors.textTertiary || '#94A3B8',
+    },
+    navItems: {
+      flexDirection: 'row',
+      gap: 7,
+    },
+    navItemsWide: {
+      gap: 6,
+    },
+    navItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      minHeight: 40,
+      paddingHorizontal: 12,
+      borderRadius: 12,
+      backgroundColor: colors.surfaceSecondary || '#F8FAFC',
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
+    },
+    navItemWide: {
+      width: '100%',
+    },
+    navItemActive: {
+      backgroundColor: colors.brand || '#4F46E5',
+      borderColor: colors.brand || '#4F46E5',
+    },
+    navItemText: {
+      maxWidth: 132,
+      fontSize: 12,
+      fontWeight: '800',
+      color: colors.textSecondary || '#64748B',
+    },
+    navItemTextActive: {
+      color: colors.onBrand || '#FFFFFF',
+    },
+    adminContent: {
+      flex: 1,
+      minWidth: 0,
+      gap: 14,
+    },
+    contentHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      padding: 14,
+      borderRadius: 16,
+      backgroundColor: colors.card || '#FFFFFF',
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
     },
     restrictedTitle: {
       marginTop: 16,
@@ -1166,6 +1715,22 @@ const createPageStyles = (colors) =>
       fontSize: 12,
       color: colors.textSecondary || '#6B7280',
     },
+    sponsoredMiniBadge: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      marginTop: 5,
+      paddingHorizontal: 7,
+      paddingVertical: 3,
+      borderRadius: 999,
+      backgroundColor: colors.warningLight || '#FEF3C7',
+    },
+    sponsoredMiniText: {
+      color: colors.warning || '#B45309',
+      fontSize: 10,
+      fontWeight: '900',
+    },
     listingActions: {
       flexDirection: 'row',
       gap: 6,
@@ -1176,6 +1741,14 @@ const createPageStyles = (colors) =>
       height: 36,
       borderRadius: 10,
       backgroundColor: colors.brandLight || '#EEF2FF',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    promoteButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      backgroundColor: colors.warningLight || '#FEF3C7',
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -1220,6 +1793,239 @@ const createPageStyles = (colors) =>
       color: colors.onBrand || '#FFFFFF',
       fontWeight: '800',
       fontSize: 14,
+    },
+    supportQueueRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      gap: 8,
+      marginTop: 4,
+    },
+    supportQueuePill: {
+      minWidth: 78,
+      alignItems: 'center',
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+      borderRadius: 12,
+      backgroundColor: colors.surfaceSecondary || '#F8FAFC',
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
+    },
+    supportQueueValue: {
+      fontSize: 16,
+      fontWeight: '900',
+      color: colors.textPrimary || '#0F172A',
+    },
+    supportQueueLabel: {
+      marginTop: 2,
+      fontSize: 10,
+      fontWeight: '800',
+      color: colors.textSecondary || '#64748B',
+    },
+  });
+
+const createDashboardStyles = (colors) =>
+  StyleSheet.create({
+    container: { gap: 14 },
+    dashboardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    eyebrow: {
+      fontSize: 10,
+      fontWeight: '900',
+      letterSpacing: 1,
+      color: colors.textTertiary || '#94A3B8',
+    },
+    title: {
+      marginTop: 3,
+      fontSize: 18,
+      fontWeight: '900',
+      color: colors.textPrimary || '#0F172A',
+    },
+    subtitle: {
+      marginTop: 3,
+      fontSize: 12,
+      lineHeight: 17,
+      color: colors.textSecondary || '#64748B',
+    },
+    refresh: {
+      width: 40,
+      height: 40,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.brandLight || '#EEF2FF',
+      borderWidth: 1,
+      borderColor: colors.brandBorder || '#E0E7FF',
+    },
+    notice: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: colors.dangerLight || '#FEF2F2',
+      borderWidth: 1,
+      borderColor: colors.danger || '#DC2626',
+    },
+    noticeText: { flex: 1, color: colors.textPrimary || '#111827', fontSize: 12, fontWeight: '700' },
+    metricGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 10,
+    },
+    metricCard: {
+      flexGrow: 1,
+      flexBasis: '47%',
+      minWidth: 145,
+      padding: 14,
+      borderRadius: 16,
+      backgroundColor: colors.card || '#FFFFFF',
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
+    },
+    pressed: { opacity: 0.78 },
+    metricTop: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    metricIcon: {
+      width: 34,
+      height: 34,
+      borderRadius: 11,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.brandLight || '#EEF2FF',
+    },
+    metricValue: {
+      marginTop: 12,
+      fontSize: 25,
+      fontWeight: '900',
+      color: colors.textPrimary || '#0F172A',
+    },
+    metricLabel: {
+      marginTop: 2,
+      fontSize: 12,
+      fontWeight: '900',
+      color: colors.textPrimary || '#0F172A',
+    },
+    metricDetail: {
+      marginTop: 3,
+      fontSize: 11,
+      color: colors.textSecondary || '#64748B',
+    },
+    panel: {
+      padding: 14,
+      borderRadius: 16,
+      backgroundColor: colors.card || '#FFFFFF',
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
+      gap: 10,
+    },
+    panelHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    panelTitle: {
+      fontSize: 14,
+      fontWeight: '900',
+      color: colors.textPrimary || '#0F172A',
+    },
+    linkText: {
+      fontSize: 12,
+      fontWeight: '900',
+      color: colors.brand || '#4F46E5',
+    },
+    queueRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 9,
+      borderTopWidth: 1,
+      borderTopColor: colors.borderSubtle || colors.borderDefault || '#E5E7EB',
+    },
+    queueLabel: {
+      color: colors.textSecondary || '#64748B',
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    queueValue: {
+      color: colors.textPrimary || '#0F172A',
+      fontSize: 14,
+      fontWeight: '900',
+    },
+    operationGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 9,
+    },
+    operationItem: {
+      flexGrow: 1,
+      flexBasis: '47%',
+      minWidth: 140,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 9,
+      padding: 11,
+      borderRadius: 13,
+      backgroundColor: colors.surfaceSecondary || '#F8FAFC',
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
+    },
+    operationCopy: { flex: 1 },
+    operationLabel: {
+      color: colors.textSecondary || '#64748B',
+      fontSize: 11,
+      fontWeight: '800',
+    },
+    operationValue: {
+      marginTop: 2,
+      color: colors.textPrimary || '#0F172A',
+      fontSize: 14,
+      fontWeight: '900',
+    },
+  });
+
+const createAccessStyles = (colors) =>
+  StyleSheet.create({
+    container: { gap: 12 },
+    card: {
+      flexDirection: 'row',
+      gap: 12,
+      padding: 16,
+      borderRadius: 16,
+      backgroundColor: colors.card || '#FFFFFF',
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
+    },
+    copy: { flex: 1 },
+    title: { fontSize: 16, fontWeight: '900', color: colors.textPrimary || '#0F172A' },
+    text: { marginTop: 4, fontSize: 13, lineHeight: 19, color: colors.textSecondary || '#64748B' },
+    detailCard: {
+      padding: 16,
+      borderRadius: 16,
+      backgroundColor: colors.surfaceSecondary || '#F8FAFC',
+      borderWidth: 1,
+      borderColor: colors.borderDefault || '#E5E7EB',
+      gap: 6,
+    },
+    label: {
+      marginTop: 4,
+      fontSize: 10,
+      fontWeight: '900',
+      letterSpacing: 0.8,
+      textTransform: 'uppercase',
+      color: colors.textTertiary || '#94A3B8',
+    },
+    value: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: colors.textPrimary || '#0F172A',
     },
   });
 

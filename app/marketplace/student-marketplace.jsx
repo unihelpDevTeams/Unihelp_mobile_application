@@ -16,7 +16,7 @@ import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import MediaCarousel from '../../src/shared/components/MediaCarousel';
 import ScreenShell from '../../src/shared/components/ScreenShell';
-import { fetchStudentListingsPage } from '../../services/firestoreSync';
+import { fetchMarketplaceListingsPage } from '../../services/firestoreSync';
 import { useAuth } from '../../context/AuthContext';
 
 const NGN = '\u20A6';
@@ -25,10 +25,10 @@ const DOWN = '\u2193';
 const PAGE_SIZE = 20;
 
 const SORT_OPTIONS = [
-  { key: 'random', label: 'Random', icon: 'shuffle-outline' },
   { key: 'newest', label: 'Newest', icon: 'time-outline' },
   { key: 'price_asc', label: `Price ${UP}`, icon: 'arrow-up-outline' },
   { key: 'price_desc', label: `Price ${DOWN}`, icon: 'arrow-down-outline' },
+  { key: 'rating_desc', label: 'Top rated', icon: 'star-outline' },
 ];
 
 const PRICE_RANGES = [
@@ -104,6 +104,13 @@ const getCategoryIcon = (category = '') => {
   return CATEGORY_ICONS[key] || CATEGORY_ICONS.default;
 };
 
+const getRatingSummary = (item = {}) => {
+  const count = Number(item.reviewCount || 0);
+  const avg = Number(item.ratingAverage || 0);
+  if (!count || !Number.isFinite(avg) || avg <= 0) return 'No reviews yet';
+  return `${avg.toFixed(1)} · ${count} ${count === 1 ? 'review' : 'reviews'}`;
+};
+
 export default function StudentMarketplacePage() {
   const router = useRouter();
   const { profile } = useAuth();
@@ -113,7 +120,7 @@ export default function StudentMarketplacePage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [cursor, setCursor] = useState(null);
+  const [pageNumber, setPageNumber] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState(null);
 
@@ -123,12 +130,12 @@ export default function StudentMarketplacePage() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
   const [priceRange, setPriceRange] = useState('all');
-  const [sort, setSort] = useState('random');
+  const [sort, setSort] = useState('newest');
 
   // Keep latest pagination state in a ref so loadListings doesn't need to be
-  // recreated (and re-triggered) every time cursor/hasMore/loadingMore change.
-  const paginationRef = useRef({ cursor: null, hasMore: false, loadingMore: false });
-  paginationRef.current = { cursor, hasMore, loadingMore };
+  // recreated (and re-triggered) every time page/hasMore/loadingMore change.
+  const paginationRef = useRef({ pageNumber: 1, hasMore: false, loadingMore: false });
+  paginationRef.current = { pageNumber, hasMore, loadingMore };
 
   const styles = useThemeStyles((c, s, r) => ({
     topBarRow: {
@@ -434,7 +441,7 @@ export default function StudentMarketplacePage() {
   const hasActiveFilters = activeFilterCount > 0;
 
   const loadListings = useCallback(async (isReset = false) => {
-    const { cursor: currentCursor, hasMore: currentHasMore, loadingMore: currentLoadingMore } = paginationRef.current;
+    const { pageNumber: currentPage, hasMore: currentHasMore, loadingMore: currentLoadingMore } = paginationRef.current;
 
     if (isReset) {
       setRefreshing(true);
@@ -445,21 +452,26 @@ export default function StudentMarketplacePage() {
     setError(null);
 
     try {
-      const page = await fetchStudentListingsPage({
+      const range = PRICE_RANGES.find((p) => p.key === priceRange) || PRICE_RANGES[0];
+      const page = await fetchMarketplaceListingsPage({
         pageSize: PAGE_SIZE,
-        cursor: isReset ? null : currentCursor,
+        page: isReset ? 1 : currentPage,
+        search: search.trim(),
+        category,
+        minPrice: range.min,
+        maxPrice: range.max,
+        sort,
       });
 
       const fetched = page.items || [];
-      const processedItems = sort === 'random' && isReset ? shuffleArray(fetched) : fetched;
 
       setItems((current) => {
-        if (isReset) return processedItems;
+        if (isReset) return fetched;
         const seen = new Set(current.map((i) => i.id));
-        return [...current, ...processedItems.filter((i) => !seen.has(i.id))];
+        return [...current, ...fetched.filter((i) => !seen.has(i.id))];
       });
 
-      setCursor(page.cursor);
+      setPageNumber((page.page || (isReset ? 1 : currentPage)) + 1);
       setHasMore(Boolean(page.hasMore));
     } catch (err) {
       setError(err?.message || 'Could not load listings. Please try again.');
@@ -468,12 +480,14 @@ export default function StudentMarketplacePage() {
       setRefreshing(false);
       setLoadingMore(false);
     }
-  }, [sort]);
+  }, [category, priceRange, search, sort]);
 
   useEffect(() => {
+    setLoading(true);
+    setItems([]);
+    setPageNumber(1);
     loadListings(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadListings]);
 
   const categories = useMemo(() => {
     const set = new Set();
@@ -540,6 +554,9 @@ export default function StudentMarketplacePage() {
 
   const marketplaceSections = useMemo(() => {
     const newest = [...filteredItems].sort((a, b) => getCreatedMs(b) - getCreatedMs(a));
+    const sponsored = filteredItems
+      .filter((item) => item?.isSponsored)
+      .sort((a, b) => Number(b?.sponsoredPriority || 0) - Number(a?.sponsoredPriority || 0));
     const affordable = filteredItems
       .filter((item) => {
         const price = Number(item?.price);
@@ -560,6 +577,7 @@ export default function StudentMarketplacePage() {
       .slice(0, 3);
 
     return [
+      { key: 'sponsored', title: 'Sponsored', subtitle: 'Promoted campus listings', items: sponsored.slice(0, 8) },
       { key: 'fresh', title: 'Fresh on campus', subtitle: 'New items students just posted', items: newest.slice(0, 8) },
       { key: 'deals', title: 'Budget finds', subtitle: `Useful picks under ${NGN}20k`, items: affordable.slice(0, 8) },
       { key: 'trusted', title: 'Verified sellers', subtitle: 'Listings with extra trust signals', items: verified.slice(0, 8) },
@@ -574,7 +592,7 @@ export default function StudentMarketplacePage() {
     setSearch('');
     setCategory('all');
     setPriceRange('all');
-    setSort('random');
+    setSort('newest');
     setShowPriceDropdown(false);
   };
 
@@ -1038,6 +1056,19 @@ function ProductCard({ item, onPress, variant = 'row' }) {
     media: { width: 96, height: 96, borderRadius: r.lg, overflow: 'hidden', backgroundColor: c.brandLight },
     compactMedia: { width: '100%', height: 132, borderRadius: r.lg },
     image: { width: '100%', height: '100%' },
+    sponsoredFlag: {
+      position: 'absolute',
+      top: 7,
+      left: 7,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      paddingHorizontal: 7,
+      paddingVertical: 3,
+      borderRadius: r.full,
+      backgroundColor: c.warningLight || '#FEF3C7',
+    },
+    sponsoredText: { color: c.warning || '#B45309', fontSize: 9, fontWeight: '900' },
     fallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brand },
     fallbackText: { color: c.onBrand, fontSize: 28, fontWeight: '900' },
     content: { flex: 1, justifyContent: 'space-between' },
@@ -1058,6 +1089,9 @@ function ProductCard({ item, onPress, variant = 'row' }) {
     badgeText: { fontSize: 10, fontWeight: '800', color: c.brandText },
     price: { fontSize: 16, fontWeight: '900', color: c.warning, marginTop: 4 },
     compactPrice: { fontSize: 14 },
+    ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 },
+    ratingText: { color: c.textSecondary, fontSize: 11, fontWeight: '800' },
+    sellerLine: { color: c.textTertiary, fontSize: 11, fontWeight: '700', marginTop: 4 },
     contactRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
     callButton: {
       flexDirection: 'row',
@@ -1076,6 +1110,8 @@ function ProductCard({ item, onPress, variant = 'row' }) {
   const imageUrl = resolveImage(item);
   const safeImageUrl = typeof imageUrl === 'string' ? imageUrl.trim() : imageUrl || '';
   const price = formatNaira(item?.price);
+  const ratingSummary = getRatingSummary(item);
+  const sellerName = item?.sellerName || item?.ownerName || item?.postedBy || '';
   const [imageFailed, setImageFailed] = useState(false);
   useEffect(() => {
     setImageFailed(false);
@@ -1123,6 +1159,12 @@ function ProductCard({ item, onPress, variant = 'row' }) {
             <Text style={styles.fallbackText}>{title.charAt(0).toUpperCase()}</Text>
           </View>
         )}
+        {item?.isSponsored ? (
+          <View style={styles.sponsoredFlag}>
+            <Ionicons name="sparkles" size={9} color={colors.warning || '#B45309'} />
+            <Text style={styles.sponsoredText}>Sponsored</Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={[styles.content, isCompact && styles.compactContent]}>
@@ -1148,6 +1190,11 @@ function ProductCard({ item, onPress, variant = 'row' }) {
 
         <View>
           {price ? <Text style={[styles.price, isCompact && styles.compactPrice]}>{price}</Text> : null}
+          <View style={styles.ratingRow}>
+            <Ionicons name="star" size={11} color={Number(item?.reviewCount || 0) > 0 ? colors.warning : colors.textTertiary} />
+            <Text style={styles.ratingText}>{ratingSummary}</Text>
+          </View>
+          {sellerName ? <Text style={styles.sellerLine} numberOfLines={1}>{sellerName}</Text> : null}
           {phone && !isCompact ? (
             <View style={styles.contactRow}>
               <Pressable onPress={callSeller} style={styles.callButton} accessibilityRole="button" accessibilityLabel="Call seller">

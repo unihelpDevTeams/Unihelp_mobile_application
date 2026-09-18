@@ -18,7 +18,7 @@ import {
 import { auth, db } from '../../../firebase/config';
 
 import { COLLECTIONS, conversationSubcollections, groupSubcollections, profileDefaults } from '../firestoreSchema';
-import { sendAppNotification, getJson, postJson, putJson, deleteJson } from './backend';
+import { sendAppNotification, getJson, postJson, putJson, patchJson, deleteJson } from './backend';
 
 const mapDocs = (snapshot) => snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
 const RESOURCE_ADMIN_EMAILS = new Set(['iadejuwon77@gmail.com', 'onakomayaokiki@gmail.com']);
@@ -257,6 +257,68 @@ export async function fetchStudentListingsPage({ pageSize = 20, page = 1 } = {})
     page: data.page || page,
     hasMore: data.hasMore || false,
   };
+}
+
+export async function fetchMarketplaceListingsPage({
+  pageSize = 20,
+  page = 1,
+  search = '',
+  category = '',
+  minPrice,
+  maxPrice,
+  sort = 'newest',
+  sponsored,
+} = {}) {
+  const params = new URLSearchParams({ page: String(page), limit: String(pageSize) });
+  if (search) params.set('search', search);
+  if (category && category !== 'all') params.set('category', category);
+  if (minPrice !== undefined && minPrice !== null && minPrice !== '') params.set('minPrice', String(minPrice));
+  if (maxPrice !== undefined && maxPrice !== null && maxPrice !== '') params.set('maxPrice', String(maxPrice));
+  if (sort) params.set('sort', sort);
+  if (sponsored) params.set('sponsored', sponsored);
+  const data = await getJson(`/api/marketplace?${params.toString()}`);
+  return {
+    items: data.items || [],
+    page: data.page || page,
+    total: data.total || 0,
+    hasMore: data.hasMore || false,
+  };
+}
+
+export async function fetchMarketplaceReviews(listingId, { page = 1, pageSize = 10 } = {}) {
+  if (!listingId) return { items: [], hasMore: false, total: 0, page };
+  const data = await getJson(`/api/marketplace/${encodeURIComponent(listingId)}/reviews?page=${page}&limit=${pageSize}`);
+  return {
+    items: data.items || [],
+    page: data.page || page,
+    total: data.total || 0,
+    hasMore: data.hasMore || false,
+  };
+}
+
+export async function submitMarketplaceReview(listingId, payload) {
+  if (!auth.currentUser?.uid) throw new Error('No authenticated user');
+  return postJson(`/api/marketplace/${encodeURIComponent(listingId)}/reviews`, payload);
+}
+
+export async function updateMarketplaceReview(listingId, reviewId, payload) {
+  if (!auth.currentUser?.uid) throw new Error('No authenticated user');
+  return patchJson(`/api/marketplace/${encodeURIComponent(listingId)}/reviews/${encodeURIComponent(reviewId)}`, payload);
+}
+
+export async function deleteMarketplaceReview(listingId, reviewId) {
+  if (!auth.currentUser?.uid) throw new Error('No authenticated user');
+  return deleteJson(`/api/marketplace/${encodeURIComponent(listingId)}/reviews/${encodeURIComponent(reviewId)}`);
+}
+
+export async function sponsorMarketplaceListing(listingId, payload = {}) {
+  if (!auth.currentUser?.uid) throw new Error('No authenticated user');
+  return postJson(`/api/marketplace/${encodeURIComponent(listingId)}/sponsor`, payload);
+}
+
+export async function removeMarketplaceSponsorship(listingId) {
+  if (!auth.currentUser?.uid) throw new Error('No authenticated user');
+  return deleteJson(`/api/marketplace/${encodeURIComponent(listingId)}/sponsor`);
 }
 
 export async function fetchTasks(uid = auth.currentUser?.uid) {

@@ -366,3 +366,7 @@ export function ResponseActionsRow({ modeId, onAction, onCopy, onRegenerate, cop
     </View>
   );
 }
+
+export default function StudyToolsModuleRoute() {
+  return null;
+}

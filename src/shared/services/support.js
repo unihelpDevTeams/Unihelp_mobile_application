@@ -4,7 +4,6 @@ const normalizePagedResponse = (res, page = 1, pageSize = 20) => {
   const items = res.items || res.data || [];
   const total = Number(res.total || items.length || 0);
   const offset = Number(res.offset || (page - 1) * pageSize || 0);
-  const limit = Number(res.limit || pageSize);
   return {
     items,
     hasMore: Boolean(res.hasMore ?? (offset + items.length < total)),

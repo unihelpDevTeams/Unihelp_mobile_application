@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Dimensions, Linking, Modal, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Dimensions, Linking, Modal, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../../src/shared/components/ScreenShell';
-import { deleteNote, deleteQuestion, fetchDetailRecord } from '../../../services/firestoreSync';
+import { deleteNote, deleteQuestion, fetchDetailRecord, fetchMarketplaceReviews, submitMarketplaceReview } from '../../../services/firestoreSync';
 import { COLLECTIONS } from '../../../src/shared/firestoreSchema';
 import { resolveDocumentAsset, formatDocumentMeta } from '../../../src/shared/utils/documentMedia';
 import { isPreviewImageUrl } from '../../../src/shared/services/cloudinary';
@@ -19,6 +19,11 @@ import { getDownloadRecord, saveResourceForOffline } from '../../../src/shared/o
 import { getApiUrl } from '../../../src/shared/services/backend';
 import FriendRequestModal from '../../../src/shared/components/FriendRequestModal';
 import { isPremiumActive } from '../../../src/shared/services/premium';
+import {
+  fetchMarketplaceSponsorshipPlans,
+  formatSponsorshipPrice,
+  startMarketplaceSponsorshipCheckout,
+} from '../../../src/shared/services/marketplaceSponsorship';
 import PastQuestionDocumentReader from '../../../src/shared/components/PastQuestionDocumentReader';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -204,6 +209,16 @@ export default function RecordViewPage() {
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [lightboxVisible, setLightboxVisible] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [reviews, setReviews] = useState([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState('');
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [sponsorModalVisible, setSponsorModalVisible] = useState(false);
+  const [sponsorPlans, setSponsorPlans] = useState([]);
+  const [sponsorPlansLoading, setSponsorPlansLoading] = useState(false);
+  const [selectedSponsorPlanId, setSelectedSponsorPlanId] = useState('');
+  const [sponsorshipProcessing, setSponsorshipProcessing] = useState(false);
   const [readingProgress, setReadingProgress] = useState(0);
   const [readerMetrics, setReaderMetrics] = useState({ y: 0, height: 0 });
   const galleryRef = useRef(null);
@@ -271,6 +286,7 @@ export default function RecordViewPage() {
     ['note', 'question'].includes(type) && canManageResource({ type, item, user, profile });
   const isCommerceType = ['listing', 'hostel'].includes(type);
   const isHostel = type === 'hostel';
+  const canPromoteListing = Boolean(type === 'listing' && user?.uid && ownerId === user.uid);
   const isPremiumUser = isPremiumActive(profile);
   // This is a UX gate only. The offline endpoint must remain the authority for
   // entitlement checks; client state can be stale or tampered with.
@@ -326,11 +342,29 @@ export default function RecordViewPage() {
     };
   }, [ownerId, type]);
 
+  const loadReviews = useCallback(async () => {
+    if (type !== 'listing' || !id) return;
+    setReviewsLoading(true);
+    try {
+      const result = await fetchMarketplaceReviews(id, { page: 1, pageSize: 20 });
+      if (isMounted.current) setReviews(result.items || []);
+    } catch (_error) {
+      if (isMounted.current) setReviews([]);
+    } finally {
+      if (isMounted.current) setReviewsLoading(false);
+    }
+  }, [id, type]);
+
+  useEffect(() => {
+    loadReviews();
+  }, [loadReviews]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await load();
+    await loadReviews();
     if (isMounted.current) setRefreshing(false);
-  }, [load]);
+  }, [load, loadReviews]);
 
   useEffect(() => {
     if (contactSheetVisible) {
@@ -656,6 +690,88 @@ export default function RecordViewPage() {
     }
   };
 
+  const saveReview = async () => {
+    if (!user) {
+      Alert.alert('Sign in required', 'Sign in to review marketplace listings.');
+      return;
+    }
+    if (!reviewRating) {
+      Alert.alert('Rating required', 'Choose a rating from 1 to 5 stars.');
+      return;
+    }
+    if (!reviewComment.trim()) {
+      Alert.alert('Review required', 'Write a short review to help other students.');
+      return;
+    }
+    setReviewSaving(true);
+    try {
+      await submitMarketplaceReview(id, {
+        rating: reviewRating,
+        comment: reviewComment.trim(),
+        reviewerName: profile?.username || profile?.fullName || profile?.displayName || user?.displayName || user?.email || 'UniHelp student',
+        reviewerAvatar: profile?.photo || profile?.photoURL || user?.photoURL || '',
+      });
+      setReviewRating(0);
+      setReviewComment('');
+      await loadReviews();
+      await load();
+      Alert.alert('Review submitted', 'Thanks for helping other students shop with more confidence.');
+    } catch (error) {
+      Alert.alert('Could not save review', error?.message || 'Please try again.');
+    } finally {
+      if (isMounted.current) setReviewSaving(false);
+    }
+  };
+
+  const openSponsorModal = async () => {
+    if (!canPromoteListing) {
+      Alert.alert('Unavailable', 'Only the seller can promote this listing.');
+      return;
+    }
+
+    setSponsorModalVisible(true);
+    if (sponsorPlans.length) return;
+
+    setSponsorPlansLoading(true);
+    try {
+      const plans = await fetchMarketplaceSponsorshipPlans();
+      if (isMounted.current) {
+        setSponsorPlans(plans);
+        setSelectedSponsorPlanId((current) => current || plans[0]?.id || '');
+      }
+    } catch (error) {
+      Alert.alert('Could not load plans', error?.message || 'Please try again.');
+    } finally {
+      if (isMounted.current) setSponsorPlansLoading(false);
+    }
+  };
+
+  const startSponsorshipPayment = async () => {
+    if (!selectedSponsorPlanId) {
+      Alert.alert('Choose a plan', 'Select how long you want this listing promoted.');
+      return;
+    }
+
+    setSponsorshipProcessing(true);
+    try {
+      const result = await startMarketplaceSponsorshipCheckout({
+        listingId: id,
+        planId: selectedSponsorPlanId,
+      });
+      await load();
+      if (result.status === 'active') {
+        setSponsorModalVisible(false);
+        Alert.alert('Listing promoted', 'Your marketplace listing is now sponsored.');
+      } else {
+        Alert.alert('Payment pending', 'We will activate the sponsorship once Flutterwave confirms the payment.');
+      }
+    } catch (error) {
+      Alert.alert('Sponsorship failed', error?.message || 'Could not complete sponsorship payment.');
+    } finally {
+      if (isMounted.current) setSponsorshipProcessing(false);
+    }
+  };
+
   const handleReaderLayout = useCallback((event) => {
     const { y, height } = event.nativeEvent.layout;
     setReaderMetrics((current) => (
@@ -926,18 +1042,52 @@ export default function RecordViewPage() {
                   <Text style={styles.commerceTitle}>{title}</Text>
                   {recordMeta ? <Text style={styles.commerceMeta}>{recordMeta}</Text> : null}
                 </View>
-                {item?.verified ? (
-                  <View style={styles.verifiedPill}>
-                    <Ionicons name="checkmark-circle" size={13} color={colors.success} />
-                    <Text style={styles.verifiedPillText}>Verified</Text>
-                  </View>
-                ) : null}
+                <View style={styles.commerceBadgeStack}>
+                  {item?.isSponsored ? (
+                    <View style={styles.sponsoredDetailPill}>
+                      <Ionicons name="sparkles" size={13} color={colors.warning} />
+                      <Text style={styles.sponsoredDetailText}>Sponsored</Text>
+                    </View>
+                  ) : null}
+                  {item?.verified ? (
+                    <View style={styles.verifiedPill}>
+                      <Ionicons name="checkmark-circle" size={13} color={colors.success} />
+                      <Text style={styles.verifiedPillText}>Verified</Text>
+                    </View>
+                  ) : null}
+                </View>
               </View>
 
               {formattedPrice ? (
                 <View style={styles.commercePriceRow}>
                   <Text style={styles.commercePrice}>{formattedPrice}</Text>
                   {isHostel ? <Text style={styles.commercePriceHint}>per listing</Text> : null}
+                </View>
+              ) : null}
+
+              {canPromoteListing ? (
+                <View style={styles.sellerSponsorPanel}>
+                  <View style={styles.sellerSponsorCopy}>
+                    <Text style={styles.sellerSponsorTitle}>
+                      {item?.isSponsored ? 'Promotion active' : 'Promote this listing'}
+                    </Text>
+                    <Text style={styles.sellerSponsorHint}>
+                      {item?.isSponsored && item?.sponsoredUntil
+                        ? `Visible as sponsored until ${formatDate(item.sponsoredUntil)}.`
+                        : 'Boost this product in Marketplace after a verified Flutterwave payment.'}
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={openSponsorModal}
+                    style={({ pressed }) => [styles.sellerSponsorButton, pressed && styles.pressedBrand]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Promote listing"
+                  >
+                    <Ionicons name="sparkles-outline" size={15} color={colors.onBrand} />
+                    <Text style={styles.sellerSponsorButtonText}>
+                      {item?.isSponsored ? 'Extend' : 'Promote'}
+                    </Text>
+                  </Pressable>
                 </View>
               ) : null}
 
@@ -964,7 +1114,11 @@ export default function RecordViewPage() {
                 <View style={styles.ownerCopy}>
                   <Text style={styles.ownerLabel}>{isHostel ? 'Listed by' : 'Sold by'}</Text>
                   <Text style={styles.ownerName} numberOfLines={1}>{ownerName}</Text>
-                  <Text style={styles.ownerHint}>{canWhatsApp ? 'WhatsApp available' : 'Open details to contact'}</Text>
+                  <Text style={styles.ownerHint}>
+                    {Number(item?.sellerReviewCount || 0) > 0
+                      ? `${Number(item.sellerRatingAverage || 0).toFixed(1)} seller rating · ${item.sellerReviewCount} reviews`
+                      : canWhatsApp ? 'WhatsApp available' : 'Open details to contact'}
+                  </Text>
                 </View>
                 {showContactCta ? (
                   <Pressable
@@ -977,6 +1131,85 @@ export default function RecordViewPage() {
                   </Pressable>
                 ) : null}
               </View>
+
+              {!isHostel ? (
+                <View style={styles.reviewsPanel}>
+                  <View style={styles.reviewsHeader}>
+                    <View>
+                      <Text style={styles.sectionLabel}>REVIEWS</Text>
+                      <Text style={styles.reviewSummary}>
+                        {Number(item?.reviewCount || 0) > 0
+                          ? `${Number(item.ratingAverage || 0).toFixed(1)} stars · ${item.reviewCount} ${item.reviewCount === 1 ? 'review' : 'reviews'}`
+                          : 'No reviews yet'}
+                      </Text>
+                    </View>
+                    {Number(item?.reviewCount || 0) > 0 ? (
+                      <View style={styles.ratingBadge}>
+                        <Ionicons name="star" size={14} color={colors.warning} />
+                        <Text style={styles.ratingBadgeText}>{Number(item.ratingAverage || 0).toFixed(1)}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  {reviewsLoading ? (
+                    <View style={styles.reviewLoadingRow}>
+                      <ActivityIndicator size="small" color={colors.brand} />
+                      <Text style={styles.reviewMuted}>Loading reviews...</Text>
+                    </View>
+                  ) : reviews.length ? (
+                    reviews.slice(0, 6).map((review) => (
+                      <View key={review.id} style={styles.reviewCard}>
+                        <View style={styles.reviewTopRow}>
+                          <View style={styles.reviewAvatar}>
+                            {review.reviewerAvatar ? (
+                              <Image source={{ uri: review.reviewerAvatar }} style={styles.reviewAvatarImage} contentFit="cover" cachePolicy="disk" />
+                            ) : (
+                              <Text style={styles.reviewAvatarText}>{(review.reviewerName || 'U').charAt(0).toUpperCase()}</Text>
+                            )}
+                          </View>
+                          <View style={styles.reviewCopy}>
+                            <Text style={styles.reviewName}>{review.reviewerName || 'UniHelp student'}</Text>
+                            <View style={styles.reviewStars}>
+                              {[1, 2, 3, 4, 5].map((star) => (
+                                <Ionicons key={star} name={star <= Number(review.rating) ? 'star' : 'star-outline'} size={12} color={colors.warning} />
+                              ))}
+                              <Text style={styles.reviewDate}>{formatDate(review.createdAt)}</Text>
+                            </View>
+                          </View>
+                        </View>
+                        <Text style={styles.reviewText}>{review.comment}</Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={styles.reviewMuted}>Be the first to review this listing after interacting with the seller.</Text>
+                  )}
+
+                  {ownerId !== user?.uid ? (
+                    <View style={styles.reviewForm}>
+                      <Text style={styles.reviewFormTitle}>Rate this listing</Text>
+                      <View style={styles.reviewPicker}>
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Pressable key={star} onPress={() => setReviewRating(star)} hitSlop={8}>
+                            <Ionicons name={star <= reviewRating ? 'star' : 'star-outline'} size={28} color={colors.warning} />
+                          </Pressable>
+                        ))}
+                      </View>
+                      <TextInput
+                        value={reviewComment}
+                        onChangeText={setReviewComment}
+                        style={styles.reviewInput}
+                        multiline
+                        placeholder="Tell other students about your experience..."
+                        placeholderTextColor={colors.textTertiary}
+                      />
+                      <Pressable style={[styles.reviewSubmit, reviewSaving && styles.disabledButton]} onPress={saveReview} disabled={reviewSaving}>
+                        {reviewSaving ? <ActivityIndicator size="small" color={colors.onBrand} /> : <Ionicons name="send-outline" size={15} color={colors.onBrand} />}
+                        <Text style={styles.reviewSubmitText}>{reviewSaving ? 'Submitting...' : 'Submit review'}</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
             </View>
           ) : null}
 
@@ -1241,6 +1474,64 @@ export default function RecordViewPage() {
       </Modal>
 
       <Modal
+        visible={sponsorModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSponsorModalVisible(false)}
+      >
+        <Pressable style={styles.sheetBackdrop} onPress={() => setSponsorModalVisible(false)} />
+        <View style={styles.sponsorSheet}>
+          <View style={styles.sponsorSheetHeader}>
+            <View>
+              <Text style={styles.sponsorSheetTitle}>Promote listing</Text>
+              <Text style={styles.sponsorSheetSubtitle}>Plans are activated only after Flutterwave verification.</Text>
+            </View>
+            <Pressable onPress={() => setSponsorModalVisible(false)} style={styles.sheetCloseButton} hitSlop={8}>
+              <Ionicons name="close" size={20} color={colors.textPrimary} />
+            </Pressable>
+          </View>
+
+          {sponsorPlansLoading ? (
+            <View style={styles.sponsorLoading}>
+              <ActivityIndicator color={colors.brand} />
+              <Text style={styles.loadingText}>Loading plans...</Text>
+            </View>
+          ) : (
+            <View style={styles.sponsorPlans}>
+              {sponsorPlans.map((plan) => {
+                const selected = selectedSponsorPlanId === plan.id;
+                return (
+                  <Pressable
+                    key={plan.id}
+                    onPress={() => setSelectedSponsorPlanId(plan.id)}
+                    style={[styles.sponsorPlanCard, selected && styles.sponsorPlanCardSelected]}
+                  >
+                    <View style={styles.sponsorPlanIcon}>
+                      <Ionicons name={selected ? 'radio-button-on' : 'radio-button-off'} size={18} color={selected ? colors.brand : colors.textSecondary} />
+                    </View>
+                    <View style={styles.sponsorPlanCopy}>
+                      <Text style={styles.sponsorPlanTitle}>{plan.label}</Text>
+                      <Text style={styles.sponsorPlanHint}>{plan.durationDays} days of sponsored Marketplace placement</Text>
+                    </View>
+                    <Text style={styles.sponsorPlanPrice}>{formatSponsorshipPrice(plan)}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+
+          <Pressable
+            onPress={startSponsorshipPayment}
+            disabled={sponsorshipProcessing || sponsorPlansLoading || !selectedSponsorPlanId}
+            style={[styles.sponsorCheckoutButton, (sponsorshipProcessing || sponsorPlansLoading || !selectedSponsorPlanId) && styles.disabledButton]}
+          >
+            {sponsorshipProcessing ? <ActivityIndicator size="small" color={colors.onBrand} /> : <Ionicons name="card-outline" size={16} color={colors.onBrand} />}
+            <Text style={styles.sponsorCheckoutText}>{sponsorshipProcessing ? 'Verifying payment...' : 'Continue to Flutterwave'}</Text>
+          </Pressable>
+        </View>
+      </Modal>
+
+      <Modal
         visible={lightboxVisible}
         transparent
         animationType="fade"
@@ -1451,6 +1742,104 @@ const createStyles = (colors) => StyleSheet.create({
     fontSize: 12.5,
     color: colors.textSecondary,
     marginBottom: 16,
+  },
+  sheetCloseButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.borderDefault,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sponsorSheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 26,
+  },
+  sponsorSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 14,
+  },
+  sponsorSheetTitle: {
+    color: colors.textPrimary,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  sponsorSheetSubtitle: {
+    marginTop: 4,
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  sponsorLoading: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+  },
+  sponsorPlans: {
+    gap: 10,
+  },
+  sponsorPlanCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.borderDefault,
+    backgroundColor: colors.surface,
+    padding: 12,
+  },
+  sponsorPlanCardSelected: {
+    borderColor: colors.brand,
+    backgroundColor: colors.brandLight,
+  },
+  sponsorPlanIcon: {
+    width: 24,
+    alignItems: 'center',
+  },
+  sponsorPlanCopy: {
+    flex: 1,
+  },
+  sponsorPlanTitle: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  sponsorPlanHint: {
+    marginTop: 2,
+    color: colors.textSecondary,
+    fontSize: 11.5,
+  },
+  sponsorPlanPrice: {
+    color: colors.brandDark,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  sponsorCheckoutButton: {
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    borderRadius: 14,
+    backgroundColor: colors.brand,
+    paddingVertical: 13,
+  },
+  sponsorCheckoutText: {
+    color: colors.onBrand,
+    fontSize: 13,
+    fontWeight: '900',
   },
   sheetOption: {
     flexDirection: 'row',
@@ -1702,6 +2091,24 @@ const createStyles = (colors) => StyleSheet.create({
     fontSize: 10.5,
     fontWeight: '900',
   },
+  commerceBadgeStack: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  sponsoredDetailPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    backgroundColor: colors.goldLight || colors.warningLight || colors.brandLight,
+  },
+  sponsoredDetailText: {
+    color: colors.warning,
+    fontSize: 10.5,
+    fontWeight: '900',
+  },
   commercePriceRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -1717,6 +2124,45 @@ const createStyles = (colors) => StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '700',
+  },
+  sellerSponsorPanel: {
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.borderDefault,
+    backgroundColor: colors.surfaceSecondary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  sellerSponsorCopy: {
+    flex: 1,
+  },
+  sellerSponsorTitle: {
+    color: colors.textPrimary,
+    fontSize: 13.5,
+    fontWeight: '900',
+  },
+  sellerSponsorHint: {
+    marginTop: 3,
+    color: colors.textSecondary,
+    fontSize: 11.5,
+    lineHeight: 16,
+  },
+  sellerSponsorButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 12,
+    backgroundColor: colors.brand,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  sellerSponsorButtonText: {
+    color: colors.onBrand,
+    fontSize: 12,
+    fontWeight: '900',
   },
   commerceHighlights: {
     flexDirection: 'row',
@@ -1801,6 +2247,152 @@ const createStyles = (colors) => StyleSheet.create({
     backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  reviewsPanel: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderDefault,
+    gap: 12,
+  },
+  reviewsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  reviewSummary: {
+    marginTop: 4,
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  ratingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: colors.goldLight || colors.warningLight || colors.brandLight,
+  },
+  ratingBadgeText: {
+    color: colors.warning,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  reviewLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+  },
+  reviewMuted: {
+    color: colors.textSecondary,
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  reviewCard: {
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.borderDefault,
+    backgroundColor: colors.surfaceSecondary || colors.card,
+    gap: 9,
+  },
+  reviewTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  reviewAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.brandLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  reviewAvatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  reviewAvatarText: {
+    color: colors.brandDark,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  reviewCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  reviewName: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  reviewStars: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginTop: 3,
+  },
+  reviewDate: {
+    marginLeft: 5,
+    color: colors.textTertiary,
+    fontSize: 10.5,
+    fontWeight: '700',
+  },
+  reviewText: {
+    color: colors.textSecondary,
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  reviewForm: {
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.brandBorder || colors.borderDefault,
+    backgroundColor: colors.brandLight,
+    gap: 10,
+  },
+  reviewFormTitle: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  reviewPicker: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  reviewInput: {
+    minHeight: 82,
+    textAlignVertical: 'top',
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: colors.inputBorder || colors.borderDefault,
+    backgroundColor: colors.inputBackground || colors.surface,
+    color: colors.textPrimary,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  reviewSubmit: {
+    minHeight: 42,
+    borderRadius: 13,
+    backgroundColor: colors.brand,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  reviewSubmitText: {
+    color: colors.onBrand,
+    fontSize: 13,
+    fontWeight: '900',
   },
   documentBody: {
     padding: 16,
