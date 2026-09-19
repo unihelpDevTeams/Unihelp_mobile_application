@@ -76,13 +76,95 @@ const orderedList = async (name, field = 'createdAt', direction = 'desc', pageSi
   return page.items;
 };
 
+const normalizeUserProfile = (profile = {}, uid = auth.currentUser?.uid) => {
+  if (!profile) return null;
+  const username = profile.username || profile.displayName || profile.display_name || profile.name || '';
+  const school = profile.school || profile.universityName || profile.university || '';
+  const department = profile.department || profile.departmentName || '';
+  const photo = profile.photo || profile.photoURL || profile.avatar || '';
+
+  return {
+    ...profile,
+    uid: profile.uid || profile.id || uid || '',
+    id: profile.id || profile.uid || uid || '',
+    username,
+    usernameLower: profile.usernameLower || (username ? username.trim().toLowerCase() : ''),
+    displayName: profile.displayName || profile.display_name || username,
+    email: profile.email || auth.currentUser?.email || '',
+    school,
+    universityName: profile.universityName || school,
+    universityId: profile.universityId || profile.schoolId || '',
+    department,
+    departmentName: profile.departmentName || department,
+    level: profile.level || '',
+    bio: profile.bio || '',
+    photo,
+    photoURL: profile.photoURL || photo,
+    photoThumb: profile.photoThumb || '',
+    totalPoints: profile.totalPoints ?? profile.total_points ?? 0,
+    rankName: profile.rankName || profile.rank_name || '',
+  };
+};
+
+const normalizeProfilePayload = (payload = {}) => {
+  const username = payload.username?.trim?.() || payload.username || payload.displayName || payload.display_name || '';
+  const school = payload.school?.trim?.() || payload.school || payload.universityName || payload.university || '';
+  const department = payload.department?.trim?.() || payload.department || payload.departmentName || '';
+  const photo = payload.photo || payload.photoURL || payload.avatar || '';
+  const next = { ...payload };
+
+  if (username) {
+    next.username = username;
+    next.usernameLower = username.toLowerCase();
+    next.displayName = payload.displayName || username;
+  }
+  if ('school' in payload || 'universityName' in payload || 'university' in payload) {
+    next.school = school;
+    next.universityName = payload.universityName || school;
+  }
+  if ('universityId' in payload || 'schoolId' in payload) {
+    next.universityId = payload.universityId || payload.schoolId || '';
+  }
+  if ('department' in payload || 'departmentName' in payload) {
+    next.department = department;
+    next.departmentName = payload.departmentName || department;
+  }
+  if ('photo' in payload || 'photoURL' in payload || 'avatar' in payload) {
+    next.photo = photo;
+    next.photoURL = payload.photoURL || photo;
+  }
+
+  return next;
+};
+
+const toUserApiPayload = (profile = {}) => ({
+  display_name: profile.displayName || profile.username || profile.display_name || '',
+  email: profile.email || auth.currentUser?.email || '',
+  university: profile.universityName || profile.school || profile.university || '',
+  department: profile.departmentName || profile.department || '',
+  level: profile.level || '',
+  avatar: profile.photoURL || profile.photo || profile.avatar || '',
+  bio: profile.bio || '',
+  total_points: profile.totalPoints ?? profile.total_points,
+  rank_name: profile.rankName || profile.rank_name,
+});
+
+const readFirestoreUserProfile = async (uid = auth.currentUser?.uid) => {
+  if (!uid) return null;
+  const snapshot = await getDoc(doc(db, COLLECTIONS.users, uid));
+  return snapshot.exists() ? normalizeUserProfile({ id: snapshot.id, ...snapshot.data() }, uid) : null;
+};
+
 export async function getCurrentUserProfile(uid = auth.currentUser?.uid) {
   if (!uid) return null;
   try {
-    const res = await getJson('/api/users');
-    return res.data || null;
+    const [firestoreProfile, apiProfile] = await Promise.all([
+      readFirestoreUserProfile(uid).catch(() => null),
+      getJson('/api/users').then((res) => normalizeUserProfile(res.data, uid)).catch(() => null),
+    ]);
+    return normalizeUserProfile({ ...(apiProfile || {}), ...(firestoreProfile || {}) }, uid);
   } catch (error) {
-    console.error('Failed to get user profile from API', error);
+    console.error('Failed to get user profile', error);
     return null;
   }
 }
@@ -90,16 +172,23 @@ export async function getCurrentUserProfile(uid = auth.currentUser?.uid) {
 export async function syncCurrentUserProfile(payload = {}) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
   try {
-    const nextUsername = payload.username?.trim?.() || payload.username || '';
-    const nextPayload = {
+    const uid = auth.currentUser.uid;
+    const currentFirestore = await readFirestoreUserProfile(uid).catch(() => null);
+    const nextProfile = normalizeProfilePayload({
+      ...(currentFirestore || {}),
       ...payload,
-      ...(nextUsername ? { usernameLower: nextUsername.toLowerCase() } : {}),
-    };
-    const res = await putJson('/api/users', nextPayload);
-    return res.data || null;
+      uid,
+      email: payload.email || currentFirestore?.email || auth.currentUser.email || '',
+      updatedAt: serverTimestamp(),
+    });
+
+    await setDoc(doc(db, COLLECTIONS.users, uid), nextProfile, { merge: true });
+    const res = await putJson('/api/users', toUserApiPayload(nextProfile)).catch(() => null);
+    const apiProfile = normalizeUserProfile(res?.data, uid);
+    return normalizeUserProfile({ ...(apiProfile || {}), ...nextProfile }, uid);
   } catch (error) {
     console.error('Failed to sync user profile', error);
-    return null;
+    throw error;
   }
 }
 
@@ -110,17 +199,26 @@ export async function ensureCurrentUserProfile(overrides = {}) {
   if (!auth.currentUser) return null;
   
   try {
-    const existingRes = await getJson('/api/users').catch(() => null);
+    const uid = auth.currentUser.uid;
+    const [firestoreProfile, existingRes] = await Promise.all([
+      readFirestoreUserProfile(uid).catch(() => null),
+      getJson('/api/users').catch(() => null),
+    ]);
+    const apiProfile = normalizeUserProfile(existingRes?.data, uid);
+    const hasExistingProfile = Boolean(apiProfile || firestoreProfile);
+    const existingData = hasExistingProfile
+      ? normalizeUserProfile({ ...(apiProfile || {}), ...(firestoreProfile || {}) }, uid)
+      : null;
     
-    if (!existingRes || !existingRes.data) {
-      const defaultProfile = profileDefaults(auth.currentUser, overrides);
-      const res = await putJson('/api/users', defaultProfile);
-      profileCacheRef = res.data;
+    if (!hasExistingProfile) {
+      const defaultProfile = normalizeProfilePayload(profileDefaults(auth.currentUser, overrides));
+      await setDoc(doc(db, COLLECTIONS.users, uid), defaultProfile, { merge: true });
+      const res = await putJson('/api/users', toUserApiPayload(defaultProfile)).catch(() => null);
+      profileCacheRef = normalizeUserProfile({ ...(normalizeUserProfile(res?.data, uid) || {}), ...defaultProfile }, uid);
       return profileCacheRef;
     }
     
-    const existingData = existingRes.data;
-    const nextProfile = { ...overrides };
+    const nextProfile = normalizeProfilePayload({ ...overrides });
 
     if (typeof nextProfile.username === 'string' && nextProfile.username.trim()) {
       nextProfile.usernameLower = nextProfile.username.trim().toLowerCase();
@@ -148,12 +246,13 @@ export async function ensureCurrentUserProfile(overrides = {}) {
     );
 
     if (hasRealChanges) {
-      const res = await putJson('/api/users', mergedProfile);
-      profileCacheRef = res.data;
+      await setDoc(doc(db, COLLECTIONS.users, uid), { ...mergedProfile, updatedAt: serverTimestamp() }, { merge: true });
+      const res = await putJson('/api/users', toUserApiPayload(mergedProfile)).catch(() => null);
+      profileCacheRef = normalizeUserProfile({ ...(normalizeUserProfile(res?.data, uid) || {}), ...mergedProfile }, uid);
       return profileCacheRef;
     }
 
-    profileCacheRef = existingData;
+    profileCacheRef = normalizeUserProfile(existingData, uid);
     return profileCacheRef;
   } catch (error) {
     console.error('Failed to ensure user profile', error);

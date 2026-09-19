@@ -268,10 +268,10 @@ function PremiumMarquee({ onPress }) {
 // no glow: the color lives in one small icon chip and a 3px edge, and
 // nowhere else on the card.
 const HERO_ACCENTS = {
-  'latest-announcement': { tint: '#EEF2FF', fg: '#4F46E5' },
-  'latest-resource': { tint: '#ECFDF5', fg: '#10B981' },
-  'latest-question': { tint: '#F3E8FF', fg: '#9333EA' },
-  'study-streak': { tint: '#FFF7ED', fg: '#F97316' },
+  'latest-announcement': { tint: '#EEF2FF', fg: '#4F46E5', image: IMAGES.community, soft: 'rgba(79,70,229,0.12)' },
+  'latest-resource': { tint: '#ECFDF5', fg: '#10B981', image: IMAGES.stories, soft: 'rgba(16,185,129,0.13)' },
+  'latest-question': { tint: '#F3E8FF', fg: '#9333EA', image: IMAGES.marketplace, soft: 'rgba(147,51,234,0.13)' },
+  'study-streak': { tint: '#FFF7ED', fg: '#F97316', image: IMAGES.hostel, soft: 'rgba(249,115,22,0.14)' },
 };
 
 // A flat, bordered card that matches the toolCard/discoveryCard language
@@ -291,35 +291,78 @@ function HeroCarousel({ slides, router }) {
     wrap: {
       marginBottom: s.xl,
     },
-    card: {
+    heroHeader: {
       flexDirection: 'row',
-      borderRadius: r.xl,
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: s.sm,
+    },
+    heroHeaderTitle: {
+      color: c.ink,
+      fontSize: 14,
+      fontWeight: '900',
+    },
+    heroHeaderMeta: {
+      color: c.textSecondary || c.grey,
+      fontSize: 11,
+      fontWeight: '800',
+    },
+    card: {
+      minHeight: 188,
+      borderRadius: r['2xl'],
       backgroundColor: c.surface,
       borderWidth: 1,
       borderColor: c.borderLight || c.border,
       shadowColor: c.shadow,
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.04,
-      shadowRadius: 8,
-      elevation: 2,
+      shadowOffset: { width: 0, height: 12 },
+      shadowOpacity: 0.09,
+      shadowRadius: 18,
+      elevation: 5,
       overflow: 'hidden',
     },
-    accentBar: {
-      width: 3,
+    cardPressed: {
+      opacity: 0.94,
+      transform: [{ scale: 0.992 }],
     },
     body: {
       flex: 1,
       padding: s.lg,
+      paddingRight: 118,
+      minHeight: 188,
+      justifyContent: 'space-between',
+    },
+    imagePanel: {
+      position: 'absolute',
+      right: 0,
+      top: 0,
+      bottom: 0,
+      width: 112,
+      overflow: 'hidden',
+    },
+    image: {
+      flex: 1,
+      justifyContent: 'flex-end',
+    },
+    imageOverlay: {
+      flex: 1,
+    },
+    softCircle: {
+      position: 'absolute',
+      width: 132,
+      height: 132,
+      borderRadius: 66,
+      right: -52,
+      bottom: -42,
     },
     topRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginBottom: s.sm,
+      marginBottom: s.md,
     },
     iconChip: {
-      width: 30,
-      height: 30,
-      borderRadius: r.md,
+      width: 34,
+      height: 34,
+      borderRadius: r.lg,
       alignItems: 'center',
       justifyContent: 'center',
       marginRight: s.sm,
@@ -330,17 +373,17 @@ function HeroCarousel({ slides, router }) {
       color: c.grey,
     },
     title: {
-      fontSize: 17,
-      fontWeight: '800',
+      fontSize: 20,
+      fontWeight: '900',
       color: c.ink,
-      lineHeight: 22,
-      marginBottom: 4,
+      lineHeight: 25,
+      marginBottom: 6,
     },
     stat: {
       fontSize: 13,
       color: c.grey,
-      fontWeight: '500',
-      lineHeight: 18,
+      fontWeight: '600',
+      lineHeight: 19,
     },
     bottomRow: {
       flexDirection: 'row',
@@ -348,20 +391,49 @@ function HeroCarousel({ slides, router }) {
       justifyContent: 'space-between',
       marginTop: s.md,
     },
-    ctaRow: {
+    ctaButton: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 4,
+      alignSelf: 'flex-start',
+      gap: 5,
+      borderRadius: 999,
+      paddingHorizontal: s.md,
+      paddingVertical: 8,
     },
     ctaText: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: c.brandText,
-    },
-    counter: {
       fontSize: 12,
-      fontWeight: '600',
-      color: c.textSecondary || c.grey,
+      fontWeight: '900',
+    },
+    controls: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    controlButton: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.borderLight || c.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    dotsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      marginTop: s.sm,
+    },
+    dot: {
+      width: 7,
+      height: 7,
+      borderRadius: 4,
+      backgroundColor: c.borderLight || c.border,
+    },
+    dotActive: {
+      width: 22,
     },
   }));
 
@@ -394,8 +466,20 @@ function HeroCarousel({ slides, router }) {
     if (autoTimerRef.current) clearInterval(autoTimerRef.current);
   };
 
+  const goToSlide = useCallback((index) => {
+    if (!slides.length) return;
+    const next = (index + slides.length) % slides.length;
+    setActiveIndex(next);
+    scrollRef.current?.scrollTo({ x: next * cardWidth, animated: true });
+    restartAutoAdvance();
+  }, [cardWidth, restartAutoAdvance, slides.length]);
+
   return (
     <View style={styles.wrap}>
+      <View style={styles.heroHeader}>
+        <Text style={styles.heroHeaderTitle}>Today on UniHelp</Text>
+        {slides.length > 1 ? <Text style={styles.heroHeaderMeta}>{activeIndex + 1} of {slides.length}</Text> : null}
+      </View>
       <ScrollView
         ref={scrollRef}
         horizontal
@@ -405,45 +489,101 @@ function HeroCarousel({ slides, router }) {
         onScrollBeginDrag={pauseAutoAdvance}
         onMomentumScrollEnd={handleMomentumEnd}
       >
-        {slides.map((slide, index) => {
+        {slides.map((slide) => {
           const accent = HERO_ACCENTS[slide.slide] || { tint: colors.brandLight, fg: colors.brandText };
           return (
             <View key={slide.slide} style={{ width: cardWidth }}>
-              <View style={styles.card}>
-                <View style={[styles.accentBar, { backgroundColor: accent.fg }]} />
+              <Pressable
+                onPress={() => router.navigate(slide.cta.route)}
+                style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+                accessibilityRole="button"
+                accessibilityLabel={`${slide.eyebrow}. ${slide.title}. ${slide.cta.label}`}
+              >
+                <View style={[styles.softCircle, { backgroundColor: accent.soft || accent.tint }]} />
+                <View style={styles.imagePanel} pointerEvents="none">
+                  <ImageBackground source={accent.image || IMAGES.community} style={styles.image} resizeMode="cover">
+                    <LinearGradient
+                      colors={['rgba(255,255,255,0.1)', colors.surface]}
+                      start={{ x: 1, y: 0 }}
+                      end={{ x: 0, y: 0 }}
+                      style={styles.imageOverlay}
+                    />
+                  </ImageBackground>
+                </View>
                 <View style={styles.body}>
-                  <View style={styles.topRow}>
-                    <View style={[styles.iconChip, { backgroundColor: accent.tint }]}>
-                      <Ionicons name={slide.icon} size={16} color={accent.fg} />
+                  <View>
+                    <View style={styles.topRow}>
+                      <View style={[styles.iconChip, { backgroundColor: accent.tint }]}>
+                        <Ionicons name={slide.icon} size={17} color={accent.fg} />
+                      </View>
+                      <Text style={styles.label}>{slide.eyebrow}</Text>
                     </View>
-                    <Text style={styles.label}>{slide.eyebrow}</Text>
+
+                    <Text style={styles.title} numberOfLines={2}>{slide.title}</Text>
+                    <Text style={styles.stat} numberOfLines={2}>{slide.stat}</Text>
                   </View>
 
-                  <Text style={styles.title} numberOfLines={2}>{slide.title}</Text>
-                  <Text style={styles.stat} numberOfLines={2}>{slide.stat}</Text>
-
                   <View style={styles.bottomRow}>
-                    <Pressable
-                      onPress={() => router.navigate(slide.cta.route)}
-                      hitSlop={8}
-                      style={styles.ctaRow}
-                      accessibilityRole="button"
-                      accessibilityLabel={slide.cta.label}
-                    >
-                      <Text style={styles.ctaText}>{slide.cta.label}</Text>
-                      <Ionicons name="arrow-forward" size={13} color={colors.brandText} />
-                    </Pressable>
+                    <View style={[styles.ctaButton, { backgroundColor: accent.tint }]}>
+                      <Text style={[styles.ctaText, { color: accent.fg }]}>{slide.cta.label}</Text>
+                      <Ionicons name="arrow-forward" size={13} color={accent.fg} />
+                    </View>
 
                     {slides.length > 1 ? (
-                      <Text style={styles.counter}>{index + 1} / {slides.length}</Text>
+                      <View style={styles.controls}>
+                        <Pressable
+                          onPress={(event) => {
+                            event.stopPropagation?.();
+                            goToSlide(activeIndex - 1);
+                          }}
+                          style={styles.controlButton}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel="Previous home banner"
+                        >
+                          <Ionicons name="chevron-back" size={16} color={colors.textSecondary || colors.grey} />
+                        </Pressable>
+                        <Pressable
+                          onPress={(event) => {
+                            event.stopPropagation?.();
+                            goToSlide(activeIndex + 1);
+                          }}
+                          style={styles.controlButton}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel="Next home banner"
+                        >
+                          <Ionicons name="chevron-forward" size={16} color={colors.textSecondary || colors.grey} />
+                        </Pressable>
+                      </View>
                     ) : null}
                   </View>
                 </View>
-              </View>
+              </Pressable>
             </View>
           );
         })}
       </ScrollView>
+      {slides.length > 1 ? (
+        <View style={styles.dotsRow}>
+          {slides.map((slide, index) => {
+            const accent = HERO_ACCENTS[slide.slide] || { fg: colors.brandText };
+            const active = activeIndex === index;
+            return (
+              <Pressable
+                key={`${slide.slide}-dot`}
+                onPress={() => goToSlide(index)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={`Show banner ${index + 1}`}
+                accessibilityState={{ selected: active }}
+              >
+                <View style={[styles.dot, active && styles.dotActive, active && { backgroundColor: accent.fg }]} />
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1440,10 +1580,6 @@ export default function HomeScreen() {
           <View style={styles.flashBannerOrbit} />
           <View style={styles.flashBannerContent}>
             <View style={styles.flashBannerCopy}>
-              <View style={styles.flashBannerPill}>
-                <Ionicons name="sparkles" size={13} color={colors.onBrand} />
-                <Text style={styles.flashBannerPillText}>FORMULA RECALL</Text>
-              </View>
               <Text style={styles.flashBannerTitle}>Flash Card Sprint</Text>
               <Text style={styles.flashBannerSubtitle}>
                 Flip equations into fast memory before your next test.

@@ -38,6 +38,7 @@ const PRICE_RANGES = [
   { key: 'over100k', label: `Over ${NGN}100k`, min: 100000, max: null },
 ];
 
+
 const CATEGORY_ICONS = {
   books: 'book-outline',
   textbook: 'book-outline',

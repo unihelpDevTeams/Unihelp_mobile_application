@@ -1,9 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -41,6 +39,33 @@ const initialMessages = [
   },
 ];
 
+const QUICK_PROMPTS = [
+  {
+    id: 'exam-plan',
+    icon: 'calendar-outline',
+    title: 'Exam plan',
+    text: 'Create a 7-day revision plan for my upcoming exam. Ask me for my course and weak topics if needed.',
+  },
+  {
+    id: 'explain-simple',
+    icon: 'bulb-outline',
+    title: 'Explain simply',
+    text: 'Explain a difficult topic to me using simple language, one example, and a quick memory trick.',
+  },
+  {
+    id: 'quiz-me',
+    icon: 'school-outline',
+    title: 'Quiz me',
+    text: 'Quiz me with 5 questions on a topic, wait for my answers, then mark and explain them.',
+  },
+  {
+    id: 'summarize-note',
+    icon: 'document-text-outline',
+    title: 'Summarize notes',
+    text: 'Summarize my notes into key points, important definitions, likely exam areas, and quick check questions.',
+  },
+];
+
 const formatTime = (date) =>
   date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 
@@ -49,6 +74,47 @@ const formatFileSize = (bytes) => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const toFiniteNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const normalizeUsageStatus = (status, premiumActive = false) => {
+  if (!status) return null;
+
+  const fallbackLimit = premiumActive ? 10 : 5;
+  const rawLimit = toFiniteNumber(status.limit ?? status.dailyLimit, fallbackLimit);
+  const limit = rawLimit > 0 ? rawLimit : fallbackLimit;
+  const rawUsed = toFiniteNumber(status.used ?? status.count ?? status.messagesUsed, 0);
+  const used = Math.max(0, Math.min(limit, rawUsed));
+  const derivedRemaining = limit - used;
+  const rawRemaining = toFiniteNumber(
+    status.remaining ?? status.tokensRemaining ?? status.available,
+    derivedRemaining
+  );
+  const remaining = Math.max(0, Math.min(limit, rawRemaining));
+  const allowed = status.allowed === false ? false : remaining > 0;
+
+  return {
+    ...status,
+    used,
+    limit,
+    remaining,
+    allowed,
+  };
+};
+
+const getUsageCopy = (usage, premiumActive) => {
+  if (!usage) {
+    return premiumActive
+      ? 'Premium answers are longer and more detailed'
+      : 'Upgrade to Premium for longer AI answers';
+  }
+
+  const tokenLabel = usage.remaining === 1 ? 'token' : 'tokens';
+  return `${usage.remaining}/${usage.limit} AI ${tokenLabel} left today`;
 };
 
 // ---------------------------------------------------------------------------
@@ -63,7 +129,7 @@ function FadeInUp({ children, style }) {
       Animated.timing(opacity, { toValue: 1, duration: 220, useNativeDriver: true }),
       Animated.timing(translateY, { toValue: 0, duration: 220, useNativeDriver: true }),
     ]).start();
-  }, []);
+  }, [opacity, translateY]);
 
   return (
     <Animated.View style={[style, { opacity, transform: [{ translateY }] }]}>
@@ -97,24 +163,36 @@ export default function AiPage() {
 
   const styles = useThemeStyles((c, s, r) => ({
     container: { flex: 1 },
-    scrollContent: { paddingTop: s.md, paddingHorizontal: s.lg, paddingBottom: 120 },
+    scrollContent: { paddingTop: s.md, paddingBottom: s.xl },
 
-    topBar: { flexDirection: 'row', alignItems: 'center', gap: s.sm, paddingHorizontal: s.lg, paddingTop: s.sm, paddingBottom: s.md },
+    topBar: { flexDirection: 'row', alignItems: 'center', gap: s.sm, paddingTop: s.xs, paddingBottom: s.md },
     topBarIcon: { width: 34, height: 34, borderRadius: r.md, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
     topBarCopy: { flex: 1 },
     topBarTitle: { color: c.textPrimary, fontSize: 13.5, fontWeight: '900' },
     topBarSubtitle: { color: c.textSecondary, fontSize: 11.5, marginTop: 1 },
     topBarSubtitleWarn: { color: c.warning, fontWeight: '700' },
+    usageTrack: { height: 5, backgroundColor: c.borderDefault, borderRadius: r.full, marginTop: 7, overflow: 'hidden' },
+    usageFill: { height: '100%', borderRadius: r.full, backgroundColor: c.brand },
     premiumBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: c.brandLight, borderRadius: r.full, paddingHorizontal: s.sm, paddingVertical: 5 },
     premiumBadgeText: { color: c.brandDark, fontSize: 10, fontWeight: '900', letterSpacing: 0.3 },
     upgradeLink: { color: c.brandText, fontSize: 11, fontWeight: '800' },
+    topIconButton: { width: 34, height: 34, borderRadius: 17, backgroundColor: c.surface, borderWidth: 1, borderColor: c.borderDefault, alignItems: 'center', justifyContent: 'center' },
 
     // Home / workspace hero
-    welcomeWrap: { flex: 1, paddingHorizontal: s.lg, paddingTop: s.md },
+    welcomeWrap: { flex: 1, paddingTop: s.sm },
+    heroPanel: { backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault, borderRadius: r['2xl'], padding: s.lg, overflow: 'hidden', marginBottom: s.lg },
+    heroGlow: { position: 'absolute', width: 150, height: 150, borderRadius: 75, right: -58, top: -58, backgroundColor: c.brandLight },
     welcomeIconRing: { width: 52, height: 52, borderRadius: r['2xl'], backgroundColor: c.brandLight, borderWidth: 1, borderColor: c.brandBorder, alignItems: 'center', justifyContent: 'center', marginBottom: s.md },
-    welcomeTitle: { color: c.textPrimary, fontSize: 20, fontWeight: '900', marginBottom: s.xs },
-    welcomeText: { color: c.textSecondary, fontSize: 13, lineHeight: 19, marginBottom: s.lg },
+    welcomeTitle: { color: c.textPrimary, fontSize: 23, fontWeight: '900', marginBottom: s.xs, maxWidth: '86%' },
+    welcomeText: { color: c.textSecondary, fontSize: 13, lineHeight: 19, marginBottom: s.md, maxWidth: '92%' },
+    heroStatsRow: { flexDirection: 'row', gap: s.sm, flexWrap: 'wrap' },
+    heroStat: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: c.surfaceSecondary || c.canvasLight, borderRadius: r.full, paddingHorizontal: s.sm, paddingVertical: 6 },
+    heroStatText: { color: c.textSecondary, fontSize: 11, fontWeight: '800' },
     sectionLabel: { color: c.textTertiary, fontSize: 11, fontWeight: '900', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: s.sm },
+    quickPromptGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: s.sm, marginBottom: s.lg },
+    quickPromptCard: { width: '48%', backgroundColor: c.surface, borderWidth: 1, borderColor: c.borderDefault, borderRadius: r.xl, padding: s.md, gap: 8 },
+    quickPromptIcon: { width: 30, height: 30, borderRadius: r.md, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
+    quickPromptTitle: { color: c.textPrimary, fontSize: 12.5, fontWeight: '900' },
     quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: s.sm },
 
     // Messages list
@@ -144,6 +222,7 @@ export default function AiPage() {
     retryButton: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     retryText: { color: c.error, fontSize: 12, fontWeight: '900', textDecorationLine: 'underline' },
 
+    bottomDock: { gap: s.sm, paddingTop: s.sm, borderTopWidth: 1, borderTopColor: c.borderDefault, backgroundColor: c.background },
     composer: { backgroundColor: c.surface, borderRadius: 20, borderWidth: 1.5, borderColor: c.borderDefault, padding: 8, gap: 8 },
     composerFocused: { borderColor: c.brand },
     composerRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
@@ -160,13 +239,10 @@ export default function AiPage() {
     sendButtonPressed: { backgroundColor: c.brandDark },
     sendButtonDisabled: { opacity: 0.4 },
     uploadingIndicator: { marginLeft: 8 },
-    modeStrip: { flexGrow: 0, paddingHorizontal: 4 },
-    modeStripRow: { gap: 8 },
-    modeChip: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 34, backgroundColor: c.brandLight, borderRadius: r.full, paddingHorizontal: s.md, borderWidth: 1, borderColor: c.brandBorder },
-    modeChipActive: { backgroundColor: c.brand, borderColor: c.brand },
-    modeChipPressed: { backgroundColor: c.brandBorder },
-    modeChipText: { color: c.brandText, fontSize: 12, fontWeight: '800' },
-    modeChipTextActive: { color: c.onBrand },
+    suggestionRail: { maxHeight: 42 },
+    suggestionRailRow: { gap: 8 },
+    suggestionChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: c.surface, borderWidth: 1, borderColor: c.borderDefault, borderRadius: r.full, paddingHorizontal: s.md, height: 34 },
+    suggestionText: { color: c.textSecondary, fontSize: 12, fontWeight: '800' },
 
     modalOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.55)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: s.xl },
     modalCard: { width: '100%', maxWidth: 360, backgroundColor: c.card, borderRadius: r['2xl'], padding: s.xl, alignItems: 'center' },
@@ -212,10 +288,36 @@ export default function AiPage() {
     if (providerUsageStatus) setUsageStatus(providerUsageStatus);
   }, [providerUsageStatus]);
 
-  const quotaBlocked = usageStatus?.allowed === false;
-  const lowQuota = !quotaBlocked && usageStatus && usageStatus.remaining <= 2;
+  const normalizedUsageStatus = useMemo(
+    () => normalizeUsageStatus(usageStatus, isPremium),
+    [isPremium, usageStatus]
+  );
+  const quotaBlocked = normalizedUsageStatus?.allowed === false;
+  const lowQuota = !quotaBlocked && normalizedUsageStatus && normalizedUsageStatus.remaining <= 2;
   const canSend = !loading && (Boolean(prompt.trim()) || Boolean(attachment)) && !quotaBlocked;
   const isEmptyConversation = messages.length <= 1 && !loading && !error && !aiError;
+  const usagePercent = useMemo(() => {
+    const limit = Number(normalizedUsageStatus?.limit || 0);
+    const used = Number(normalizedUsageStatus?.used || 0);
+    if (!limit || !Number.isFinite(limit)) return 0;
+    return Math.max(0, Math.min(100, (used / limit) * 100));
+  }, [normalizedUsageStatus]);
+  const usageCopy = useMemo(
+    () => getUsageCopy(normalizedUsageStatus, isPremium),
+    [isPremium, normalizedUsageStatus]
+  );
+  const heroUsageCopy = useMemo(() => {
+    if (!usageLoaded) return 'Checking tokens';
+    if (isPremium) return 'Premium active';
+    if (!normalizedUsageStatus) return 'Tokens unavailable';
+    return `${normalizedUsageStatus.remaining}/${normalizedUsageStatus.limit} left today`;
+  }, [isPremium, normalizedUsageStatus, usageLoaded]);
+  const smartSuggestions = useMemo(() => {
+    if (activeMode?.id) {
+      return [`Continue in ${activeMode.label}`, 'Make this easier', 'Give me a quick test'];
+    }
+    return ['Explain with an example', 'Make a study plan', 'Test me on this'];
+  }, [activeMode]);
 
   useEffect(() => {
     if (!quotaBlocked) return;
@@ -250,7 +352,7 @@ export default function AiPage() {
 
   const removeAttachment = () => setAttachment(null);
 
-  const sendPrompt = async (value = prompt) => {
+  const sendPrompt = useCallback(async (value = prompt, options = {}) => {
     const text = String(value || '').trim();
     if (!text && !attachment) return;
     if (loading) return;
@@ -277,7 +379,8 @@ export default function AiPage() {
         };
       }
 
-      await sendMessage({ prompt: text, attachment: uploadedAttachment, context: { profile, mode: activeMode?.id || null } });
+      const modeForRequest = options.modeOverride === undefined ? activeMode : options.modeOverride;
+      await sendMessage({ prompt: text, attachment: uploadedAttachment, context: { profile, mode: modeForRequest?.id || null } });
       requestAnimationFrame(() => scrollRef.current?.scrollToEnd?.({ animated: true }));
       setAttachment(null);
     } catch (sendError) {
@@ -286,7 +389,7 @@ export default function AiPage() {
       setUploadingAttachment(false);
       setRegeneratingIndex(null);
     }
-  };
+  }, [activeMode, attachment, loading, profile, prompt, sendMessage]);
 
   const retryLastPrompt = () => {
     if (!lastPromptRef.current) return;
@@ -321,7 +424,7 @@ export default function AiPage() {
     setActiveMode(mode);
     setSessionMeta({ subject: values.subject || '', topic: values.topic || values.question?.slice(0, 40) || '' });
     setFormMode(null);
-    sendPrompt(composedPrompt);
+    sendPrompt(composedPrompt, { modeOverride: mode });
   };
 
   const skipModeForm = (mode) => {
@@ -341,6 +444,14 @@ export default function AiPage() {
     sendPrompt(label);
   };
 
+  const handleQuickPrompt = useCallback((item) => {
+    if (loading || quotaBlocked) return;
+    setActiveMode(null);
+    setSessionMeta({ subject: '', topic: '' });
+    setFormMode(null);
+    sendPrompt(item.text, { modeOverride: null });
+  }, [loading, quotaBlocked, sendPrompt]);
+
   const loadingLabel = uploadingAttachment
     ? 'Uploading attachment…'
     : regeneratingIndex !== null
@@ -349,11 +460,7 @@ export default function AiPage() {
 
   return (
     <ScreenShell title="AI Assistant" subtitle="Your academic workspace" showBack scrollable={false}>
-      <KeyboardAvoidingView
-        behavior="padding"
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}
-        style={styles.container}
-      >
+      <View style={styles.container}>
         {/* Compact usage / premium pill */}
         <View style={styles.topBar}>
           <View style={styles.topBarIcon}>
@@ -364,12 +471,13 @@ export default function AiPage() {
               <>
                 <Text style={styles.topBarTitle}>UniHelp AI</Text>
                 <Text style={[styles.topBarSubtitle, lowQuota && styles.topBarSubtitleWarn]} numberOfLines={1}>
-                  {usageStatus
-                    ? `${usageStatus.remaining} AI ${usageStatus.remaining === 1 ? 'token' : 'tokens'} left today`
-                    : isPremium
-                      ? 'Premium answers are longer and more detailed'
-                      : 'Upgrade to Premium for longer AI answers'}
+                  {usageCopy}
                 </Text>
+                {normalizedUsageStatus ? (
+                  <View style={styles.usageTrack}>
+                    <View style={[styles.usageFill, { width: `${usagePercent}%`, backgroundColor: lowQuota ? colors.warning : colors.brand }]} />
+                  </View>
+                ) : null}
               </>
             ) : (
               <Text style={styles.topBarSubtitle}>Loading usage…</Text>
@@ -387,6 +495,11 @@ export default function AiPage() {
               </Pressable>
             ) : null
           )}
+          {messages.length > 1 ? (
+            <Pressable onPress={startNewSession} style={styles.topIconButton} accessibilityRole="button" accessibilityLabel="Start new AI session">
+              <Ionicons name="add" size={18} color={colors.brand} />
+            </Pressable>
+          ) : null}
         </View>
 
         {isEmptyConversation && !activeMode ? (
@@ -396,11 +509,30 @@ export default function AiPage() {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            <View style={styles.welcomeIconRing}>
-              <Ionicons name="sparkles" size={24} color={colors.brand} />
-            </View>
-            <Text style={styles.welcomeTitle}>Your academic workspace</Text>
-            <Text style={styles.welcomeText}>Understand more. Practice better. Study smarter.</Text>
+            {!formMode ? (
+              <View style={styles.heroPanel}>
+                <View style={styles.heroGlow} />
+                <View style={styles.welcomeIconRing}>
+                  <Ionicons name="sparkles" size={24} color={colors.brand} />
+                </View>
+                <Text style={styles.welcomeTitle}>Study with a sharper AI workspace</Text>
+                <Text style={styles.welcomeText}>Solve questions, explain hard topics, summarize notes, and build practice sessions from one place.</Text>
+                <View style={styles.heroStatsRow}>
+                  <View style={styles.heroStat}>
+                    <Ionicons name="flash-outline" size={13} color={colors.brand} />
+                    <Text style={styles.heroStatText}>Instant study help</Text>
+                  </View>
+                  <View style={styles.heroStat}>
+                    <Ionicons name="attach-outline" size={13} color={colors.brand} />
+                    <Text style={styles.heroStatText}>Files supported</Text>
+                  </View>
+                  <View style={styles.heroStat}>
+                    <Ionicons name={isPremium ? 'star' : 'lock-open-outline'} size={13} color={colors.brand} />
+                    <Text style={styles.heroStatText}>{heroUsageCopy}</Text>
+                  </View>
+                </View>
+              </View>
+            ) : null}
 
             {formMode ? (
               <ContextForm
@@ -412,6 +544,24 @@ export default function AiPage() {
               />
             ) : (
               <>
+                <Text style={styles.sectionLabel}>Start fast</Text>
+                <View style={styles.quickPromptGrid}>
+                  {QUICK_PROMPTS.map((item) => (
+                    <Pressable
+                      key={item.id}
+                      onPress={() => handleQuickPrompt(item)}
+                      disabled={loading || quotaBlocked}
+                      style={({ pressed }) => [styles.quickPromptCard, pressed && { backgroundColor: colors.brandLight, borderColor: colors.brandBorder }]}
+                      accessibilityRole="button"
+                      accessibilityLabel={item.title}
+                    >
+                      <View style={styles.quickPromptIcon}>
+                        <Ionicons name={item.icon} size={16} color={colors.brand} />
+                      </View>
+                      <Text style={styles.quickPromptTitle}>{item.title}</Text>
+                    </Pressable>
+                  ))}
+                </View>
                 <Text style={styles.sectionLabel}>Academic tools</Text>
                 <View style={styles.quickGrid}>
                   {MODES.map((mode) => (
@@ -531,30 +681,31 @@ export default function AiPage() {
         )}
 
         {/* Mode strip — switch tools mid-conversation without losing the composer */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.modeStripRow}
-          keyboardShouldPersistTaps="handled"
-          style={styles.modeStrip}
-        >
-          {MODES.map((mode) => {
-            const isActive = activeMode?.id === mode.id;
-            return (
+        {!formMode ? (
+          <View style={styles.bottomDock}>
+        {!isEmptyConversation ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.suggestionRailRow}
+            keyboardShouldPersistTaps="handled"
+            style={styles.suggestionRail}
+          >
+            {smartSuggestions.map((label) => (
               <Pressable
-                key={mode.id}
-                style={({ pressed }) => [styles.modeChip, isActive && styles.modeChipActive, pressed && !isActive && styles.modeChipPressed]}
-                onPress={() => openModeForm(mode)}
-                disabled={loading}
+                key={label}
+                onPress={() => handleContextualAction(label)}
+                disabled={loading || quotaBlocked}
+                style={styles.suggestionChip}
                 accessibilityRole="button"
-                accessibilityLabel={mode.label}
+                accessibilityLabel={label}
               >
-                <Ionicons name={mode.icon} size={13} color={isActive ? colors.onBrand : colors.brandDark} />
-                <Text style={[styles.modeChipText, isActive && styles.modeChipTextActive]}>{mode.label}</Text>
+                <Ionicons name="sparkles-outline" size={13} color={colors.brand} />
+                <Text style={styles.suggestionText}>{label}</Text>
               </Pressable>
-            );
-          })}
-        </ScrollView>
+            ))}
+          </ScrollView>
+        ) : null}
 
         <View style={[styles.composer, inputFocused && styles.composerFocused]}>
           {attachment ? (
@@ -615,7 +766,9 @@ export default function AiPage() {
             </Pressable>
           </View>
         </View>
-      </KeyboardAvoidingView>
+          </View>
+        ) : null}
+      </View>
 
       {/* In-app replacement for the previous Alert.alert() quota-blocked prompt */}
       <Modal visible={showUpgradeModal} transparent animationType="fade" onRequestClose={() => setShowUpgradeModal(false)}>

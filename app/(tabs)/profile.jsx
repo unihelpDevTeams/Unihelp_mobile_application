@@ -133,7 +133,7 @@ const THEME_OPTIONS = [
 ];
 
 const emptyForm = {
-  username: '', school: '', schoolId: '', department: '', level: '', location: '', bio: '', role: 'university',
+  username: '', school: '', schoolId: '', department: '', departmentId: '', faculty: '', level: '', location: '', bio: '', role: 'university',
 };
 
 // Sheets are mutually exclusive — only one is meaningfully open at a time.
@@ -348,10 +348,12 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     const next = {
-      username: profile?.username || user?.displayName || '',
-      school: profile?.universityName || '',
-      schoolId: profile?.universityId || '',
-      department: profile?.departmentName || '',
+      username: profile?.username || profile?.displayName || user?.displayName || '',
+      school: profile?.school || profile?.universityName || profile?.university || '',
+      schoolId: profile?.schoolId || profile?.universityId || '',
+      department: profile?.department || profile?.departmentName || '',
+      departmentId: profile?.departmentId || '',
+      faculty: profile?.faculty || '',
       level: profile?.level || '',
       location: profile?.location || '',
       bio: profile?.bio || '',
@@ -481,12 +483,16 @@ export default function ProfileScreen() {
     setField('school', item.name);
     setField('schoolId', item.id);
     setField('department', '');
+    setField('departmentId', '');
+    setField('faculty', '');
     selectUniversity(item.id);
     backToEditProfile();
   };
 
   const handleDepartmentSelect = (item) => {
     setField('department', item.name);
+    setField('departmentId', item.id || '');
+    setField('faculty', item.faculty || '');
     backToEditProfile();
   };
 
@@ -587,7 +593,8 @@ export default function ProfileScreen() {
       await saveUserProfile({
         username: trimmedName, school: form.school.trim(), department: form.department.trim(),
         level: form.level.trim(), location: form.location.trim(), bio: form.bio.trim(), role: form.role,
-        universityId: form.schoolId || '', universityName: form.school.trim(),
+        schoolId: form.schoolId || '', universityId: form.schoolId || '', universityName: form.school.trim(),
+        departmentId: form.departmentId || '', departmentName: form.department.trim(), faculty: form.faculty || '',
       });
       await refreshProfile();
       if (!isMountedRef.current) return;
