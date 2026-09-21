@@ -1,13 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Alert, Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { spacing } from '../../src/shared/theme';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import ScreenShell from '../../src/shared/components/ScreenShell';
-import EmptyState from '../../src/shared/components/EmptyState';
 import DailyStreakBanner from '../../src/shared/components/DailyStreakBanner';
-import { useAuth } from '../../context/AuthContext';
 import { fetchDailyStreak, fetchStreakMilestones, recordDailyStreak } from '../../services/firestoreSync';
 import { useRouter } from 'expo-router';
 
@@ -20,13 +17,15 @@ function getStreakMilestones(streakCount) {
 }
 
 export default function StreakScreen() {
-  const { profile } = useAuth();
   const { colors } = useTheme();
   const router = useRouter();
   const [streakData, setStreakData] = useState(null);
   const [milestones, setMilestones] = useState([]);
   const [today, setToday] = useState(new Date());
   const [loading, setLoading] = useState(true);
+  const [celebration, setCelebration] = useState(null);
+  const celebrateAnim = useRef(new Animated.Value(0)).current;
+  const flameAnim = useRef(new Animated.Value(0)).current;
 
   const styles = useThemeStyles((c, s, r) => ({
     statsRow: { flexDirection: 'row', gap: s.sm, marginBottom: s['2xl'] },
@@ -56,6 +55,12 @@ export default function StreakScreen() {
     studyButtonText: { color: c.onBrand, fontSize: 15, fontWeight: '800' },
     rewardsButton: { backgroundColor: c.card, borderRadius: r.full, borderWidth: 1, borderColor: c.gold, paddingVertical: 13, alignItems: 'center', marginBottom: s.lg },
     rewardsButtonText: { color: c.gold, fontSize: 14, fontWeight: '800' },
+    celebrationOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', zIndex: 10 },
+    celebrationCard: { minWidth: 250, maxWidth: 310, alignItems: 'center', backgroundColor: c.card, borderRadius: r['2xl'], borderWidth: 1, borderColor: c.gold, padding: s.lg },
+    celebrationIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: c.orangeLight, alignItems: 'center', justifyContent: 'center', marginBottom: s.sm },
+    celebrationTitle: { color: c.textPrimary, fontSize: 20, fontWeight: '900', textAlign: 'center' },
+    celebrationText: { color: c.textSecondary, fontSize: 13, fontWeight: '700', marginTop: 4, textAlign: 'center' },
+    confetti: { position: 'absolute', width: 8, height: 18, borderRadius: 4 },
     milestonesTitle: { color: c.textPrimary, fontSize: 18, fontWeight: '900', marginBottom: s.sm },
     milestoneList: { gap: s.sm, marginBottom: s.lg },
     milestoneItem: { backgroundColor: c.card, borderRadius: r['2xl'], borderWidth: 1, borderColor: c.borderDefault, padding: s.md, flexDirection: 'row', alignItems: 'center', gap: s.md },
@@ -74,20 +79,50 @@ export default function StreakScreen() {
     }).catch(() => setLoading(false));
   }, []);
 
+  const runCelebration = (payload) => {
+    setCelebration(payload);
+    celebrateAnim.setValue(0);
+    flameAnim.setValue(0);
+    Animated.parallel([
+      Animated.sequence([
+        Animated.spring(celebrateAnim, { toValue: 1, friction: 5, tension: 95, useNativeDriver: true }),
+        Animated.timing(celebrateAnim, { toValue: 0, duration: 650, delay: 1500, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+      ]),
+      Animated.sequence([
+        Animated.timing(flameAnim, { toValue: 1, duration: 650, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(flameAnim, { toValue: 0, duration: 650, delay: 850, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+      ]),
+    ]).start(({ finished }) => {
+      if (finished) setCelebration(null);
+    });
+  };
+
   const handleStudyNow = async () => {
     try {
       const result = await recordDailyStreak();
       setStreakData(result);
       if (result.unlocked?.length) {
         const milestone = result.unlocked[0];
-        Alert.alert(
-          `${milestone.milestone}-Day Streak!`,
-          `You unlocked a reward spin for your ${milestone.title}.`,
-          [{ text: 'Later', style: 'cancel' }, { text: 'Spin now', onPress: () => router.navigate('/rewards') }]
-        );
+        runCelebration({
+          title: `${milestone.milestone}-Day Streak!`,
+          text: `Reward spin unlocked for ${milestone.title}.`,
+          icon: 'gift',
+        });
+        setTimeout(() => {
+          Alert.alert(
+            `${milestone.milestone}-Day Streak!`,
+            `You unlocked a reward spin for your ${milestone.title}.`,
+            [{ text: 'Later', style: 'cancel' }, { text: 'Spin now', onPress: () => router.navigate('/rewards') }]
+          );
+        }, 900);
         return;
       }
-      router.navigate('/challenge');
+      runCelebration({
+        title: `${result.streakCount || 1}-Day Streak`,
+        text: 'Nice work. Your daily progress is locked in.',
+        icon: 'flame',
+      });
+      setTimeout(() => router.navigate('/challenge'), 1700);
     } catch {}
   };
 
@@ -98,6 +133,9 @@ export default function StreakScreen() {
   const month = today.getMonth();
   const daysInMonth = getDaysInMonth(year, month);
   const firstDay = new Date(year, month, 1).getDay();
+  const celebrationScale = celebrateAnim.interpolate({ inputRange: [0, 1], outputRange: [0.72, 1] });
+  const celebrationOpacity = celebrateAnim.interpolate({ inputRange: [0, 0.15, 0.82, 1], outputRange: [0, 1, 1, 0] });
+  const flameRotate = flameAnim.interpolate({ inputRange: [0, 1], outputRange: ['-10deg', '10deg'] });
 
   return (
     <ScreenShell title="Daily Streak" subtitle="Keep your learning momentum going" showBack loading={loading}>
@@ -204,6 +242,30 @@ export default function StreakScreen() {
       <Pressable onPress={handleStudyNow} style={({ pressed }) => [styles.studyButton, pressed && styles.studyButtonPressed]}>
         <Text style={styles.studyButtonText}>Study Now & Record Streak</Text>
       </Pressable>
+
+      {celebration && (
+        <Animated.View pointerEvents="none" style={[styles.celebrationOverlay, { opacity: celebrationOpacity }]}>
+          {[0, 1, 2, 3, 4, 5, 6, 7].map((item) => (
+            <View
+              key={item}
+              style={[
+                styles.confetti,
+                {
+                  backgroundColor: item % 3 === 0 ? colors.gold : item % 3 === 1 ? colors.brand : colors.orange,
+                  transform: [{ rotate: `${item * 45}deg` }, { translateY: -118 }],
+                },
+              ]}
+            />
+          ))}
+          <Animated.View style={[styles.celebrationCard, { transform: [{ scale: celebrationScale }] }]}>
+            <Animated.View style={[styles.celebrationIcon, { transform: [{ rotate: flameRotate }] }]}>
+              <Ionicons name={celebration.icon} size={30} color={celebration.icon === 'gift' ? colors.gold : colors.orange} />
+            </Animated.View>
+            <Text style={styles.celebrationTitle}>{celebration.title}</Text>
+            <Text style={styles.celebrationText}>{celebration.text}</Text>
+          </Animated.View>
+        </Animated.View>
+      )}
     </ScreenShell>
   );
 }

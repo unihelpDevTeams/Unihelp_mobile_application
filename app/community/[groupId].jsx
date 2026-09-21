@@ -37,6 +37,8 @@ import {
   rejectGroupJoinRequest,
   requestJoinGroup,
   sendGroupMessage,
+  updateGroupMessage,
+  deleteGroupMessage,
   startConversation,
   toggleMessageReaction, // see note at bottom of file if this doesn't exist yet in your service
   updateGroup, // see note at bottom of file if this doesn't exist yet in your service
@@ -107,6 +109,8 @@ export default function GroupDetailPage() {
   const [draft, setDraft] = useState('');
   const [stickerPickerVisible, setStickerPickerVisible] = useState(false);
   const [replyTo, setReplyTo] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [editText, setEditText] = useState('');
   const scrollRef = useRef(null);
 
   // Reactions
@@ -1163,6 +1167,54 @@ export default function GroupDetailPage() {
     }
   };
 
+  const messageWithinEditWindow = (message) => {
+    const sentAt = message?.createdAt?.toMillis?.() || message?.createdAt?.seconds * 1000 || 0;
+    return Boolean(sentAt && Date.now() - sentAt <= 60 * 60 * 1000);
+  };
+
+  const startEditingMessage = (message) => {
+    if (!message || message.senderId !== user?.uid || message.type === 'sticker' || !messageWithinEditWindow(message)) return;
+    setEditingMessage(message);
+    setEditText(message.text || '');
+    setActiveMessageActions(null);
+  };
+
+  const cancelEditingMessage = () => {
+    setEditingMessage(null);
+    setEditText('');
+  };
+
+  const saveEditedMessage = async () => {
+    if (!editingMessage || !editText.trim()) return;
+    setBusy(true);
+    try {
+      await updateGroupMessage(groupId, editingMessage.id, editText, user?.uid);
+      cancelEditingMessage();
+    } catch (error) {
+      Alert.alert('Edit failed', error.message || 'Unable to edit this message.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeGroupMessage = (message) => {
+    if (!message || message.senderId !== user?.uid || !messageWithinEditWindow(message)) return;
+    Alert.alert('Delete message?', 'It will be replaced with “This message was deleted” for everyone in the group.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteGroupMessage(groupId, message.id, user?.uid);
+          } catch (error) {
+            Alert.alert('Delete failed', error.message || 'Unable to delete this message.');
+          }
+        },
+      },
+    ]);
+  };
+
   const setReplyFromSwipe = (message) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setReplyTo(message);
@@ -1462,7 +1514,17 @@ export default function GroupDetailPage() {
               keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}
               style={styles.composerOuter}
             >
-              {replyTo ? (
+              {editingMessage ? (
+                <View style={styles.replyPreview}>
+                  <View style={styles.replyPreviewBody}>
+                    <Text style={styles.replyPreviewLabel}>Editing message</Text>
+                    <Text style={styles.replyPreviewText} numberOfLines={2}>{editingMessage.text || ''}</Text>
+                  </View>
+                  <Pressable onPress={cancelEditingMessage} hitSlop={8}>
+                    <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
+                  </Pressable>
+                </View>
+              ) : replyTo ? (
                 <View style={styles.replyPreview}>
                   <View style={[styles.replyPreviewBar, { backgroundColor: colorForName(replyTo.senderName || 'S') }]} />
                   <View style={styles.replyPreviewBody}>
@@ -1494,9 +1556,9 @@ export default function GroupDetailPage() {
                   </Pressable>
                   <View style={styles.inputPill}>
                     <TextInput
-                      value={draft}
-                      onChangeText={setDraft}
-                      placeholder={canSendMessages ? 'Write a message' : 'Messaging is disabled for members'}
+                      value={editingMessage ? editText : draft}
+                      onChangeText={editingMessage ? setEditText : setDraft}
+                      placeholder={editingMessage ? 'Edit your message' : (canSendMessages ? 'Write a message' : 'Messaging is disabled for members')}
                       placeholderTextColor={colors.textTertiary}
                       style={styles.input}
                       multiline
@@ -1505,10 +1567,10 @@ export default function GroupDetailPage() {
                   </View>
                   <Pressable
                     style={[styles.sendButton, (busy || !draft.trim() || !canSendMessages) && styles.sendButtonDisabled]}
-                    onPress={send}
-                    disabled={busy || !draft.trim() || !canSendMessages}
+                    onPress={editingMessage ? saveEditedMessage : send}
+                    disabled={busy || !(editingMessage ? editText.trim() : draft.trim()) || !canSendMessages}
                   >
-                    {busy ? <ActivityIndicator color="#fff" /> : <Ionicons name="send" size={18} color="#fff" />}
+                    {busy ? <ActivityIndicator color="#fff" /> : <Ionicons name={editingMessage ? 'checkmark' : 'send'} size={18} color="#fff" />}
                   </Pressable>
                 </View>
               </View>
@@ -1539,6 +1601,32 @@ export default function GroupDetailPage() {
             <View style={styles.actionSheetHandleWrap} {...messageActionsSheet.panHandlers}>
               <View style={styles.actionSheetHandle} />
             </View>
+            {activeMessageActions?.senderId === user?.uid && messageWithinEditWindow(activeMessageActions) && activeMessageActions?.type !== 'sticker' ? (
+              <Pressable
+                style={styles.actionSheetRow}
+                onPress={() => startEditingMessage(activeMessageActions)}
+              >
+                <View style={styles.actionSheetIconWrap}>
+                  <Ionicons name="create-outline" size={16} color={colors.brandDark} />
+                </View>
+                <Text style={styles.actionSheetLabel}>Edit message</Text>
+              </Pressable>
+            ) : null}
+            {activeMessageActions?.senderId === user?.uid && messageWithinEditWindow(activeMessageActions) ? (
+              <Pressable
+                style={styles.actionSheetRow}
+                onPress={() => {
+                  const message = activeMessageActions;
+                  setActiveMessageActions(null);
+                  removeGroupMessage(message);
+                }}
+              >
+                <View style={styles.actionSheetIconWrap}>
+                  <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                </View>
+                <Text style={[styles.actionSheetLabel, { color: colors.danger }]}>Delete message</Text>
+              </Pressable>
+            ) : null}
             <Pressable
               style={styles.actionSheetRow}
               onPress={() => {
@@ -1976,7 +2064,9 @@ function MessageRow({
             </View>
           ) : null}
 
-          {message.type === 'sticker' ? (
+          {message.deleted ? (
+            <Text style={[styles.messageBody, mine && styles.messageBodyMine, { fontStyle: 'italic', opacity: 0.75 }]}>This message was deleted</Text>
+          ) : message.type === 'sticker' ? (
             <StickerMessage message={message} isMine={mine} onLongPress={() => onOpenReactionPicker(message)} />
           ) : (
             <Text style={[styles.messageBody, mine && styles.messageBodyMine]}>{message.text || 'Attachment'}</Text>
@@ -1988,6 +2078,7 @@ function MessageRow({
             ) : null}
             <Text style={[styles.messageTime, mine && styles.messageTimeMine]}>{formatShortTime(message.createdAt)}</Text>
             {mine ? <Ionicons name="checkmark-done" size={14} color={colors.brandGlow} style={{ marginLeft: 4 }} /> : null}
+            {message.edited && !message.deleted ? <Text style={[styles.messageTime, mine && styles.messageTimeMine]}>edited</Text> : null}
             <Pressable onPress={() => onOpenActions(message)} hitSlop={8} style={styles.kebabButton}>
               <Ionicons
                 name="ellipsis-vertical"

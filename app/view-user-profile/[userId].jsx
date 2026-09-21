@@ -25,6 +25,7 @@ import {
   cancelFriendRequest,
   createOrOpenFriendConversation,
   declineFriendRequest,
+  fetchFriendStats,
   listenRelationship,
   removeFriend,
   sendFriendRequest,
@@ -47,6 +48,7 @@ export default function ViewUserProfile() {
   const [intro, setIntro] = useState('');
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [feedback, setFeedback] = useState(null);
+  const [friendStats, setFriendStats] = useState({ friendCount: 0, mutualCount: 0 });
 
   useEffect(() => {
     let cancelled = false;
@@ -71,6 +73,22 @@ export default function ViewUserProfile() {
     if (!user?.uid || !targetUid || user.uid === targetUid) return undefined;
     return listenRelationship(user.uid, targetUid, setRelationship);
   }, [targetUid, user?.uid]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!targetUid) return undefined;
+    fetchFriendStats(targetUid)
+      .then((stats) => {
+        if (!cancelled) setFriendStats(stats);
+      })
+      .catch((error) => {
+        console.warn('Failed to load friend stats', error);
+        if (!cancelled) setFriendStats({ friendCount: Number(profile?.friendCount || 0), mutualCount: 0 });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.friendCount, targetUid]);
 
   const initials = useMemo(() => {
     const source = profile?.username || profile?.email || 'S';
@@ -403,16 +421,22 @@ export default function ViewUserProfile() {
               {/* Action Row */}
               {renderActions()}
 
-              {/* Mutual Friends Stat Bar */}
-              {!isSelf ? (
+              {/* Friend Stat Bar */}
                 <View style={[styles.statsCard, { backgroundColor: colors.card, borderColor: colors.borderDefault, shadowColor: colors.shadow }]}>
                   <View style={styles.statItem}>
                     <Ionicons name="people" size={20} color={colors.brand} />
-                    <Text style={[styles.statNumber, { color: colors.textPrimary }]}>{relationship.mutualCount || 0}</Text>
-                    <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Mutual Friends</Text>
+                    <Text style={[styles.statNumber, { color: colors.textPrimary }]}>{friendStats.friendCount || 0}</Text>
+                    <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Friends</Text>
                   </View>
+                  {!isSelf ? <View style={[styles.statDivider, { backgroundColor: colors.borderDefault }]} /> : null}
+                  {!isSelf ? (
+                    <View style={styles.statItem}>
+                      <Ionicons name="git-network-outline" size={19} color={colors.gold || colors.brand} />
+                      <Text style={[styles.statNumber, { color: colors.textPrimary }]}>{friendStats.mutualCount || 0}</Text>
+                      <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Mutual Friends</Text>
+                    </View>
+                  ) : null}
                 </View>
-              ) : null}
 
               {/* Academic Info Grid */}
               <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.borderDefault, shadowColor: colors.shadow }]}>
@@ -771,6 +795,9 @@ const styles = StyleSheet.create({
 
   /* Mutual Stat Card */
   statsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 14,
@@ -785,10 +812,16 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   statItem: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     justifyContent: 'center',
+  },
+  statDivider: {
+    width: 1,
+    height: 26,
+    marginHorizontal: 8,
   },
   statNumber: {
     fontSize: 15,

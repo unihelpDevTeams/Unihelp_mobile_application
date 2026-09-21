@@ -27,6 +27,7 @@ import {
   markConversationRead,
   sendDirectMessage,
   deleteDirectMessage,
+  updateDirectMessage,
   clearConversationForUser,
   deleteConversationForUser,
 } from '../../src/shared/services/community';
@@ -75,6 +76,8 @@ export default function ConversationPage() {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [replyTo, setReplyTo] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [editText, setEditText] = useState('');
   const [activeMessage, setActiveMessage] = useState(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
@@ -583,6 +586,33 @@ export default function ConversationPage() {
     setConfirmingDelete(false);
   };
 
+  const messageWithinEditWindow = (message) => {
+    const sentAt = toMillis(message?.createdAt);
+    return Boolean(sentAt && Date.now() - sentAt <= 60 * 60 * 1000);
+  };
+
+  const startEditingMessage = () => {
+    if (!activeMessage || !isMine(activeMessage) || !messageWithinEditWindow(activeMessage) || activeMessage.type !== 'text') return;
+    setEditingMessage(activeMessage);
+    setEditText(activeMessage.text || '');
+    closeSheet();
+  };
+
+  const cancelEditingMessage = () => {
+    setEditingMessage(null);
+    setEditText('');
+  };
+
+  const saveEditedMessage = async () => {
+    if (!editingMessage || !editText.trim()) return;
+    try {
+      await updateDirectMessage(conversationId, editingMessage.id, editText, currentUid);
+      cancelEditingMessage();
+    } catch (error) {
+      showAlertDialog('Edit failed', error.message || 'Unable to edit this message.');
+    }
+  };
+
   const handleReplyFromSheet = () => {
     if (activeMessage) setReplyTo(activeMessage);
     closeSheet();
@@ -800,7 +830,17 @@ export default function ConversationPage() {
 
       {canChat ? (
         <View style={styles.composerContainer}>
-          {replyTo ? (
+          {editingMessage ? (
+            <View style={styles.replyPreview}>
+              <View style={styles.replyPreviewHeader}>
+                <Text style={styles.replyPreviewLabel}>Editing message</Text>
+                <Pressable onPress={cancelEditingMessage}>
+                  <Text style={styles.replyCancel}>Cancel</Text>
+                </Pressable>
+              </View>
+              <Text style={styles.replyPreviewText} numberOfLines={2}>{editingMessage.text || ''}</Text>
+            </View>
+          ) : replyTo ? (
             <View style={styles.replyPreview}>
               <View style={styles.replyPreviewHeader}>
                 <Text style={styles.replyPreviewLabel}>Replying to {replyTo.senderName || 'Student'}</Text>
@@ -820,8 +860,12 @@ export default function ConversationPage() {
               onVoiceSent={sendVoiceMessage}
             />
             <TextInput
-              value={draft}
+              value={editingMessage ? editText : draft}
               onChangeText={(text) => {
+                if (editingMessage) {
+                  setEditText(text);
+                  return;
+                }
                 setDraft(text);
                 const socket = getSocket();
                 socket.emit("typing", { conversationId, userId: currentUid, isTyping: true, name: profile?.name || user?.displayName || 'Student' });
@@ -836,11 +880,11 @@ export default function ConversationPage() {
               multiline
             />
             <Pressable
-              style={[styles.button, (!draft.trim() || sending) && styles.buttonDisabled]}
-              onPress={send}
-              disabled={sending || !draft.trim()}
+              style={[styles.button, (!(editingMessage ? editText.trim() : draft.trim()) || sending) && styles.buttonDisabled]}
+              onPress={editingMessage ? saveEditedMessage : send}
+              disabled={sending || !(editingMessage ? editText.trim() : draft.trim())}
             >
-              {sending ? <ActivityIndicator color="#fff" /> : <Ionicons name="arrow-up" size={18} color={colors.onBrand} />}
+              {sending ? <ActivityIndicator color="#fff" /> : <Ionicons name={editingMessage ? 'checkmark' : 'arrow-up'} size={18} color={colors.onBrand} />}
             </Pressable>
           </View>
         </View>
@@ -871,7 +915,14 @@ export default function ConversationPage() {
                   <Text style={styles.sheetOptionText}>Copy text</Text>
                 </Pressable>
 
-                {activeMessage && isMine(activeMessage) ? (
+                {activeMessage && isMine(activeMessage) && messageWithinEditWindow(activeMessage) ? (
+                  <Pressable style={styles.sheetOption} onPress={startEditingMessage}>
+                    <Ionicons name="create-outline" size={18} color={colors.textPrimary} />
+                    <Text style={styles.sheetOptionText}>Edit message</Text>
+                  </Pressable>
+                ) : null}
+
+                {activeMessage && isMine(activeMessage) && messageWithinEditWindow(activeMessage) ? (
                   <Pressable style={styles.sheetOption} onPress={() => setConfirmingDelete(true)}>
                     <Ionicons name="trash-outline" size={18} color={colors.error} />
                     <Text style={[styles.sheetOptionText, { color: colors.error }]}>Delete message</Text>

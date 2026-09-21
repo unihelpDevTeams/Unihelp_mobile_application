@@ -10,6 +10,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -30,6 +31,7 @@ import {
   acceptFriendRequest,
   declineFriendRequest,
   cancelFriendRequest,
+  createOrOpenFriendConversation,
   removeFriend,
 } from '../../src/shared/services/friendships';
 import { useAuth } from '../../context/AuthContext';
@@ -169,6 +171,7 @@ export default function MessagesPage() {
   const [optionsModalVisible, setOptionsModalVisible] = useState(false);
   const [confirmationMode, setConfirmationMode] = useState(null); // 'clear' | 'delete' | null
   const [actionLoading, setActionLoading] = useState(false);
+  const [openingFriendId, setOpeningFriendId] = useState('');
 
   const styles = useThemeStyles((c, s, r) => ({
     tabBar: {
@@ -634,11 +637,26 @@ export default function MessagesPage() {
     }
   };
 
-  const openFriendChat = (friend) => {
-    const otherUid = friend.users?.find((id) => id !== profile?.uid);
-    if (!otherUid) return;
-    const conversationId = [profile?.uid, otherUid].sort().join('_');
-    router.navigate(`/messages/${conversationId}`);
+  const openFriendChat = async (friend) => {
+    const currentUid = user?.uid || profile?.uid;
+    const otherUid = friend.users?.find((id) => id !== currentUid);
+    if (!currentUid || !otherUid || openingFriendId) return;
+
+    setOpeningFriendId(otherUid);
+    try {
+      const friendProfile = friend.profiles?.[otherUid] || { uid: otherUid };
+      const conversationId = await createOrOpenFriendConversation({
+        currentUser: user || { uid: currentUid },
+        otherUser: { id: otherUid, ...friendProfile },
+        currentProfile: profile,
+        otherProfile: friendProfile,
+      });
+      router.navigate(`/messages/${conversationId}`);
+    } catch (error) {
+      Alert.alert('Chat unavailable', error.message || 'Unable to open this conversation.');
+    } finally {
+      setOpeningFriendId('');
+    }
   };
 
   const emptyMessage = useMemo(() => 'Search for a student and start a direct conversation.', []);
@@ -913,9 +931,14 @@ export default function MessagesPage() {
         <TouchableOpacity
           style={styles.messageBtn}
           onPress={() => openFriendChat(item)}
+          disabled={openingFriendId === item.users?.find((id) => id !== (user?.uid || profile?.uid))}
           hitSlop={8}
         >
-          <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.brandText} />
+          {openingFriendId === item.users?.find((id) => id !== (user?.uid || profile?.uid)) ? (
+            <ActivityIndicator size="small" color={colors.brandText} />
+          ) : (
+            <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.brandText} />
+          )}
         </TouchableOpacity>
       </Pressable>
     );

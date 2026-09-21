@@ -25,6 +25,7 @@ import { canSendDirectMessage, createOrOpenFriendConversation } from './friendsh
 
 export const PAGE_SIZE = 20;
 export const MESSAGE_PAGE_SIZE = 25;
+export const MESSAGE_EDIT_WINDOW_MS = 60 * 60 * 1000;
 
 const normalizeSearch = (value = '') => value.trim().toLowerCase();
 
@@ -376,6 +377,39 @@ export const sendGroupMessage = async (groupId, user, profile, payload) => {
   }
 };
 
+const messageCreatedAtMillis = (value) => {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  if (value.seconds) return value.seconds * 1000;
+  return new Date(value).getTime() || 0;
+};
+
+const assertMessageOwnerWithinWindow = async (messageRef, uid) => {
+  const snapshot = await getDoc(messageRef);
+  if (!snapshot.exists()) throw new Error('This message no longer exists.');
+  const message = snapshot.data();
+  if (message.senderId !== uid) throw new Error('You can only change your own messages.');
+  if (Date.now() - messageCreatedAtMillis(message.createdAt) > MESSAGE_EDIT_WINDOW_MS) {
+    throw new Error('Messages can only be edited or deleted within one hour.');
+  }
+  return message;
+};
+
+export async function updateGroupMessage(groupId, messageId, text, uid = auth.currentUser?.uid) {
+  if (!groupId || !messageId || !uid || !text?.trim()) throw new Error('Message text is required.');
+  const messageRef = doc(db, 'groups', groupId, 'messages', messageId);
+  await assertMessageOwnerWithinWindow(messageRef, uid);
+  await updateDoc(messageRef, { text: text.trim(), edited: true, editedAt: serverTimestamp() });
+}
+
+export async function deleteGroupMessage(groupId, messageId, uid = auth.currentUser?.uid) {
+  if (!groupId || !messageId || !uid) throw new Error('Missing message details.');
+  const messageRef = doc(db, 'groups', groupId, 'messages', messageId);
+  await assertMessageOwnerWithinWindow(messageRef, uid);
+  await updateDoc(messageRef, { deleted: true, text: '', attachments: [], deletedAt: serverTimestamp() });
+}
+
 export async function updateGroup(groupId, payload) {
   await updateDoc(doc(db, 'groups', groupId), {
     ...payload,
@@ -485,6 +519,7 @@ export const deleteConversationForUser = async (conversationId, uid = auth.curre
 
 export async function deleteDirectMessage(conversationId, messageId, options = {}) {
   const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
+  await assertMessageOwnerWithinWindow(messageRef, auth.currentUser?.uid);
   if (options.voice) {
     try {
       const token = await auth.currentUser?.getIdToken();
@@ -510,6 +545,13 @@ export async function deleteDirectMessage(conversationId, messageId, options = {
     attachments: [],
     deletedAt: serverTimestamp(),
   });
+}
+
+export async function updateDirectMessage(conversationId, messageId, text, uid = auth.currentUser?.uid) {
+  if (!conversationId || !messageId || !uid || !text?.trim()) throw new Error('Message text is required.');
+  const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
+  await assertMessageOwnerWithinWindow(messageRef, uid);
+  await updateDoc(messageRef, { text: text.trim(), edited: true, editedAt: serverTimestamp() });
 }
 
 /**

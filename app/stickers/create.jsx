@@ -27,6 +27,7 @@ export default function CreateStickerScreen() {
   const [cropAspect, setCropAspect] = useState([1, 1]);
   const [progress, setProgress] = useState(0);
   const [saving, setSaving] = useState(false);
+  const mediaIsVideo = media?.type?.startsWith('video');
   const styles = useThemeStyles((c, s, r) => ({
     preview: { width: '100%', aspectRatio: 1, borderRadius: r['2xl'], backgroundColor: c.surfaceSecondary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', marginBottom: s.md, borderWidth: 1, borderColor: c.borderDefault },
     previewImage: { width: '100%', height: '100%' },
@@ -57,7 +58,10 @@ export default function CreateStickerScreen() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) { Alert.alert('Permission needed', 'Allow media access to create a sticker.'); return; }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: [mediaType], allowsEditing: mediaType === IMAGE_MEDIA_TYPE, aspect, quality: 0.9, videoMaxDuration: 10 });
-    if (!result.canceled && result.assets?.[0]) setMedia(result.assets[0]);
+    if (!result.canceled && result.assets?.[0]) {
+      setMedia(result.assets[0]);
+      if (mediaType === VIDEO_MEDIA_TYPE) setRemoveBackground(false);
+    }
   };
 
   const save = async () => {
@@ -65,8 +69,19 @@ export default function CreateStickerScreen() {
     setSaving(true);
     try {
       const uploaded = await uploadStickerMedia(media, setProgress, { rotation });
-      const sticker = await createSticker({ uploadId: uploaded.uploadId, name: name.trim() || 'My Sticker', idempotencyKey: `create-${Date.now()}-${Math.random().toString(36).slice(2)}`, editor: { text: overlayText.trim(), emoji, outline } });
-      if (removeBackground) await removeStickerBackground(sticker.id);
+      const sticker = await createSticker({
+        uploadId: uploaded.uploadId,
+        name: name.trim() || 'My Sticker',
+        idempotencyKey: `create-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        editor: {
+          text: media.type?.startsWith('video') ? '' : overlayText.trim(),
+          emoji: media.type?.startsWith('video') ? '' : emoji,
+          outline,
+          textColor,
+          textSize,
+        },
+      });
+      if (removeBackground && !media.type?.startsWith('video')) await removeStickerBackground(sticker.id);
       Alert.alert('Sticker saved', 'Your sticker is ready to send.', [{ text: 'Open chat', onPress: () => router.back() }]);
       return sticker;
     } catch (error) {
@@ -75,20 +90,29 @@ export default function CreateStickerScreen() {
   };
 
   const previewTextSize = textSize === 'small' ? 22 : textSize === 'large' ? 38 : 30;
+  const previewTextOutline = outline ? {
+    textShadowColor: '#00000099',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
+  } : {
+    textShadowColor: 'transparent',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 0,
+  };
   return <ScreenShell title="Create Sticker" subtitle="Make it yours, WhatsApp-style" showBack>
     <View style={styles.preview}>
-      {media ? (media.type?.startsWith('video') ? <Text style={styles.placeholder}>Video sticker selected</Text> : <Image source={{ uri: media.uri }} style={[styles.previewImage, { transform: [{ rotate: `${rotation}deg` }] }]} />) : <Text style={styles.placeholder}>Choose a photo or short video</Text>}
-      {media && !(media.type?.startsWith('video')) ? <View pointerEvents="none" style={styles.previewOverlay}>
+      {media ? (mediaIsVideo ? <Text style={styles.placeholder}>Video sticker selected</Text> : <Image source={{ uri: media.uri }} style={[styles.previewImage, { transform: [{ rotate: `${rotation}deg` }] }]} />) : <Text style={styles.placeholder}>Choose a photo or short video</Text>}
+      {media && !mediaIsVideo ? <View pointerEvents="none" style={styles.previewOverlay}>
         {emoji ? <Text style={styles.previewEmoji}>{emoji}</Text> : null}
-        {overlayText ? <Text style={[styles.previewText, { color: textColor, fontSize: previewTextSize }]}>{overlayText}</Text> : null}
+        {overlayText ? <Text style={[styles.previewText, previewTextOutline, { color: textColor, fontSize: previewTextSize }]}>{overlayText}</Text> : null}
       </View> : null}
     </View>
     <Text style={styles.helper}>Start with a photo, then add a caption, emoji, crop, rotation, or background removal before saving.</Text>
     <View style={styles.editorBar}>
       <Pressable style={[styles.editorTool, media && styles.editorToolActive]} onPress={() => chooseMedia(IMAGE_MEDIA_TYPE)}><Ionicons name="image-outline" size={19} color={colors.brand} /><Text style={styles.editorToolText}>Photo</Text></Pressable>
-      <Pressable style={styles.editorTool} onPress={() => setOverlayText((value) => value || 'Your text')}><Ionicons name="text-outline" size={19} color={colors.brand} /><Text style={styles.editorToolText}>Text</Text></Pressable>
-      <Pressable style={styles.editorTool} onPress={() => setEmoji(emoji ? '' : EMOJIS[0])}><Ionicons name="happy-outline" size={19} color={colors.brand} /><Text style={styles.editorToolText}>Emoji</Text></Pressable>
-      <Pressable style={styles.editorTool} onPress={() => setRemoveBackground((current) => !current)}><Ionicons name="cut-outline" size={19} color={colors.brand} /><Text style={styles.editorToolText}>Cut out</Text></Pressable>
+      <Pressable style={[styles.editorTool, mediaIsVideo && { opacity: 0.45 }]} disabled={mediaIsVideo} onPress={() => setOverlayText((value) => value || 'Your text')}><Ionicons name="text-outline" size={19} color={colors.brand} /><Text style={styles.editorToolText}>Text</Text></Pressable>
+      <Pressable style={[styles.editorTool, mediaIsVideo && { opacity: 0.45 }]} disabled={mediaIsVideo} onPress={() => setEmoji(emoji ? '' : EMOJIS[0])}><Ionicons name="happy-outline" size={19} color={colors.brand} /><Text style={styles.editorToolText}>Emoji</Text></Pressable>
+      <Pressable style={[styles.editorTool, mediaIsVideo && { opacity: 0.45 }]} disabled={mediaIsVideo} onPress={() => setRemoveBackground((current) => !current)}><Ionicons name="cut-outline" size={19} color={colors.brand} /><Text style={styles.editorToolText}>Cut out</Text></Pressable>
     </View>
     <View style={styles.row}>
       <Pressable style={styles.choice} onPress={() => chooseMedia(VIDEO_MEDIA_TYPE)}><Text style={styles.choiceText}>Choose video</Text></Pressable>
@@ -101,7 +125,7 @@ export default function CreateStickerScreen() {
     <View style={styles.row}>{['#FFFFFF', '#000000', '#FF3B30', '#FFD60A'].map((color) => <Pressable key={color} accessibilityLabel={`Text color ${color}`} style={[styles.colorChoice, { backgroundColor: color }, textColor === color && styles.colorChoiceActive]} onPress={() => setTextColor(color)} />)}</View>
     <Text style={styles.label}>Emoji</Text><View style={styles.row}>{EMOJIS.map((item) => <Pressable key={item} style={[styles.choice, emoji === item && styles.choiceActive]} onPress={() => setEmoji(emoji === item ? '' : item)}><Text style={{ fontSize: 22 }}>{item}</Text></Pressable>)}</View>
     <Pressable style={[styles.choice, outline && styles.choiceActive]} onPress={() => setOutline((current) => !current)}><Text style={styles.choiceText}>{outline ? 'Outline on' : 'Outline off'}</Text></Pressable>
-    <Pressable style={[styles.choice, removeBackground && styles.choiceActive, { marginTop: 8 }]} onPress={() => setRemoveBackground((current) => !current)}><Ionicons name="cut-outline" size={16} color={colors.brand} /><Text style={styles.choiceText}>{removeBackground ? 'Background removal on' : 'Remove background'}</Text></Pressable>
+    <Pressable style={[styles.choice, removeBackground && styles.choiceActive, mediaIsVideo && { opacity: 0.45 }, { marginTop: 8 }]} disabled={mediaIsVideo} onPress={() => setRemoveBackground((current) => !current)}><Ionicons name="cut-outline" size={16} color={colors.brand} /><Text style={styles.choiceText}>{removeBackground ? 'Background removal on' : 'Remove background'}</Text></Pressable>
     {saving && <Text style={{ color: colors.textSecondary, marginTop: 12 }}>{progress < 100 ? `Uploading... ${progress}%` : 'Creating sticker...'}</Text>}
     <Pressable style={styles.save} onPress={save} disabled={!media || saving}>{saving ? <ActivityIndicator color={colors.onBrand} /> : <Text style={styles.saveText}>Save Sticker</Text>}</Pressable>
   </ScreenShell>;

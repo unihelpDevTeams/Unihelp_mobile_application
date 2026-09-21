@@ -12,7 +12,7 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
   const { profile } = useAuth();
   const { colors } = useTheme();
   const router = useRouter();
-  const [tab, setTab] = useState('packs');
+  const [tab, setTab] = useState('mine');
   const [selectedPackId, setSelectedPackId] = useState('');
   const [packs, setPacks] = useState([]);
   const [stickers, setStickers] = useState([]);
@@ -20,6 +20,7 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
   const [error, setError] = useState('');
   const premium = isPremiumActive(profile);
   const stickerColumns = 4;
+  const stickerTabs = [['mine', 'Mine'], ['recent', 'Recent'], ['favorites', 'Favorites'], ['packs', 'Packs']];
   const styles = useThemeStyles((c, s, r) => ({
     overlay: { flex: 1, backgroundColor: c.overlay, justifyContent: 'flex-end' },
     sheet: { backgroundColor: c.bottomSheetBackground, minHeight: '52%', maxHeight: '76%', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: s.lg },
@@ -36,6 +37,8 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
     pack: { backgroundColor: c.surfaceSecondary, borderRadius: r['2xl'], padding: s.md, marginBottom: s.sm },
     packTitle: { color: c.textPrimary, fontWeight: '800' },
     packMeta: { color: c.textSecondary, fontSize: 12, marginTop: 2 },
+    packHeader: { flexDirection: 'row', alignItems: 'center', gap: s.sm, marginBottom: s.md },
+    packBack: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surfaceSecondary },
     create: { marginTop: s.md, borderWidth: 1, borderColor: c.gold, borderRadius: r.full, paddingVertical: 12, alignItems: 'center' },
     createText: { color: c.gold, fontWeight: '800' },
     error: { color: c.error, textAlign: 'center', marginVertical: s.md },
@@ -45,7 +48,14 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
     if (!visible) return;
     let cancelled = false;
     setLoading(true); setError('');
-    Promise.all([fetchStickerPacks(), tab === 'recent' ? fetchRecentStickers() : tab === 'favorites' ? fetchFavoriteStickers() : fetchStickers(selectedPackId ? { packId: selectedPackId } : {})])
+    const stickerRequest = tab === 'recent'
+      ? fetchRecentStickers()
+      : tab === 'favorites'
+        ? fetchFavoriteStickers()
+        : tab === 'mine'
+          ? fetchStickers({ owner: 'me' })
+          : fetchStickers(selectedPackId ? { packId: selectedPackId } : {});
+    Promise.all([fetchStickerPacks(), stickerRequest])
       .then(([packData, stickerData]) => { if (!cancelled) { setPacks(packData); setStickers(stickerData); } })
       .catch((loadError) => {
         console.error('[StickerPicker] Failed to load stickers/packs:', loadError);
@@ -69,8 +79,11 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
     <Pressable style={styles.overlay} onPress={onClose}>
       <Pressable style={styles.sheet} onPress={(event) => event.stopPropagation()}>
         <View style={styles.header}><Text style={styles.title}>Stickers</Text><Pressable accessibilityLabel="Close sticker picker" onPress={onClose}><Ionicons name="close" size={22} color={colors.textPrimary} /></Pressable></View>
-        <View style={styles.tabs}>{[['recent', 'Recent'], ['favorites', 'Favorites'], ['packs', 'Packs']].map(([key, label]) => <Pressable key={key} onPress={() => setTab(key)} style={[styles.tab, tab === key && styles.tabActive]}><Text style={[styles.tabText, tab === key && styles.tabTextActive]}>{label}</Text></Pressable>)}</View>
-        {loading ? <ActivityIndicator color={colors.brand} /> : error ? <Text style={styles.error}>{error}</Text> : tab === 'packs' ? <FlatList data={packs} keyExtractor={(item) => item.id} renderItem={({ item }) => <Pressable onPress={() => { setSelectedPackId(item.id); setTab('pack'); }} style={styles.pack}><Text style={styles.packTitle}>{item.name}</Text><Text style={styles.packMeta}>{item.description || 'Sticker pack'}</Text></Pressable>} ListEmptyComponent={<Text style={styles.packMeta}>No sticker packs available yet.</Text>} /> : <FlatList key={`sticker-grid-${stickerColumns}`} data={stickers} numColumns={stickerColumns} columnWrapperStyle={styles.grid} keyExtractor={(item) => item.id} renderItem={({ item }) => <Pressable style={styles.sticker} onPress={() => select(item)} accessibilityLabel={`Send ${item.name}`}><Image source={{ uri: item.thumbnailUrl }} style={styles.image} /></Pressable>} ListEmptyComponent={<Text style={styles.packMeta}>No stickers here yet.</Text>} />}
+        <View style={styles.tabs}>{stickerTabs.map(([key, label]) => <Pressable key={key} onPress={() => { setSelectedPackId(''); setTab(key); }} style={[styles.tab, tab === key && styles.tabActive]}><Text style={[styles.tabText, tab === key && styles.tabTextActive]}>{label}</Text></Pressable>)}</View>
+        {loading ? <ActivityIndicator color={colors.brand} /> : error ? <Text style={styles.error}>{error}</Text> : tab === 'packs' ? <FlatList data={packs} keyExtractor={(item) => item.id} renderItem={({ item }) => <Pressable onPress={() => { setSelectedPackId(item.id); setTab('pack'); }} style={styles.pack}><Text style={styles.packTitle}>{item.name}</Text><Text style={styles.packMeta}>{item.description || 'Sticker pack'}</Text></Pressable>} ListEmptyComponent={<Text style={styles.packMeta}>No sticker packs available yet.</Text>} /> : <>
+          {tab === 'pack' ? <View style={styles.packHeader}><Pressable accessibilityLabel="Back to sticker packs" onPress={() => { setSelectedPackId(''); setTab('packs'); }} style={styles.packBack}><Ionicons name="chevron-back" size={20} color={colors.textPrimary} /></Pressable><Text style={styles.packTitle}>{packs.find((item) => item.id === selectedPackId)?.name || 'Sticker pack'}</Text></View> : null}
+          <FlatList key={`sticker-grid-${stickerColumns}`} data={stickers} numColumns={stickerColumns} columnWrapperStyle={styles.grid} keyExtractor={(item) => item.id} renderItem={({ item }) => <Pressable style={styles.sticker} onPress={() => select(item)} accessibilityLabel={`Send ${item.name}`}><Image source={{ uri: item.thumbnailUrl }} style={styles.image} /></Pressable>} ListEmptyComponent={<Text style={styles.packMeta}>{tab === 'mine' ? 'Your created stickers will appear here.' : 'No stickers here yet.'}</Text>} />
+        </>}
         <Pressable style={styles.create} onPress={() => premium ? (onClose(), router.navigate('/stickers/create')) : router.navigate('/premium')}><Text style={styles.createText}>{premium ? '+ Create Sticker' : 'Create Sticker with Premium'}</Text></Pressable>
       </Pressable>
     </Pressable>

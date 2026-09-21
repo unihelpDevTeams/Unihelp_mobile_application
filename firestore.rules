@@ -84,6 +84,32 @@ service cloud.firestore {
         userData(a).department == userData(b).department;
     }
 
+    function groupDoc(groupId) {
+      return get(/databases/$(database)/documents/groups/$(groupId));
+    }
+
+    function groupData(groupId) {
+      return groupDoc(groupId).data;
+    }
+
+    function groupOwner(groupId) {
+      return signedIn() && groupData(groupId).ownerId == request.auth.uid;
+    }
+
+    function groupAdmin(groupId) {
+      return signedIn() && request.auth.uid in groupData(groupId).adminIds;
+    }
+
+    function groupMember(groupId) {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
+    }
+
+    function messageWithinEditWindow(createdAt) {
+      return createdAt is timestamp &&
+        request.time < createdAt + duration.value(1, 'h');
+    }
+
     function friendRequestAllowed(from, to) {
       let privacy = userData(to).privacy.friendRequests;
       return privacy == null ||
@@ -121,11 +147,27 @@ service cloud.firestore {
         ]);
       allow delete: if false;
 
+      match /groups/{groupId} {
+        allow read: if isUser(uid);
+        allow create: if isUser(uid) &&
+          request.resource.data.groupId == groupId &&
+          request.resource.data.role in ['owner', 'member', 'moderator'] &&
+          request.resource.data.joinedAt == request.time &&
+          (
+            (request.resource.data.role == 'owner' && groupData(groupId).ownerId == uid) ||
+            (request.resource.data.role in ['member', 'moderator'] &&
+              getAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(uid)).data.uid == uid)
+          );
+        allow update: if false;
+        allow delete: if isUser(uid);
+      }
+
       match /{subPath=**} {
         allow read: if isUser(uid);
         allow write: if isUser(uid) &&
           !subPath.matches('^streakRewards/.*') &&
-          !subPath.matches('^streakSpins/.*');
+          !subPath.matches('^streakSpins/.*') &&
+          !subPath.matches('^groups/.*');
       }
     }
 
@@ -221,8 +263,16 @@ service cloud.firestore {
             get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds[1]
           );
         allow update: if signedIn() &&
-          resource.data.senderId == request.auth.uid &&
-          request.resource.data.deleted == true;
+          (
+            (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])) ||
+            (resource.data.senderId == request.auth.uid &&
+              messageWithinEditWindow(resource.data.createdAt) &&
+              request.resource.data.senderId == resource.data.senderId &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'text', 'attachments', 'deleted', 'deletedAt', 'edited', 'editedAt'
+              ]))
+          );
         allow delete: if false;
       }
     }
@@ -238,11 +288,25 @@ service cloud.firestore {
     }
 
     match /stickers/{stickerId} {
-      allow read, write: if false;
+      allow read: if signedIn() &&
+        resource.data.isActive != false &&
+        (
+          resource.data.ownerId == request.auth.uid ||
+          (resource.data.ownerId == null && (resource.data.isPremium != true || userData(request.auth.uid).premium == true)) ||
+          isAdminRequest()
+        );
+      allow write: if false;
     }
 
     match /stickerPacks/{packId} {
-      allow read, write: if false;
+      allow read: if signedIn() &&
+        resource.data.isActive != false &&
+        (
+          resource.data.ownerId == request.auth.uid ||
+          (resource.data.ownerId == null && (resource.data.isPremium != true || userData(request.auth.uid).premium == true)) ||
+          isAdminRequest()
+        );
+      allow write: if false;
     }
 
     match /stickerUploads/{uploadId} {
@@ -250,11 +314,11 @@ service cloud.firestore {
     }
 
     match /users/{uid}/stickerRecent/{stickerId} {
-      allow read, write: if false;
+      allow read, write: if isUser(uid);
     }
 
     match /users/{uid}/stickerFavorites/{stickerId} {
-      allow read, write: if false;
+      allow read, write: if isUser(uid);
     }
 
     match /users/{uid}/stickerOperations/{operationId} {
@@ -364,8 +428,78 @@ service cloud.firestore {
       allow create, update, delete: if isAdminRequest();
     }
 
-    match /groups/{groupId}/{subPath=**} {
-      allow read, write: if signedIn();
+    match /groups/{groupId} {
+      allow read: if signedIn();
+      allow create: if signedIn() &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() > 0 &&
+        request.resource.data.description is string &&
+        request.resource.data.category in ['Academics', 'Career', 'Health', 'Social', 'Tech', 'Other'] &&
+        request.resource.data.privacy in ['public', 'private'] &&
+        request.resource.data.allowMemberMessages is bool &&
+        request.resource.data.requireApproval is bool &&
+        request.resource.data.ownerId == request.auth.uid &&
+        request.resource.data.adminIds is list &&
+        request.resource.data.adminIds.size() == 1 &&
+        request.auth.uid in request.resource.data.adminIds &&
+        request.resource.data.moderatorIds is list &&
+        request.resource.data.moderatorIds.size() == 0 &&
+        request.resource.data.members is list &&
+        request.resource.data.members.size() == 1 &&
+        request.auth.uid in request.resource.data.members &&
+        request.resource.data.memberCount == 1 &&
+        request.resource.data.postCount == 0 &&
+        request.resource.data.mediaCount == 0 &&
+        request.resource.data.fileCount == 0 &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.updatedAt == request.time &&
+        request.resource.data.lastActivityAt == request.time;
+      allow update: if (groupOwner(groupId) || groupAdmin(groupId)) &&
+        request.resource.data.ownerId == resource.data.ownerId &&
+        request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if groupOwner(groupId);
+
+      match /members/{memberId} {
+        allow read: if signedIn();
+        allow create: if signedIn() &&
+          memberId == request.resource.data.uid &&
+          request.resource.data.role in ['owner', 'member', 'moderator'] &&
+          request.resource.data.joinedAt == request.time &&
+          (
+            (memberId == request.auth.uid && groupData(groupId).privacy == 'public' && request.resource.data.role == 'member') ||
+            (memberId == request.auth.uid && groupOwner(groupId) && request.resource.data.role == 'owner') ||
+            ((groupOwner(groupId) || groupAdmin(groupId)) && request.resource.data.role in ['member', 'moderator'])
+          );
+        allow update: if (groupOwner(groupId) || groupAdmin(groupId)) ||
+          (memberId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['avatar', 'name', 'email']));
+        allow delete: if groupOwner(groupId) || groupAdmin(groupId) || memberId == request.auth.uid;
+      }
+
+      match /joinRequests/{requesterId} {
+        allow read: if signedIn() && (requesterId == request.auth.uid || groupOwner(groupId) || groupAdmin(groupId));
+        allow create: if signedIn() &&
+          requesterId == request.auth.uid &&
+          request.resource.data.uid == request.auth.uid &&
+          request.resource.data.status == 'pending' &&
+          request.resource.data.requestedAt == request.time;
+        allow update: if groupOwner(groupId) || groupAdmin(groupId);
+        allow delete: if requesterId == request.auth.uid || groupOwner(groupId) || groupAdmin(groupId);
+      }
+
+      match /messages/{messageId} {
+        allow read: if groupMember(groupId);
+        allow create: if groupMember(groupId) &&
+          request.resource.data.senderId == request.auth.uid &&
+          request.resource.data.createdAt == request.time;
+        allow update: if signedIn() &&
+          resource.data.senderId == request.auth.uid &&
+          messageWithinEditWindow(resource.data.createdAt) &&
+          request.resource.data.senderId == resource.data.senderId &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'text', 'attachments', 'deleted', 'deletedAt', 'edited', 'editedAt'
+          ]);
+        allow delete: if false;
+      }
     }
 
     match /{collectionId}/{documentId} {
@@ -373,7 +507,11 @@ service cloud.firestore {
         'notes',
         'questions',
         'promoSpotlights',
-        'promoSpotlightEvents'
+        'promoSpotlightEvents',
+        'groups',
+        'stickers',
+        'stickerPacks',
+        'stickerUploads'
       ]);
     }
   }

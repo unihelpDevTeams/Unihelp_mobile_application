@@ -19,7 +19,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
 import { COLLECTIONS } from '../firestoreSchema';
-import { sendAppNotification } from './backend';
+import { getJson, sendAppNotification } from './backend';
 
 export const FRIEND_PAGE_SIZE = 20;
 export const REQUEST_PAGE_SIZE = 20;
@@ -621,4 +621,10 @@ export const updatePrivacySettings = async (uid, privacy) => {
   await setDoc(doc(db, COLLECTIONS.users, uid), {
     privacy,
   }, { merge: true });
+};
+
+export const fetchFriendStats = async (uid) => {
+  if (!uid) return { friendCount: 0, mutualCount: 0, mutualFriendIds: [], isFriend: false };
+  const response = await getJson(`/api/users/${encodeURIComponent(uid)}/social-counts`);
+  return response.data || { friendCount: 0, mutualCount: 0, mutualFriendIds: [], isFriend: false };
 };

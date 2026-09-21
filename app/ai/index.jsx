@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -35,7 +37,7 @@ import {
 const initialMessages = [
   {
     role: 'assistant',
-    text: "Welcome to your academic workspace. Pick a tool below to solve, explain, practice, summarize, plan, or research — or just ask me anything.",
+    text: "Welcome to your academic workspace. Pick a tool below to solve, explain, practice, summarize, plan, research or just ask me anything.",
   },
 ];
 
@@ -74,47 +76,6 @@ const formatFileSize = (bytes) => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-};
-
-const toFiniteNumber = (value, fallback = 0) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const normalizeUsageStatus = (status, premiumActive = false) => {
-  if (!status) return null;
-
-  const fallbackLimit = premiumActive ? 10 : 5;
-  const rawLimit = toFiniteNumber(status.limit ?? status.dailyLimit, fallbackLimit);
-  const limit = rawLimit > 0 ? rawLimit : fallbackLimit;
-  const rawUsed = toFiniteNumber(status.used ?? status.count ?? status.messagesUsed, 0);
-  const used = Math.max(0, Math.min(limit, rawUsed));
-  const derivedRemaining = limit - used;
-  const rawRemaining = toFiniteNumber(
-    status.remaining ?? status.tokensRemaining ?? status.available,
-    derivedRemaining
-  );
-  const remaining = Math.max(0, Math.min(limit, rawRemaining));
-  const allowed = status.allowed === false ? false : remaining > 0;
-
-  return {
-    ...status,
-    used,
-    limit,
-    remaining,
-    allowed,
-  };
-};
-
-const getUsageCopy = (usage, premiumActive) => {
-  if (!usage) {
-    return premiumActive
-      ? 'Premium answers are longer and more detailed'
-      : 'Upgrade to Premium for longer AI answers';
-  }
-
-  const tokenLabel = usage.remaining === 1 ? 'token' : 'tokens';
-  return `${usage.remaining}/${usage.limit} AI ${tokenLabel} left today`;
 };
 
 // ---------------------------------------------------------------------------
@@ -239,6 +200,13 @@ export default function AiPage() {
     sendButtonPressed: { backgroundColor: c.brandDark },
     sendButtonDisabled: { opacity: 0.4 },
     uploadingIndicator: { marginLeft: 8 },
+    modeStrip: { flexGrow: 0 },
+    modeStripRow: { gap: 8 },
+    modeChip: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 34, backgroundColor: c.brandLight, borderRadius: r.full, paddingHorizontal: s.md, borderWidth: 1, borderColor: c.brandBorder },
+    modeChipActive: { backgroundColor: c.brand, borderColor: c.brand },
+    modeChipPressed: { backgroundColor: c.brandBorder },
+    modeChipText: { color: c.brandText, fontSize: 12, fontWeight: '800' },
+    modeChipTextActive: { color: c.onBrand },
     suggestionRail: { maxHeight: 42 },
     suggestionRailRow: { gap: 8 },
     suggestionChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: c.surface, borderWidth: 1, borderColor: c.borderDefault, borderRadius: r.full, paddingHorizontal: s.md, height: 34 },
@@ -288,30 +256,16 @@ export default function AiPage() {
     if (providerUsageStatus) setUsageStatus(providerUsageStatus);
   }, [providerUsageStatus]);
 
-  const normalizedUsageStatus = useMemo(
-    () => normalizeUsageStatus(usageStatus, isPremium),
-    [isPremium, usageStatus]
-  );
-  const quotaBlocked = normalizedUsageStatus?.allowed === false;
-  const lowQuota = !quotaBlocked && normalizedUsageStatus && normalizedUsageStatus.remaining <= 2;
+  const quotaBlocked = usageStatus?.allowed === false;
+  const lowQuota = !quotaBlocked && usageStatus && usageStatus.remaining <= 2;
   const canSend = !loading && (Boolean(prompt.trim()) || Boolean(attachment)) && !quotaBlocked;
   const isEmptyConversation = messages.length <= 1 && !loading && !error && !aiError;
   const usagePercent = useMemo(() => {
-    const limit = Number(normalizedUsageStatus?.limit || 0);
-    const used = Number(normalizedUsageStatus?.used || 0);
+    const limit = Number(usageStatus?.limit || 0);
+    const used = Number(usageStatus?.used || 0);
     if (!limit || !Number.isFinite(limit)) return 0;
     return Math.max(0, Math.min(100, (used / limit) * 100));
-  }, [normalizedUsageStatus]);
-  const usageCopy = useMemo(
-    () => getUsageCopy(normalizedUsageStatus, isPremium),
-    [isPremium, normalizedUsageStatus]
-  );
-  const heroUsageCopy = useMemo(() => {
-    if (!usageLoaded) return 'Checking tokens';
-    if (isPremium) return 'Premium active';
-    if (!normalizedUsageStatus) return 'Tokens unavailable';
-    return `${normalizedUsageStatus.remaining}/${normalizedUsageStatus.limit} left today`;
-  }, [isPremium, normalizedUsageStatus, usageLoaded]);
+  }, [usageStatus]);
   const smartSuggestions = useMemo(() => {
     if (activeMode?.id) {
       return [`Continue in ${activeMode.label}`, 'Make this easier', 'Give me a quick test'];
@@ -460,7 +414,11 @@ export default function AiPage() {
 
   return (
     <ScreenShell title="AI Assistant" subtitle="Your academic workspace" showBack scrollable={false}>
-      <View style={styles.container}>
+      <KeyboardAvoidingView
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}
+        style={styles.container}
+      >
         {/* Compact usage / premium pill */}
         <View style={styles.topBar}>
           <View style={styles.topBarIcon}>
@@ -471,9 +429,13 @@ export default function AiPage() {
               <>
                 <Text style={styles.topBarTitle}>UniHelp AI</Text>
                 <Text style={[styles.topBarSubtitle, lowQuota && styles.topBarSubtitleWarn]} numberOfLines={1}>
-                  {usageCopy}
+                  {usageStatus
+                    ? `${usageStatus.remaining} AI ${usageStatus.remaining === 1 ? 'token' : 'tokens'} left today`
+                    : isPremium
+                      ? 'Premium answers are longer and more detailed'
+                      : 'Upgrade to Premium for longer AI answers'}
                 </Text>
-                {normalizedUsageStatus ? (
+                {usageStatus ? (
                   <View style={styles.usageTrack}>
                     <View style={[styles.usageFill, { width: `${usagePercent}%`, backgroundColor: lowQuota ? colors.warning : colors.brand }]} />
                   </View>
@@ -528,7 +490,7 @@ export default function AiPage() {
                   </View>
                   <View style={styles.heroStat}>
                     <Ionicons name={isPremium ? 'star' : 'lock-open-outline'} size={13} color={colors.brand} />
-                    <Text style={styles.heroStatText}>{heroUsageCopy}</Text>
+                    <Text style={styles.heroStatText}>{isPremium ? 'Premium active' : `${usageStatus?.remaining ?? 0} left today`}</Text>
                   </View>
                 </View>
               </View>
@@ -707,6 +669,31 @@ export default function AiPage() {
           </ScrollView>
         ) : null}
 
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.modeStripRow}
+          keyboardShouldPersistTaps="handled"
+          style={styles.modeStrip}
+        >
+          {MODES.map((mode) => {
+            const isActive = activeMode?.id === mode.id;
+            return (
+              <Pressable
+                key={mode.id}
+                style={({ pressed }) => [styles.modeChip, isActive && styles.modeChipActive, pressed && !isActive && styles.modeChipPressed]}
+                onPress={() => openModeForm(mode)}
+                disabled={loading}
+                accessibilityRole="button"
+                accessibilityLabel={mode.label}
+              >
+                <Ionicons name={mode.icon} size={13} color={isActive ? colors.onBrand : colors.brandDark} />
+                <Text style={[styles.modeChipText, isActive && styles.modeChipTextActive]}>{mode.label}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
         <View style={[styles.composer, inputFocused && styles.composerFocused]}>
           {attachment ? (
             <View style={styles.attachmentChip}>
@@ -768,7 +755,7 @@ export default function AiPage() {
         </View>
           </View>
         ) : null}
-      </View>
+      </KeyboardAvoidingView>
 
       {/* In-app replacement for the previous Alert.alert() quota-blocked prompt */}
       <Modal visible={showUpgradeModal} transparent animationType="fade" onRequestClose={() => setShowUpgradeModal(false)}>
