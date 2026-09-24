@@ -60,6 +60,7 @@ const ADMIN_NAV_SECTIONS = [
       { key: 'stickers', label: 'Stickers', icon: 'happy-outline' },
     ],
   },
+  { label: 'Financials', items: [{ key: 'revenue', label: 'Revenue', icon: 'cash-outline' }] },
   { label: 'System', items: [{ key: 'access', label: 'Access', icon: 'shield-checkmark-outline' }] },
 ];
 
@@ -336,6 +337,7 @@ export default function AdminPanelPage() {
     if (activeTab === 'stickers') return <StickerManager colors={colors} />;
     if (activeTab === 'pastQuestions') return <PastQuestionReviewManager />;
     if (activeTab === 'access') return <AdminAccessPage colors={colors} profile={profile} user={user} />;
+    if (activeTab === 'revenue') return <AdminRevenuePage colors={colors} />;
     if (activeTab === 'sponsorships') return <MarketplaceSponsorshipRecords colors={colors} />;
     if (activeTab === 'listings') {
       return (
@@ -2272,3 +2274,168 @@ const createUserStyles = (colors) =>
     emptyWrap: { alignItems: 'center', paddingVertical: 60, gap: 12 },
     emptyText: { fontSize: 14, color: colors.textSecondary || '#6B7280', fontWeight: '600' },
   });
+
+function AdminRevenuePage({ colors }) {
+  const [stats, setStats] = useState(null);
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState({ range: 'all', type: 'all' });
+  const [search, setSearch] = useState('');
+
+  const styles = useMemo(() => StyleSheet.create({
+    container: { gap: 16, paddingBottom: 40 },
+    headerCard: { padding: 20, borderRadius: 16, backgroundColor: colors.brand, gap: 8 },
+    headerTitle: { color: colors.onBrand || '#FFF', fontSize: 13, fontWeight: '800', opacity: 0.9 },
+    headerValue: { color: colors.onBrand || '#FFF', fontSize: 32, fontWeight: '900' },
+    headerSub: { color: colors.onBrand || '#FFF', fontSize: 12, opacity: 0.8 },
+    grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+    metricCard: { flex: 1, minWidth: '45%', padding: 16, borderRadius: 14, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.borderDefault, gap: 6 },
+    metricLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: '800' },
+    metricValue: { color: colors.textPrimary, fontSize: 18, fontWeight: '900' },
+    sectionTitle: { color: colors.textPrimary, fontSize: 16, fontWeight: '900', marginTop: 10 },
+    breakdownCard: { padding: 16, borderRadius: 14, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.borderDefault },
+    breakdownRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.borderDefault },
+    breakdownLabel: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
+    breakdownValue: { color: colors.textPrimary, fontSize: 13, fontWeight: '800' },
+    breakdownTotalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 12, marginTop: 4 },
+    breakdownTotalLabel: { color: colors.brandDark, fontSize: 14, fontWeight: '900' },
+    breakdownTotalValue: { color: colors.brandDark, fontSize: 15, fontWeight: '900' },
+    filterRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+    searchInput: { flex: 1, minHeight: 44, paddingHorizontal: 14, borderRadius: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.borderDefault, color: colors.textPrimary },
+    txCard: { padding: 14, borderRadius: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.borderDefault, gap: 6 },
+    txHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    txType: { color: colors.textPrimary, fontSize: 13, fontWeight: '800' },
+    txAmount: { color: colors.brandDark, fontSize: 14, fontWeight: '900' },
+    txRef: { color: colors.textSecondary, fontSize: 11, fontWeight: '600' },
+    txMetaRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+    txDate: { color: colors.textTertiary, fontSize: 11 },
+    txStatus: { fontSize: 10, fontWeight: '800', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, overflow: 'hidden' },
+    txStatusSuccess: { backgroundColor: colors.successLight || '#D1FAE5', color: colors.success || '#065F46' },
+    txStatusFailed: { backgroundColor: colors.dangerLight || '#FEE2E2', color: colors.danger || '#991B1B' },
+  }), [colors]);
+
+  const formatNaira = (val) => {
+    const num = Number(val) || 0;
+    return \`₦\${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\`;
+  };
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const queryParams = new URLSearchParams();
+      if (search) queryParams.append('search', search);
+      if (filter.type !== 'all') queryParams.append('type', filter.type);
+      
+      const [statsRes, txRes] = await Promise.allSettled([
+        getJson('/api/revenue'),
+        getJson(\`/api/revenue/transactions?\${queryParams.toString()}\`)
+      ]);
+      
+      if (statsRes.status === 'fulfilled') setStats(statsRes.value);
+      if (txRes.status === 'fulfilled') setTransactions(txRes.value.items || []);
+    } catch (e) {
+      console.warn("Failed to load revenue data", e);
+    } finally {
+      setLoading(false);
+    }
+  }, [search, filter]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  if (loading && !stats) {
+    return <PageLoader label="Loading financials..." />;
+  }
+
+  const s = stats || {};
+
+  return (
+    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      <View style={styles.headerCard}>
+        <Text style={styles.headerTitle}>TOTAL GROSS REVENUE</Text>
+        <Text style={styles.headerValue}>{formatNaira(s.totalRevenue)}</Text>
+        <Text style={styles.headerSub}>Aggregated from all verified transactions</Text>
+      </View>
+
+      <View style={styles.grid}>
+        <View style={styles.metricCard}>
+          <Text style={styles.metricLabel}>TODAY</Text>
+          <Text style={styles.metricValue}>{formatNaira(s.revenueToday)}</Text>
+        </View>
+        <View style={styles.metricCard}>
+          <Text style={styles.metricLabel}>THIS WEEK</Text>
+          <Text style={styles.metricValue}>{formatNaira(s.revenueWeek)}</Text>
+        </View>
+        <View style={styles.metricCard}>
+          <Text style={styles.metricLabel}>THIS MONTH</Text>
+          <Text style={styles.metricValue}>{formatNaira(s.revenueMonth)}</Text>
+        </View>
+        <View style={styles.metricCard}>
+          <Text style={styles.metricLabel}>TRANSACTIONS</Text>
+          <Text style={styles.metricValue}>{s.totalTransactions || 0}</Text>
+        </View>
+      </View>
+
+      <Text style={styles.sectionTitle}>Financial Breakdown & Reinvestment</Text>
+      <View style={styles.breakdownCard}>
+        <View style={styles.breakdownRow}>
+          <Text style={styles.breakdownLabel}>Gross Revenue</Text>
+          <Text style={styles.breakdownValue}>{formatNaira(s.totalRevenue)}</Text>
+        </View>
+        <View style={styles.breakdownRow}>
+          <Text style={styles.breakdownLabel}>Gateway Fees (est.)</Text>
+          <Text style={[styles.breakdownValue, { color: colors.danger || '#DC2626' }]}>- {formatNaira(s.totalFees)}</Text>
+        </View>
+        <View style={styles.breakdownRow}>
+          <Text style={styles.breakdownLabel}>Net Revenue</Text>
+          <Text style={styles.breakdownValue}>{formatNaira(s.netRevenue)}</Text>
+        </View>
+        <View style={styles.breakdownTotalRow}>
+          <Text style={styles.breakdownTotalLabel}>50% Distributable Profit</Text>
+          <Text style={styles.breakdownTotalValue}>{formatNaira(s.reinvestmentFund)}</Text>
+        </View>
+      </View>
+
+      <Text style={styles.sectionTitle}>Transaction History</Text>
+      <View style={styles.filterRow}>
+        <TextInput 
+          style={styles.searchInput}
+          placeholder="Search ref or email..."
+          placeholderTextColor={colors.textTertiary}
+          value={search}
+          onChangeText={setSearch}
+          onSubmitEditing={loadData}
+        />
+        <Pressable 
+          style={[styles.searchInput, { flex: 0, justifyContent: 'center', backgroundColor: colors.brandLight }]}
+          onPress={loadData}
+        >
+          <Text style={{ color: colors.brandDark, fontWeight: '700' }}>Filter</Text>
+        </Pressable>
+      </View>
+
+      {transactions.length === 0 ? (
+        <View style={{ padding: 20, alignItems: 'center' }}>
+          <Text style={{ color: colors.textSecondary }}>No transactions found.</Text>
+        </View>
+      ) : (
+        transactions.map(tx => (
+          <View key={tx.id || tx.transaction_id} style={styles.txCard}>
+            <View style={styles.txHeader}>
+              <Text style={styles.txType}>{tx.type?.replace('_', ' ')?.toUpperCase() || 'PAYMENT'}</Text>
+              <Text style={styles.txAmount}>{formatNaira(tx.amount)}</Text>
+            </View>
+            <Text style={styles.txRef}>{tx.customer_email || tx.user_id} • {tx.transaction_id || tx.reference}</Text>
+            <View style={styles.txMetaRow}>
+              <Text style={styles.txDate}>{new Date(tx.created_at).toLocaleString()}</Text>
+              <Text style={[styles.txStatus, tx.status === 'successful' ? styles.txStatusSuccess : styles.txStatusFailed]}>
+                {tx.status?.toUpperCase() || 'UNKNOWN'}
+              </Text>
+            </View>
+          </View>
+        ))
+      )}
+    </ScrollView>
+  );
+}
