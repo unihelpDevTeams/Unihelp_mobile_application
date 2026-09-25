@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, Pressable, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -29,6 +29,10 @@ const PRESET_COLORS = {
   dark: '#111827',
 };
 
+const getPostHashtags = (item) => item.tags?.length
+  ? item.tags
+  : [...new Set((item.content || '').match(/#[a-zA-Z0-9_]{1,40}/g) || [])].map((tag) => tag.toLowerCase());
+
 export default function NewsFeedPage() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -51,6 +55,8 @@ export default function NewsFeedPage() {
   const [profileRelationship, setProfileRelationship] = useState({ state: RELATIONSHIP.NONE });
   const [relationshipBusy, setRelationshipBusy] = useState(false);
   const [postAudience, setPostAudience] = useState('friends');
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all');
   const viewedPosts = useRef(new Set());
 
   const styles = useThemeStyles((c, s, r) => ({
@@ -235,6 +241,16 @@ export default function NewsFeedPage() {
     profileSecondaryButtonText: { color: c.textPrimary, fontSize: 13, fontWeight: '900' },
     profileCloseButton: { width: '100%', alignItems: 'center', paddingVertical: 10 },
     profileCloseText: { color: c.textSecondary, fontSize: 13, fontWeight: '800' },
+    searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: s.sm, paddingHorizontal: s.md, borderRadius: r.xl, backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault },
+    searchInput: { flex: 1, color: c.textPrimary, paddingVertical: 11, fontSize: 13 },
+    filterRow: { flexDirection: 'row', gap: 7, marginBottom: s.md },
+    filterButton: { paddingHorizontal: 11, paddingVertical: 7, borderRadius: r.lg, backgroundColor: c.surfacePrimary, borderWidth: 1, borderColor: c.borderDefault },
+    filterButtonActive: { backgroundColor: c.brandLight, borderColor: c.brand },
+    filterText: { color: c.textSecondary, fontSize: 11, fontWeight: '800' },
+    filterTextActive: { color: c.brandText },
+    hashtagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+    hashtag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: r.lg, backgroundColor: c.brandLight },
+    hashtagText: { color: c.brandText, fontSize: 11, fontWeight: '800' },
   }));
 
   const loadFeed = useCallback(async (refresh = false) => {
@@ -243,7 +259,20 @@ export default function NewsFeedPage() {
       const response = await getJson('/api/feed?limit=20');
       const nextItems = Array.isArray(response?.items) ? response.items : [];
       console.log('[Feed] Loaded feed', { uid: user?.uid, count: nextItems.length });
-      setItems(nextItems);
+      const hydratedItems = await Promise.all(nextItems.map(async (item) => {
+        if (item.authorAvatar && item.authorName) return item;
+        try {
+          const author = await getUserProfileById(item.authorId);
+          return {
+            ...item,
+            authorName: item.authorName || author?.username || author?.displayName || 'UniHelp student',
+            authorAvatar: item.authorAvatar || author?.photoThumb || author?.photoURL || author?.photo || author?.avatar || '',
+          };
+        } catch {
+          return item;
+        }
+      }));
+      setItems(hydratedItems);
     } catch (error) {
       console.error('[Feed] Failed to load feed', error);
       Alert.alert('Feed unavailable', error.message || "Couldn't load your feed.");
@@ -390,6 +419,16 @@ export default function NewsFeedPage() {
     loadFeed(true);
   };
 
+  const visibleItems = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    return items.filter((item) => {
+      const matchesType = typeFilter === 'all' || item.type === typeFilter;
+      const tags = getPostHashtags(item);
+      const searchable = `${item.content || ''} ${item.authorName || ''} ${tags.join(' ')}`.toLowerCase();
+      return matchesType && (!normalizedSearch || searchable.includes(normalizedSearch));
+    });
+  }, [items, search, typeFilter]);
+
   const renderPost = ({ item }) => (
     <View style={styles.card}>
       <View style={styles.body}>
@@ -419,6 +458,11 @@ export default function NewsFeedPage() {
 
       <View style={styles.body}>
         {item.type !== 'colored' && item.content ? <Text style={styles.description}>{item.content}</Text> : null}
+        {getPostHashtags(item).length ? (
+          <View style={styles.hashtagRow}>
+            {getPostHashtags(item).map((tag) => <Pressable key={tag} style={styles.hashtag} onPress={() => setSearch(tag)}><Text style={styles.hashtagText}>{tag}</Text></Pressable>)}
+          </View>
+        ) : null}
 
         <View style={styles.metaRow}>
           <Pressable
@@ -464,15 +508,6 @@ export default function NewsFeedPage() {
 
   return (
     <ScreenShell title="Feed" subtitle="What is happening with your friends." showBack={false} scrollable={false} loading={loading}>
-      <View style={styles.header}>
-        <View style={styles.headerIcon}>
-          <Ionicons name="people-outline" size={20} color={colors.brand} />
-        </View>
-        <View style={styles.headerCopy}>
-          <Text style={styles.headerTitle}>UniHelp Feed</Text>
-          <Text style={styles.headerText}>Share what is happening with friends around campus.</Text>
-        </View>
-      </View>
 
       <View style={styles.composer}>
         <View style={styles.composerRow}>
@@ -570,8 +605,19 @@ export default function NewsFeedPage() {
         ) : null}
       </View>
 
+      <View style={styles.searchWrap}>
+        <Ionicons name="search-outline" size={17} color={colors.textTertiary} />
+        <TextInput value={search} onChangeText={setSearch} placeholder="Search posts or hashtags" placeholderTextColor={colors.placeholder} style={styles.searchInput} />
+        {search ? <Pressable onPress={() => setSearch('')}><Ionicons name="close-circle" size={17} color={colors.textTertiary} /></Pressable> : null}
+      </View>
+      <View style={styles.filterRow}>
+        {[['all', 'All'], ['text', 'Text'], ['image', 'Photos'], ['colored', 'Backgrounds']].map(([value, label]) => (
+          <Pressable key={value} style={[styles.filterButton, typeFilter === value && styles.filterButtonActive]} onPress={() => setTypeFilter(value)}><Text style={[styles.filterText, typeFilter === value && styles.filterTextActive]}>{label}</Text></Pressable>
+        ))}
+      </View>
+
       <FlatList
-        data={items}
+        data={visibleItems}
         keyExtractor={(item) => item.id}
         renderItem={renderPost}
         onViewableItemsChanged={onViewableItemsChanged}
@@ -579,7 +625,7 @@ export default function NewsFeedPage() {
         refreshing={refreshing}
         onRefresh={() => loadFeed(true)}
         ListEmptyComponent={!loading ? (
-          <EmptyState title="Your feed is quiet" description="Add friends and start sharing what is happening around campus." />
+          <EmptyState title={items.length && !visibleItems.length ? 'No matching posts' : 'Your feed is quiet'} description={items.length && !visibleItems.length ? 'Try another search or filter.' : 'Add friends and start sharing what is happening around campus.'} />
         ) : null}
         contentContainerStyle={{ paddingBottom: 30 }}
       />
