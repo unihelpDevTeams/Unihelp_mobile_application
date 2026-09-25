@@ -109,7 +109,7 @@ export default function NewsFeedPage() {
     },
     composerDivider: { height: 1, backgroundColor: c.borderDefault, marginTop: 12 },
     audienceLabel: { marginTop: 12, color: c.textTertiary, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
-    audienceRow: { flexDirection: 'row', gap: 8, marginTop: 7 },
+    audienceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 7 },
     audienceAction: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 11, paddingVertical: 8, borderRadius: r.lg, backgroundColor: c.surfacePrimary, borderWidth: 1, borderColor: c.borderDefault },
     audienceActionActive: { backgroundColor: c.brandLight, borderColor: c.brand },
     audienceActionText: { color: c.textSecondary, fontSize: 12, fontWeight: '800' },
@@ -534,6 +534,13 @@ export default function NewsFeedPage() {
               >
                 <Ionicons name="lock-closed-outline" size={15} color={postAudience === 'private' ? colors.brandText : colors.textSecondary} />
                 <Text style={[styles.audienceActionText, postAudience === 'private' && styles.audienceActionTextActive]}>Only me</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.audienceAction, postAudience === 'everyone' && styles.audienceActionActive]}
+                onPress={() => setPostAudience('everyone')}
+              >
+                <Ionicons name="globe-outline" size={15} color={postAudience === 'everyone' ? colors.brandText : colors.textSecondary} />
+                <Text style={[styles.audienceActionText, postAudience === 'everyone' && styles.audienceActionTextActive]}>Everyone</Text>
               </Pressable>
             </View>
 
