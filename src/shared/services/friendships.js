@@ -564,8 +564,16 @@ export const listenIncomingMessageRequests = (uid, callback) => {
 
 export const listenBlockedUsers = (uid, callback) => {
   if (!uid) return () => {};
-  const q = query(collection(db, COLLECTIONS.blockedUsers), where('blockerId', '==', uid), orderBy('createdAt', 'desc'), limit(FRIEND_PAGE_SIZE));
-  return onSnapshot(q, (snap) => callback(mapDocs(snap)));
+  const q = query(collection(db, COLLECTIONS.blockedUsers), where('blockerId', '==', uid));
+  return onSnapshot(q, (snap) => {
+    const rows = mapDocs(snap)
+      .sort((left, right) => toMillis(right.createdAt) - toMillis(left.createdAt))
+      .slice(0, FRIEND_PAGE_SIZE);
+    callback(rows);
+  }, (error) => {
+    console.warn('Failed to listen for blocked users:', error?.message || error);
+    callback([]);
+  });
 };
 
 export const loadMoreFriends = async (uid, cursor, pageSize = FRIEND_PAGE_SIZE) => {

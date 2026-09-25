@@ -1162,7 +1162,7 @@ function ProductCard({ item, onPress, variant = 'row' }) {
         )}
         {item?.isSponsored ? (
           <View style={styles.sponsoredFlag}>
-            <Ionicons name="sparkles" size={9} color={colors.warning || '#B45309'} />
+            <Ionicons name="megaphone-outline" size={9} color={colors.warning || '#B45309'} />
             <Text style={styles.sponsoredText}>Sponsored</Text>
           </View>
         ) : null}

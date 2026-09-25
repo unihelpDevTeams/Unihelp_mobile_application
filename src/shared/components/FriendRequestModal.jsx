@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { useThemeStyles } from '../theme/createStyles';
 
-const personName = (person = {}) => person.name || person.username || person.email || 'Student';
+const personName = (person) => person?.name || person?.username || person?.email || 'Student';
 
 export default function FriendRequestModal({ visible, person, onClose, onAdd }) {
   const { colors } = useTheme();

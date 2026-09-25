@@ -1329,8 +1329,7 @@ export default function HomeScreen() {
           <Pressable
             style={discoverySectionStyles.discoveryCard}
             disabled={!targetId}
-            onPress={() => targetId && router.navigate(`/view-user-profile/${targetId}`)}
-          >
+            onPress={() => targetId && router.navigate(`/view-user-profile/${targetId}`)}>
             <View style={[discoverySectionStyles.discoveryMedia, { justifyContent: 'center', alignItems: 'center', backgroundColor: colors.brandLight }]}>
               {personImage ? (
                 <Image source={{ uri: personImage }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
@@ -1543,8 +1542,7 @@ export default function HomeScreen() {
                 styles.toolCard,
                 pressed && { opacity: 0.88, transform: [{ scale: 0.98 }] },
               ]}
-              onPress={() => router.navigate(tool.route)}
-            >
+              onPress={() => router.navigate(tool.route)}>
               <View style={styles.toolHeader}>
                 <View style={[styles.toolIconContainer, { backgroundColor: tool.bgColor }]}>
                   <Ionicons name={tool.icon} size={20} color={tool.color} />
@@ -1671,11 +1669,8 @@ export default function HomeScreen() {
       </View>
 
       <View style={discoverySectionStyles.discoverySection}>
-        <View style={discoverySectionStyles.sectionMeta}>
+        <View>
           <Text style={discoverySectionStyles.discoveryTitle}>Discover</Text>
-          <Pressable onPress={() => router.navigate('/find-friends')}>
-            <Text style={discoverySectionStyles.metaText}>Fresh picks</Text>
-          </Pressable>
         </View>
 
         {discoverData.loading ? (

@@ -2316,7 +2316,7 @@ function AdminRevenuePage({ colors }) {
 
   const formatNaira = (val) => {
     const num = Number(val) || 0;
-    return \`₦\${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\`;
+    return `₦${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   const loadData = useCallback(async () => {
@@ -2328,7 +2328,7 @@ function AdminRevenuePage({ colors }) {
       
       const [statsRes, txRes] = await Promise.allSettled([
         getJson('/api/revenue'),
-        getJson(\`/api/revenue/transactions?\${queryParams.toString()}\`)
+        getJson(`/api/revenue/transactions?${queryParams.toString()}`)
       ]);
       
       if (statsRes.status === 'fulfilled') setStats(statsRes.value);

@@ -231,8 +231,7 @@ export default function TabsLayout() {
                       justifyContent: 'center',
                       borderWidth: 1.5,
                       borderColor: colors.tabBarBackground,
-                    }}
-                  >
+                    }}>
                     <Text style={{ color: '#FFFFFF', fontSize: 9, fontWeight: '800' }}>
                       {unreadChats > 99 ? '99+' : unreadChats}
                     </Text>

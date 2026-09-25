@@ -6,7 +6,7 @@ import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../../src/shared/components/ScreenShell';
-import { deleteNote, deleteQuestion, fetchDetailRecord, fetchMarketplaceReviews, submitMarketplaceReview } from '../../../services/firestoreSync';
+import { deleteNote, deleteQuestion, fetchDetailRecord, fetchMarketplaceListingsPage, fetchMarketplaceReviews, submitMarketplaceReview } from '../../../services/firestoreSync';
 import { COLLECTIONS } from '../../../src/shared/firestoreSchema';
 import { resolveDocumentAsset, formatDocumentMeta } from '../../../src/shared/utils/documentMedia';
 import { isPreviewImageUrl } from '../../../src/shared/services/cloudinary';
@@ -219,6 +219,9 @@ export default function RecordViewPage() {
   const [sponsorPlansLoading, setSponsorPlansLoading] = useState(false);
   const [selectedSponsorPlanId, setSelectedSponsorPlanId] = useState('');
   const [sponsorshipProcessing, setSponsorshipProcessing] = useState(false);
+  const [relatedListings, setRelatedListings] = useState([]);
+  const [sponsoredListings, setSponsoredListings] = useState([]);
+  const [recommendationsLoading, setRecommendationsLoading] = useState(false);
   const [readingProgress, setReadingProgress] = useState(0);
   const [readerMetrics, setReaderMetrics] = useState({ y: 0, height: 0 });
   const galleryRef = useRef(null);
@@ -358,6 +361,49 @@ export default function RecordViewPage() {
   useEffect(() => {
     loadReviews();
   }, [loadReviews]);
+
+  useEffect(() => {
+    if (type !== 'listing' || !id || !item) {
+      setRelatedListings([]);
+      setSponsoredListings([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const loadRecommendations = async () => {
+      setRecommendationsLoading(true);
+      try {
+        const category = String(item?.category || '').trim();
+        const [relatedResult, sponsoredResult] = await Promise.all([
+          fetchMarketplaceListingsPage({ pageSize: 12, category, sort: 'newest' }),
+          fetchMarketplaceListingsPage({ pageSize: 12, sort: 'newest', sponsored: 'active' }),
+        ]);
+        if (cancelled) return;
+
+        const withoutCurrent = (listing) => listing?.id && listing.id !== id;
+        const related = (relatedResult.items || []).filter(withoutCurrent).slice(0, 8);
+        const relatedIds = new Set(related.map((listing) => listing.id));
+        const sponsored = (sponsoredResult.items || [])
+          .filter((listing) => withoutCurrent(listing) && !relatedIds.has(listing.id) && listing?.isSponsored === true && listing?.sponsoredStatus === 'active')
+          .slice(0, 8);
+        setRelatedListings(related);
+        setSponsoredListings(sponsored);
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('Failed to load marketplace recommendations:', error?.message || error);
+          setRelatedListings([]);
+          setSponsoredListings([]);
+        }
+      } finally {
+        if (!cancelled) setRecommendationsLoading(false);
+      }
+    };
+
+    loadRecommendations();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, item, item?.category, type]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -763,7 +809,7 @@ export default function RecordViewPage() {
         setSponsorModalVisible(false);
         Alert.alert('Listing promoted', 'Your marketplace listing is now sponsored.');
       } else {
-        Alert.alert('Payment pending', 'We will activate the sponsorship once Flutterwave confirms the payment.');
+        Alert.alert('Payment pending', 'We will activate the sponsorship once your payment is confirmed.');
       }
     } catch (error) {
       Alert.alert('Sponsorship failed', error?.message || 'Could not complete sponsorship payment.');
@@ -1045,7 +1091,7 @@ export default function RecordViewPage() {
                 <View style={styles.commerceBadgeStack}>
                   {item?.isSponsored ? (
                     <View style={styles.sponsoredDetailPill}>
-                      <Ionicons name="sparkles" size={13} color={colors.warning} />
+                      <Ionicons name="megaphone-outline" size={13} color={colors.warning} />
                       <Text style={styles.sponsoredDetailText}>Sponsored</Text>
                     </View>
                   ) : null}
@@ -1074,7 +1120,7 @@ export default function RecordViewPage() {
                     <Text style={styles.sellerSponsorHint}>
                       {item?.isSponsored && item?.sponsoredUntil
                         ? `Visible as sponsored until ${formatDate(item.sponsoredUntil)}.`
-                        : 'Boost this product in Marketplace after a verified Flutterwave payment.'}
+                        : 'Boost this product in Marketplace after a verified payment.'}
                     </Text>
                   </View>
                   <Pressable
@@ -1083,7 +1129,7 @@ export default function RecordViewPage() {
                     accessibilityRole="button"
                     accessibilityLabel="Promote listing"
                   >
-                    <Ionicons name="sparkles-outline" size={15} color={colors.onBrand} />
+                    <Ionicons name="megaphone-outline" size={15} color={colors.onBrand} />
                     <Text style={styles.sellerSponsorButtonText}>
                       {item?.isSponsored ? 'Extend' : 'Promote'}
                     </Text>
@@ -1213,6 +1259,15 @@ export default function RecordViewPage() {
             </View>
           ) : null}
 
+          {type === 'listing' ? (
+            <MarketplaceRecommendations
+              relatedListings={relatedListings}
+              sponsoredListings={sponsoredListings}
+              loading={recommendationsLoading}
+              onPressItem={(listing) => router.push({ pathname: '/view/[type]/[id]', params: { type: 'listing', id: listing.id } })}
+            />
+          ) : null}
+
           {!isCommerceType && !hasFileAsset && !showMediaGallery ? (
             <View style={styles.titleCard}>
               <Text style={styles.documentTitle}>{title}</Text>
@@ -1242,7 +1297,7 @@ export default function RecordViewPage() {
             />
           ) : null}
 
-          {fields.length ? (
+          {!isCommerceType && fields.length ? (
             <>
               <Text style={styles.sectionLabel}>DETAILS</Text>
               <View style={styles.fieldGrid}>
@@ -1484,7 +1539,7 @@ export default function RecordViewPage() {
           <View style={styles.sponsorSheetHeader}>
             <View>
               <Text style={styles.sponsorSheetTitle}>Promote listing</Text>
-              <Text style={styles.sponsorSheetSubtitle}>Plans are activated only after Flutterwave verification.</Text>
+              <Text style={styles.sponsorSheetSubtitle}>Plans are activated only after payment verification.</Text>
             </View>
             <Pressable onPress={() => setSponsorModalVisible(false)} style={styles.sheetCloseButton} hitSlop={8}>
               <Ionicons name="close" size={20} color={colors.textPrimary} />
@@ -1526,7 +1581,7 @@ export default function RecordViewPage() {
             style={[styles.sponsorCheckoutButton, (sponsorshipProcessing || sponsorPlansLoading || !selectedSponsorPlanId) && styles.disabledButton]}
           >
             {sponsorshipProcessing ? <ActivityIndicator size="small" color={colors.onBrand} /> : <Ionicons name="card-outline" size={16} color={colors.onBrand} />}
-            <Text style={styles.sponsorCheckoutText}>{sponsorshipProcessing ? 'Verifying payment...' : 'Continue to Flutterwave'}</Text>
+            <Text style={styles.sponsorCheckoutText}>{sponsorshipProcessing ? 'Verifying payment...' : 'Continue Payment process'}</Text>
           </Pressable>
         </View>
       </Modal>
@@ -1568,6 +1623,80 @@ export default function RecordViewPage() {
         </View>
       </Modal>
     </ScreenShell>
+  );
+}
+
+function MarketplaceRecommendations({ relatedListings, sponsoredListings, loading, onPressItem }) {
+  const { colors } = useTheme();
+  const styles = StyleSheet.create({
+    section: { marginTop: 18 },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+    title: { color: colors.textPrimary, fontSize: 16, fontWeight: '900' },
+    subtitle: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+    rail: { gap: 10, paddingRight: 4 },
+    card: { width: 166, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.borderDefault, borderRadius: 16, padding: 9 },
+    imageWrap: { height: 112, borderRadius: 11, overflow: 'hidden', backgroundColor: colors.brandLight },
+    image: { width: '100%', height: '100%' },
+    fallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.brand },
+    fallbackText: { color: colors.onBrand, fontSize: 26, fontWeight: '900' },
+    cardTitle: { color: colors.textPrimary, fontSize: 12.5, fontWeight: '800', marginTop: 8 },
+    price: { color: colors.warning, fontSize: 13, fontWeight: '900', marginTop: 5 },
+    meta: { color: colors.textTertiary, fontSize: 10.5, fontWeight: '700', marginTop: 4 },
+    badge: { position: 'absolute', top: 6, left: 6, backgroundColor: colors.warningLight, borderRadius: 999, paddingHorizontal: 6, paddingVertical: 3 },
+    badgeText: { color: colors.warning, fontSize: 9, fontWeight: '900' },
+    loading: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+    loadingText: { color: colors.textSecondary, fontSize: 12 },
+  });
+
+  const imageFor = (listing) => {
+    const values = [listing?.imageUrl, listing?.coverUrl, listing?.thumbnailUrl, listing?.images];
+    for (const value of values) {
+      const candidate = Array.isArray(value) ? value[0] : value;
+      if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+      if (candidate?.url) return candidate.url;
+    }
+    return '';
+  };
+
+  const renderRail = (listings, sponsored) => (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
+      {listings.map((listing) => {
+        const title = listing?.title || listing?.name || 'Untitled item';
+        const imageUrl = imageFor(listing);
+        return (
+          <Pressable key={listing.id} style={styles.card} onPress={() => onPressItem(listing)} accessibilityRole="button" accessibilityLabel={`View ${title}`}>
+            <View style={styles.imageWrap}>
+              {imageUrl ? <Image source={{ uri: imageUrl }} style={styles.image} contentFit="cover" /> : <View style={styles.fallback}><Text style={styles.fallbackText}>{title.charAt(0).toUpperCase()}</Text></View>}
+              {sponsored ? <View style={styles.badge}><Text style={styles.badgeText}>Sponsored</Text></View> : null}
+            </View>
+            <Text style={styles.cardTitle} numberOfLines={2}>{title}</Text>
+            {listing?.price !== undefined && listing?.price !== null ? <Text style={styles.price}>{formatNaira(listing.price)}</Text> : null}
+            <Text style={styles.meta} numberOfLines={1}>{listing?.category || 'Marketplace listing'}</Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+
+  if (loading) {
+    return <View style={styles.section}><ActivityIndicator size="small" color={colors.brand} /></View>;
+  }
+
+  return (
+    <>
+      {relatedListings.length ? (
+        <View style={styles.section}>
+          <View style={styles.header}><View><Text style={styles.title}>Related products</Text><Text style={styles.subtitle}>More items in this category</Text></View><Ionicons name="arrow-forward-circle-outline" size={21} color={colors.brand} /></View>
+          {renderRail(relatedListings, false)}
+        </View>
+      ) : null}
+      {sponsoredListings.length ? (
+        <View style={styles.section}>
+          <View style={styles.header}><View><Text style={styles.title}>Sponsored products</Text><Text style={styles.subtitle}>Featured by student sellers</Text></View><Ionicons name="megaphone-outline" size={20} color={colors.warning} /></View>
+          {renderRail(sponsoredListings, true)}
+        </View>
+      ) : null}
+    </>
   );
 }
 

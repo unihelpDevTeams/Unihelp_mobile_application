@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Pressable, RefreshControl, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
@@ -34,12 +34,12 @@ const TABS = [
   { key: 'blocked', label: 'Blocked', icon: 'ban-outline' },
 ];
 
-const nameOf = (person = {}) => person.name || person.username || person.email || 'Student';
-const schoolLine = (person = {}) => [person.university || person.school, person.department, person.level].filter(Boolean).join(' • ');
+const nameOf = (person) => person?.name || person?.username || person?.email || 'Student';
+const schoolLine = (person) => [person?.university || person?.school, person?.department, person?.level].filter(Boolean).join(' • ');
 
 function Avatar({ person, styles, size = 50 }) {
   const name = nameOf(person);
-  const uri = person.avatar || person.photo || person.photoURL || '';
+  const uri = person?.avatar || person?.photo || person?.photoURL || '';
   return uri ? (
     <Image source={{ uri }} style={[styles.avatar, { width: size, height: size, borderRadius: Math.round(size / 3) }]} />
   ) : (
@@ -68,7 +68,7 @@ function StudentCard({ person, subtitle, children, onPress, styles }) {
       <View style={styles.cardBody}>
         <View style={styles.nameRow}>
           <Text style={styles.cardTitle} numberOfLines={1}>{nameOf(person)}</Text>
-          {person.online ? <View style={styles.onlineDot} /> : null}
+          {person?.online ? <View style={styles.onlineDot} /> : null}
         </View>
         <Text style={styles.cardSubtitle} numberOfLines={2}>{subtitle || schoolLine(person) || 'UniHelp student'}</Text>
         {children ? <View style={styles.actionRow}>{children}</View> : null}
@@ -94,6 +94,8 @@ export default function FriendsPage() {
   const { colors } = useTheme();
   const styles = useThemeStyles(createStyles);
   const uid = user?.uid || profile?.uid;
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
   const [activeTab, setActiveTab] = useState('friends');
   const [friends, setFriends] = useState([]);
   const [incoming, setIncoming] = useState([]);
@@ -108,11 +110,11 @@ export default function FriendsPage() {
 
   const refreshSuggested = useCallback(async () => {
     if (!uid) return;
-    const rows = await listSuggestedFriends({ uid, profile, pageSize: 24 });
+    const rows = await listSuggestedFriends({ uid, profile: profileRef.current, pageSize: 24 });
     setSuggested(rows);
-  }, [profile, uid]);
+  }, [uid]);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     if (!uid) return undefined;
     setLoading(true);
     const unsubs = [
@@ -122,9 +124,11 @@ export default function FriendsPage() {
       listenIncomingMessageRequests(uid, (rows) => setMessageRequests(rows)),
       listenBlockedUsers(uid, (rows) => setBlocked(rows)),
     ];
-    refreshSuggested().finally(() => setLoading(false));
+    refreshSuggested()
+      .catch((error) => console.warn('Failed to refresh friend suggestions:', error?.message || error))
+      .finally(() => setLoading(false));
     return () => unsubs.forEach((unsubscribe) => unsubscribe?.());
-  }, [refreshSuggested, uid]);
+  }, [refreshSuggested, uid]));
 
   const onRefresh = async () => {
     setRefreshing(true);

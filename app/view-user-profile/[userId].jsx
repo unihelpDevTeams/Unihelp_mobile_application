@@ -466,10 +466,10 @@ export default function ViewUserProfile() {
               </View>
 
               {/* Bio Section */}
-              {profile?.bio ? (
+              {String(profile?.bio || '').trim() ? (
                 <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.borderDefault, shadowColor: colors.shadow }]}>
                   <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>About</Text>
-                  <Text style={[styles.bioText, { color: colors.textSecondary }]}>{profile.bio}</Text>
+                  <Text style={[styles.bioText, { color: colors.textSecondary }]}>{String(profile.bio).trim()}</Text>
                 </View>
               ) : null}
             </>

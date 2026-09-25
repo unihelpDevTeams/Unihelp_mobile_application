@@ -39,6 +39,7 @@ import { fetchChallengeStats } from './../../src/shared/challenge/service';
 import { getCloudinaryThumbnailUrl, toCloudinaryAsset, uploadToCloudinary } from '../../services/cloudinary';
 import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 import { isPremiumActive } from '../../src/shared/services/premium';
+import { fetchFriendStats } from '../../src/shared/services/friendships';
 
 const BIO_MAX_LENGTH = 160;
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
@@ -162,6 +163,7 @@ export default function ProfileScreen() {
   const [initialForm, setInitialForm] = useState(emptyForm);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [stats, setStats] = useState({ listings: 0, hostelListings: 0, groups: 0, stories: 0 });
+  const [friendCount, setFriendCount] = useState(0);
   const [statsLoading, setStatsLoading] = useState(true);
   const [streakCount, setStreakCount] = useState(0);
   const [streakDates, setStreakDates] = useState([]);
@@ -252,6 +254,27 @@ export default function ProfileScreen() {
     pillText: { fontSize: 11, fontWeight: '800', color: c.brandText },
     pillTextGold: { color: c.gold },
     pillTextMuted: { color: c.grey },
+    friendsStat: {
+      flexDirection: 'row', alignItems: 'center', width: '100%',
+      backgroundColor: c.surface, borderRadius: r.xl, borderWidth: 1, borderColor: c.borderLight,
+      paddingHorizontal: s.md, paddingVertical: s.sm, marginTop: s.sm,
+    },
+    friendsStatIcon: {
+      width: 38, height: 38, borderRadius: 12, backgroundColor: c.brandLight,
+      alignItems: 'center', justifyContent: 'center', marginRight: s.sm,
+    },
+    friendsStatCopy: { flex: 1 },
+    friendsStatValue: { fontSize: 18, fontWeight: '900', color: c.ink },
+    friendsStatLabel: { marginTop: 1, fontSize: 12, fontWeight: '600', color: c.grey },
+    friendsStatAction: { fontSize: 12, fontWeight: '800', color: c.brandText, marginRight: s.xs },
+    bioCard: {
+      backgroundColor: c.surface, borderRadius: r.xl, borderWidth: 1, borderColor: c.borderLight,
+      padding: s.md, marginTop: s.sm,
+    },
+    bioHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: s.xs },
+    bioTitle: { flex: 1, fontSize: 12, fontWeight: '900', color: c.ink, textTransform: 'uppercase', letterSpacing: 0.5 },
+    bioEdit: { fontSize: 12, fontWeight: '800', color: c.brandText },
+    bioText: { color: c.grey, fontSize: 13.5, lineHeight: 20 },
 
     toast: {
       flexDirection: 'row', alignItems: 'center', gap: s.sm, borderRadius: r.md, borderWidth: 1,
@@ -347,6 +370,7 @@ export default function ProfileScreen() {
   }, [refreshProfile]);
 
   useEffect(() => {
+    if (sheet !== SHEET.NONE || isDirty) return;
     const next = {
       username: profile?.username || profile?.displayName || user?.displayName || '',
       school: profile?.school || profile?.universityName || profile?.university || '',
@@ -361,7 +385,7 @@ export default function ProfileScreen() {
     };
     setForm(next);
     setInitialForm(next);
-  }, [profile, user]);
+  }, [isDirty, profile, sheet, user]);
 
   const showStatus = useCallback((next) => {
     if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
@@ -403,6 +427,16 @@ export default function ProfileScreen() {
     }
   }, [user?.uid]);
 
+  const loadFriendCount = useCallback(async () => {
+    if (!user?.uid) return;
+    try {
+      const result = await fetchFriendStats(user.uid);
+      if (isMountedRef.current) setFriendCount(Number(result?.friendCount) || 0);
+    } catch {
+      if (isMountedRef.current) setFriendCount(0);
+    }
+  }, [user?.uid]);
+
   const loadStreakAndChallenge = useCallback(async () => {
     if (!user?.uid) return;
     try {
@@ -422,7 +456,8 @@ export default function ProfileScreen() {
   useEffect(() => {
     setStatsLoading(true);
     loadStats();
-  }, [loadStats]);
+    loadFriendCount();
+  }, [loadFriendCount, loadStats]);
 
   useEffect(() => {
     loadStreakAndChallenge();
@@ -434,12 +469,13 @@ export default function ProfileScreen() {
       await Promise.all([
         refreshProfile().catch(() => {}),
         loadStats(),
+        loadFriendCount(),
         loadStreakAndChallenge(),
       ]);
     } finally {
       if (isMountedRef.current) setRefreshing(false);
     }
-  }, [refreshProfile, loadStats, loadStreakAndChallenge]);
+  }, [refreshProfile, loadFriendCount, loadStats, loadStreakAndChallenge]);
 
   const isDirty = useMemo(
     () => Object.keys(form).some((key) => form[key] !== initialForm[key]),
@@ -596,6 +632,7 @@ export default function ProfileScreen() {
         schoolId: form.schoolId || '', universityId: form.schoolId || '', universityName: form.school.trim(),
         departmentId: form.departmentId || '', departmentName: form.department.trim(), faculty: form.faculty || '',
       });
+      setInitialForm(form);
       await refreshProfile();
       if (!isMountedRef.current) return;
       closeSheet();
@@ -1012,6 +1049,35 @@ export default function ProfileScreen() {
             ) : null}
           </View>
         </Animated.View>
+
+        <Pressable
+          onPress={() => router.navigate('/friends')}
+          style={({ pressed }) => [styles.friendsStat, pressed && styles.rowPressed]}
+          accessibilityRole="button"
+          accessibilityLabel={`${friendCount} friends, open friends list`}
+        >
+          <View style={styles.friendsStatIcon}>
+            <Ionicons name="people-outline" size={19} color={colors.brand} />
+          </View>
+          <View style={styles.friendsStatCopy}>
+            <Text style={styles.friendsStatValue}>{friendCount}</Text>
+            <Text style={styles.friendsStatLabel}>Friends</Text>
+          </View>
+          <Text style={styles.friendsStatAction}>View list</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
+        </Pressable>
+
+        {form.bio.trim() ? (
+          <View style={styles.bioCard}>
+            <View style={styles.bioHeader}>
+              <Text style={styles.bioTitle}>About</Text>
+              <Pressable onPress={() => openFieldEditor('bio')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Edit About">
+                <Text style={styles.bioEdit}>Edit</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.bioText}>{form.bio.trim()}</Text>
+          </View>
+        ) : null}
 
         <DailyStreakBanner
           streakCount={streakCount}
