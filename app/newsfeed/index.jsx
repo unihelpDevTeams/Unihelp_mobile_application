@@ -1,14 +1,22 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, FlatList, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Modal, Pressable, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { deleteJson, getJson, postJson, putJson, uploadFeatureMedia } from '../../src/shared/services/backend';
 import { useAuth } from '../../context/AuthContext';
+import {
+  getUserProfileById,
+  listenRelationship,
+  RELATIONSHIP,
+  removeFriend,
+  sendFriendRequest,
+} from '../../src/shared/services/friendships';
 
 const PRESET_COLORS = {
   indigo: '#4F46E5',
@@ -22,8 +30,10 @@ const PRESET_COLORS = {
 };
 
 export default function NewsFeedPage() {
+  const router = useRouter();
   const { colors } = useTheme();
   const { user, profile } = useAuth();
+  const viewerAvatar = profile?.photoThumb || profile?.photoURL || profile?.photo || profile?.avatar || user?.photoURL || '';
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -36,6 +46,11 @@ export default function NewsFeedPage() {
   const [editingPost, setEditingPost] = useState(null);
   const [commentingId, setCommentingId] = useState(null);
   const [commentText, setCommentText] = useState('');
+  const [managePost, setManagePost] = useState(null);
+  const [profilePreview, setProfilePreview] = useState(null);
+  const [profileRelationship, setProfileRelationship] = useState({ state: RELATIONSHIP.NONE });
+  const [relationshipBusy, setRelationshipBusy] = useState(false);
+  const [postAudience, setPostAudience] = useState('friends');
   const viewedPosts = useRef(new Set());
 
   const styles = useThemeStyles((c, s, r) => ({
@@ -93,6 +108,12 @@ export default function NewsFeedPage() {
       fontSize: 14,
     },
     composerDivider: { height: 1, backgroundColor: c.borderDefault, marginTop: 12 },
+    audienceLabel: { marginTop: 12, color: c.textTertiary, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
+    audienceRow: { flexDirection: 'row', gap: 8, marginTop: 7 },
+    audienceAction: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 11, paddingVertical: 8, borderRadius: r.lg, backgroundColor: c.surfacePrimary, borderWidth: 1, borderColor: c.borderDefault },
+    audienceActionActive: { backgroundColor: c.brandLight, borderColor: c.brand },
+    audienceActionText: { color: c.textSecondary, fontSize: 12, fontWeight: '800' },
+    audienceActionTextActive: { color: c.brandText },
     composerActions: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
     action: {
       flexDirection: 'row',
@@ -197,6 +218,23 @@ export default function NewsFeedPage() {
       justifyContent: 'center',
       backgroundColor: c.brand,
     },
+    modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15,23,42,0.48)' },
+    actionCard: { backgroundColor: c.card, borderTopLeftRadius: r['3xl'], borderTopRightRadius: r['3xl'], padding: s.lg, gap: 8 },
+    modalHandle: { alignSelf: 'center', width: 42, height: 4, borderRadius: 2, backgroundColor: c.borderDefault, marginBottom: s.sm },
+    modalTitle: { color: c.textPrimary, fontSize: 17, fontWeight: '900', marginBottom: s.sm },
+    modalAction: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: s.md, borderRadius: r.xl, backgroundColor: c.surfacePrimary },
+    modalActionText: { color: c.textPrimary, fontSize: 14, fontWeight: '800' },
+    modalDangerText: { color: c.error || '#DC2626' },
+    profileCard: { alignItems: 'center', backgroundColor: c.card, borderRadius: r['3xl'], padding: s.xl, marginHorizontal: s.lg, gap: 8 },
+    profileAvatar: { width: 76, height: 76, borderRadius: 38, backgroundColor: c.brandLight },
+    profileName: { color: c.textPrimary, fontSize: 19, fontWeight: '900' },
+    profileMeta: { color: c.textSecondary, fontSize: 12 },
+    profileButton: { width: '100%', alignItems: 'center', paddingVertical: 12, borderRadius: r.xl, backgroundColor: c.brand, marginTop: s.sm },
+    profileButtonText: { color: c.onBrand, fontSize: 13, fontWeight: '900' },
+    profileSecondaryButton: { width: '100%', alignItems: 'center', paddingVertical: 12, borderRadius: r.xl, backgroundColor: c.surfacePrimary, borderWidth: 1, borderColor: c.borderDefault },
+    profileSecondaryButtonText: { color: c.textPrimary, fontSize: 13, fontWeight: '900' },
+    profileCloseButton: { width: '100%', alignItems: 'center', paddingVertical: 10 },
+    profileCloseText: { color: c.textSecondary, fontSize: 13, fontWeight: '800' },
   }));
 
   const loadFeed = useCallback(async (refresh = false) => {
@@ -235,6 +273,7 @@ export default function NewsFeedPage() {
     setSelectedImage(null);
     setPostType('text');
     setEditingPost(null);
+    setPostAudience('friends');
     setComposerOpen(false);
   };
 
@@ -245,6 +284,7 @@ export default function NewsFeedPage() {
       if (editingPost) {
         await putJson(`/api/feed/posts/${editingPost.id}`, {
           content,
+          audience: postAudience,
           backgroundPreset: postType === 'colored' ? backgroundPreset : undefined,
         });
       } else {
@@ -255,6 +295,7 @@ export default function NewsFeedPage() {
         await postJson('/api/feed/posts', {
           type: postType,
           content,
+          audience: postAudience,
           backgroundPreset: postType === 'colored' ? backgroundPreset : undefined,
           imageUrl: image?.url || image?.secure_url,
           cloudinaryPublicId: image?.publicId || image?.public_id,
@@ -274,23 +315,53 @@ export default function NewsFeedPage() {
     setContent(item.content || '');
     setPostType(item.type || 'text');
     setBackgroundPreset(item.backgroundPreset || 'indigo');
+    setPostAudience(item.audience || 'friends');
     setSelectedImage(item.type === 'image' ? { uri: item.imageUrl } : null);
     setComposerOpen(true);
   };
 
   const handlePostMenu = (item) => {
-    const ownPost = item.authorId === user?.uid;
-    const actions = ownPost
-      ? [
-        { text: 'Edit', onPress: () => beginEdit(item) },
-        { text: 'Delete', style: 'destructive', onPress: () => handleDelete(item) },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-      : [
-        { text: 'Report', onPress: () => postJson(`/api/feed/posts/${item.id}/report`, { reportType: 'Inappropriate content' }) },
-        { text: 'Cancel', style: 'cancel' },
-      ];
-    Alert.alert(ownPost ? 'Manage post' : 'Post options', undefined, actions);
+    setManagePost(item);
+  };
+
+  const openProfilePreview = async (item) => {
+    setProfilePreview({ ...item, loading: true });
+    setProfileRelationship({ state: RELATIONSHIP.NONE });
+    try {
+      const profileData = await getUserProfileById(item.authorId);
+      setProfilePreview((current) => current ? { ...current, ...(profileData || {}), loading: false } : current);
+    } catch (error) {
+      console.warn('[Feed] Could not load author profile', error);
+      setProfilePreview((current) => current ? { ...current, loading: false } : current);
+    }
+  };
+
+  useEffect(() => {
+    const targetUid = profilePreview?.authorId;
+    if (!targetUid || !user?.uid || targetUid === user.uid) {
+      setProfileRelationship({ state: RELATIONSHIP.NONE });
+      return undefined;
+    }
+    return listenRelationship(user.uid, targetUid, setProfileRelationship);
+  }, [profilePreview?.authorId, user?.uid]);
+
+  const handleRelationshipAction = async () => {
+    const targetUid = profilePreview?.authorId;
+    if (!targetUid || !user?.uid || relationshipBusy) return;
+    setRelationshipBusy(true);
+    try {
+      if (profileRelationship.state === RELATIONSHIP.FRIENDS) {
+        await removeFriend({ currentUid: user.uid, friendUid: targetUid, currentProfile: profile || {} });
+        setProfileRelationship({ state: RELATIONSHIP.NONE });
+      } else if (profileRelationship.state === RELATIONSHIP.NONE) {
+        await sendFriendRequest({ currentUid: user.uid, targetUid, currentProfile: profile || {}, targetProfile: profilePreview || {} });
+        setProfileRelationship({ state: RELATIONSHIP.SENT });
+      }
+    } catch (error) {
+      Alert.alert('Friend connection failed', error.message || 'Please try again.');
+    } finally {
+      setRelationshipBusy(false);
+    }
   };
 
   const recordView = useCallback((item) => {
@@ -323,11 +394,9 @@ export default function NewsFeedPage() {
     <View style={styles.card}>
       <View style={styles.body}>
         <View style={styles.postHeader}>
-          {item.authorAvatar ? (
-            <Image source={{ uri: item.authorAvatar }} style={styles.avatar} />
-          ) : (
-            <View style={styles.avatar} />
-          )}
+          <Pressable onPress={() => openProfilePreview(item)} accessibilityRole="button" accessibilityLabel={`Open ${item.authorName || 'student'} profile`}>
+            {item.authorAvatar ? <Image source={{ uri: item.authorAvatar }} style={styles.avatar} contentFit="cover" /> : <View style={styles.avatar} />}
+          </Pressable>
           <View style={{ flex: 1 }}>
             <Text style={styles.author}>{item.authorName || 'UniHelp student'}</Text>
             <Text style={styles.time}>{new Date(item.createdAt).toLocaleString()}</Text>
@@ -407,7 +476,7 @@ export default function NewsFeedPage() {
 
       <View style={styles.composer}>
         <View style={styles.composerRow}>
-          {profile?.photo ? <Image source={{ uri: profile.photo }} style={styles.avatar} /> : <View style={styles.avatar} />}
+          {viewerAvatar ? <Image source={{ uri: viewerAvatar }} style={styles.avatar} contentFit="cover" /> : <View style={styles.avatar} />}
           <Pressable style={{ flex: 1 }} onPress={() => setComposerOpen(true)}>
             <Text style={styles.composerPlaceholder} numberOfLines={1}>
               {editingPost ? 'Editing your post' : "What's on your mind?"}
@@ -449,6 +518,24 @@ export default function NewsFeedPage() {
                 ))}
               </View>
             ) : null}
+
+            <Text style={styles.audienceLabel}>WHO CAN SEE THIS?</Text>
+            <View style={styles.audienceRow}>
+              <Pressable
+                style={[styles.audienceAction, postAudience === 'friends' && styles.audienceActionActive]}
+                onPress={() => setPostAudience('friends')}
+              >
+                <Ionicons name="people-outline" size={15} color={postAudience === 'friends' ? colors.brandText : colors.textSecondary} />
+                <Text style={[styles.audienceActionText, postAudience === 'friends' && styles.audienceActionTextActive]}>Friends</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.audienceAction, postAudience === 'private' && styles.audienceActionActive]}
+                onPress={() => setPostAudience('private')}
+              >
+                <Ionicons name="lock-closed-outline" size={15} color={postAudience === 'private' ? colors.brandText : colors.textSecondary} />
+                <Text style={[styles.audienceActionText, postAudience === 'private' && styles.audienceActionTextActive]}>Only me</Text>
+              </Pressable>
+            </View>
 
             <View style={styles.composerDivider} />
             <View style={styles.composerActions}>
@@ -496,6 +583,46 @@ export default function NewsFeedPage() {
         ) : null}
         contentContainerStyle={{ paddingBottom: 30 }}
       />
+
+      <Modal visible={Boolean(managePost)} transparent animationType="slide" onRequestClose={() => setManagePost(null)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setManagePost(null)}>
+          <Pressable style={styles.actionCard} onPress={(event) => event.stopPropagation()}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>{managePost?.authorId === user?.uid ? 'Manage your post' : 'Post options'}</Text>
+            {managePost?.authorId === user?.uid ? (
+              <>
+                <Pressable style={styles.modalAction} onPress={() => { const post = managePost; setManagePost(null); beginEdit(post); }}><Ionicons name="create-outline" size={20} color={colors.brand} /><Text style={styles.modalActionText}>Edit post</Text></Pressable>
+                <Pressable style={styles.modalAction} onPress={() => { const post = managePost; setManagePost(null); handleDelete(post); }}><Ionicons name="trash-outline" size={20} color={colors.error || '#DC2626'} /><Text style={[styles.modalActionText, styles.modalDangerText]}>Delete post</Text></Pressable>
+              </>
+            ) : (
+              <Pressable style={styles.modalAction} onPress={() => { const post = managePost; setManagePost(null); postJson(`/api/feed/posts/${post.id}/report`, { reportType: 'Inappropriate content' }); }}><Ionicons name="flag-outline" size={20} color={colors.brand} /><Text style={styles.modalActionText}>Report post</Text></Pressable>
+            )}
+            <Pressable style={styles.profileCloseButton} onPress={() => setManagePost(null)}><Text style={styles.profileCloseText}>Cancel</Text></Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={Boolean(profilePreview)} transparent animationType="fade" onRequestClose={() => setProfilePreview(null)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setProfilePreview(null)}>
+          <Pressable style={styles.profileCard} onPress={(event) => event.stopPropagation()}>
+            {profilePreview?.authorAvatar || profilePreview?.photoURL || profilePreview?.photo ? <Image source={{ uri: profilePreview.authorAvatar || profilePreview.photoURL || profilePreview.photo }} style={styles.profileAvatar} contentFit="cover" /> : <View style={styles.profileAvatar} />}
+            <Text style={styles.profileName}>{profilePreview?.username || profilePreview?.displayName || profilePreview?.authorName || 'UniHelp student'}</Text>
+            {profilePreview?.email ? <Text style={styles.profileMeta}>{profilePreview.email}</Text> : null}
+            {profilePreview?.loading ? <ActivityIndicator color={colors.brand} /> : null}
+            {profilePreview?.authorId && profilePreview.authorId !== user?.uid ? (
+              <>
+                <Pressable style={styles.profileButton} onPress={() => { const uid = profilePreview.authorId; setProfilePreview(null); router.push(`/view-user-profile/${uid}`); }}><Text style={styles.profileButtonText}>View full profile</Text></Pressable>
+                {profileRelationship.state !== RELATIONSHIP.BLOCKED ? (
+                  <Pressable style={styles.profileSecondaryButton} onPress={handleRelationshipAction} disabled={relationshipBusy || profileRelationship.state === RELATIONSHIP.SENT || profileRelationship.state === RELATIONSHIP.RECEIVED}>
+                    {relationshipBusy ? <ActivityIndicator size="small" color={colors.brand} /> : <Text style={styles.profileSecondaryButtonText}>{profileRelationship.state === RELATIONSHIP.FRIENDS ? 'Remove friend' : profileRelationship.state === RELATIONSHIP.SENT ? 'Request sent' : profileRelationship.state === RELATIONSHIP.RECEIVED ? 'Respond in Friends' : 'Add friend'}</Text>}
+                  </Pressable>
+                ) : null}
+              </>
+            ) : null}
+            <Pressable style={styles.profileCloseButton} onPress={() => setProfilePreview(null)}><Text style={styles.profileCloseText}>Close</Text></Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ScreenShell>
   );
 }
