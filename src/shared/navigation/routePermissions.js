@@ -30,7 +30,7 @@ const universityOnlyRoutes = [
   '/requests',
 ];
 
-const sharedRoutes = ['/profile', '/privacy', '/contact', '/formula-hub', '/challenge', '/help-center', '/about', '/newsfeed', '/formula-hub/subjects', '/notifications', '/announcements', '/report', '/faq'];
+const sharedRoutes = ['/profile', '/privacy', '/contact', '/formula-hub', '/challenge', '/help-center', '/about', '/newsfeed', '/feed', '/formula-hub/subjects', '/notifications', '/announcements', '/report', '/faq'];
 
 export const getPathFromSegments = (segments) => {
   const parts = segments.filter(Boolean);

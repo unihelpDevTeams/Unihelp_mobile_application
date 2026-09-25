@@ -14,7 +14,6 @@ import { blockUser, unblockUser } from '../../services/firestoreSync';
 import MarketingSourcesManager from '../../src/admin/MarketingSourcesManager';
 import PromoSpotlightManager from '../../src/admin/PromoSpotlightManager';
 import StickerManager from '../../src/admin/StickerManager';
-import AdminNewsManager from '../../src/admin/AdminNewsManager';
 import PastQuestionReviewManager from '../../src/admin/PastQuestionReviewManager';
 import UniversityManager from '../../src/admin/UniversityManager';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
@@ -26,8 +25,15 @@ import {
   isPremiumActive,
 } from '../../src/shared/services/premium';
 
+// ---------------------------------------------------------------------------
+// Navigation model
+// Grouping/labels/order updated to match the redesigned information
+// architecture: MAIN / PEOPLE / CONTENT / MARKETPLACE / SUPPORT / GROWTH /
+// FINANCE / SYSTEM. Destinations and route keys are unchanged so nothing in
+// renderAdminContent() or downstream routing needs to change.
+// ---------------------------------------------------------------------------
 const ADMIN_NAV_SECTIONS = [
-  { label: 'Overview', items: [{ key: 'dashboard', label: 'Dashboard', icon: 'grid-outline' }] },
+  { label: 'Main', items: [{ key: 'dashboard', label: 'Dashboard', icon: 'grid-outline' }] },
   {
     label: 'People',
     items: [
@@ -39,9 +45,8 @@ const ADMIN_NAV_SECTIONS = [
     label: 'Content',
     items: [
       { key: 'pastQuestions', label: 'Past Questions', icon: 'clipboard-outline' },
-      { key: 'notifications', label: 'Campus News', icon: 'newspaper-outline' },
-      { key: 'mediaSources', label: 'Media Sources', icon: 'megaphone-outline' },
       { key: 'academicData', label: 'Universities', icon: 'school-outline' },
+      { key: 'mediaSources', label: 'Media Sources', icon: 'megaphone-outline' },
     ],
   },
   {
@@ -60,7 +65,7 @@ const ADMIN_NAV_SECTIONS = [
       { key: 'stickers', label: 'Stickers', icon: 'happy-outline' },
     ],
   },
-  { label: 'Financials', items: [{ key: 'revenue', label: 'Revenue', icon: 'cash-outline' }] },
+  { label: 'Finance', items: [{ key: 'revenue', label: 'Revenue', icon: 'cash-outline' }] },
   { label: 'System', items: [{ key: 'access', label: 'Access', icon: 'shield-checkmark-outline' }] },
 ];
 
@@ -469,23 +474,33 @@ export default function AdminPanelPage() {
         </View>
       );
     }
-    return <AdminNewsManager />;
   };
 
   return (
     <ScreenShell title="Admin Panel" subtitle={activeNav?.section ? `${activeNav.section} / ${activeNav.label}` : `Welcome, ${profile?.username || 'Admin'}`} showBack loading={loading && activeTab === 'listings'}>
-      <View style={pageStyles.adminHero}>
-        <View style={pageStyles.heroIcon}>
-          <Ionicons name="shield-checkmark" size={22} color={colors.onBrand || '#FFF'} />
+      {/* Compact top bar: brand + current admin identity + refresh. Replaces the
+          previous large gradient hero card with a slim, Stripe/Linear-style bar. */}
+      <View style={pageStyles.topBar}>
+        <View style={pageStyles.topBarBrand}>
+          <View style={pageStyles.brandMark}>
+            <Text style={pageStyles.brandMarkText}>U</Text>
+          </View>
+          <View>
+            <Text style={pageStyles.brandName}>UniHelp</Text>
+            <Text style={pageStyles.brandEyebrow}>ADMIN CONSOLE</Text>
+          </View>
         </View>
-        <View style={pageStyles.heroCopy}>
-          <Text style={pageStyles.heroEyebrow}>UNIHELP ADMIN</Text>
-          <Text style={pageStyles.heroTitle}>{activeNav?.label || 'Dashboard'}</Text>
-          <Text style={pageStyles.heroSubtitle}>Manage real UniHelp data across people, content, support, marketplace, and growth tools.</Text>
+        <View style={pageStyles.topBarMeta}>
+          <View style={pageStyles.adminPill}>
+            <View style={pageStyles.statusDot} />
+            <Text style={pageStyles.adminPillText} numberOfLines={1}>
+              {profile?.username || user?.email || 'Admin'}
+            </Text>
+          </View>
+          <Pressable style={pageStyles.refreshButton} onPress={() => { fetchItems(); loadOverview(); }}>
+            <Ionicons name="refresh-outline" size={16} color={colors.textSecondary} />
+          </Pressable>
         </View>
-        <Pressable style={pageStyles.refreshButton} onPress={() => { fetchItems(); loadOverview(); }}>
-          <Ionicons name="refresh-outline" size={18} color={colors.onBrand || '#FFF'} />
-        </Pressable>
       </View>
 
       <View style={[pageStyles.adminWorkspace, isWide && pageStyles.adminWorkspaceWide]}>
@@ -502,10 +517,6 @@ export default function AdminPanelPage() {
               <Text style={pageStyles.sectionEyebrow}>{activeNav?.section || 'Overview'}</Text>
               <Text style={pageStyles.sectionTitle}>{activeNav?.label || 'Dashboard'}</Text>
             </View>
-            <View style={pageStyles.adminPill}>
-              <View style={pageStyles.statusDot} />
-              <Text style={pageStyles.adminPillText}>Admin</Text>
-            </View>
           </View>
           {renderAdminContent()}
         </View>
@@ -515,9 +526,9 @@ export default function AdminPanelPage() {
 }
 
 function AdminSectionNav({ colors, styles, activeTab, setActiveTab, wide }) {
-  const content = ADMIN_NAV_SECTIONS.map((section) => (
-    <View key={section.label} style={styles.navSection}>
-      <Text style={styles.navSectionLabel}>{section.label}</Text>
+  const content = ADMIN_NAV_SECTIONS.map((section, sectionIndex) => (
+    <View key={section.label} style={[styles.navSection, !wide && sectionIndex > 0 && styles.navSectionDivider]}>
+      {wide ? <Text style={styles.navSectionLabel}>{section.label}</Text> : null}
       <View style={wide ? styles.navItemsWide : styles.navItems}>
         {section.items.map((item) => {
           const selected = activeTab === item.key;
@@ -530,16 +541,16 @@ function AdminSectionNav({ colors, styles, activeTab, setActiveTab, wide }) {
               style={({ pressed }) => [
                 styles.navItem,
                 wide && styles.navItemWide,
-                selected && styles.navItemActive,
+                selected && (wide ? styles.navItemActiveWide : styles.navItemActiveMobile),
                 pressed && styles.tabPressed,
               ]}
             >
               <Ionicons
                 name={item.icon}
                 size={16}
-                color={selected ? colors.onBrand || '#FFFFFF' : colors.textSecondary || '#64748B'}
+                color={selected ? (wide ? colors.brandText || colors.brand : colors.onBrand || '#FFFFFF') : colors.textSecondary || '#64748B'}
               />
-              <Text style={[styles.navItemText, selected && styles.navItemTextActive]} numberOfLines={1}>
+              <Text style={[styles.navItemText, selected && (wide ? styles.navItemTextActiveWide : styles.navItemTextActiveMobile)]} numberOfLines={1}>
                 {item.label}
               </Text>
             </Pressable>
@@ -579,7 +590,7 @@ function MarketplaceSponsorshipRecords({ colors }) {
       justifyContent: 'center',
       paddingVertical: 32,
       paddingHorizontal: 16,
-      borderRadius: 18,
+      borderRadius: 14,
       borderWidth: 1,
       borderColor: colors.borderDefault,
       backgroundColor: colors.surfaceSecondary,
@@ -591,7 +602,7 @@ function MarketplaceSponsorshipRecords({ colors }) {
       fontWeight: '700',
     },
     card: {
-      borderRadius: 18,
+      borderRadius: 14,
       borderWidth: 1,
       borderColor: colors.borderDefault,
       backgroundColor: colors.surface,
@@ -754,8 +765,8 @@ function AdminDashboard({ colors, overview, onRefresh, setActiveTab }) {
         {metricCards.map((item) => (
           <Pressable key={item.label} style={({ pressed }) => [styles.metricCard, pressed && styles.pressed]} onPress={() => setActiveTab(item.target)}>
             <View style={styles.metricTop}>
-              <View style={styles.metricIcon}><Ionicons name={item.icon} size={18} color={colors.brand || '#4F46E5'} /></View>
-              <Ionicons name="chevron-forward" size={16} color={colors.textTertiary || '#94A3B8'} />
+              <View style={styles.metricIcon}><Ionicons name={item.icon} size={17} color={colors.brand || '#4F46E5'} /></View>
+              <Ionicons name="chevron-forward" size={15} color={colors.textTertiary || '#94A3B8'} />
             </View>
             <Text style={styles.metricValue}>{overview.loading ? '...' : item.value.toLocaleString()}</Text>
             <Text style={styles.metricLabel}>{item.label}</Text>
@@ -780,7 +791,7 @@ function AdminDashboard({ colors, overview, onRefresh, setActiveTab }) {
         <View style={styles.operationGrid}>
           {operations.map((item) => (
             <Pressable key={item.label} style={styles.operationItem} onPress={() => setActiveTab(item.target)}>
-              <Ionicons name={item.icon} size={17} color={colors.brand || '#4F46E5'} />
+              <Ionicons name={item.icon} size={16} color={colors.brand || '#4F46E5'} />
               <View style={styles.operationCopy}>
                 <Text style={styles.operationLabel}>{item.label}</Text>
                 <Text style={styles.operationValue}>{overview.loading ? '...' : item.value.toLocaleString()}</Text>
@@ -1343,59 +1354,72 @@ function UsersList({ colors, premiumOnly = false }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Page-level styles
+// The layout below replaces the previous large gradient "hero" card with a
+// slim top bar, and reworks the sidebar/mobile nav to read as a real,
+// hierarchical admin navigation (Linear/Stripe-influenced) rather than a row
+// of equally-weighted pills.
+// ---------------------------------------------------------------------------
 const createPageStyles = (colors) =>
   StyleSheet.create({
-    adminHero: {
+    // Top bar (replaces the old adminHero gradient card)
+    topBar: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 14,
-      backgroundColor: colors.brandDark || '#3730A3',
-      borderRadius: 20,
-      padding: 18,
-      marginBottom: 22,
-      shadowColor: colors.shadow || '#0F172A',
-      shadowOffset: { width: 0, height: 6 },
-      shadowOpacity: 0.16,
-      shadowRadius: 12,
-      elevation: 4,
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 4,
+      marginBottom: 18,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.borderDefault || '#E5E7EB',
+    },
+    topBarBrand: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    brandMark: {
+      width: 32,
+      height: 32,
+      borderRadius: 9,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.brand || '#4F46E5',
+    },
+    brandMarkText: {
+      color: colors.onBrand || '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '900',
+    },
+    brandName: {
+      fontSize: 14.5,
+      fontWeight: '900',
+      color: colors.textPrimary || '#0F172A',
+      lineHeight: 17,
+    },
+    brandEyebrow: {
+      marginTop: 1,
+      fontSize: 9,
+      fontWeight: '800',
+      letterSpacing: 1,
+      color: colors.textTertiary || '#94A3B8',
+    },
+    topBarMeta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
     },
     refreshButton: {
-      width: 40,
-      height: 40,
-      borderRadius: 13,
+      width: 34,
+      height: 34,
+      borderRadius: 10,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: 'rgba(255,255,255,0.14)',
+      backgroundColor: colors.surfaceSecondary || '#F8FAFC',
       borderWidth: 1,
-      borderColor: 'rgba(255,255,255,0.18)',
-    },
-    heroIcon: {
-      width: 46,
-      height: 46,
-      borderRadius: 15,
-      backgroundColor: colors.brand || '#4F46E5',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    heroCopy: { flex: 1 },
-    heroEyebrow: {
-      fontSize: 10,
-      fontWeight: '900',
-      letterSpacing: 1.3,
-      color: colors.brandGlow || '#C7D2FE',
-    },
-    heroTitle: {
-      marginTop: 4,
-      fontSize: 19,
-      lineHeight: 24,
-      fontWeight: '900',
-      color: colors.onBrand || '#FFFFFF',
-    },
-    heroSubtitle: {
-      marginTop: 5,
-      fontSize: 12,
-      lineHeight: 17,
-      color: colors.brandGlow || '#C7D2FE',
+      borderColor: colors.borderDefault || '#E5E7EB',
     },
     sectionHeading: {
       flexDirection: 'row',
@@ -1420,23 +1444,24 @@ const createPageStyles = (colors) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
+      maxWidth: 160,
       paddingHorizontal: 10,
       paddingVertical: 7,
       borderRadius: 999,
-      backgroundColor: colors.greenLight || '#ECFDF5',
+      backgroundColor: colors.surfaceSecondary || '#F8FAFC',
       borderWidth: 1,
-      borderColor: colors.success || '#10B981',
+      borderColor: colors.borderDefault || '#E5E7EB',
     },
     statusDot: {
-      width: 7,
-      height: 7,
-      borderRadius: 4,
+      width: 6,
+      height: 6,
+      borderRadius: 3,
       backgroundColor: colors.success || '#10B981',
     },
     adminPillText: {
       fontSize: 11,
       fontWeight: '800',
-      color: colors.success || '#10B981',
+      color: colors.textSecondary || '#64748B',
     },
     restricted: {
       flex: 1,
@@ -1451,66 +1476,83 @@ const createPageStyles = (colors) =>
     adminWorkspaceWide: {
       flexDirection: 'row',
       alignItems: 'flex-start',
+      gap: 20,
     },
+    // Sidebar (desktop / wide layout)
     sidebarNav: {
-      width: 248,
-      gap: 18,
-      padding: 12,
-      borderRadius: 18,
-      backgroundColor: colors.card || '#FFFFFF',
-      borderWidth: 1,
-      borderColor: colors.borderDefault || '#E5E7EB',
+      width: 236,
+      gap: 20,
+      paddingVertical: 4,
     },
     mobileNav: {
       marginBottom: 2,
     },
     mobileNavContent: {
-      gap: 12,
+      alignItems: 'center',
+      gap: 4,
       paddingBottom: 4,
+      paddingRight: 8,
     },
     navSection: {
-      gap: 7,
+      gap: 4,
+    },
+    navSectionDivider: {
+      marginLeft: 6,
+      paddingLeft: 10,
+      borderLeftWidth: 1,
+      borderLeftColor: colors.borderDefault || '#E5E7EB',
     },
     navSectionLabel: {
-      paddingHorizontal: 4,
+      paddingHorizontal: 10,
+      marginBottom: 2,
       fontSize: 10,
-      fontWeight: '900',
-      letterSpacing: 0.8,
+      fontWeight: '800',
+      letterSpacing: 1,
       textTransform: 'uppercase',
       color: colors.textTertiary || '#94A3B8',
     },
     navItems: {
       flexDirection: 'row',
-      gap: 7,
+      gap: 6,
     },
     navItemsWide: {
-      gap: 6,
+      gap: 1,
     },
     navItem: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 6,
-      minHeight: 40,
-      paddingHorizontal: 12,
-      borderRadius: 12,
+      gap: 8,
+      minHeight: 36,
+      paddingHorizontal: 10,
+      borderRadius: 9,
       backgroundColor: colors.surfaceSecondary || '#F8FAFC',
       borderWidth: 1,
       borderColor: colors.borderDefault || '#E5E7EB',
     },
     navItemWide: {
       width: '100%',
+      backgroundColor: 'transparent',
+      borderWidth: 0,
+      paddingVertical: 8,
     },
-    navItemActive: {
+    navItemActiveWide: {
+      backgroundColor: colors.brandLight || '#EEF2FF',
+    },
+    navItemActiveMobile: {
       backgroundColor: colors.brand || '#4F46E5',
       borderColor: colors.brand || '#4F46E5',
     },
     navItemText: {
       maxWidth: 132,
-      fontSize: 12,
-      fontWeight: '800',
+      fontSize: 12.5,
+      fontWeight: '700',
       color: colors.textSecondary || '#64748B',
     },
-    navItemTextActive: {
+    navItemTextActiveWide: {
+      color: colors.brandText || colors.brand || '#4338CA',
+      fontWeight: '800',
+    },
+    navItemTextActiveMobile: {
       color: colors.onBrand || '#FFFFFF',
     },
     adminContent: {
@@ -1519,15 +1561,8 @@ const createPageStyles = (colors) =>
       gap: 14,
     },
     contentHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 12,
-      padding: 14,
-      borderRadius: 16,
-      backgroundColor: colors.card || '#FFFFFF',
-      borderWidth: 1,
-      borderColor: colors.borderDefault || '#E5E7EB',
+      gap: 2,
+      marginBottom: 2,
     },
     restrictedTitle: {
       marginTop: 16,
@@ -1626,7 +1661,7 @@ const createPageStyles = (colors) =>
     listingToggleContainer: {
       flexDirection: 'row',
       backgroundColor: colors.surfaceSecondary || '#F8FAFC',
-      borderRadius: 15,
+      borderRadius: 13,
       borderWidth: 1,
       borderColor: colors.borderDefault || '#E5E7EB',
       padding: 4,
@@ -1638,7 +1673,7 @@ const createPageStyles = (colors) =>
       alignItems: 'center',
       justifyContent: 'center',
       gap: 6,
-      borderRadius: 10,
+      borderRadius: 9,
       paddingVertical: 10,
       paddingHorizontal: 12,
     },
@@ -1671,15 +1706,10 @@ const createPageStyles = (colors) =>
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: colors.card || '#FFFFFF',
-      borderRadius: 18,
+      borderRadius: 14,
       borderWidth: 1,
       borderColor: colors.borderDefault || '#E5E7EB',
       padding: 13,
-      shadowColor: colors.shadow || '#0F172A',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.05,
-      shadowRadius: 6,
-      elevation: 1,
     },
     listingLeft: {
       marginRight: 12,
@@ -1687,13 +1717,13 @@ const createPageStyles = (colors) =>
     listingThumb: {
       width: 52,
       height: 52,
-      borderRadius: 12,
+      borderRadius: 10,
       backgroundColor: colors.brandLight || '#EEF2FF',
     },
     listingThumbFallback: {
       width: 52,
       height: 52,
-      borderRadius: 12,
+      borderRadius: 10,
       backgroundColor: colors.brandLight || '#EEF2FF',
       alignItems: 'center',
       justifyContent: 'center',
@@ -1854,14 +1884,14 @@ const createDashboardStyles = (colors) =>
       color: colors.textSecondary || '#64748B',
     },
     refresh: {
-      width: 40,
-      height: 40,
-      borderRadius: 12,
+      width: 38,
+      height: 38,
+      borderRadius: 11,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: colors.brandLight || '#EEF2FF',
+      backgroundColor: colors.surfaceSecondary || '#F8FAFC',
       borderWidth: 1,
-      borderColor: colors.brandBorder || '#E0E7FF',
+      borderColor: colors.borderDefault || '#E5E7EB',
     },
     notice: {
       flexDirection: 'row',
@@ -1883,8 +1913,8 @@ const createDashboardStyles = (colors) =>
       flexGrow: 1,
       flexBasis: '47%',
       minWidth: 145,
-      padding: 14,
-      borderRadius: 16,
+      padding: 13,
+      borderRadius: 13,
       backgroundColor: colors.card || '#FFFFFF',
       borderWidth: 1,
       borderColor: colors.borderDefault || '#E5E7EB',
@@ -1896,16 +1926,16 @@ const createDashboardStyles = (colors) =>
       justifyContent: 'space-between',
     },
     metricIcon: {
-      width: 34,
-      height: 34,
-      borderRadius: 11,
+      width: 32,
+      height: 32,
+      borderRadius: 9,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: colors.brandLight || '#EEF2FF',
     },
     metricValue: {
       marginTop: 12,
-      fontSize: 25,
+      fontSize: 24,
       fontWeight: '900',
       color: colors.textPrimary || '#0F172A',
     },
@@ -1922,7 +1952,7 @@ const createDashboardStyles = (colors) =>
     },
     panel: {
       padding: 14,
-      borderRadius: 16,
+      borderRadius: 13,
       backgroundColor: colors.card || '#FFFFFF',
       borderWidth: 1,
       borderColor: colors.borderDefault || '#E5E7EB',
@@ -1974,7 +2004,7 @@ const createDashboardStyles = (colors) =>
       alignItems: 'center',
       gap: 9,
       padding: 11,
-      borderRadius: 13,
+      borderRadius: 12,
       backgroundColor: colors.surfaceSecondary || '#F8FAFC',
       borderWidth: 1,
       borderColor: colors.borderDefault || '#E5E7EB',

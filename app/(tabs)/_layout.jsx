@@ -16,7 +16,7 @@ import {
 // file-system group paths. Using "/(tabs)/chat" here was the root cause of
 // the swipe glitches: it never matched, so the "current tab" index was
 // always stuck at 0 and every swipe computed the wrong destination.
-const TAB_ROUTES = ['/', '/chat', '/studyMaterials', '/groups', '/profile'];
+const TAB_ROUTES = ['/', '/chat', '/studyMaterials', '/groups', '/feed'];
 const SWIPE_DISTANCE = 72;
 const SWIPE_VELOCITY = 0.45;
 const TRANSITION_DURATION = 180;
@@ -292,17 +292,21 @@ export default function TabsLayout() {
           }}
         />
         <Tabs.Screen
-          name="profile"
+          name="feed"
           options={{
-            title: 'Profile',
+            title: 'Feed',
             tabBarIcon: ({ color, size, focused }) => (
               <Ionicons
-                name={focused ? 'person' : 'person-outline'}
+                name={focused ? 'newspaper' : 'newspaper-outline'}
                 size={size ?? 22}
                 color={color}
               />
             ),
           }}
+        />
+        <Tabs.Screen
+          name="profile"
+          options={{ href: null }}
         />
         </Tabs>
       </Animated.View>

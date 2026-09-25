@@ -5,7 +5,7 @@ export const headerMenuSections = [
       { label: 'Home', route: '/(tabs)' },
       { label: 'Resources', route: '/(tabs)/studyMaterials' },
       { label: 'Offline Library', route: '/offline-center', icon: 'cloud-download-outline', requiresPremium: true },
-      { label: 'News Feed', route: '/newsfeed' },
+      { label: 'Feed', route: '/newsfeed' },
       { label: 'Challenge', route: '/challenge', icon: 'flash-outline' },
     ],
   },

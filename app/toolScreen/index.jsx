@@ -59,7 +59,7 @@ const ALL_TOOLS = [
       },
       {
         id: 'newsfeed',
-        title: 'News Feed',
+        title: 'Feed',
         sub: 'Latest updates',
         icon: 'newspaper',
         color: '#3B82F6',
