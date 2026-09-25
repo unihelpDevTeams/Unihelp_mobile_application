@@ -244,7 +244,6 @@ function PremiumMarquee({ onPress }) {
         end={{ x: 1, y: 0 }}
         style={styles.gradient}
       >
-        <Ionicons name="sparkles" size={14} color={colors.onBrand} style={{ marginRight: 6 }} />
         <View style={styles.trackClip}>
           <Animated.View style={[styles.track, { transform: [{ translateX }] }]}>
             <Text style={styles.text} onLayout={(e) => setContentWidth(e.nativeEvent.layout.width)}>

@@ -40,6 +40,7 @@ import { getCloudinaryThumbnailUrl, toCloudinaryAsset, uploadToCloudinary } from
 import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 import { isPremiumActive } from '../../src/shared/services/premium';
 import { fetchFriendStats } from '../../src/shared/services/friendships';
+import { getJson } from '../../src/shared/services/backend';
 
 const BIO_MAX_LENGTH = 160;
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
@@ -171,6 +172,9 @@ export default function ProfileScreen() {
   const [challengeStats, setChallengeStats] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false);
+  const [profileView, setProfileView] = useState('profile');
+  const [profilePosts, setProfilePosts] = useState([]);
+  const [profilePostsLoading, setProfilePostsLoading] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const headerFade = useRef(new Animated.Value(0)).current;
   const isMountedRef = useRef(true);
@@ -184,8 +188,42 @@ export default function ProfileScreen() {
     };
   }, []);
 
+  const loadProfilePosts = useCallback(async () => {
+    if (!profile?.uid) return;
+    setProfilePostsLoading(true);
+    try {
+      const response = await getJson(`/api/feed/users/${encodeURIComponent(profile.uid)}/posts?limit=20`);
+      setProfilePosts(Array.isArray(response?.items) ? response.items : []);
+    } catch (error) {
+      console.error('[Profile] Failed to load user posts', error);
+      setProfilePosts([]);
+    } finally {
+      setProfilePostsLoading(false);
+    }
+  }, [profile?.uid]);
+
+  useEffect(() => {
+    if (profileView === 'posts') loadProfilePosts();
+  }, [loadProfilePosts, profileView]);
+
   const styles = useThemeStyles((c, s, r) => ({
     scrollContent: { paddingBottom: 32 },
+    profileTabs: { flexDirection: 'row', gap: 8, marginBottom: s.lg, padding: 4, borderRadius: r.xl, backgroundColor: c.surfaceSecondary, borderWidth: 1, borderColor: c.borderDefault },
+    profileTab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: r.lg },
+    profileTabActive: { backgroundColor: c.brand },
+    profileTabText: { color: c.textSecondary, fontSize: 12, fontWeight: '800' },
+    profileTabTextActive: { color: c.onBrand },
+    postsState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40, gap: 8 },
+    postsStateText: { color: c.textSecondary, fontSize: 13, textAlign: 'center' },
+    postCard: { marginBottom: s.md, overflow: 'hidden', borderRadius: r['2xl'], borderWidth: 1, borderColor: c.borderDefault, backgroundColor: c.card },
+    postBody: { padding: s.md },
+    postText: { color: c.textPrimary, fontSize: 14, lineHeight: 21 },
+    postImage: { width: '100%', height: 220 },
+    postColored: { minHeight: 190, alignItems: 'center', justifyContent: 'center', padding: s.xl },
+    postColoredText: { color: '#FFFFFF', fontSize: 23, fontWeight: '900', lineHeight: 30, textAlign: 'center' },
+    timeText: { marginTop: s.sm, color: c.textTertiary, fontSize: 11 },
+    postMeta: { flexDirection: 'row', gap: 18, marginTop: s.md, paddingTop: s.sm, borderTopWidth: 1, borderTopColor: c.borderDefault },
+    postMetaText: { color: c.textSecondary, fontSize: 11, fontWeight: '800' },
 
     // Header bar with the overflow (⋮) trigger
     topBar: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: spacing.xs, marginBottom: spacing.xs },
@@ -471,11 +509,12 @@ export default function ProfileScreen() {
         loadStats(),
         loadFriendCount(),
         loadStreakAndChallenge(),
+        profileView === 'posts' ? loadProfilePosts() : Promise.resolve(),
       ]);
     } finally {
       if (isMountedRef.current) setRefreshing(false);
     }
-  }, [refreshProfile, loadFriendCount, loadStats, loadStreakAndChallenge]);
+  }, [refreshProfile, loadFriendCount, loadStats, loadStreakAndChallenge, loadProfilePosts, profileView]);
 
   const isDirty = useMemo(
     () => Object.keys(form).some((key) => form[key] !== initialForm[key]),
@@ -960,6 +999,35 @@ export default function ProfileScreen() {
 
   const activeMeta = sheetMeta[sheet] || {};
 
+  const renderProfilePosts = () => {
+    const presetColors = { indigo: '#4F46E5', violet: '#7C3AED', blue: '#0284C7', green: '#15803D', orange: '#EA580C', pink: '#DB2777', red: '#DC2626', dark: '#111827' };
+    if (profilePostsLoading) {
+      return <View style={styles.postsState}><ActivityIndicator color={colors.brand} /><Text style={styles.postsStateText}>Loading your posts...</Text></View>;
+    }
+    if (!profilePosts.length) {
+      return <View style={styles.postsState}><Ionicons name="newspaper-outline" size={34} color={colors.greyLight} /><Text style={styles.postsStateText}>You have not posted anything yet.</Text></View>;
+    }
+    return profilePosts.map((post) => (
+      <View key={post.id} style={styles.postCard}>
+        {post.type === 'colored' ? (
+          <View style={[styles.postColored, { backgroundColor: presetColors[post.backgroundPreset] || presetColors.indigo }]}>
+            <Text style={styles.postColoredText}>{post.content}</Text>
+          </View>
+        ) : null}
+        {post.type === 'image' && post.imageUrl ? <Image source={{ uri: post.imageUrl }} style={styles.postImage} contentFit="cover" /> : null}
+        <View style={styles.postBody}>
+          {post.type !== 'colored' && post.content ? <Text style={styles.postText}>{post.content}</Text> : null}
+          <Text style={styles.timeText}>{new Date(post.createdAt).toLocaleString()}</Text>
+          <View style={styles.postMeta}>
+            <Text style={styles.postMetaText}>Likes {post.likesCount || 0}</Text>
+            <Text style={styles.postMetaText}>Comments {post.commentsCount || 0}</Text>
+            <Text style={styles.postMetaText}>Views {post.viewsCount || 0}</Text>
+          </View>
+        </View>
+      </View>
+    ));
+  };
+
   return (
     <ScreenShell title="Profile" subtitle="University student" showBack>
       <ScrollView
@@ -1049,6 +1117,29 @@ export default function ProfileScreen() {
             ) : null}
           </View>
         </Animated.View>
+
+        <View style={styles.profileTabs}>
+          <Pressable
+            onPress={() => setProfileView('profile')}
+            style={[styles.profileTab, profileView === 'profile' && styles.profileTabActive]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: profileView === 'profile' }}
+          >
+            <Ionicons name="person-outline" size={16} color={profileView === 'profile' ? colors.onBrand : colors.textSecondary} />
+            <Text style={[styles.profileTabText, profileView === 'profile' && styles.profileTabTextActive]}>Profile</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setProfileView('posts')}
+            style={[styles.profileTab, profileView === 'posts' && styles.profileTabActive]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: profileView === 'posts' }}
+          >
+            <Ionicons name="newspaper-outline" size={16} color={profileView === 'posts' ? colors.onBrand : colors.textSecondary} />
+            <Text style={[styles.profileTabText, profileView === 'posts' && styles.profileTabTextActive]}>Posted Feed</Text>
+          </Pressable>
+        </View>
+
+        {profileView === 'posts' ? renderProfilePosts() : <>
 
         <Pressable
           onPress={() => router.navigate('/friends')}
@@ -1151,6 +1242,7 @@ export default function ProfileScreen() {
           socialLinks={PROFILE_SOCIAL_LINKS}
           version="v1.0.2"
         />
+        </>}
       </ScrollView>
 
       {/* SINGLE SHARED SHEET — content swaps based on `sheet` */}
