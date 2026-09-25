@@ -260,12 +260,6 @@ function PremiumMarquee({ onPress }) {
     </Pressable>
   );
 }
-
-// One quiet accent color per slide type — reuses the same worked-out
-// palette the Academic Toolkit grid already uses below, so the hero
-// doesn't introduce its own separate visual language. No gradients,
-// no glow: the color lives in one small icon chip and a 3px edge, and
-// nowhere else on the card.
 const HERO_ACCENTS = {
   'latest-announcement': { tint: '#EEF2FF', fg: '#4F46E5', image: IMAGES.community, soft: 'rgba(79,70,229,0.12)' },
   'latest-resource': { tint: '#ECFDF5', fg: '#10B981', image: IMAGES.stories, soft: 'rgba(16,185,129,0.13)' },
@@ -1437,17 +1431,7 @@ export default function HomeScreen() {
       bgColor: '#FFFAF0',
       route: '/pomodoroScreen',
       badge: 'FOCUS',
-    },
-    {
-      id: 'newsfeed',
-      title: 'Feed',
-      sub: 'Latest updates',
-      icon: 'newspaper',
-      color: '#3B82F6',
-      bgColor: '#ECFDF5',
-      route: '/newsfeed',
-      badge: 'TRENDING',
-    },
+    }
   ].filter((tool) => isRouteAllowedForRole(tool.route, profile?.role || 'university'));
 
   return (
