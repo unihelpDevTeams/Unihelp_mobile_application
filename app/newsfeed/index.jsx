@@ -535,13 +535,6 @@ export default function NewsFeedPage() {
                 <Ionicons name="lock-closed-outline" size={15} color={postAudience === 'private' ? colors.brandText : colors.textSecondary} />
                 <Text style={[styles.audienceActionText, postAudience === 'private' && styles.audienceActionTextActive]}>Only me</Text>
               </Pressable>
-              <Pressable
-                style={[styles.audienceAction, postAudience === 'everyone' && styles.audienceActionActive]}
-                onPress={() => setPostAudience('everyone')}
-              >
-                <Ionicons name="globe-outline" size={15} color={postAudience === 'everyone' ? colors.brandText : colors.textSecondary} />
-                <Text style={[styles.audienceActionText, postAudience === 'everyone' && styles.audienceActionTextActive]}>Everyone</Text>
-              </Pressable>
             </View>
 
             <View style={styles.composerDivider} />

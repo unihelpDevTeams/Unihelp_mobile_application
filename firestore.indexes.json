@@ -80,14 +80,6 @@
         { "fieldPath": "postId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
-    },
-    {
-      "collectionGroup": "feedPosts",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "audience", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
-      ]
     }
   ],
   "fieldOverrides": []
