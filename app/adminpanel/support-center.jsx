@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { PageLoader } from '../../src/shared/components/AILoaders';
 import { useAuth } from '../../context/AuthContext';
+import { isResourceAdmin } from '../../src/shared/auth/resourcePermissions';
 import {
   fetchContactMessages,
   fetchReports,
@@ -49,7 +50,7 @@ const formatStatus = (status) => {
 
 export default function AdminSupportCenter() {
   const router = useRouter();
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [activeTab, setActiveTab] = useState('contact');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -62,7 +63,7 @@ export default function AdminSupportCenter() {
   const pageRef = useRef(1);
   const searchTimeoutRef = useRef(null);
 
-  const isAdmin = profile?.admin === true;
+  const isAdmin = isResourceAdmin(profile, user);
 
   const getFetchFn = useCallback(() => {
     switch (activeTab) {

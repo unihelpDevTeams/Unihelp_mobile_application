@@ -9,6 +9,7 @@ import EmptyState from '../../src/shared/components/EmptyState';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { deleteJson, getJson, postJson, putJson, uploadFeatureMedia } from '../../src/shared/services/backend';
+import { buildShareUrl, shareContent } from '../../utils/share';
 import { useAuth } from '../../context/AuthContext';
 import {
   getUserProfileById,
@@ -33,6 +34,32 @@ const getPostHashtags = (item) => item.tags?.length
   ? item.tags
   : [...new Set((item.content || '').match(/#[a-zA-Z0-9_]{1,40}/g) || [])].map((tag) => tag.toLowerCase());
 
+// Firestore can hand back Timestamp objects instead of ISO strings, and
+// `new Date(timestamp)` on one of those silently produces "Invalid Date",
+// which then breaks sorting, time-window filters, and the printed time.
+// Normalize either shape before using it.
+const toDate = (value) => {
+  if (!value) return null;
+  if (typeof value.toDate === 'function') return value.toDate();
+  if (typeof value.seconds === 'number') return new Date(value.seconds * 1000);
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const timeAgo = (value) => {
+  const date = toDate(value);
+  if (!date) return '';
+  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
+
 export default function NewsFeedPage() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -48,10 +75,17 @@ export default function NewsFeedPage() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [posting, setPosting] = useState(false);
   const [editingPost, setEditingPost] = useState(null);
-  const [commentingId, setCommentingId] = useState(null);
+  const [commentsPost, setCommentsPost] = useState(null);
+  const [comments, setComments] = useState([]);
+  const [commentsCursor, setCommentsCursor] = useState(null);
+  const [commentsHasMore, setCommentsHasMore] = useState(false);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsLoadingMore, setCommentsLoadingMore] = useState(false);
   const [commentText, setCommentText] = useState('');
+  const [commentPosting, setCommentPosting] = useState(false);
   const [managePost, setManagePost] = useState(null);
   const [profilePreview, setProfilePreview] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
   const [profileRelationship, setProfileRelationship] = useState({ state: RELATIONSHIP.NONE });
   const [relationshipBusy, setRelationshipBusy] = useState(false);
   const [postAudience, setPostAudience] = useState('friends');
@@ -60,6 +94,7 @@ export default function NewsFeedPage() {
   const [sortFilter, setSortFilter] = useState('smart');
   const [timeFilter, setTimeFilter] = useState('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [likedPostIds, setLikedPostIds] = useState(() => new Set());
   const viewedPosts = useRef(new Set());
   const marqueeX = useRef(new Animated.Value(0)).current;
 
@@ -167,6 +202,9 @@ export default function NewsFeedPage() {
     selectedPreset: { borderColor: c.textPrimary },
     imagePreviewWrap: { marginTop: 12, borderRadius: r.xl, overflow: 'hidden', position: 'relative' },
     imagePreview: { width: '100%', height: 180, backgroundColor: c.surfacePrimary },
+    imageLightbox: { flex: 1, backgroundColor: 'rgba(0,0,0,0.96)', justifyContent: 'center', alignItems: 'center' },
+    imageLightboxImage: { width: '100%', height: '82%' },
+    imageLightboxClose: { position: 'absolute', top: 52, right: 20, width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.16)' },
     removeImageButton: {
       position: 'absolute',
       top: 8,
@@ -188,10 +226,23 @@ export default function NewsFeedPage() {
       overflow: 'hidden',
       marginBottom: s.md,
     },
+    skeletonCard: {
+      backgroundColor: c.card,
+      borderRadius: r['3xl'],
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      overflow: 'hidden',
+      marginBottom: s.md,
+      padding: s.lg,
+    },
+    skeletonLine: { height: 12, borderRadius: 6, backgroundColor: c.surfacePrimary },
+    skeletonBlock: { height: 140, borderRadius: r.xl, backgroundColor: c.surfacePrimary, marginTop: 12 },
     image: { height: 260, width: '100%', backgroundColor: c.surfacePrimary },
     body: { padding: s.lg },
     postHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     author: { flex: 1, color: c.textPrimary, fontSize: 14, fontWeight: '800' },
+    verifiedBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 5, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 999, backgroundColor: c.brandLight },
+    verifiedBadgeText: { color: c.brandText, fontSize: 9, fontWeight: '900' },
     time: { color: c.textTertiary, fontSize: 11, marginTop: 2 },
     menu: {
       width: 30,
@@ -213,7 +264,9 @@ export default function NewsFeedPage() {
       paddingVertical: 6,
       borderRadius: r.lg,
     },
+    metaButtonActive: { backgroundColor: c.brandLight },
     metaText: { fontSize: 12.5, fontWeight: '800', color: c.textSecondary },
+    metaTextActive: { color: '#DC2626' },
     commentRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
     commentInput: {
       flex: 1,
@@ -232,6 +285,23 @@ export default function NewsFeedPage() {
       justifyContent: 'center',
       backgroundColor: c.brand,
     },
+    sendButtonDisabled: { opacity: 0.5 },
+    commentsSheet: { height: '78%', backgroundColor: c.card, borderTopLeftRadius: r['3xl'], borderTopRightRadius: r['3xl'], paddingTop: s.md },
+    commentsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: s.lg, paddingBottom: s.md, borderBottomWidth: 1, borderBottomColor: c.borderDefault },
+    commentsTitle: { color: c.textPrimary, fontSize: 16, fontWeight: '900' },
+    commentsCount: { color: c.textTertiary, fontSize: 12, fontWeight: '700' },
+    commentsList: { flex: 1, paddingHorizontal: s.lg },
+    commentItem: { flexDirection: 'row', gap: 10, paddingVertical: 12 },
+    commentAvatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: c.brandLight },
+    commentCopy: { flex: 1 },
+    commentAuthor: { color: c.textPrimary, fontSize: 12, fontWeight: '900' },
+    commentBody: { marginTop: 3, color: c.textSecondary, fontSize: 13, lineHeight: 18 },
+    commentDate: { marginTop: 3, color: c.textTertiary, fontSize: 10 },
+    commentsMore: { alignItems: 'center', paddingVertical: 12 },
+    commentsMoreText: { color: c.brandText, fontSize: 12, fontWeight: '900' },
+    commentsEmpty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },
+    commentsEmptyText: { color: c.textTertiary, fontSize: 13 },
+    commentsComposer: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: s.md, borderTopWidth: 1, borderTopColor: c.borderDefault },
     modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15,23,42,0.48)' },
     actionCard: { backgroundColor: c.card, borderTopLeftRadius: r['3xl'], borderTopRightRadius: r['3xl'], padding: s.lg, gap: 8 },
     modalHandle: { alignSelf: 'center', width: 42, height: 4, borderRadius: 2, backgroundColor: c.borderDefault, marginBottom: s.sm },
@@ -265,6 +335,8 @@ export default function NewsFeedPage() {
     hashtagText: { color: c.brandText, fontSize: 11, fontWeight: '800' },
   }));
 
+  // Single marquee loop. (Previously declared twice, which spun up two
+  // competing Animated loops on the same value and wasted a native driver tick.)
   useEffect(() => {
     const animation = Animated.loop(
       Animated.sequence([
@@ -296,6 +368,11 @@ export default function NewsFeedPage() {
         }
       }));
       setItems(hydratedItems);
+      setLikedPostIds((current) => {
+        const next = new Set();
+        hydratedItems.forEach((item) => { if (item.likedByMe || current.has(item.id)) next.add(item.id); });
+        return next;
+      });
     } catch (error) {
       console.error('[Feed] Failed to load feed', error);
       Alert.alert('Feed unavailable', error.message || "Couldn't load your feed.");
@@ -308,6 +385,11 @@ export default function NewsFeedPage() {
   useEffect(() => { loadFeed(); }, [loadFeed]);
 
   const openImagePicker = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Photo access needed', 'Allow access to your photos to add one to a post.');
+      return;
+    }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
     if (!result.canceled) {
       setSelectedImage(result.assets[0]);
@@ -376,6 +458,25 @@ export default function NewsFeedPage() {
     setManagePost(item);
   };
 
+  const reportPost = async (item) => {
+    setManagePost(null);
+    try {
+      await postJson(`/api/feed/posts/${item.id}/report`, { reportType: 'Inappropriate content' });
+      Alert.alert('Report submitted', 'Thanks. Our team will review this post.');
+    } catch (error) {
+      Alert.alert('Report failed', error.message || 'Could not report this post.');
+    }
+  };
+
+  const sharePost = async (item) => {
+    setManagePost(null);
+    await shareContent({
+      title: `${item.authorName || 'UniHelp student'} on UniHelp`,
+      text: item.content || 'View this post on UniHelp.',
+      url: buildShareUrl('feed', { post: item.id }),
+    });
+  };
+
   const openProfilePreview = async (item) => {
     setProfilePreview({ ...item, loading: true });
     setProfileRelationship({ state: RELATIONSHIP.NONE });
@@ -429,17 +530,109 @@ export default function NewsFeedPage() {
     viewableItems.forEach(({ item }) => recordView(item));
   }).current;
 
+  // Optimistic like: flips the heart and count immediately instead of
+  // reloading the whole feed (which used to reset scroll position and
+  // flash a refresh spinner on every tap).
+  const toggleLike = useCallback((item) => {
+    const alreadyLiked = likedPostIds.has(item.id);
+    setLikedPostIds((current) => {
+      const next = new Set(current);
+      if (alreadyLiked) next.delete(item.id); else next.add(item.id);
+      return next;
+    });
+    setItems((current) => current.map((post) => post.id === item.id
+      ? { ...post, likesCount: Math.max(0, (post.likesCount || 0) + (alreadyLiked ? -1 : 1)) }
+      : post));
+    postJson(`/api/feed/posts/${item.id}/like`, {}).catch((error) => {
+      setLikedPostIds((current) => {
+        const next = new Set(current);
+        if (alreadyLiked) next.add(item.id); else next.delete(item.id);
+        return next;
+      });
+      setItems((current) => current.map((post) => post.id === item.id
+        ? { ...post, likesCount: Math.max(0, (post.likesCount || 0) + (alreadyLiked ? 1 : -1)) }
+        : post));
+      Alert.alert('Could not update like', error.message || 'Please try again.');
+    });
+  }, [likedPostIds]);
+
   const handleDelete = (item) => Alert.alert('Delete post?', 'This cannot be undone.', [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Delete', style: 'destructive', onPress: async () => { await deleteJson(`/api/feed/posts/${item.id}`); loadFeed(true); } },
+    {
+      text: 'Delete',
+      style: 'destructive',
+      onPress: async () => {
+        const previous = items;
+        setItems((current) => current.filter((post) => post.id !== item.id));
+        try {
+          await deleteJson(`/api/feed/posts/${item.id}`);
+        } catch (error) {
+          setItems(previous);
+          Alert.alert('Could not delete', error.message || 'Please try again.');
+        }
+      },
+    },
   ]);
 
-  const addComment = async (item) => {
-    if (!commentText.trim()) return;
-    await postJson(`/api/feed/posts/${item.id}/comments`, { content: commentText });
+  const loadComments = async (item, append = false) => {
+    if (!item?.id || (append && (!commentsHasMore || commentsLoadingMore))) return;
+    if (append) setCommentsLoadingMore(true); else setCommentsLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: '20' });
+      if (append && commentsCursor) params.set('cursor', commentsCursor);
+      const response = await getJson(`/api/feed/posts/${encodeURIComponent(item.id)}/comments?${params.toString()}`);
+      setComments((current) => append ? [...current, ...(response.items || [])] : (response.items || []));
+      setCommentsCursor(response.nextCursor || null);
+      setCommentsHasMore(Boolean(response.hasMore));
+    } catch (error) {
+      Alert.alert('Could not load comments', error.message || 'Please try again.');
+      console.error('[Feed] Failed to load comments', error);
+    } finally {
+      setCommentsLoading(false);
+      setCommentsLoadingMore(false);
+    }
+  };
+
+  const openComments = (item) => {
     setCommentText('');
-    setCommentingId(null);
-    loadFeed(true);
+    setCommentsPost(item);
+    setComments([]);
+    setCommentsCursor(null);
+    setCommentsHasMore(false);
+    loadComments(item);
+  };
+
+  const closeComments = () => {
+    setCommentsPost(null);
+    setComments([]);
+    setCommentText('');
+  };
+
+  const addComment = async (item) => {
+    const trimmed = commentText.trim();
+    if (!trimmed || commentPosting) return;
+    setCommentPosting(true);
+    try {
+      await postJson(`/api/feed/posts/${item.id}/comments`, { content: trimmed });
+      const newComment = {
+        id: `local-${Date.now()}`,
+        postId: item.id,
+        authorId: user?.uid || '',
+        authorName: profile?.username || profile?.displayName || user?.email || 'You',
+        authorAvatar: viewerAvatar,
+        content: trimmed,
+        createdAt: new Date().toISOString(),
+      };
+      setComments((current) => [newComment, ...current]);
+      setItems((current) => current.map((post) => post.id === item.id
+        ? { ...post, commentsCount: (post.commentsCount || 0) + 1 }
+        : post));
+      setCommentText('');
+    } catch (error) {
+      Alert.alert('Could not comment', error.message || 'Please try again.');
+    } finally {
+      setCommentPosting(false);
+    }
   };
 
   const visibleItems = useMemo(() => {
@@ -450,23 +643,28 @@ export default function NewsFeedPage() {
       const matchesType = typeFilter === 'all' || item.type === typeFilter;
       const tags = getPostHashtags(item);
       const searchable = `${item.content || ''} ${item.authorName || ''} ${tags.join(' ')}`.toLowerCase();
-      const ageHours = Math.max(0, (now - new Date(item.createdAt).getTime()) / (60 * 60 * 1000));
+      const postDate = toDate(item.createdAt);
+      const ageHours = postDate ? Math.max(0, (now - postDate.getTime()) / (60 * 60 * 1000)) : Infinity;
       const matchesTime = timeFilter === 'all' || ageHours <= timeLimits[timeFilter];
       return matchesType && matchesTime && (!normalizedSearch || searchable.includes(normalizedSearch));
     });
     return [...filtered].sort((left, right) => {
-      if (sortFilter === 'oldest') return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+      const leftTime = toDate(left.createdAt)?.getTime() ?? 0;
+      const rightTime = toDate(right.createdAt)?.getTime() ?? 0;
+      if (sortFilter === 'oldest') return leftTime - rightTime;
       if (sortFilter === 'popular') {
         const leftScore = (left.likesCount || 0) + ((left.commentsCount || 0) * 2) + ((left.viewsCount || 0) * 0.1);
         const rightScore = (right.likesCount || 0) + ((right.commentsCount || 0) * 2) + ((right.viewsCount || 0) * 0.1);
         return rightScore - leftScore;
       }
-      if (sortFilter === 'latest') return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+      if (sortFilter === 'latest') return rightTime - leftTime;
       return 0;
     });
   }, [items, search, sortFilter, timeFilter, typeFilter]);
 
-  const renderPost = ({ item }) => (
+  const renderPost = ({ item }) => {
+    const liked = likedPostIds.has(item.id);
+    return (
     <View style={styles.card}>
       <View style={styles.body}>
         <View style={styles.postHeader}>
@@ -474,8 +672,11 @@ export default function NewsFeedPage() {
             {item.authorAvatar ? <Image source={{ uri: item.authorAvatar }} style={styles.avatar} contentFit="cover" /> : <View style={styles.avatar} />}
           </Pressable>
           <View style={{ flex: 1 }}>
-            <Text style={styles.author}>{item.authorName || 'UniHelp student'}</Text>
-            <Text style={styles.time}>{new Date(item.createdAt).toLocaleString()}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={styles.author}>{item.authorName || 'UniHelp student'}</Text>
+              {item.authorPremium ? <View style={styles.verifiedBadge}><Ionicons name="checkmark-circle" size={12} color={colors.brand} /><Text style={styles.verifiedBadgeText}>Premium</Text></View> : null}
+            </View>
+            <Text style={styles.time}>{timeAgo(item.createdAt)}</Text>
           </View>
           <Pressable style={({ pressed }) => [styles.menu, pressed && { opacity: 0.7 }]} onPress={() => handlePostMenu(item)}>
             <Ionicons name="ellipsis-horizontal" size={18} color={colors.textSecondary} />
@@ -490,7 +691,9 @@ export default function NewsFeedPage() {
       ) : null}
 
       {item.type === 'image' && item.imageUrl ? (
-        <Image source={{ uri: item.imageUrl }} style={styles.image} contentFit="cover" />
+        <Pressable onPress={() => setImagePreview(item.imageUrl)} accessibilityRole="button" accessibilityLabel="Open full image">
+          <Image source={{ uri: item.imageUrl }} style={styles.image} contentFit="cover" />
+        </Pressable>
       ) : null}
 
       <View style={styles.body}>
@@ -503,15 +706,17 @@ export default function NewsFeedPage() {
 
         <View style={styles.metaRow}>
           <Pressable
-            style={({ pressed }) => [styles.metaButton, pressed && { opacity: 0.65 }]}
-            onPress={() => postJson(`/api/feed/posts/${item.id}/like`, {}).then(() => loadFeed(true))}
+            style={({ pressed }) => [styles.metaButton, liked && styles.metaButtonActive, pressed && { opacity: 0.65 }]}
+            onPress={() => toggleLike(item)}
+            accessibilityRole="button"
+            accessibilityLabel={liked ? 'Unlike post' : 'Like post'}
           >
-            <Ionicons name="heart-outline" size={16} color={colors.textSecondary} />
-            <Text style={styles.metaText}>{item.likesCount || 0}</Text>
+            <Ionicons name={liked ? 'heart' : 'heart-outline'} size={16} color={liked ? '#DC2626' : colors.textSecondary} />
+            <Text style={[styles.metaText, liked && styles.metaTextActive]}>{item.likesCount || 0}</Text>
           </Pressable>
           <Pressable
             style={({ pressed }) => [styles.metaButton, pressed && { opacity: 0.65 }]}
-            onPress={() => setCommentingId(commentingId === item.id ? null : item.id)}
+            onPress={() => openComments(item)}
           >
             <Ionicons name="chatbubble-outline" size={15} color={colors.textSecondary} />
             <Text style={styles.metaText}>{item.commentsCount || 0}</Text>
@@ -522,36 +727,13 @@ export default function NewsFeedPage() {
           </View>
         </View>
 
-        {commentingId === item.id ? (
-          <View style={styles.commentRow}>
-            <TextInput
-              value={commentText}
-              onChangeText={setCommentText}
-              placeholder="Write a comment"
-              placeholderTextColor={colors.placeholder}
-              style={styles.commentInput}
-              autoFocus
-            />
-            <Pressable style={({ pressed }) => [styles.sendButton, pressed && { opacity: 0.85 }]} onPress={() => addComment(item)}>
-              <Ionicons name="send" size={16} color={colors.onBrand} />
-            </Pressable>
-          </View>
-        ) : null}
       </View>
     </View>
-  );
+    );
+  };
 
   const canSubmit = content.trim().length > 0 && !(postType === 'image' && !selectedImage);
   const activeFilterCount = [typeFilter !== 'all', sortFilter !== 'smart', timeFilter !== 'all'].filter(Boolean).length;
-
-  useEffect(() => {
-    const animation = Animated.loop(Animated.sequence([
-      Animated.timing(marqueeX, { toValue: -420, duration: 12000, easing: Easing.linear, useNativeDriver: true }),
-      Animated.timing(marqueeX, { toValue: 0, duration: 0, useNativeDriver: true }),
-    ]));
-    animation.start();
-    return () => animation.stop();
-  }, [marqueeX]);
 
   return (
     <ScreenShell title="Feed" subtitle="What is happening with your friends." showBack={false} scrollable={false} loading={loading}>
@@ -595,9 +777,11 @@ export default function NewsFeedPage() {
             {postType === 'image' && selectedImage ? (
               <View style={styles.imagePreviewWrap}>
                 <Image source={{ uri: selectedImage.uri }} style={styles.imagePreview} contentFit="cover" />
-                <Pressable style={({ pressed }) => [styles.removeImageButton, pressed && { opacity: 0.8 }]} onPress={removeSelectedImage}>
-                  <Ionicons name="close" size={15} color="#FFFFFF" />
-                </Pressable>
+                {!editingPost ? (
+                  <Pressable style={({ pressed }) => [styles.removeImageButton, pressed && { opacity: 0.8 }]} onPress={removeSelectedImage}>
+                    <Ionicons name="close" size={15} color="#FFFFFF" />
+                  </Pressable>
+                ) : null}
               </View>
             ) : null}
 
@@ -683,19 +867,36 @@ export default function NewsFeedPage() {
         </Pressable>
       </View>
 
-      <FlatList
-        data={visibleItems}
-        keyExtractor={(item) => item.id}
-        renderItem={renderPost}
-        onViewableItemsChanged={onViewableItemsChanged}
-        viewabilityConfig={viewabilityConfig}
-        refreshing={refreshing}
-        onRefresh={() => loadFeed(true)}
-        ListEmptyComponent={!loading ? (
-          <EmptyState title={items.length && !visibleItems.length ? 'No matching posts' : 'Your feed is quiet'} description={items.length && !visibleItems.length ? 'Try another search or filter.' : 'Add friends and start sharing what is happening around campus.'} />
-        ) : null}
-        contentContainerStyle={{ paddingBottom: 30 }}
-      />
+      {loading && !items.length ? (
+        <View>
+          {[0, 1, 2].map((key) => (
+            <View key={key} style={styles.skeletonCard}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={[styles.avatar, { opacity: 0.6 }]} />
+                <View style={{ flex: 1, gap: 6 }}>
+                  <View style={[styles.skeletonLine, { width: '40%' }]} />
+                  <View style={[styles.skeletonLine, { width: '25%', height: 9 }]} />
+                </View>
+              </View>
+              <View style={styles.skeletonBlock} />
+            </View>
+          ))}
+        </View>
+      ) : (
+        <FlatList
+          data={visibleItems}
+          keyExtractor={(item) => item.id}
+          renderItem={renderPost}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
+          refreshing={refreshing}
+          onRefresh={() => loadFeed(true)}
+          ListEmptyComponent={!loading ? (
+            <EmptyState title={items.length && !visibleItems.length ? 'No matching posts' : 'Your feed is quiet'} description={items.length && !visibleItems.length ? 'Try another search or filter.' : 'Add friends and start sharing what is happening around campus.'} />
+          ) : null}
+          contentContainerStyle={{ paddingBottom: 30 }}
+        />
+      )}
 
       <Modal visible={filtersOpen} transparent animationType="slide" onRequestClose={() => setFiltersOpen(false)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setFiltersOpen(false)}>
@@ -737,8 +938,9 @@ export default function NewsFeedPage() {
                 <Pressable style={styles.modalAction} onPress={() => { const post = managePost; setManagePost(null); handleDelete(post); }}><Ionicons name="trash-outline" size={20} color={colors.error || '#DC2626'} /><Text style={[styles.modalActionText, styles.modalDangerText]}>Delete post</Text></Pressable>
               </>
             ) : (
-              <Pressable style={styles.modalAction} onPress={() => { const post = managePost; setManagePost(null); postJson(`/api/feed/posts/${post.id}/report`, { reportType: 'Inappropriate content' }); }}><Ionicons name="flag-outline" size={20} color={colors.brand} /><Text style={styles.modalActionText}>Report post</Text></Pressable>
+              <Pressable style={styles.modalAction} onPress={() => reportPost(managePost)}><Ionicons name="flag-outline" size={20} color={colors.brand} /><Text style={styles.modalActionText}>Report post</Text></Pressable>
             )}
+            <Pressable style={styles.modalAction} onPress={() => sharePost(managePost)}><Ionicons name="share-social-outline" size={20} color={colors.brand} /><Text style={styles.modalActionText}>Share post</Text></Pressable>
             <Pressable style={styles.profileCloseButton} onPress={() => setManagePost(null)}><Text style={styles.profileCloseText}>Cancel</Text></Pressable>
           </Pressable>
         </Pressable>
@@ -764,6 +966,70 @@ export default function NewsFeedPage() {
             <Pressable style={styles.profileCloseButton} onPress={() => setProfilePreview(null)}><Text style={styles.profileCloseText}>Close</Text></Pressable>
           </Pressable>
         </Pressable>
+      </Modal>
+
+      <Modal visible={Boolean(commentsPost)} transparent animationType="slide" onRequestClose={closeComments}>
+        <Pressable style={styles.modalBackdrop} onPress={closeComments}>
+          <Pressable style={styles.commentsSheet} onPress={(event) => event.stopPropagation()}>
+            <View style={styles.commentsHeader}>
+              <View>
+                <Text style={styles.commentsTitle}>Comments</Text>
+                <Text style={styles.commentsCount}>{commentsPost?.commentsCount || comments.length} comments</Text>
+              </View>
+              <Pressable onPress={closeComments} accessibilityRole="button" accessibilityLabel="Close comments">
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            {commentsLoading ? <ActivityIndicator style={{ marginTop: 32 }} color={colors.brand} /> : null}
+            {!commentsLoading && !comments.length ? (
+              <View style={styles.commentsEmpty}><Ionicons name="chatbubble-ellipses-outline" size={32} color={colors.textTertiary} /><Text style={styles.commentsEmptyText}>Be the first to comment</Text></View>
+            ) : null}
+            <FlatList
+              data={comments}
+              keyExtractor={(item) => item.id}
+              style={styles.commentsList}
+              renderItem={({ item }) => (
+                <View style={styles.commentItem}>
+                  {item.authorAvatar ? <Image source={{ uri: item.authorAvatar }} style={styles.commentAvatar} contentFit="cover" /> : <View style={styles.commentAvatar} />}
+                  <View style={styles.commentCopy}>
+                    <Text style={styles.commentAuthor}>{item.authorName || 'UniHelp student'}</Text>
+                    <Text style={styles.commentBody}>{item.content}</Text>
+                    <Text style={styles.commentDate}>{timeAgo(item.createdAt)}</Text>
+                  </View>
+                </View>
+              )}
+              onEndReached={() => commentsPost && loadComments(commentsPost, true)}
+              onEndReachedThreshold={0.5}
+              ListFooterComponent={commentsLoadingMore ? <ActivityIndicator style={{ paddingVertical: 12 }} color={colors.brand} /> : commentsHasMore ? <Pressable style={styles.commentsMore} onPress={() => loadComments(commentsPost, true)}><Text style={styles.commentsMoreText}>Load more comments</Text></Pressable> : null}
+            />
+
+            <View style={styles.commentsComposer}>
+              <TextInput
+                value={commentText}
+                onChangeText={setCommentText}
+                placeholder="Add a comment..."
+                placeholderTextColor={colors.placeholder}
+                style={styles.commentInput}
+                editable={!commentPosting}
+                onSubmitEditing={() => commentsPost && addComment(commentsPost)}
+                returnKeyType="send"
+              />
+              <Pressable style={({ pressed }) => [styles.sendButton, (pressed || commentPosting) && styles.sendButtonDisabled]} onPress={() => commentsPost && addComment(commentsPost)} disabled={commentPosting || !commentText.trim()}>
+                {commentPosting ? <ActivityIndicator size="small" color={colors.onBrand} /> : <Ionicons name="send" size={16} color={colors.onBrand} />}
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={Boolean(imagePreview)} transparent animationType="fade" onRequestClose={() => setImagePreview(null)}>
+        <View style={styles.imageLightbox}>
+          {imagePreview ? <Image source={{ uri: imagePreview }} style={styles.imageLightboxImage} contentFit="contain" /> : null}
+          <Pressable style={styles.imageLightboxClose} onPress={() => setImagePreview(null)} accessibilityRole="button" accessibilityLabel="Close full image">
+            <Ionicons name="close" size={24} color="#FFFFFF" />
+          </Pressable>
+        </View>
       </Modal>
     </ScreenShell>
   );

@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { PageLoader } from '../../src/shared/components/AILoaders';
 import { useAuth } from '../../context/AuthContext';
+import { isResourceAdmin } from '../../src/shared/auth/resourcePermissions';
 import {
   fetchSupportItem,
   updateSupportItemStatus,
@@ -55,7 +56,7 @@ const formatDate = (timestamp) => {
 };
 
 export default function SupportDetailPage() {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const params = useLocalSearchParams();
   const { collection, id, tab } = params;
 
@@ -67,7 +68,7 @@ export default function SupportDetailPage() {
   const [submittingNote, setSubmittingNote] = useState(false);
   const [error, setError] = useState('');
 
-  const isAdmin = profile?.admin === true;
+  const isAdmin = isResourceAdmin(profile, user);
 
   const loadData = useCallback(async () => {
     if (!collection || !id) return;
