@@ -57,6 +57,9 @@ export default function NewsFeedPage() {
   const [postAudience, setPostAudience] = useState('friends');
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [sortFilter, setSortFilter] = useState('smart');
+  const [timeFilter, setTimeFilter] = useState('all');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const viewedPosts = useRef(new Set());
 
   const styles = useThemeStyles((c, s, r) => ({
@@ -243,11 +246,15 @@ export default function NewsFeedPage() {
     profileCloseText: { color: c.textSecondary, fontSize: 13, fontWeight: '800' },
     searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: s.sm, paddingHorizontal: s.md, borderRadius: r.xl, backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault },
     searchInput: { flex: 1, color: c.textPrimary, paddingVertical: 11, fontSize: 13 },
-    filterRow: { flexDirection: 'row', gap: 7, marginBottom: s.md },
+    filterIconButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: r.lg, backgroundColor: c.surfacePrimary, borderWidth: 1, borderColor: c.borderDefault },
+    filterBadge: { position: 'absolute', top: -4, right: -4, minWidth: 16, height: 16, paddingHorizontal: 3, alignItems: 'center', justifyContent: 'center', borderRadius: 8, backgroundColor: c.brand },
+    filterBadgeText: { color: c.onBrand, fontSize: 9, fontWeight: '900' },
+    filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: s.md },
     filterButton: { paddingHorizontal: 11, paddingVertical: 7, borderRadius: r.lg, backgroundColor: c.surfacePrimary, borderWidth: 1, borderColor: c.borderDefault },
     filterButtonActive: { backgroundColor: c.brandLight, borderColor: c.brand },
     filterText: { color: c.textSecondary, fontSize: 11, fontWeight: '800' },
     filterTextActive: { color: c.brandText },
+    filterCaption: { color: c.textTertiary, fontSize: 10, fontWeight: '900', letterSpacing: 0.7, marginBottom: 6, marginTop: 2 },
     hashtagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
     hashtag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: r.lg, backgroundColor: c.brandLight },
     hashtagText: { color: c.brandText, fontSize: 11, fontWeight: '800' },
@@ -421,13 +428,27 @@ export default function NewsFeedPage() {
 
   const visibleItems = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
-    return items.filter((item) => {
+    const now = Date.now();
+    const timeLimits = { today: 24, week: 24 * 7, month: 24 * 30 };
+    const filtered = items.filter((item) => {
       const matchesType = typeFilter === 'all' || item.type === typeFilter;
       const tags = getPostHashtags(item);
       const searchable = `${item.content || ''} ${item.authorName || ''} ${tags.join(' ')}`.toLowerCase();
-      return matchesType && (!normalizedSearch || searchable.includes(normalizedSearch));
+      const ageHours = Math.max(0, (now - new Date(item.createdAt).getTime()) / (60 * 60 * 1000));
+      const matchesTime = timeFilter === 'all' || ageHours <= timeLimits[timeFilter];
+      return matchesType && matchesTime && (!normalizedSearch || searchable.includes(normalizedSearch));
     });
-  }, [items, search, typeFilter]);
+    return [...filtered].sort((left, right) => {
+      if (sortFilter === 'oldest') return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+      if (sortFilter === 'popular') {
+        const leftScore = (left.likesCount || 0) + ((left.commentsCount || 0) * 2) + ((left.viewsCount || 0) * 0.1);
+        const rightScore = (right.likesCount || 0) + ((right.commentsCount || 0) * 2) + ((right.viewsCount || 0) * 0.1);
+        return rightScore - leftScore;
+      }
+      if (sortFilter === 'latest') return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+      return 0;
+    });
+  }, [items, search, sortFilter, timeFilter, typeFilter]);
 
   const renderPost = ({ item }) => (
     <View style={styles.card}>
@@ -505,6 +526,7 @@ export default function NewsFeedPage() {
   );
 
   const canSubmit = content.trim().length > 0 && !(postType === 'image' && !selectedImage);
+  const activeFilterCount = [typeFilter !== 'all', sortFilter !== 'smart', timeFilter !== 'all'].filter(Boolean).length;
 
   return (
     <ScreenShell title="Feed" subtitle="What is happening with your friends." showBack={false} scrollable={false} loading={loading}>
@@ -609,11 +631,10 @@ export default function NewsFeedPage() {
         <Ionicons name="search-outline" size={17} color={colors.textTertiary} />
         <TextInput value={search} onChangeText={setSearch} placeholder="Search posts or hashtags" placeholderTextColor={colors.placeholder} style={styles.searchInput} />
         {search ? <Pressable onPress={() => setSearch('')}><Ionicons name="close-circle" size={17} color={colors.textTertiary} /></Pressable> : null}
-      </View>
-      <View style={styles.filterRow}>
-        {[['all', 'All'], ['text', 'Text'], ['image', 'Photos'], ['colored', 'Backgrounds']].map(([value, label]) => (
-          <Pressable key={value} style={[styles.filterButton, typeFilter === value && styles.filterButtonActive]} onPress={() => setTypeFilter(value)}><Text style={[styles.filterText, typeFilter === value && styles.filterTextActive]}>{label}</Text></Pressable>
-        ))}
+        <Pressable style={styles.filterIconButton} onPress={() => setFiltersOpen(true)} accessibilityRole="button" accessibilityLabel="Open feed filters">
+          <Ionicons name="options-outline" size={18} color={colors.brand} />
+          {activeFilterCount ? <View style={styles.filterBadge}><Text style={styles.filterBadgeText}>{activeFilterCount}</Text></View> : null}
+        </Pressable>
       </View>
 
       <FlatList
@@ -629,6 +650,35 @@ export default function NewsFeedPage() {
         ) : null}
         contentContainerStyle={{ paddingBottom: 30 }}
       />
+
+      <Modal visible={filtersOpen} transparent animationType="slide" onRequestClose={() => setFiltersOpen(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setFiltersOpen(false)}>
+          <Pressable style={styles.actionCard} onPress={(event) => event.stopPropagation()}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Feed filters</Text>
+            <Text style={styles.filterCaption}>POST TYPE</Text>
+            <View style={styles.filterRow}>
+              {[['all', 'All'], ['text', 'Text'], ['image', 'Photos'], ['colored', 'Backgrounds']].map(([value, label]) => (
+                <Pressable key={value} style={[styles.filterButton, typeFilter === value && styles.filterButtonActive]} onPress={() => setTypeFilter(value)}><Text style={[styles.filterText, typeFilter === value && styles.filterTextActive]}>{label}</Text></Pressable>
+              ))}
+            </View>
+            <Text style={styles.filterCaption}>SORT BY</Text>
+            <View style={styles.filterRow}>
+              {[['smart', 'For you'], ['latest', 'Latest'], ['oldest', 'Old posts'], ['popular', 'Popular']].map(([value, label]) => (
+                <Pressable key={value} style={[styles.filterButton, sortFilter === value && styles.filterButtonActive]} onPress={() => setSortFilter(value)}><Text style={[styles.filterText, sortFilter === value && styles.filterTextActive]}>{label}</Text></Pressable>
+              ))}
+            </View>
+            <Text style={styles.filterCaption}>TIME FRAME</Text>
+            <View style={styles.filterRow}>
+              {[['all', 'Any time'], ['today', 'Today'], ['week', 'This week'], ['month', 'This month']].map(([value, label]) => (
+                <Pressable key={value} style={[styles.filterButton, timeFilter === value && styles.filterButtonActive]} onPress={() => setTimeFilter(value)}><Text style={[styles.filterText, timeFilter === value && styles.filterTextActive]}>{label}</Text></Pressable>
+              ))}
+            </View>
+            <Pressable style={styles.profileButton} onPress={() => setFiltersOpen(false)}><Text style={styles.profileButtonText}>Apply filters</Text></Pressable>
+            {activeFilterCount ? <Pressable style={styles.profileCloseButton} onPress={() => { setTypeFilter('all'); setSortFilter('smart'); setTimeFilter('all'); }}><Text style={styles.profileCloseText}>Clear filters</Text></Pressable> : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal visible={Boolean(managePost)} transparent animationType="slide" onRequestClose={() => setManagePost(null)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setManagePost(null)}>
