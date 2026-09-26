@@ -422,20 +422,20 @@ export async function removeMarketplaceSponsorship(listingId) {
 
 export async function fetchTasks(uid = auth.currentUser?.uid) {
   if (!uid) return [];
-  const snapshot = await getDocs(query(collection(db, 'tasks'), orderBy('createdAt', 'desc')));
-  return mapDocs(snapshot).filter((item) => item.userId === uid || !item.userId);
+  const snapshot = await getDocs(query(collection(db, 'tasks'), where('userId', '==', uid), orderBy('createdAt', 'desc')));
+  return mapDocs(snapshot);
 }
 
 export async function fetchGpaRecords(uid = auth.currentUser?.uid) {
   if (!uid) return [];
-  const snapshot = await getDocs(query(collection(db, 'GPARecords'), orderBy('createdAt', 'desc')));
-  return mapDocs(snapshot).filter((item) => item.userId === uid || !item.userId);
+  const snapshot = await getDocs(query(collection(db, 'GPARecords'), where('userId', '==', uid), orderBy('createdAt', 'desc')));
+  return mapDocs(snapshot);
 }
 
 export async function fetchCgpaRecords(uid = auth.currentUser?.uid) {
   if (!uid) return [];
-  const snapshot = await getDocs(query(collection(db, 'cgpaTracker'), orderBy('createdAt', 'desc')));
-  return mapDocs(snapshot).filter((item) => item.userId === uid || !item.userId);
+  const snapshot = await getDocs(query(collection(db, 'cgpaTracker'), where('userId', '==', uid), orderBy('createdAt', 'desc')));
+  return mapDocs(snapshot);
 }
 
 export async function fetchNotifications(uid = auth.currentUser?.uid) {
@@ -491,9 +491,8 @@ export function listenUnreadGroupMessageCount(uid = auth.currentUser?.uid, callb
 
 export async function fetchConversations(uid = auth.currentUser?.uid) {
   if (!uid) return [];
-  const snapshot = await getDocs(query(collection(db, COLLECTIONS.conversations)));
+  const snapshot = await getDocs(query(collection(db, COLLECTIONS.conversations), where('memberIds', 'array-contains', uid)));
   return mapDocs(snapshot)
-    .filter((item) => Array.isArray(item.memberIds) && item.memberIds.includes(uid))
     .filter((item) => {
       const deletedAt = item.deletedFor?.[uid]?.toDate?.()?.getTime?.() || 0;
       const updatedAt = item.updatedAt?.toDate?.()?.getTime?.() || 0;

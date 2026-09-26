@@ -11,6 +11,7 @@ import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { deleteJson, getJson, postJson, putJson, uploadFeatureMedia } from '../../src/shared/services/backend';
 import { buildShareUrl, shareContent } from '../../utils/share';
 import { useAuth } from '../../context/AuthContext';
+import { isPremiumActive } from '../../src/shared/services/premium';
 import {
   getUserProfileById,
   listenRelationship,
@@ -355,13 +356,14 @@ export default function NewsFeedPage() {
       const nextItems = Array.isArray(response?.items) ? response.items : [];
       console.log('[Feed] Loaded feed', { uid: user?.uid, count: nextItems.length });
       const hydratedItems = await Promise.all(nextItems.map(async (item) => {
-        if (item.authorAvatar && item.authorName) return item;
+        if (typeof item.authorPremium === 'boolean') return item;
         try {
           const author = await getUserProfileById(item.authorId);
           return {
             ...item,
             authorName: item.authorName || author?.username || author?.displayName || 'UniHelp student',
             authorAvatar: item.authorAvatar || author?.photoThumb || author?.photoURL || author?.photo || author?.avatar || '',
+            authorPremium: isPremiumActive(author),
           };
         } catch {
           return item;
@@ -950,7 +952,10 @@ export default function NewsFeedPage() {
         <Pressable style={styles.modalBackdrop} onPress={() => setProfilePreview(null)}>
           <Pressable style={styles.profileCard} onPress={(event) => event.stopPropagation()}>
             {profilePreview?.authorAvatar || profilePreview?.photoURL || profilePreview?.photo ? <Image source={{ uri: profilePreview.authorAvatar || profilePreview.photoURL || profilePreview.photo }} style={styles.profileAvatar} contentFit="cover" /> : <View style={styles.profileAvatar} />}
-            <Text style={styles.profileName}>{profilePreview?.username || profilePreview?.displayName || profilePreview?.authorName || 'UniHelp student'}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={styles.profileName}>{profilePreview?.username || profilePreview?.displayName || profilePreview?.authorName || 'UniHelp student'}</Text>
+              {isPremiumActive(profilePreview) ? <View style={styles.verifiedBadge}><Ionicons name="checkmark-circle" size={12} color={colors.brand} /><Text style={styles.verifiedBadgeText}>Premium</Text></View> : null}
+            </View>
             {profilePreview?.email ? <Text style={styles.profileMeta}>{profilePreview.email}</Text> : null}
             {profilePreview?.loading ? <ActivityIndicator color={colors.brand} /> : null}
             {profilePreview?.authorId && profilePreview.authorId !== user?.uid ? (

@@ -131,6 +131,7 @@ export const createGroup = async ({ form, user, profile, uploads }) => {
 
   batch.set(doc(db, 'notifications', user.uid, 'items', groupRef.id), {
     type: 'group_created',
+    senderId: user.uid,
     title: 'Group created',
     body: `${form.name.trim()} is ready.`,
     groupId: groupRef.id,
@@ -197,6 +198,7 @@ export const requestJoinGroup = async (group, user, profile) => {
     const notificationRef = doc(collection(db, 'notifications', targetId, 'items'));
     batch.set(notificationRef, {
       type: 'group_join_request',
+      senderId: user.uid,
       title: 'New join request',
       body: `${summary.name} wants to join ${group.name}.`,
       groupId: group.id,
