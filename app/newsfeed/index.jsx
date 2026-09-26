@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Modal, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, FlatList, Modal, Pressable, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -61,6 +61,7 @@ export default function NewsFeedPage() {
   const [timeFilter, setTimeFilter] = useState('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const viewedPosts = useRef(new Set());
+  const marqueeX = useRef(new Animated.Value(0)).current;
 
   const styles = useThemeStyles((c, s, r) => ({
     // Header — a quieter, card-based intro instead of a full-bleed brand block.
@@ -86,6 +87,10 @@ export default function NewsFeedPage() {
     headerCopy: { flex: 1 },
     headerTitle: { color: c.textPrimary, fontSize: 16, fontWeight: '900' },
     headerText: { marginTop: 2, color: c.textSecondary, fontSize: 12, lineHeight: 17, fontWeight: '500' },
+    noticeMarquee: { height: 38, overflow: 'hidden', flexDirection: 'row', alignItems: 'center', marginBottom: s.md, borderRadius: r.xl, backgroundColor: c.goldLight || '#FEF3C7', borderWidth: 1, borderColor: c.gold || '#F59E0B' },
+    noticeTrack: { flexDirection: 'row', alignItems: 'center', minWidth: '200%' },
+    noticeItem: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 14 },
+    noticeText: { color: c.goldText || '#92400E', fontSize: 11.5, fontWeight: '800' },
 
     // Composer
     composer: {
@@ -259,6 +264,17 @@ export default function NewsFeedPage() {
     hashtag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: r.lg, backgroundColor: c.brandLight },
     hashtagText: { color: c.brandText, fontSize: 11, fontWeight: '800' },
   }));
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(marqueeX, { toValue: -420, duration: 12000, easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(marqueeX, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ])
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [marqueeX]);
 
   const loadFeed = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true); else setLoading(true);
@@ -528,8 +544,31 @@ export default function NewsFeedPage() {
   const canSubmit = content.trim().length > 0 && !(postType === 'image' && !selectedImage);
   const activeFilterCount = [typeFilter !== 'all', sortFilter !== 'smart', timeFilter !== 'all'].filter(Boolean).length;
 
+  useEffect(() => {
+    const animation = Animated.loop(Animated.sequence([
+      Animated.timing(marqueeX, { toValue: -420, duration: 12000, easing: Easing.linear, useNativeDriver: true }),
+      Animated.timing(marqueeX, { toValue: 0, duration: 0, useNativeDriver: true }),
+    ]));
+    animation.start();
+    return () => animation.stop();
+  }, [marqueeX]);
+
   return (
     <ScreenShell title="Feed" subtitle="What is happening with your friends." showBack={false} scrollable={false} loading={loading}>
+      <View
+        style={styles.noticeMarquee}
+        accessibilityRole="alert"
+        accessibilityLabel="Feed guidelines: Share educational updates, school information, opportunities, and useful student resources. Avoid irrelevant or offensive content."
+      >
+        <Animated.View style={[styles.noticeTrack, { transform: [{ translateX: marqueeX }] }]}>
+          {[1, 2].map((copy) => (
+            <View key={copy} style={styles.noticeItem} accessible={false}>
+              <Ionicons name="information-circle-outline" size={16} color={colors.gold || '#B45309'} />
+              <Text style={styles.noticeText}>Keep the Feed professional: share educational updates, school information, opportunities, and useful student resources.</Text>
+            </View>
+          ))}
+        </Animated.View>
+      </View>
 
       <View style={styles.composer}>
         <View style={styles.composerRow}>
@@ -591,6 +630,13 @@ export default function NewsFeedPage() {
               >
                 <Ionicons name="lock-closed-outline" size={15} color={postAudience === 'private' ? colors.brandText : colors.textSecondary} />
                 <Text style={[styles.audienceActionText, postAudience === 'private' && styles.audienceActionTextActive]}>Only me</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.audienceAction, postAudience === 'everyone' && styles.audienceActionActive]}
+                onPress={() => setPostAudience('everyone')}
+              >
+                <Ionicons name="globe-outline" size={15} color={postAudience === 'everyone' ? colors.brandText : colors.textSecondary} />
+                <Text style={[styles.audienceActionText, postAudience === 'everyone' && styles.audienceActionTextActive]}>Everyone</Text>
               </Pressable>
             </View>
 
