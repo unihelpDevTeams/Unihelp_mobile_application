@@ -22,6 +22,8 @@ import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import logo from '../../assets/images/favicon.png';
 import { useAuth } from '../../context/AuthContext';
 
+import { logError, translateError } from '../../src/utils/errorLogger';
+
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const LOGIN_STORAGE_KEY = '@unihelp_saved_login';
 
@@ -148,19 +150,12 @@ export default function Login() {
       );
       router.replace('/(tabs)');
     } catch (submitError) {
+      logError('Login', submitError, { email: email.trim() });
       if (submitError?.code === 'auth/email-not-verified') {
         router.replace({ pathname: '/(auth)/verify-email', params: { email: email.trim() } });
         return;
       }
-      setError(
-        submitError?.code === 'auth/invalid-credential' || submitError?.code === 'auth/wrong-password'
-          ? 'Incorrect email or password. If you signed up with Google, please use "Forgot password" to set a password.'
-          : submitError?.code === 'auth/user-not-found'
-          ? 'No account found with that email address.'
-          : submitError?.code === 'auth/too-many-requests'
-          ? 'Too many attempts. Please wait a moment and try again.'
-          : submitError?.message || 'Something went wrong while signing in. Please try again.'
-      );
+      setError(translateError(submitError));
     } finally {
       setLoading(false);
     }
