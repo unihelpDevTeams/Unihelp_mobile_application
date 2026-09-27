@@ -3,6 +3,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  documentId,
   getDoc,
   getDocs,
   limit,
@@ -445,25 +446,90 @@ export async function fetchNotifications(uid = auth.currentUser?.uid) {
 }
 
 export async function fetchNotificationsPage({ uid = auth.currentUser?.uid, pageSize = 30, cursor = null } = {}) {
-  if (!cursor) {
+  if (!uid) return { items: [], cursor: null, hasMore: false };
+  const apiCursor = cursor?.apiCursor || null;
+  const firestoreCursor = cursor?.firestoreCursor || null;
+  let apiDone = cursor?.apiDone === true;
+  let firestoreDone = cursor?.firestoreDone === true;
+  let apiItems = [];
+  let apiHasMore = false;
+  let firestoreSnapshot = null;
+
+  if (!apiDone) {
     try {
-      const { items } = await getJson('/api/notifications?pageSize=' + pageSize);
-      return { items, cursor: null, hasMore: false };
-    } catch (e) {
-      console.error('API notifications fetch failed, falling back to firebase', e);
+      const params = new URLSearchParams({ pageSize: String(pageSize) });
+      if (apiCursor) params.set('cursor', JSON.stringify(apiCursor));
+      const response = await getJson(`/api/notifications?${params.toString()}`);
+      apiItems = (response.items || []).map((item) => ({ ...item, notificationSource: 'api' }));
+      apiHasMore = response.hasMore === true;
+    } catch (error) {
+      console.error('API notifications fetch failed, falling back to firebase', error);
+      apiDone = true;
     }
   }
 
-  if (!uid) return { items: [], cursor: null, hasMore: false };
-  const constraints = [orderBy('createdAt', 'desc')];
-  if (cursor) constraints.push(startAfter(cursor));
-  constraints.push(limit(pageSize));
+  if (!firestoreDone) {
+    try {
+      const constraints = [orderBy('createdAt', 'desc'), orderBy(documentId(), 'desc')];
+      if (firestoreCursor) constraints.push(startAfter(firestoreCursor));
+      constraints.push(limit(pageSize));
+      firestoreSnapshot = await getDocs(query(
+        collection(db, COLLECTIONS.notifications, uid, 'items'),
+        ...constraints
+      ));
+    } catch (error) {
+      console.error('Firestore notifications fetch failed', error);
+      firestoreDone = true;
+    }
+  }
 
-  const snapshot = await getDocs(query(collection(db, COLLECTIONS.notifications, uid, 'items'), ...constraints));
+  const firestoreItems = firestoreSnapshot
+    ? firestoreSnapshot.docs.map((snapshot) => ({
+        id: snapshot.id,
+        ...snapshot.data(),
+        notificationSource: 'firestore',
+        notificationCursor: snapshot,
+      }))
+    : [];
+  const combined = [...apiItems, ...firestoreItems].sort((left, right) => {
+    const leftDate = typeof left.createdAt === 'string' ? new Date(left.createdAt) : left.createdAt?.toDate?.();
+    const rightDate = typeof right.createdAt === 'string' ? new Date(right.createdAt) : right.createdAt?.toDate?.();
+    const dateDifference = (rightDate?.getTime?.() || 0) - (leftDate?.getTime?.() || 0);
+    if (dateDifference) return dateDifference;
+    if (left.notificationSource === right.notificationSource && left.notificationSource === 'api') {
+      const leftId = BigInt(left.id);
+      const rightId = BigInt(right.id);
+      return rightId > leftId ? 1 : rightId < leftId ? -1 : 0;
+    }
+    return right.id.localeCompare(left.id);
+  });
+  const pageItems = combined.slice(0, pageSize);
+  const apiPageItems = pageItems.filter((item) => item.notificationSource === 'api');
+  const firestorePageItems = pageItems.filter((item) => item.notificationSource === 'firestore');
+  const lastApiItem = apiPageItems[apiPageItems.length - 1];
+  const lastFirestoreItem = firestorePageItems[firestorePageItems.length - 1];
+  const nextApiCursor = lastApiItem
+    ? { createdAt: lastApiItem.createdAt, id: lastApiItem.id }
+    : apiCursor;
+  const nextFirestoreCursor = lastFirestoreItem?.notificationCursor || firestoreCursor;
+
+  apiDone = apiDone || (!apiHasMore && apiItems.length === apiPageItems.length);
+  firestoreDone = firestoreDone || (
+    (!firestoreSnapshot || firestoreSnapshot.docs.length < pageSize) &&
+    firestoreItems.length === firestorePageItems.length
+  );
+
   return {
-    items: mapDocs(snapshot),
-    cursor: snapshot.docs[snapshot.docs.length - 1] || null,
-    hasMore: snapshot.docs.length === pageSize,
+    items: pageItems.map(({ notificationSource, notificationCursor, ...item }) => item),
+    cursor: apiDone && firestoreDone
+      ? null
+      : {
+          apiCursor: nextApiCursor,
+          firestoreCursor: nextFirestoreCursor,
+          apiDone,
+          firestoreDone,
+        },
+    hasMore: !apiDone || !firestoreDone,
   };
 }
 

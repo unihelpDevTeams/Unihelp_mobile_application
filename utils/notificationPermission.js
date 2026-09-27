@@ -6,18 +6,22 @@ import { auth, db } from '../firebase/config';
 
 const DEFAULT_API_URL = 'https://unihelp-backend-dg0o.onrender.com';
 const ANDROID_DEFAULT_CHANNEL_ID = 'default';
+const isAndroidExpoGo = Platform.OS === 'android' && Constants.appOwnership === 'expo';
+const noopSubscription = { remove: () => {} };
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    priority: 'high',
-    defaultBehavior: 'default',
-  }),
-});
+if (!isAndroidExpoGo) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+      priority: 'high',
+      defaultBehavior: 'default',
+    }),
+  });
+}
 
 const getExtra = () => Constants.expoConfig?.extra || Constants.manifest2?.extra || Constants.manifest?.extra || {};
 
@@ -39,7 +43,7 @@ const getEasProjectId = () => {
 };
 
 export const configureAndroidNotificationChannels = async () => {
-  if (Platform.OS !== 'android') {
+  if (Platform.OS !== 'android' || isAndroidExpoGo) {
     return null;
   }
 
@@ -65,6 +69,11 @@ export const requestNotificationPermission = async () => {
   try {
     if (Platform.OS === 'web') {
       console.log('[push-debug] Push notification registration skipped on web.');
+      return null;
+    }
+
+    if (isAndroidExpoGo) {
+      console.log('[push-debug] Remote push notifications require an Android development build.');
       return null;
     }
 
@@ -189,8 +198,8 @@ export const registerPushNotificationsForCurrentUser = async () => {
 };
 
 export const listenToPushTokenChanges = () => {
-  if (Platform.OS === 'web') {
-    return { remove: () => {} };
+  if (Platform.OS === 'web' || isAndroidExpoGo) {
+    return noopSubscription;
   }
 
   if (tokenListenerSubscription) {
@@ -211,9 +220,11 @@ export const listenToPushTokenChanges = () => {
 };
 
 export const listenToForegroundMessages = (handler) => {
+  if (isAndroidExpoGo) return noopSubscription;
   return Notifications.addNotificationReceivedListener(handler);
 };
 
 export const listenToNotificationResponses = (handler) => {
+  if (isAndroidExpoGo) return noopSubscription;
   return Notifications.addNotificationResponseReceivedListener(handler);
 };

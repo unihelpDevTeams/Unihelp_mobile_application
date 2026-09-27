@@ -347,7 +347,7 @@ export const sendGroupMessage = async (groupId, user, profile, payload) => {
     throw new Error('Only admins can send messages in this group right now.');
   }
 
-  await addDoc(collection(db, 'groups', groupId, 'messages'), {
+  const messageRef = await addDoc(collection(db, 'groups', groupId, 'messages'), {
     ...payload,
     senderId: user.uid,
     senderName: summary.name,
@@ -371,7 +371,7 @@ export const sendGroupMessage = async (groupId, user, profile, payload) => {
         type: 'group_message',
         category: 'Message',
         url: `/community/${groupId}`,
-        data: { groupId },
+        data: { groupId, messageId: messageRef.id },
       });
     }
   } catch (notificationError) {

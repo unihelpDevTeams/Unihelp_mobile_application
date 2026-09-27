@@ -313,7 +313,6 @@ export const cancelFriendRequest = async ({ requestId, currentUid }) => {
 
 export const removeFriend = async ({ currentUid, friendUid, currentProfile = {} }) => {
   if (!currentUid || !friendUid) throw new Error('Missing friendship details.');
-  await deleteDoc(doc(db, COLLECTIONS.friends, pairId(currentUid, friendUid)));
   await notifyUser(friendUid, {
     type: 'friend_removed',
     title: 'Friend removed',
@@ -321,6 +320,7 @@ export const removeFriend = async ({ currentUid, friendUid, currentProfile = {} 
     route: '/friends',
     data: { friendId: currentUid },
   });
+  await deleteDoc(doc(db, COLLECTIONS.friends, pairId(currentUid, friendUid)));
 };
 
 export const blockStudent = async ({ currentUid, targetUid, currentProfile = {}, targetProfile = {} }) => {
