@@ -46,3 +46,7 @@ app-example
 # Firebase Admin service account
 *-firebase-adminsdk-*.json
 *.firebase-adminsdk.json
+
+# Firebase Admin service account
+*-firebase-adminsdk-*.json
+*.firebase-adminsdk.json
