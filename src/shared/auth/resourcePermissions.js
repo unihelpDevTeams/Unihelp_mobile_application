@@ -1,6 +1,7 @@
 export const RESOURCE_ADMIN_EMAILS = [
   'iadejuwon77@gmail.com',
   'onakomayaokiki@gmail.com',
+  'agbajejoshua36@gmail.com',
 ];
 
 const emailOf = (profile, user) =>

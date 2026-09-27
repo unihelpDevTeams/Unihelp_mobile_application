@@ -21,7 +21,7 @@ import { COLLECTIONS, conversationSubcollections, groupSubcollections, profileDe
 import { sendAppNotification, getJson, postJson, putJson, patchJson, deleteJson } from './backend';
 
 const mapDocs = (snapshot) => snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-const RESOURCE_ADMIN_EMAILS = new Set(['iadejuwon77@gmail.com', 'onakomayaokiki@gmail.com']);
+const RESOURCE_ADMIN_EMAILS = new Set(['iadejuwon77@gmail.com', 'onakomayaokiki@gmail.com', 'agbajejoshua36@gmail.com']);
 const collectionMapForType = {
   announcement: COLLECTIONS.announcements,
   note: COLLECTIONS.notes,
