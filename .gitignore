@@ -42,3 +42,7 @@ app-example
 # generated native folders
 /ios
 /android
+
+# Firebase Admin service account
+*-firebase-adminsdk-*.json
+*.firebase-adminsdk.json
