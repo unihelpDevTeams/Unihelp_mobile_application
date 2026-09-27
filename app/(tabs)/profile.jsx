@@ -179,6 +179,22 @@ export default function ProfileScreen() {
   const headerFade = useRef(new Animated.Value(0)).current;
   const isMountedRef = useRef(true);
   const statusTimerRef = useRef(null);
+  const adminTapCountRef = useRef(0);
+  const adminTapTimerRef = useRef(null);
+
+  const handleAdminBadgePress = () => {
+    adminTapCountRef.current += 1;
+    if (adminTapTimerRef.current) clearTimeout(adminTapTimerRef.current);
+    
+    if (adminTapCountRef.current >= 3) {
+      adminTapCountRef.current = 0;
+      router.push('/adminLogs');
+    } else {
+      adminTapTimerRef.current = setTimeout(() => {
+        adminTapCountRef.current = 0;
+      }, 1000);
+    }
+  };
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -1104,10 +1120,10 @@ export default function ProfileScreen() {
               </Text>
             </Pressable>
             {isAdmin ? (
-              <View style={styles.pill}>
+              <Pressable style={styles.pill} onPress={handleAdminBadgePress}>
                 <Ionicons name="shield-checkmark" size={12} color={colors.brandText} />
                 <Text style={styles.pillText}>Admin</Text>
-              </View>
+              </Pressable>
             ) : null}
             {challengeStats?.rank ? (
               <Pressable onPress={() => setSheet(SHEET.PROGRESS)} style={[styles.pill, { backgroundColor: colors.orangeLight }]} accessibilityRole="button" accessibilityLabel="View progress">
