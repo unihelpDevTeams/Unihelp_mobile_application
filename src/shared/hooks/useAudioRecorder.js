@@ -1,6 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Alert } from 'react-native';
-import { Audio } from 'expo-av';
+import {
+  AudioQuality,
+  IOSOutputFormat,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioRecorder as useExpoAudioRecorder,
+} from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 import { getApiUrl } from '../services/backend';
 import { auth } from '../../../firebase/config';
@@ -12,16 +18,16 @@ const TARGET_BITRATE = 32000;
 const RECORDING_OPTIONS = {
   android: {
     extension: '.m4a',
-    outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-    audioEncoder: Audio.AndroidAudioEncoder.AAC,
+    outputFormat: 'mpeg4',
+    audioEncoder: 'aac',
     sampleRate: 44100,
     numberOfChannels: 1,
     bitRate: TARGET_BITRATE,
   },
   ios: {
     extension: '.m4a',
-    outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-    audioQuality: Audio.IOSAudioQuality.MEDIUM,
+    outputFormat: IOSOutputFormat.MPEG4AAC,
+    audioQuality: AudioQuality.MEDIUM,
     sampleRate: 44100,
     numberOfChannels: 1,
     bitRate: TARGET_BITRATE,
@@ -34,29 +40,30 @@ const RECORDING_OPTIONS = {
 
 const resetAudioMode = async () => {
   try {
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: false,
-      playsInSilentModeIOS: true,
-      shouldDuckAndroid: true,
-      playThroughEarpieceAndroid: false,
+    await setAudioModeAsync({
+      allowsRecording: false,
+      playsInSilentMode: true,
+      interruptionMode: 'duckOthers',
+      shouldRouteThroughEarpiece: false,
     });
   } catch {
     // Best effort. A failed reset should not break the send flow.
   }
 };
 
-const stopAndUnloadRecorder = async (recorder) => {
+const stopRecorder = async (recorder) => {
   if (!recorder) return null;
-
-  const stopMethod = recorder.stopAndUnloadAsync || recorder.stopAndUnloadRecording;
-  if (typeof stopMethod !== 'function') {
-    return null;
-  }
-
-  return stopMethod.call(recorder);
+  const status = recorder.getStatus();
+  if (status.isRecording) await recorder.stop();
+  const finalStatus = recorder.getStatus();
+  return {
+    ...finalStatus,
+    durationMillis: finalStatus.durationMillis || Math.round(recorder.currentTime * 1000),
+  };
 };
 
 export function useAudioRecorder({ conversationId, isPremium }) {
+  const audioRecorder = useExpoAudioRecorder(RECORDING_OPTIONS);
   const [permission, setPermission] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
@@ -72,8 +79,8 @@ export function useAudioRecorder({ conversationId, isPremium }) {
   useEffect(() => {
     const getPermission = async () => {
       try {
-        const { status } = await Audio.requestPermissionsAsync();
-        setPermission(status === 'granted');
+        const result = await requestRecordingPermissionsAsync();
+        setPermission(result.granted);
       } catch {
         setPermission(false);
       }
@@ -92,7 +99,7 @@ export function useAudioRecorder({ conversationId, isPremium }) {
     return () => {
       clearTimer();
       if (recordingRef.current) {
-        stopAndUnloadRecorder(recordingRef.current).catch(() => {});
+        stopRecorder(recordingRef.current).catch(() => {});
         recordingRef.current = null;
       }
       resetAudioMode();
@@ -111,7 +118,7 @@ export function useAudioRecorder({ conversationId, isPremium }) {
     try {
       let status = null;
       try {
-        status = await recorder.getStatusAsync();
+        status = recorder.getStatus();
       } catch {
         status = null;
       }
@@ -120,8 +127,8 @@ export function useAudioRecorder({ conversationId, isPremium }) {
         lastDurationRef.current = status.durationMillis;
       }
 
-      if (!status || status.canRecord || status.isRecording) {
-        await stopAndUnloadRecorder(recorder);
+      if (!status || status.isRecording) {
+        status = await stopRecorder(recorder);
       }
 
       return status;
@@ -152,38 +159,27 @@ export function useAudioRecorder({ conversationId, isPremium }) {
       clearTimer();
 
       if (recordingRef.current) {
-        await stopAndUnloadRecorder(recordingRef.current).catch(() => {});
-        const staleUri = recordingRef.current.getURI();
+        const staleUri = recordingRef.current.uri;
+        await stopRecorder(recordingRef.current).catch(() => {});
         if (staleUri) {
           await FileSystem.deleteAsync(staleUri, { idempotent: true }).catch(() => {});
         }
-        recordingRef.current = null;
         await resetAudioMode();
       }
 
       lastDurationRef.current = 0;
       startTimeRef.current = Date.now();
       setRecordingDuration(0);
+      recordingRef.current = audioRecorder;
 
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+        interruptionMode: 'duckOthers',
+        shouldRouteThroughEarpiece: false,
       });
-
-      const { recording } = await Audio.Recording.createAsync(
-        RECORDING_OPTIONS,
-        (status) => {
-          if (!status.isRecording) return;
-          const duration = Math.min(status.durationMillis || 0, MAX_RECORDING_DURATION_MS);
-          lastDurationRef.current = duration;
-          setRecordingDuration(duration);
-        },
-        100
-      );
-
-      recordingRef.current = recording;
+      await audioRecorder.prepareToRecordAsync(RECORDING_OPTIONS);
+      audioRecorder.record();
       setIsRecording(true);
 
       timerRef.current = setInterval(() => {
@@ -197,7 +193,7 @@ export function useAudioRecorder({ conversationId, isPremium }) {
       setIsRecording(false);
       await resetAudioMode();
     }
-  }, [clearTimer, conversationId, isPremium, permission]);
+  }, [audioRecorder, clearTimer, conversationId, isPremium, permission]);
 
   const stopRecording = useCallback(async () => {
     if (!recordingRef.current) return;
@@ -219,7 +215,7 @@ export function useAudioRecorder({ conversationId, isPremium }) {
     try {
       clearTimer();
       await stopRecorderIfNeeded(recorder);
-      const uri = recorder.getURI();
+      const uri = recorder.uri;
 
       if (uri) {
         await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
@@ -247,7 +243,7 @@ export function useAudioRecorder({ conversationId, isPremium }) {
       const status = await stopRecorderIfNeeded(recorder);
       setIsRecording(false);
 
-      const uri = recorder.getURI();
+      const uri = recorder.uri;
       if (!uri) {
         throw new Error('No recording URI available.');
       }

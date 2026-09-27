@@ -1,5 +1,4 @@
 import Constants from 'expo-constants';
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
@@ -8,20 +7,34 @@ const DEFAULT_API_URL = 'https://unihelp-backend-dg0o.onrender.com';
 const ANDROID_DEFAULT_CHANNEL_ID = 'default';
 const isAndroidExpoGo = Platform.OS === 'android' && Constants.appOwnership === 'expo';
 const noopSubscription = { remove: () => {} };
+let notificationsModulePromise = null;
 
-if (!isAndroidExpoGo) {
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-      shouldShowBanner: true,
-      shouldShowList: true,
-      priority: 'high',
-      defaultBehavior: 'default',
-    }),
-  });
-}
+const loadNotificationsModule = async () => {
+  if (isAndroidExpoGo) return null;
+  if (!notificationsModulePromise) {
+    notificationsModulePromise = import('expo-notifications')
+      .then((Notifications) => {
+        Notifications.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowAlert: true,
+            shouldPlaySound: true,
+            shouldSetBadge: false,
+            shouldShowBanner: true,
+            shouldShowList: true,
+            priority: 'high',
+            defaultBehavior: 'default',
+          }),
+        });
+        return Notifications;
+      })
+      .catch((error) => {
+        notificationsModulePromise = null;
+        console.warn('Unable to load notification support:', error?.message || error);
+        return null;
+      });
+  }
+  return notificationsModulePromise;
+};
 
 const getExtra = () => Constants.expoConfig?.extra || Constants.manifest2?.extra || Constants.manifest?.extra || {};
 
@@ -46,6 +59,9 @@ export const configureAndroidNotificationChannels = async () => {
   if (Platform.OS !== 'android' || isAndroidExpoGo) {
     return null;
   }
+
+  const Notifications = await loadNotificationsModule();
+  if (!Notifications) return null;
 
   const channel = await Notifications.setNotificationChannelAsync(ANDROID_DEFAULT_CHANNEL_ID, {
     name: 'Default',
@@ -76,6 +92,9 @@ export const requestNotificationPermission = async () => {
       console.log('[push-debug] Remote push notifications require an Android development build.');
       return null;
     }
+
+    const Notifications = await loadNotificationsModule();
+    if (!Notifications) return null;
 
     await configureAndroidNotificationChannels();
 
@@ -206,25 +225,53 @@ export const listenToPushTokenChanges = () => {
     return tokenListenerSubscription;
   }
 
-  tokenListenerSubscription = Notifications.addPushTokenListener(async () => {
-    console.log('[push-debug] Native push token changed; refreshing Expo push token registration.');
-    await registerPushNotificationsForCurrentUser();
+  let active = true;
+  let subscription = null;
+  const listenerSubscription = {
+    remove: () => {
+      active = false;
+      subscription?.remove?.();
+      if (tokenListenerSubscription === listenerSubscription) {
+        tokenListenerSubscription = null;
+      }
+    },
+  };
+  tokenListenerSubscription = listenerSubscription;
+
+  loadNotificationsModule().then((Notifications) => {
+    if (!active || !Notifications) return;
+    subscription = Notifications.addPushTokenListener(async () => {
+      console.log('[push-debug] Native push token changed; refreshing Expo push token registration.');
+      await registerPushNotificationsForCurrentUser();
+    });
+  });
+
+  return listenerSubscription;
+};
+
+const addLazyNotificationListener = (addListener, handler) => {
+  if (Platform.OS === 'web' || isAndroidExpoGo) return noopSubscription;
+
+  let active = true;
+  let subscription = null;
+  loadNotificationsModule().then((Notifications) => {
+    if (active && Notifications) subscription = addListener(Notifications, handler);
   });
 
   return {
     remove: () => {
-      tokenListenerSubscription?.remove?.();
-      tokenListenerSubscription = null;
+      active = false;
+      subscription?.remove?.();
     },
   };
 };
 
-export const listenToForegroundMessages = (handler) => {
-  if (isAndroidExpoGo) return noopSubscription;
-  return Notifications.addNotificationReceivedListener(handler);
-};
+export const listenToForegroundMessages = (handler) => addLazyNotificationListener(
+  (Notifications, callback) => Notifications.addNotificationReceivedListener(callback),
+  handler
+);
 
-export const listenToNotificationResponses = (handler) => {
-  if (isAndroidExpoGo) return noopSubscription;
-  return Notifications.addNotificationResponseReceivedListener(handler);
-};
+export const listenToNotificationResponses = (handler) => addLazyNotificationListener(
+  (Notifications, callback) => Notifications.addNotificationResponseReceivedListener(callback),
+  handler
+);

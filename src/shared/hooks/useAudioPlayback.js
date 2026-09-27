@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Audio } from 'expo-av';
+import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
 const POLL_INTERVAL = 200;
 
@@ -13,52 +13,31 @@ const POLL_INTERVAL = 200;
  * @returns {Object} Playback controls and state
  */
 export function useAudioPlayback({ isPremium }) {
-  const [sound, setSound] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  const soundRef = useRef(null);
-  const positionRef = useRef(null);
   const finishedRef = useRef(false);
-  const currentUrlRef = useRef(null);
+  const player = useAudioPlayer(null, { updateInterval: POLL_INTERVAL });
+  const status = useAudioPlayerStatus(player);
 
-  // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      if (positionRef.current) clearInterval(positionRef.current);
-      if (soundRef.current) {
-        soundRef.current.unloadAsync().catch(() => {});
-        soundRef.current = null;
-      }
-    };
-  }, []);
+    setIsLoaded(status.isLoaded);
+    setIsPlaying(status.playing);
 
-  const startPositionPolling = useCallback(() => {
-    if (positionRef.current) clearInterval(positionRef.current);
-    positionRef.current = setInterval(async () => {
-      if (soundRef.current) {
-        try {
-          const status = await soundRef.current.getStatusAsync();
-          if (status.isLoaded) {
-            setPosition(status.positionMillis || 0);
-            
-            if (status.didJustFinish) {
-              setIsPlaying(false);
-              finishedRef.current = true;
-              setPosition(status.durationMillis || 0);
-              clearInterval(positionRef.current);
-              positionRef.current = null;
-            }
-          }
-        } catch {
-          // Ignore polling errors
-        }
-      }
-    }, POLL_INTERVAL);
-  }, []);
+    if (status.isLoaded) {
+      setIsLoading(false);
+      setPosition(status.currentTime * 1000);
+      setDuration(status.duration * 1000);
+    }
+
+    if (status.didJustFinish) {
+      finishedRef.current = true;
+      setPosition(status.duration * 1000);
+    }
+  }, [status.currentTime, status.didJustFinish, status.duration, status.isLoaded, status.playing]);
 
   const play = useCallback(async (audioUrl, messageDuration) => {
     if (!isPremium) {
@@ -75,122 +54,71 @@ export function useAudioPlayback({ isPremium }) {
       setIsLoading(true);
       setError(null);
       finishedRef.current = false;
-      currentUrlRef.current = audioUrl;
-
-      // Unload previous sound if any
-      if (soundRef.current) {
-        await soundRef.current.unloadAsync();
-        soundRef.current = null;
-      }
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
-
-      const { sound: newSound } = await Audio.Sound.createAsync(
-        { uri: audioUrl },
-        { shouldPlay: true },
-        (status) => {
-          if (status.isLoaded) {
-            const actualDuration = status.durationMillis || messageDuration || 0;
-            setDuration(actualDuration);
-            
-            if (status.didJustFinish) {
-              setIsPlaying(false);
-              finishedRef.current = true;
-              setPosition(actualDuration);
-              if (positionRef.current) {
-                clearInterval(positionRef.current);
-                positionRef.current = null;
-              }
-            }
-          }
-        }
-      );
-
-      soundRef.current = newSound;
-      setSound(newSound);
-      setIsLoaded(true);
-      setIsPlaying(true);
-      setPosition(0);
       setDuration(messageDuration || 0);
 
-      startPositionPolling();
+      await setAudioModeAsync({
+        playsInSilentModeIOS: true,
+        interruptionMode: 'duckOthers',
+        shouldRouteThroughEarpiece: false,
+      });
+      setPosition(0);
+      player.replace({ uri: audioUrl });
+      player.play();
     } catch (err) {
       console.error('[useAudioPlayback] Play failed:', err);
       setError('Failed to play voice message.');
     } finally {
       setIsLoading(false);
     }
-  }, [isPremium, startPositionPolling]);
+  }, [isPremium, player]);
 
   const pause = useCallback(async () => {
-    if (!soundRef.current) return;
+    if (!isLoaded) return;
     try {
-      await soundRef.current.pauseAsync();
+      player.pause();
       setIsPlaying(false);
-      if (positionRef.current) {
-        clearInterval(positionRef.current);
-        positionRef.current = null;
-      }
     } catch (err) {
       console.error('[useAudioPlayback] Pause failed:', err);
     }
-  }, []);
+  }, [isLoaded, player]);
 
   const resume = useCallback(async () => {
-    if (!soundRef.current) return;
+    if (!isLoaded) return;
     try {
-      // If already finished, restart from beginning
       if (finishedRef.current) {
         finishedRef.current = false;
-        await soundRef.current.replayAsync();
-        setIsPlaying(true);
-        startPositionPolling();
-        return;
+        await player.seekTo(0);
       }
-      
-      await soundRef.current.playAsync();
-      setIsPlaying(true);
-      startPositionPolling();
+      player.play();
     } catch (err) {
       console.error('[useAudioPlayback] Resume failed:', err);
     }
-  }, [startPositionPolling]);
+  }, [isLoaded, player]);
 
   const seek = useCallback(async (millis) => {
-    if (!soundRef.current) return;
+    if (!isLoaded) return;
     try {
       finishedRef.current = false;
-      await soundRef.current.setPositionAsync(millis);
+      await player.seekTo(millis / 1000);
       setPosition(millis);
     } catch (err) {
       console.error('[useAudioPlayback] Seek failed:', err);
     }
-  }, []);
+  }, [isLoaded, player]);
 
   const stop = useCallback(async () => {
-    if (!soundRef.current) return;
+    if (!isLoaded) return;
     try {
-      if (positionRef.current) clearInterval(positionRef.current);
-      positionRef.current = null;
-      await soundRef.current.stopAsync();
-      await soundRef.current.unloadAsync();
-      soundRef.current = null;
-      setSound(null);
-      setIsLoaded(false);
+      player.pause();
+      await player.seekTo(0);
       setIsPlaying(false);
       setPosition(0);
       setDuration(0);
       finishedRef.current = false;
-      currentUrlRef.current = null;
     } catch (err) {
       console.error('[useAudioPlayback] Stop failed:', err);
     }
-  }, []);
+  }, [isLoaded, player]);
 
   const formatTime = useCallback((millis) => {
     if (!millis || millis < 0) return '0:00';
