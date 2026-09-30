@@ -210,7 +210,7 @@ export default function GroupDetailPage() {
     chatContent: {
       paddingHorizontal: 14,
       paddingTop: 12,
-      paddingBottom: 14,
+      paddingBottom: 40,
     },
 
     /* Jump to latest */

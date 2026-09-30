@@ -140,20 +140,15 @@ export default function AiPage() {
     topIconButton: { width: 34, height: 34, borderRadius: 17, backgroundColor: c.surface, borderWidth: 1, borderColor: c.borderDefault, alignItems: 'center', justifyContent: 'center' },
 
     // Home / workspace hero
-    welcomeWrap: { flex: 1, paddingTop: s.sm },
-    heroPanel: { backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault, borderRadius: r['2xl'], padding: s.lg, overflow: 'hidden', marginBottom: s.lg },
-    heroGlow: { position: 'absolute', width: 150, height: 150, borderRadius: 75, right: -58, top: -58, backgroundColor: c.brandLight },
-    welcomeIconRing: { width: 52, height: 52, borderRadius: r['2xl'], backgroundColor: c.brandLight, borderWidth: 1, borderColor: c.brandBorder, alignItems: 'center', justifyContent: 'center', marginBottom: s.md },
-    welcomeTitle: { color: c.textPrimary, fontSize: 23, fontWeight: '900', marginBottom: s.xs, maxWidth: '86%' },
-    welcomeText: { color: c.textSecondary, fontSize: 13, lineHeight: 19, marginBottom: s.md, maxWidth: '92%' },
-    heroStatsRow: { flexDirection: 'row', gap: s.sm, flexWrap: 'wrap' },
-    heroStat: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: c.surfaceSecondary || c.canvasLight, borderRadius: r.full, paddingHorizontal: s.sm, paddingVertical: 6 },
-    heroStatText: { color: c.textSecondary, fontSize: 11, fontWeight: '800' },
-    sectionLabel: { color: c.textTertiary, fontSize: 11, fontWeight: '900', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: s.sm },
-    quickPromptGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: s.sm, marginBottom: s.lg },
-    quickPromptCard: { width: '48%', backgroundColor: c.surface, borderWidth: 1, borderColor: c.borderDefault, borderRadius: r.xl, padding: s.md, gap: 8 },
-    quickPromptIcon: { width: 30, height: 30, borderRadius: r.md, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
-    quickPromptTitle: { color: c.textPrimary, fontSize: 12.5, fontWeight: '900' },
+    welcomeWrap: { flex: 1, paddingTop: 40, paddingHorizontal: s.sm },
+    geminiHero: { alignItems: 'flex-start', marginBottom: 40 },
+    geminiHello: { fontSize: 36, fontWeight: '600', color: c.brand, letterSpacing: -0.5, marginBottom: 4 },
+    geminiSub: { fontSize: 36, fontWeight: '600', color: c.textTertiary, letterSpacing: -0.5 },
+    sectionLabel: { color: c.textSecondary, fontSize: 13, fontWeight: '600', marginBottom: s.md },
+    quickPromptGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: s.sm, marginBottom: 32 },
+    quickPromptCard: { width: '48%', backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault, borderRadius: 24, padding: s.lg, gap: 12 },
+    quickPromptIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
+    quickPromptTitle: { color: c.textPrimary, fontSize: 13, fontWeight: '500', lineHeight: 18 },
     quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: s.sm },
 
     // Messages list
@@ -183,24 +178,24 @@ export default function AiPage() {
     retryButton: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     retryText: { color: c.error, fontSize: 12, fontWeight: '900', textDecorationLine: 'underline' },
 
-    bottomDock: { gap: s.sm, paddingTop: s.sm, borderTopWidth: 1, borderTopColor: c.borderDefault, backgroundColor: c.background },
-    composer: { backgroundColor: c.surface, borderRadius: 20, borderWidth: 1.5, borderColor: c.borderDefault, padding: 8, gap: 8 },
+    bottomDock: { gap: s.sm, paddingTop: s.md, paddingBottom: 16, backgroundColor: c.background },
+    composer: { backgroundColor: c.card, borderRadius: 32, borderWidth: 1, borderColor: c.borderDefault, paddingVertical: 6, paddingHorizontal: 6, gap: 8 },
     composerFocused: { borderColor: c.brand },
-    composerRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
-    attachmentChip: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: c.brandLight, borderRadius: r.lg, paddingHorizontal: s.sm, paddingVertical: 8 },
-    attachmentIconWrap: { width: 26, height: 26, borderRadius: 9, backgroundColor: c.card, alignItems: 'center', justifyContent: 'center' },
+    composerRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    attachmentChip: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: c.surfaceSecondary || c.canvasLight, borderRadius: r.xl, paddingHorizontal: s.md, paddingVertical: 10, marginHorizontal: 12, marginTop: 12 },
+    attachmentIconWrap: { width: 28, height: 28, borderRadius: 14, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },
     attachmentCopy: { flex: 1 },
-    attachmentText: { color: c.brandText, fontSize: 12.5, fontWeight: '700' },
-    attachmentMeta: { color: c.textSecondary, fontSize: 10.5, marginTop: 1 },
-    attachButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
-    attachButtonPressed: { backgroundColor: c.brandBorder },
+    attachmentText: { color: c.textPrimary, fontSize: 13, fontWeight: '600' },
+    attachmentMeta: { color: c.textSecondary, fontSize: 11, marginTop: 2 },
+    attachButton: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
+    attachButtonPressed: { backgroundColor: c.surfaceSecondary || c.canvasLight },
     attachButtonDisabled: { opacity: 0.4 },
-    composerInput: { flex: 1, color: c.textPrimary, fontSize: 14, paddingHorizontal: 8, paddingVertical: 8, minHeight: 38, maxHeight: 110 },
-    sendButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center' },
+    composerInput: { flex: 1, color: c.textPrimary, fontSize: 16, paddingHorizontal: 6, paddingVertical: 12, minHeight: 44, maxHeight: 120 },
+    sendButton: { width: 42, height: 42, borderRadius: 21, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center' },
     sendButtonPressed: { backgroundColor: c.brandDark },
-    sendButtonDisabled: { opacity: 0.4 },
+    sendButtonDisabled: { opacity: 0.4, backgroundColor: c.surfaceSecondary || c.canvasLight },
     uploadingIndicator: { marginLeft: 8 },
-    modeStrip: { flexGrow: 0 },
+    modeStrip: { flexGrow: 0, marginBottom: s.xs },
     modeStripRow: { gap: 8 },
     modeChip: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 34, backgroundColor: c.brandLight, borderRadius: r.full, paddingHorizontal: s.md, borderWidth: 1, borderColor: c.brandBorder },
     modeChipActive: { backgroundColor: c.brand, borderColor: c.brand },
@@ -472,27 +467,9 @@ export default function AiPage() {
             keyboardShouldPersistTaps="handled"
           >
             {!formMode ? (
-              <View style={styles.heroPanel}>
-                <View style={styles.heroGlow} />
-                <View style={styles.welcomeIconRing}>
-                  <Ionicons name="sparkles" size={24} color={colors.brand} />
-                </View>
-                <Text style={styles.welcomeTitle}>Study with a sharper AI workspace</Text>
-                <Text style={styles.welcomeText}>Solve questions, explain hard topics, summarize notes, and build practice sessions from one place.</Text>
-                <View style={styles.heroStatsRow}>
-                  <View style={styles.heroStat}>
-                    <Ionicons name="flash-outline" size={13} color={colors.brand} />
-                    <Text style={styles.heroStatText}>Instant study help</Text>
-                  </View>
-                  <View style={styles.heroStat}>
-                    <Ionicons name="attach-outline" size={13} color={colors.brand} />
-                    <Text style={styles.heroStatText}>Files supported</Text>
-                  </View>
-                  <View style={styles.heroStat}>
-                    <Ionicons name={isPremium ? 'star' : 'lock-open-outline'} size={13} color={colors.brand} />
-                    <Text style={styles.heroStatText}>{isPremium ? 'Premium active' : `${usageStatus?.remaining ?? 0} left today`}</Text>
-                  </View>
-                </View>
+              <View style={styles.geminiHero}>
+                <Text style={styles.geminiHello}>Hello, {profile?.displayName?.split(' ')[0] || 'Student'}</Text>
+                <Text style={styles.geminiSub}>How can I help you today?</Text>
               </View>
             ) : null}
 
