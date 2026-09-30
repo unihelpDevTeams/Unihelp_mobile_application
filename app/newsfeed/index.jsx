@@ -96,6 +96,7 @@ export default function NewsFeedPage() {
   const [timeFilter, setTimeFilter] = useState('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [likedPostIds, setLikedPostIds] = useState(() => new Set());
+  const [searchOpen, setSearchOpen] = useState(false);
   const viewedPosts = useRef(new Set());
   const marqueeX = useRef(new Animated.Value(0)).current;
 
@@ -130,32 +131,25 @@ export default function NewsFeedPage() {
 
     // Composer
     composer: {
-      backgroundColor: c.card,
-      borderWidth: 1,
-      borderColor: c.borderDefault,
-      borderRadius: r['2xl'],
-      padding: s.md,
-      marginBottom: s.md,
+      backgroundColor: c.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: c.borderDefault,
+      paddingVertical: s.md,
+      paddingHorizontal: s.lg,
+      marginBottom: 0,
     },
-    composerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    avatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: c.brandLight },
+    composerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.brandLight },
     composerPlaceholder: {
       flex: 1,
       color: c.textSecondary,
-      backgroundColor: c.surfacePrimary,
-      borderRadius: 999,
-      paddingHorizontal: 16,
-      paddingVertical: 11,
-      fontSize: 13.5,
-      fontWeight: '600',
+      fontSize: 16,
+      fontWeight: '500',
     },
     composerInput: {
       color: c.textPrimary,
-      backgroundColor: c.surfacePrimary,
-      borderRadius: r.xl,
-      paddingHorizontal: 14,
-      paddingVertical: 11,
-      fontSize: 14,
+      fontSize: 16,
+      lineHeight: 22,
     },
     composerDivider: { height: 1, backgroundColor: c.borderDefault, marginTop: 12 },
     audienceLabel: { marginTop: 12, color: c.textTertiary, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
@@ -183,13 +177,13 @@ export default function NewsFeedPage() {
     cancelActionText: { color: c.textTertiary, fontSize: 12, fontWeight: '800' },
     postButton: {
       marginLeft: 'auto',
-      paddingHorizontal: 16,
+      paddingHorizontal: 18,
       paddingVertical: 9,
-      borderRadius: r.lg,
+      borderRadius: 999,
       backgroundColor: c.brand,
     },
     postButtonDisabled: { opacity: 0.5 },
-    postButtonText: { color: c.onBrand, fontSize: 12.5, fontWeight: '900' },
+    postButtonText: { color: c.onBrand, fontSize: 13, fontWeight: '800' },
     presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 12 },
     preset: {
       width: 30,
@@ -220,52 +214,46 @@ export default function NewsFeedPage() {
 
     // Post cards
     card: {
-      backgroundColor: c.card,
-      borderRadius: r['3xl'],
-      borderWidth: 1,
-      borderColor: c.borderDefault,
-      overflow: 'hidden',
-      marginBottom: s.md,
+      backgroundColor: c.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: c.borderDefault,
+      paddingHorizontal: s.md,
+      paddingTop: s.lg,
+      paddingBottom: s.md,
     },
     skeletonCard: {
-      backgroundColor: c.card,
-      borderRadius: r['3xl'],
-      borderWidth: 1,
-      borderColor: c.borderDefault,
-      overflow: 'hidden',
-      marginBottom: s.md,
+      backgroundColor: c.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: c.borderDefault,
       padding: s.lg,
     },
     skeletonLine: { height: 12, borderRadius: 6, backgroundColor: c.surfacePrimary },
     skeletonBlock: { height: 140, borderRadius: r.xl, backgroundColor: c.surfacePrimary, marginTop: 12 },
-    image: { height: 260, width: '100%', backgroundColor: c.surfacePrimary },
-    body: { padding: s.lg },
+    image: { height: 260, width: '100%', backgroundColor: c.surfacePrimary, borderRadius: r.xl, marginTop: 10 },
+    body: { paddingHorizontal: 0 },
     postHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    author: { flex: 1, color: c.textPrimary, fontSize: 14, fontWeight: '800' },
-    verifiedBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 5, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 999, backgroundColor: c.brandLight },
-    verifiedBadgeText: { color: c.brandText, fontSize: 9, fontWeight: '900' },
-    time: { color: c.textTertiary, fontSize: 11, marginTop: 2 },
+    author: { color: c.textPrimary, fontSize: 15, fontWeight: '800' },
+    verifiedBadge: { flexDirection: 'row', alignItems: 'center', gap: 2, marginLeft: 4 },
+    verifiedBadgeText: { display: 'none' },
+    time: { color: c.textTertiary, fontSize: 13 },
     menu: {
       width: 30,
       height: 30,
-      borderRadius: 10,
+      borderRadius: 15,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: c.surfacePrimary,
     },
-    description: { marginTop: 12, fontSize: 14, lineHeight: 21, color: c.textPrimary },
-    colored: { minHeight: 220, justifyContent: 'center', alignItems: 'center', padding: 28 },
+    description: { marginTop: 8, fontSize: 15, lineHeight: 22, color: c.textPrimary },
+    colored: { minHeight: 220, justifyContent: 'center', alignItems: 'center', padding: 28, borderRadius: r.xl, marginTop: 10 },
     coloredText: { color: '#fff', fontSize: 22, lineHeight: 30, textAlign: 'center', fontWeight: '900' },
-    metaRow: { flexDirection: 'row', gap: 8, marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: c.borderDefault },
+    metaRow: { flexDirection: 'row', justifyContent: 'flex-start', gap: 24, marginTop: 12 },
     metaButton: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 5,
-      paddingHorizontal: 10,
+      gap: 6,
       paddingVertical: 6,
-      borderRadius: r.lg,
     },
-    metaButtonActive: { backgroundColor: c.brandLight },
+    metaButtonActive: {},
     metaText: { fontSize: 12.5, fontWeight: '800', color: c.textSecondary },
     metaTextActive: { color: '#DC2626' },
     commentRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
@@ -680,15 +668,13 @@ export default function NewsFeedPage() {
           <Pressable onPress={() => openProfilePreview(item)} accessibilityRole="button" accessibilityLabel={`Open ${item.authorName || 'student'} profile`}>
             {item.authorAvatar ? <Image source={{ uri: item.authorAvatar }} style={styles.avatar} contentFit="cover" /> : <View style={styles.avatar} />}
           </Pressable>
-          <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={styles.author}>{item.authorName || 'UniHelp student'}</Text>
-              {item.authorPremium ? <View style={styles.verifiedBadge}><Ionicons name="checkmark-circle" size={12} color={colors.brand} /><Text style={styles.verifiedBadgeText}>Premium</Text></View> : null}
-            </View>
-            <Text style={styles.time}>{timeAgo(item.createdAt)}</Text>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+            <Text style={styles.author}>{item.authorName || 'UniHelp student'}</Text>
+            {item.authorPremium ? <View style={styles.verifiedBadge}><Ionicons name="checkmark-circle" size={14} color={colors.brand} /></View> : null}
+            <Text style={styles.time}>· {timeAgo(item.createdAt)}</Text>
           </View>
           <Pressable style={({ pressed }) => [styles.menu, pressed && { opacity: 0.7 }]} onPress={() => handlePostMenu(item)}>
-            <Ionicons name="ellipsis-horizontal" size={18} color={colors.textSecondary} />
+            <Ionicons name="ellipsis-horizontal" size={16} color={colors.textSecondary} />
           </Pressable>
         </View>
       </View>
@@ -744,29 +730,34 @@ export default function NewsFeedPage() {
   const canSubmit = content.trim().length > 0 && !(postType === 'image' && !selectedImage);
   const activeFilterCount = [typeFilter !== 'all', sortFilter !== 'smart', timeFilter !== 'all'].filter(Boolean).length;
 
+  const headerActions = (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+      <Pressable onPress={() => setFiltersOpen(true)} hitSlop={8}>
+        <Ionicons name="options-outline" size={24} color={colors.textPrimary} />
+        {activeFilterCount > 0 && <View style={styles.filterBadge}><Text style={styles.filterBadgeText}>{activeFilterCount}</Text></View>}
+      </Pressable>
+      <Pressable onPress={() => setSearchOpen(!searchOpen)} hitSlop={8}>
+        <Ionicons name="search" size={22} color={colors.textPrimary} />
+      </Pressable>
+    </View>
+  );
+
   return (
-    <ScreenShell title="Feed" subtitle="What is happening with your friends." showBack={false} scrollable={false} loading={loading}>
-      <View
-        style={styles.noticeMarquee}
-        accessibilityRole="alert"
-        accessibilityLabel="Feed guidelines: Share educational updates, school information, opportunities, and useful student resources. Avoid irrelevant or offensive content."
-      >
-        <Animated.View style={[styles.noticeTrack, { transform: [{ translateX: marqueeX }] }]}>
-          {[1, 2].map((copy) => (
-            <View key={copy} style={styles.noticeItem} accessible={false}>
-              <Ionicons name="information-circle-outline" size={16} color={colors.gold || '#B45309'} />
-              <Text style={styles.noticeText}>Keep the Feed professional: share educational updates, school information, opportunities, and useful student resources.</Text>
-            </View>
-          ))}
-        </Animated.View>
-      </View>
+    <ScreenShell title="Feed" subtitle="What is happening with your friends." showBack={false} scrollable={false} loading={loading} actions={headerActions}>
+      {searchOpen && (
+        <View style={[styles.searchWrap, { marginHorizontal: 16, marginTop: 12, marginBottom: 4 }]}>
+          <Ionicons name="search-outline" size={17} color={colors.textTertiary} />
+          <TextInput value={search} onChangeText={setSearch} placeholder="Search posts or hashtags" placeholderTextColor={colors.placeholder} style={styles.searchInput} autoFocus />
+          {search ? <Pressable onPress={() => setSearch('')}><Ionicons name="close-circle" size={17} color={colors.textTertiary} /></Pressable> : null}
+        </View>
+      )}
 
       <View style={styles.composer}>
         <View style={styles.composerRow}>
           {viewerAvatar ? <Image source={{ uri: viewerAvatar }} style={styles.avatar} contentFit="cover" /> : <View style={styles.avatar} />}
           <Pressable style={{ flex: 1 }} onPress={() => setComposerOpen(true)}>
             <Text style={styles.composerPlaceholder} numberOfLines={1}>
-              {editingPost ? 'Editing your post' : "What's on your mind?"}
+              {editingPost ? 'Editing your post' : "What's happening?"}
             </Text>
           </Pressable>
         </View>
@@ -776,7 +767,7 @@ export default function NewsFeedPage() {
             <TextInput
               value={content}
               onChangeText={setContent}
-              placeholder="Share something with your friends"
+              placeholder="What's happening?"
               placeholderTextColor={colors.placeholder}
               multiline
               autoFocus
@@ -864,16 +855,6 @@ export default function NewsFeedPage() {
             </View>
           </>
         ) : null}
-      </View>
-
-      <View style={styles.searchWrap}>
-        <Ionicons name="search-outline" size={17} color={colors.textTertiary} />
-        <TextInput value={search} onChangeText={setSearch} placeholder="Search posts or hashtags" placeholderTextColor={colors.placeholder} style={styles.searchInput} />
-        {search ? <Pressable onPress={() => setSearch('')}><Ionicons name="close-circle" size={17} color={colors.textTertiary} /></Pressable> : null}
-        <Pressable style={styles.filterIconButton} onPress={() => setFiltersOpen(true)} accessibilityRole="button" accessibilityLabel="Open feed filters">
-          <Ionicons name="options-outline" size={18} color={colors.brand} />
-          {activeFilterCount ? <View style={styles.filterBadge}><Text style={styles.filterBadgeText}>{activeFilterCount}</Text></View> : null}
-        </Pressable>
       </View>
 
       {loading && !items.length ? (
@@ -981,12 +962,9 @@ export default function NewsFeedPage() {
       </Modal>
 
       <Modal visible={Boolean(commentsPost)} transparent animationType="slide" onRequestClose={closeComments}>
-        <Pressable style={styles.modalBackdrop} onPress={closeComments}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.commentsSheet}
-          >
-            <Pressable style={{ flex: 1 }} onPress={(event) => event.stopPropagation()}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={styles.modalBackdrop} onPress={closeComments}>
+            <Pressable style={styles.commentsSheet} onPress={(event) => event.stopPropagation()}>
               <View style={styles.commentsHeader}>
                 <View>
                   <Text style={styles.commentsTitle}>Comments</Text>
@@ -1036,8 +1014,8 @@ export default function NewsFeedPage() {
                 </Pressable>
               </View>
             </Pressable>
-          </KeyboardAvoidingView>
-        </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal visible={Boolean(imagePreview)} transparent animationType="fade" onRequestClose={() => setImagePreview(null)}>
