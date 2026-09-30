@@ -350,6 +350,13 @@ export default function NewsFeedPage() {
   }, [marqueeX]);
 
   const loadFeed = useCallback(async (refresh = false) => {
+    if (!user?.uid) {
+      setItems([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
     if (refresh) setRefreshing(true); else setLoading(true);
     try {
       const response = await getJson('/api/feed?limit=20');

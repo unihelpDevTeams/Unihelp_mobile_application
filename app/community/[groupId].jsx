@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   PanResponder,
@@ -12,7 +14,6 @@ import {
   Text,
   TextInput,
   View,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -50,6 +51,8 @@ const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 const REACTION_ERROR_AUTO_DISMISS_MS = 3000;
 const SWIPE_REPLY_MAX = 88;
 const SWIPE_REPLY_THRESHOLD = 56;
+const NEAR_BOTTOM_PX = 140;
+const GROUP_WINDOW_MS = 5 * 60 * 1000;
 
 // Deterministic pastel palette so each sender gets a consistent avatar/name colour
 const AVATAR_PALETTE = ['#4F46E5', '#0EA5E9', '#F59E0B', '#EF4444', '#10B981', '#EC4899', '#8B5CF6'];
@@ -65,6 +68,39 @@ const initialsForName = (name = '') =>
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join('') || '?';
+
+const pluralize = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+// createdAt can be a Firestore Timestamp, a {seconds} object, a Date/ISO string, or null (pending write).
+const getMillis = (message) => {
+  const created = message?.createdAt;
+  if (!created) return 0;
+  if (typeof created.toMillis === 'function') return created.toMillis();
+  if (typeof created.seconds === 'number') return created.seconds * 1000;
+  const parsed = new Date(created).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+const startOfDay = (ms) => {
+  const d = new Date(ms);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+};
+const isSameDay = (a, b) => startOfDay(a) === startOfDay(b);
+const dayLabel = (ms) => {
+  const diff = Math.round((startOfDay(Date.now()) - startOfDay(ms)) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return new Date(ms).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+};
+
+// Two messages belong to one visual group if same sender, same day, and close in time.
+const inSameGroup = (a, b) => {
+  if (!a || !b || a.senderId !== b.senderId) return false;
+  const am = getMillis(a);
+  const bm = getMillis(b);
+  if (am && bm) return isSameDay(am, bm) && Math.abs(bm - am) <= GROUP_WINDOW_MS;
+  return true;
+};
 
 // Shared drag-to-dismiss behaviour for bottom sheets. Attach `panHandlers` to
 // the sheet's handle/header only, and wrap the sheet body in an Animated.View
@@ -111,7 +147,17 @@ export default function GroupDetailPage() {
   const [replyTo, setReplyTo] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
   const [editText, setEditText] = useState('');
+
+  // Chat layout / scrolling
   const scrollRef = useRef(null);
+  const inputRef = useRef(null);
+  const containerRef = useRef(null);
+  const nearBottomRef = useRef(true);
+  const initialScrolledRef = useRef(false);
+  const editCloseTimer = useRef(null);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
 
   // Reactions
   const [reactionPickerFor, setReactionPickerFor] = useState(null);
@@ -148,14 +194,15 @@ export default function GroupDetailPage() {
       flex: 1,
       backgroundColor: c.background,
     },
+    flex: {
+      flex: 1,
+    },
     chatArea: {
       flex: 1,
     },
+    // The composer is now a normal flex child under the list (not absolutely positioned),
+    // so the list is always sized to end exactly where the composer begins.
     composerOuter: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: 0,
       backgroundColor: c.surface,
       borderTopWidth: 1,
       borderColor: c.borderDefault,
@@ -163,7 +210,27 @@ export default function GroupDetailPage() {
     chatContent: {
       paddingHorizontal: 14,
       paddingTop: 12,
-      paddingBottom: 8,
+      paddingBottom: 14,
+    },
+
+    /* Jump to latest */
+    jumpButton: {
+      position: 'absolute',
+      right: 14,
+      bottom: 12,
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      shadowColor: c.shadow || '#000',
+      shadowOpacity: 0.15,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 4,
     },
 
     /* Hero / group info */
@@ -284,14 +351,36 @@ export default function GroupDetailPage() {
       flex: 1,
     },
 
+    /* Date dividers */
+    dateDividerWrap: {
+      alignItems: 'center',
+      marginVertical: 10,
+    },
+    dateDividerPill: {
+      backgroundColor: c.surfaceSecondary,
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 4,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+    },
+    dateDividerText: {
+      color: c.textSecondary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+
     /* Messages */
     messagesWrap: {
-      marginBottom: 8,
+      marginBottom: 4,
     },
     row: {
       flexDirection: 'row',
-      marginBottom: 4,
+      marginBottom: 3,
       maxWidth: '100%',
+    },
+    rowEnd: {
+      marginBottom: 10,
     },
     rowTheirs: {
       justifyContent: 'flex-start',
@@ -299,12 +388,9 @@ export default function GroupDetailPage() {
     rowMine: {
       justifyContent: 'flex-end',
     },
-    rowGrouped: {
-      marginTop: -2,
-    },
     swipeReplyIconTheirs: {
       position: 'absolute',
-      left: 2,
+      left: 38, // sits just after the 36px avatar slot so it is never hidden behind it
       top: '50%',
       marginTop: -12,
       width: 24,
@@ -344,25 +430,44 @@ export default function GroupDetailPage() {
     },
     bubble: {
       paddingHorizontal: 14,
-      paddingVertical: 10,
-      shadowColor: c.shadow || '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 1, elevation: 1,
+      paddingVertical: 9,
+      shadowColor: c.shadow || '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.1,
+      shadowRadius: 1,
+      elevation: 1,
     },
+    // Only the last bubble in a group gets the "tail" corner (radius 4).
     bubbleTheirs: {
       backgroundColor: c.surfacePrimary,
-      borderTopLeftRadius: 20, borderTopRightRadius: 20, borderBottomRightRadius: 20, borderBottomLeftRadius: 4,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      borderBottomRightRadius: 20,
+      borderBottomLeftRadius: 4,
       borderWidth: 1,
       borderColor: c.borderDefault,
     },
-    bubbleTheirsGrouped: {
-      borderTopLeftRadius: 20,
+    bubbleTheirsNoTail: {
+      borderBottomLeftRadius: 20,
     },
     bubbleMine: {
       backgroundColor: c.brand,
-      borderTopLeftRadius: 20, borderTopRightRadius: 20, borderBottomLeftRadius: 20, borderBottomRightRadius: 4,
-      marginLeft: 36,
-    },
-    bubbleMineGrouped: {
+      borderTopLeftRadius: 20,
       borderTopRightRadius: 20,
+      borderBottomLeftRadius: 20,
+      borderBottomRightRadius: 4,
+    },
+    bubbleMineNoTail: {
+      borderBottomRightRadius: 20,
+    },
+    // Stickers float without a coloured bubble behind them.
+    bubbleSticker: {
+      backgroundColor: 'transparent',
+      borderWidth: 0,
+      paddingHorizontal: 2,
+      paddingVertical: 2,
+      shadowOpacity: 0,
+      elevation: 0,
     },
     messageAuthor: {
       fontWeight: '800',
@@ -371,17 +476,22 @@ export default function GroupDetailPage() {
     },
     messageBody: {
       color: c.inkLight,
-      fontSize: 14,
+      fontSize: 14.5,
       lineHeight: 20,
     },
     messageBodyMine: {
       color: '#FFFFFF',
     },
+    messageDeleted: {
+      fontStyle: 'italic',
+      opacity: 0.75,
+    },
     bubbleFooter: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'flex-end',
-      marginTop: 4,
+      gap: 4,
+      marginTop: 3,
     },
     messageTime: {
       color: c.textTertiary,
@@ -391,7 +501,7 @@ export default function GroupDetailPage() {
       color: c.brandGlow,
     },
     kebabButton: {
-      marginLeft: 8,
+      marginLeft: 4,
       paddingHorizontal: 2,
       paddingVertical: 2,
     },
@@ -415,11 +525,18 @@ export default function GroupDetailPage() {
       fontWeight: '800',
       fontSize: 11,
     },
+    // Text on the translucent-white block inside a brand-coloured bubble must be light.
+    replyAuthorMine: {
+      color: '#FFFFFF',
+    },
     replyText: {
       marginTop: 2,
       color: c.textSecondary,
       fontSize: 12,
       lineHeight: 16,
+    },
+    replyTextMine: {
+      color: 'rgba(255,255,255,0.85)',
     },
 
     /* Reactions */
@@ -537,6 +654,9 @@ export default function GroupDetailPage() {
       alignItems: 'center',
       justifyContent: 'center',
     },
+    actionSheetIconWrapDanger: {
+      backgroundColor: c.redLight,
+    },
     actionSheetLabel: {
       fontSize: 14.5,
       fontWeight: '700',
@@ -588,7 +708,7 @@ export default function GroupDetailPage() {
       borderWidth: 1,
       borderColor: c.borderDefault,
       padding: 12,
-      marginBottom: 10,
+      marginBottom: 12,
     },
     requestsTitle: {
       fontSize: 13,
@@ -675,7 +795,6 @@ export default function GroupDetailPage() {
       fontWeight: '700',
       fontSize: 13,
     },
-    dangerLinkCard: {},
     dangerIconWrap: {
       backgroundColor: c.redLight,
     },
@@ -688,7 +807,7 @@ export default function GroupDetailPage() {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: c.surface,
-      borderTopWidth: 1,
+      borderBottomWidth: 1,
       borderColor: c.borderDefault,
       paddingVertical: 8,
       paddingHorizontal: 12,
@@ -717,10 +836,7 @@ export default function GroupDetailPage() {
       gap: 8,
       paddingHorizontal: 12,
       paddingTop: 10,
-      paddingBottom: Platform.OS === 'ios' ? 24 : 12,
       backgroundColor: c.surfacePrimary,
-      borderTopWidth: 1,
-      borderColor: c.borderDefault,
     },
     permissionNotice: {
       flexDirection: 'row',
@@ -757,7 +873,8 @@ export default function GroupDetailPage() {
       backgroundColor: c.inputBackground,
       borderRadius: 22,
       paddingHorizontal: 16,
-      paddingVertical: 8,
+      paddingVertical: 4,
+      minHeight: 42,
       maxHeight: 120,
       justifyContent: 'center',
       borderWidth: 1,
@@ -767,7 +884,8 @@ export default function GroupDetailPage() {
       fontSize: 15.5,
       color: c.textPrimary,
       maxHeight: 100,
-      paddingVertical: 4,
+      paddingTop: Platform.OS === 'ios' ? 8 : 6,
+      paddingBottom: Platform.OS === 'ios' ? 8 : 6,
     },
     sendButton: {
       width: 42,
@@ -971,10 +1089,63 @@ export default function GroupDetailPage() {
     },
   }));
 
-  useEffect(() => () => clearTimeout(reactionErrorTimer.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(reactionErrorTimer.current);
+      clearTimeout(editCloseTimer.current);
+    },
+    []
+  );
+
+  // ---- Keyboard / scroll handling ----------------------------------------
+
+  const scrollToLatest = useCallback((animated = true) => {
+    requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated }));
+  }, []);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, () => {
+      setKeyboardVisible(true);
+      // Keep the latest message in view when the list shrinks for the keyboard.
+      if (nearBottomRef.current) setTimeout(() => scrollToLatest(true), 80);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [scrollToLatest]);
+
+  // The KeyboardAvoidingView needs to know how far it sits below the top of the window
+  // (status bar + ScreenShell header). Measure it instead of guessing a magic number.
+  const measureKeyboardOffset = useCallback(() => {
+    containerRef.current?.measureInWindow?.((x, y) => {
+      if (Number.isFinite(y)) setKeyboardOffset(y);
+    });
+  }, []);
+
+  const handleScroll = useCallback((event) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    const near = distanceFromBottom < NEAR_BOTTOM_PX;
+    nearBottomRef.current = near;
+    setShowJumpToLatest(!near);
+  }, []);
+
+  const handleContentSizeChange = () => {
+    // Only auto-follow new content if the reader is already at the bottom,
+    // so incoming messages never yank someone who is reading history.
+    if (!nearBottomRef.current) return;
+    scrollRef.current?.scrollToEnd({ animated: initialScrolledRef.current });
+    if (messages.length) initialScrolledRef.current = true;
+  };
+
+  // ---- Helpers ------------------------------------------------------------
 
   const messagePreview = (message) => {
-    if (!message?.text) return '';
+    if (!message?.text) return message?.type === 'sticker' ? '[Sticker]' : '';
     const text = message.text.trim();
     return text.length > 80 ? `${text.slice(0, 80).trim()}...` : text;
   };
@@ -985,6 +1156,7 @@ export default function GroupDetailPage() {
     const prefix = draft.trimEnd();
     const mention = `@${safeName} `;
     setDraft(prefix ? `${prefix} ${mention}` : mention);
+    setTimeout(() => inputRef.current?.focus(), 150);
   };
 
   const openDm = async (message) => {
@@ -1002,6 +1174,8 @@ export default function GroupDetailPage() {
         profile || {}
       );
       router.navigate(`/messages/${conversationId}`);
+    } catch (error) {
+      Alert.alert('Could not open chat', error?.message || 'Unable to start a private conversation.');
     } finally {
       setBusy(false);
     }
@@ -1017,6 +1191,8 @@ export default function GroupDetailPage() {
     isAdmin ||
     (isMember && group?.allowMemberMessages !== false)
   );
+  const activeText = editingMessage ? editText : draft;
+  const canSubmit = Boolean(activeText.trim()) && canSendMessages && !busy;
 
   const load = useCallback(async () => {
     const groupData = await getGroup(groupId);
@@ -1036,21 +1212,13 @@ export default function GroupDetailPage() {
     load().catch(() => setLoading(false));
   }, [load]);
 
-  // NOTE: this previously gated on the raw `membership` record, so an owner/admin
-  // whose privileges come from group.adminId / group.ownerId (rather than a
-  // membership doc) would never get a message listener attached and would see an
-  // empty chat. Gating on `isMember` (which already accounts for that) fixes it.
+  // Gate on `isMember` (not the raw membership doc) so owners/admins whose privileges come
+  // from group.adminId / group.ownerId still get a message listener.
   useEffect(() => {
     if (!groupId || !isMember) return undefined;
     const unsubscribe = listenGroupMessages(groupId, setMessages);
     return () => unsubscribe?.();
   }, [groupId, isMember]);
-
-  useEffect(() => {
-    if (messages.length) {
-      requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
-    }
-  }, [messages.length]);
 
   const join = async () => {
     if (!group || !user || isOwnerOrAdmin) return;
@@ -1062,6 +1230,8 @@ export default function GroupDetailPage() {
         await joinPublicGroup(group, user, profile || {});
       }
       await load();
+    } catch (error) {
+      Alert.alert('Could not join', error?.message || 'Something went wrong. Please try again.');
     } finally {
       setBusy(false);
     }
@@ -1107,6 +1277,11 @@ export default function GroupDetailPage() {
       });
       setDraft('');
       setReplyTo(null);
+      // Always follow your own message down, even if you had scrolled up.
+      nearBottomRef.current = true;
+      scrollToLatest(true);
+    } catch (error) {
+      Alert.alert('Message not sent', error?.message || 'Unable to send your message.');
     } finally {
       setBusy(false);
     }
@@ -1136,6 +1311,10 @@ export default function GroupDetailPage() {
           : null,
       });
       setReplyTo(null);
+      nearBottomRef.current = true;
+      scrollToLatest(true);
+    } catch (error) {
+      Alert.alert('Sticker not sent', error?.message || 'Unable to send this sticker.');
     } finally {
       setBusy(false);
     }
@@ -1148,7 +1327,7 @@ export default function GroupDetailPage() {
   };
 
   const openReactionPicker = (message) => {
-    if (!isMember) return;
+    if (!isMember || message?.deleted) return;
     Haptics.selectionAsync();
     setReactionPickerFor((current) => (current === message.id ? null : message.id));
   };
@@ -1168,7 +1347,7 @@ export default function GroupDetailPage() {
   };
 
   const messageWithinEditWindow = (message) => {
-    const sentAt = message?.createdAt?.toMillis?.() || message?.createdAt?.seconds * 1000 || 0;
+    const sentAt = getMillis(message);
     return Boolean(sentAt && Date.now() - sentAt <= 60 * 60 * 1000);
   };
 
@@ -1177,6 +1356,7 @@ export default function GroupDetailPage() {
     setEditingMessage(message);
     setEditText(message.text || '');
     setActiveMessageActions(null);
+    setTimeout(() => inputRef.current?.focus(), 200);
   };
 
   const cancelEditingMessage = () => {
@@ -1216,8 +1396,10 @@ export default function GroupDetailPage() {
   };
 
   const setReplyFromSwipe = (message) => {
+    if (message?.deleted) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setReplyTo(message);
+    setTimeout(() => inputRef.current?.focus(), 100);
   };
 
   const openEdit = () => {
@@ -1286,7 +1468,6 @@ export default function GroupDetailPage() {
           }
         }
 
-
         const uploaded = await uploadToCloudinary(
           {
             uri: editPhotoUri,
@@ -1306,7 +1487,8 @@ export default function GroupDetailPage() {
       await load();
       setEditMessageType('success');
       setEditMessage('Group updated.');
-      setTimeout(() => setEditVisible(false), 700);
+      clearTimeout(editCloseTimer.current);
+      editCloseTimer.current = setTimeout(() => setEditVisible(false), 700);
     } catch (error) {
       setUploadingPhoto(false);
       setEditMessageType('error');
@@ -1339,243 +1521,329 @@ export default function GroupDetailPage() {
   };
 
   const activeMine = activeMessageActions && user?.uid && activeMessageActions.senderId === user.uid;
+  const activeCanModify =
+    Boolean(activeMine) && !activeMessageActions?.deleted && messageWithinEditWindow(activeMessageActions);
+
+  const renderMessages = () => {
+    if (!isMember) {
+      return (
+        <EmptyState
+          title="Join to see the conversation"
+          description="Members can read and send messages in this group."
+        />
+      );
+    }
+    if (!messages.length) {
+      return <EmptyState title="No messages yet" description="Start the conversation when you are ready." />;
+    }
+    return messages.map((message, index) => {
+      const mine = message.senderId === user?.uid;
+      const prev = messages[index - 1];
+      const next = messages[index + 1];
+      const isGroupedWithPrev = inSameGroup(prev, message);
+      const isGroupedWithNext = inSameGroup(message, next);
+      const showHeader = !mine && !isGroupedWithPrev;
+      const senderColor = colorForName(message.senderName || 'Student');
+      const ms = getMillis(message);
+      const prevMs = getMillis(prev);
+      const showDate = Boolean(ms) && (!prevMs || !isSameDay(ms, prevMs));
+      const reactionEntries = Object.entries(message.reactions || {})
+        .filter(([, uids]) => Array.isArray(uids) && uids.length)
+        .sort((a, b) => b[1].length - a[1].length);
+
+      return (
+        <React.Fragment key={message.id}>
+          {showDate ? (
+            <View style={styles.dateDividerWrap}>
+              <View style={styles.dateDividerPill}>
+                <Text style={styles.dateDividerText}>{dayLabel(ms)}</Text>
+              </View>
+            </View>
+          ) : null}
+          <MessageRow
+            message={message}
+            mine={mine}
+            showHeader={showHeader}
+            isGroupedWithNext={isGroupedWithNext}
+            senderColor={senderColor}
+            reactionEntries={reactionEntries}
+            pickerOpen={reactionPickerFor === message.id}
+            isReacting={reactingMessageId === message.id}
+            isMember={isMember}
+            colors={colors}
+            styles={styles}
+            user={user}
+            router={router}
+            formatShortTime={formatShortTime}
+            initialsForName={initialsForName}
+            onOpenReactionPicker={openReactionPicker}
+            onToggleReaction={toggleReaction}
+            onSwipeReply={setReplyFromSwipe}
+            onOpenActions={setActiveMessageActions}
+          />
+        </React.Fragment>
+      );
+    });
+  };
 
   return (
     <ScreenShell title="Group" subtitle={group?.name || groupId} showBack loading={loading} scrollable={false}>
       {group ? (
-        <View style={styles.screen}>
-          <ScrollView
-            ref={scrollRef}
-            style={styles.chatArea}
-            contentContainerStyle={styles.chatContent}
-            showsVerticalScrollIndicator={false}
-            onScrollBeginDrag={() => setReactionPickerFor(null)}
-            keyboardShouldPersistTaps="handled"
-          >
-            {/* Group info card */}
-            <View style={styles.hero}>
-              <View style={styles.heroActionsRow}>
-                {isAdmin ? (
-                  <Pressable style={styles.heroIconButton} onPress={openEdit} hitSlop={8}>
-                    <Ionicons name="create-outline" size={16} color="#FFFFFF" />
+        <View ref={containerRef} onLayout={measureKeyboardOffset} style={styles.screen}>
+          {/*
+            The list and the composer are siblings in one column. The composer is NOT absolutely
+            positioned, so the list ends exactly where the composer starts and the last message can
+            never sit underneath it. The keyboard just pads this view from the bottom.
+          */}
+          <KeyboardAvoidingView style={styles.flex} behavior="padding" keyboardVerticalOffset={keyboardOffset}>
+            <View style={styles.chatArea}>
+              <ScrollView
+                ref={scrollRef}
+                style={styles.flex}
+                contentContainerStyle={styles.chatContent}
+                showsVerticalScrollIndicator={false}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
+                onContentSizeChange={handleContentSizeChange}
+                onScrollBeginDrag={() => setReactionPickerFor(null)}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              >
+                {/* Group info card */}
+                <View style={styles.hero}>
+                  <View style={styles.heroActionsRow}>
+                    {isAdmin ? (
+                      <Pressable
+                        style={styles.heroIconButton}
+                        onPress={openEdit}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Manage group"
+                      >
+                        <Ionicons name="create-outline" size={16} color="#FFFFFF" />
+                      </Pressable>
+                    ) : null}
+                    {isMember ? (
+                      <Pressable
+                        style={styles.heroIconButton}
+                        onPress={() => setGroupOptionsVisible(true)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Group options"
+                      >
+                        <Ionicons name="ellipsis-horizontal" size={16} color="#FFFFFF" />
+                      </Pressable>
+                    ) : null}
+                  </View>
+                  <View style={styles.heroTopRow}>
+                    <View style={styles.heroAvatar}>
+                      {groupPhotoUrl ? (
+                        <Image source={{ uri: groupPhotoUrl }} style={styles.heroAvatarImage} />
+                      ) : (
+                        <Text style={styles.heroAvatarText}>{initialsForName(group.name)}</Text>
+                      )}
+                    </View>
+                    <View style={styles.heroTextWrap}>
+                      <Text style={styles.heroTitle} numberOfLines={2}>{group.name}</Text>
+                      {group.description ? (
+                        <Text style={styles.heroText} numberOfLines={2}>
+                          {group.description}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                  <View style={styles.metaRow}>
+                    <View style={styles.metaPill}>
+                      <Ionicons name="pricetag-outline" size={12} color="#E0E7FF" />
+                      <Text style={styles.meta}>{group.category || 'General'}</Text>
+                    </View>
+                    <View style={styles.metaPill}>
+                      <Ionicons name="people-outline" size={12} color="#E0E7FF" />
+                      <Text style={styles.meta}>{pluralize(Number(group.memberCount || 0), 'member')}</Text>
+                    </View>
+                    {group.privacy === 'private' ? (
+                      <View style={styles.metaPill}>
+                        <Ionicons name="lock-closed-outline" size={12} color="#E0E7FF" />
+                        <Text style={styles.meta}>Private</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+
+                {/* Pending requests sit right under the hero so admins actually see them */}
+                {isAdmin && joinRequests.length ? (
+                  <View style={styles.requestsCard}>
+                    <Text style={styles.requestsTitle}>Pending requests ({joinRequests.length})</Text>
+                    {requestMessage ? (
+                      <View style={styles.requestNotice}>
+                        <Ionicons name="information-circle-outline" size={14} color={colors.brand} />
+                        <Text style={styles.requestNoticeText}>{requestMessage}</Text>
+                      </View>
+                    ) : null}
+                    {joinRequests.map((request) => {
+                      const processing = busy && processingRequestId === request.uid;
+                      return (
+                        <View key={request.id} style={styles.requestRow}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.requestName} numberOfLines={1}>{request.name || 'Student'}</Text>
+                            <Text style={styles.requestMeta} numberOfLines={1}>{request.email || 'Awaiting review'}</Text>
+                          </View>
+                          <View style={styles.requestActions}>
+                            <Pressable
+                              style={[styles.requestApprove, processing && styles.requestButtonDisabled]}
+                              onPress={() => handleJoinRequestAction(request.uid, 'approve')}
+                              disabled={processing}
+                            >
+                              <Text style={styles.requestActionText}>Approve</Text>
+                            </Pressable>
+                            <Pressable
+                              style={[styles.requestReject, processing && styles.requestButtonDisabled]}
+                              onPress={() => handleJoinRequestAction(request.uid, 'reject')}
+                              disabled={processing}
+                            >
+                              <Text style={styles.requestActionText}>Decline</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
+
+                {!isMember ? (
+                  <Pressable style={styles.joinButton} onPress={join} disabled={busy}>
+                    {busy ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <>
+                        <Ionicons
+                          name={group.privacy === 'private' ? 'lock-closed-outline' : 'add-circle-outline'}
+                          size={16}
+                          color="#fff"
+                        />
+                        <Text style={styles.joinText}>
+                          {group.privacy === 'private' ? 'Request access' : 'Join group'}
+                        </Text>
+                      </>
+                    )}
                   </Pressable>
                 ) : null}
-                {isMember ? (
-                  <Pressable style={styles.heroIconButton} onPress={() => setGroupOptionsVisible(true)} hitSlop={8}>
-                    <Ionicons name="ellipsis-horizontal" size={16} color="#FFFFFF" />
-                  </Pressable>
+
+                {reactionError ? (
+                  <View style={styles.reactionToast}>
+                    <Ionicons name="alert-circle-outline" size={14} color={colors.danger} />
+                    <Text style={styles.reactionToastText}>{reactionError}</Text>
+                  </View>
                 ) : null}
-              </View>
-              <View style={styles.heroTopRow}>
-                <View style={styles.heroAvatar}>
-                  {groupPhotoUrl ? (
-                    <Image source={{ uri: groupPhotoUrl }} style={styles.heroAvatarImage} />
+
+                {/* Messages */}
+                <View style={styles.messagesWrap}>{renderMessages()}</View>
+              </ScrollView>
+
+              {showJumpToLatest && isMember ? (
+                <Pressable
+                  style={styles.jumpButton}
+                  onPress={() => {
+                    nearBottomRef.current = true;
+                    scrollToLatest(true);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Jump to latest message"
+                >
+                  <Ionicons name="chevron-down" size={20} color={colors.brand} />
+                </Pressable>
+              ) : null}
+            </View>
+
+            {/* Composer, docked under the list */}
+            {isMember ? (
+              <View style={styles.composerOuter}>
+                {editingMessage ? (
+                  <View style={styles.replyPreview}>
+                    <View style={[styles.replyPreviewBar, { backgroundColor: colors.brand }]} />
+                    <View style={styles.replyPreviewBody}>
+                      <Text style={styles.replyPreviewLabel}>Editing message</Text>
+                      <Text style={styles.replyPreviewText} numberOfLines={2}>{editingMessage.text || ''}</Text>
+                    </View>
+                    <Pressable onPress={cancelEditingMessage} hitSlop={8} accessibilityLabel="Cancel editing">
+                      <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
+                    </Pressable>
+                  </View>
+                ) : replyTo ? (
+                  <View style={styles.replyPreview}>
+                    <View style={[styles.replyPreviewBar, { backgroundColor: colorForName(replyTo.senderName || 'S') }]} />
+                    <View style={styles.replyPreviewBody}>
+                      <Text style={styles.replyPreviewLabel}>{replyTo.senderName || 'Student'}</Text>
+                      <Text style={styles.replyPreviewText} numberOfLines={1}>
+                        {messagePreview(replyTo)}
+                      </Text>
+                    </View>
+                    <Pressable onPress={() => setReplyTo(null)} hitSlop={8} accessibilityLabel="Cancel reply">
+                      <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
+                    </Pressable>
+                  </View>
+                ) : null}
+
+                <View
+                  style={[
+                    styles.composer,
+                    // Extra home-indicator padding only when the keyboard is closed.
+                    { paddingBottom: keyboardVisible ? 10 : Platform.OS === 'ios' ? 24 : 12 },
+                  ]}
+                >
+                  {!canSendMessages ? (
+                    <View style={styles.permissionNotice}>
+                      <Ionicons name="lock-closed-outline" size={14} color={colors.brandDark} />
+                      <Text style={styles.permissionNoticeText}>Only admins can send messages in this group.</Text>
+                    </View>
                   ) : (
-                    <Text style={styles.heroAvatarText}>{initialsForName(group.name)}</Text>
+                    <View style={styles.composerInputRow}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Open sticker picker"
+                        style={styles.stickerButton}
+                        onPress={() => setStickerPickerVisible(true)}
+                        disabled={busy || Boolean(editingMessage)}
+                      >
+                        <Ionicons
+                          name="happy-outline"
+                          size={22}
+                          color={editingMessage ? colors.textTertiary : colors.brand}
+                        />
+                      </Pressable>
+                      <View style={styles.inputPill}>
+                        <TextInput
+                          ref={inputRef}
+                          value={activeText}
+                          onChangeText={editingMessage ? setEditText : setDraft}
+                          placeholder={editingMessage ? 'Edit your message' : 'Write a message'}
+                          placeholderTextColor={colors.textTertiary}
+                          style={styles.input}
+                          multiline
+                          maxLength={2000}
+                          accessibilityLabel="Message input"
+                        />
+                      </View>
+                      <Pressable
+                        style={[styles.sendButton, !canSubmit && styles.sendButtonDisabled]}
+                        onPress={editingMessage ? saveEditedMessage : send}
+                        disabled={!canSubmit}
+                        accessibilityRole="button"
+                        accessibilityLabel={editingMessage ? 'Save edit' : 'Send message'}
+                      >
+                        {busy ? (
+                          <ActivityIndicator color="#fff" />
+                        ) : (
+                          <Ionicons name={editingMessage ? 'checkmark' : 'send'} size={18} color="#fff" />
+                        )}
+                      </Pressable>
+                    </View>
                   )}
                 </View>
-                <View style={styles.heroTextWrap}>
-                  <Text style={styles.heroTitle}>{group.name}</Text>
-                  <Text style={styles.heroText} numberOfLines={2}>
-                    {group.description}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.metaRow}>
-                <View style={styles.metaPill}>
-                  <Ionicons name="pricetag-outline" size={12} color="#E0E7FF" />
-                  <Text style={styles.meta}>{group.category || 'General'}</Text>
-                </View>
-                <View style={styles.metaPill}>
-                  <Ionicons name="people-outline" size={12} color="#E0E7FF" />
-                  <Text style={styles.meta}>{group.memberCount || 0} members</Text>
-                </View>
-                {group.privacy === 'private' ? (
-                  <View style={styles.metaPill}>
-                    <Ionicons name="lock-closed-outline" size={12} color="#E0E7FF" />
-                    <Text style={styles.meta}>Private</Text>
-                  </View>
-                ) : null}
-              </View>
-            </View>
-
-            {!isMember ? (
-              <Pressable style={styles.joinButton} onPress={join} disabled={busy}>
-                {busy ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <>
-                    <Ionicons
-                      name={group.privacy === 'private' ? 'lock-closed-outline' : 'add-circle-outline'}
-                      size={16}
-                      color="#fff"
-                    />
-                    <Text style={styles.joinText}>
-                      {group.privacy === 'private' ? 'Request access' : 'Join group'}
-                    </Text>
-                  </>
-                )}
-              </Pressable>
-            ) : null}
-
-            {reactionError ? (
-              <View style={styles.reactionToast}>
-                <Ionicons name="alert-circle-outline" size={14} color={colors.danger} />
-                <Text style={styles.reactionToastText}>{reactionError}</Text>
               </View>
             ) : null}
+          </KeyboardAvoidingView>
 
-            {/* Messages */}
-            <View style={styles.messagesWrap}>
-              {messages.length ? (
-                messages.map((message, index) => {
-                  const mine = message.senderId === user?.uid;
-                  const prev = messages[index - 1];
-                  const isGroupedWithPrev =
-                    Boolean(prev && prev.senderId === message.senderId) &&
-                    Boolean(prev?.replyTo) === Boolean(message.replyTo);
-                  const showHeader = !mine && !isGroupedWithPrev;
-                  const senderColor = colorForName(message.senderName || 'Student');
-                  const reactionEntries = Object.entries(message.reactions || {})
-                    .filter(([, uids]) => Array.isArray(uids) && uids.length)
-                    .sort((a, b) => b[1].length - a[1].length);
-
-                  return (
-                    <MessageRow
-                      key={message.id}
-                      message={message}
-                      mine={mine}
-                      showHeader={showHeader}
-                      isGroupedWithPrev={isGroupedWithPrev}
-                      senderColor={senderColor}
-                      reactionEntries={reactionEntries}
-                      pickerOpen={reactionPickerFor === message.id}
-                      isReacting={reactingMessageId === message.id}
-                      isMember={isMember}
-                      colors={colors}
-                      styles={styles}
-                      user={user}
-                      router={router}
-                      formatShortTime={formatShortTime}
-                      initialsForName={initialsForName}
-                      onOpenReactionPicker={openReactionPicker}
-                      onToggleReaction={toggleReaction}
-                      onSwipeReply={setReplyFromSwipe}
-                      onOpenActions={setActiveMessageActions}
-                    />
-                  );
-                })
-              ) : (
-                <EmptyState title="No messages yet" description="Start the conversation when you are ready." />
-              )}
-            </View>
-
-            {isAdmin && joinRequests.length ? (
-              <View style={styles.requestsCard}>
-                <Text style={styles.requestsTitle}>Pending requests</Text>
-                {requestMessage ? (
-                  <View style={styles.requestNotice}>
-                    <Ionicons name="information-circle-outline" size={14} color={colors.brand} />
-                    <Text style={styles.requestNoticeText}>{requestMessage}</Text>
-                  </View>
-                ) : null}
-                {joinRequests.map((request) => (
-                  <View key={request.id} style={styles.requestRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.requestName}>{request.name || 'Student'}</Text>
-                      <Text style={styles.requestMeta}>{request.email || 'Awaiting review'}</Text>
-                    </View>
-                    <View style={styles.requestActions}>
-                      <Pressable
-                        style={[styles.requestApprove, busy && processingRequestId === request.uid && styles.requestButtonDisabled]}
-                        onPress={() => handleJoinRequestAction(request.uid, 'approve')}
-                        disabled={busy && processingRequestId === request.uid}
-                      >
-                        <Text style={styles.requestActionText}>Approve</Text>
-                      </Pressable>
-                      <Pressable
-                        style={[styles.requestReject, busy && processingRequestId === request.uid && styles.requestButtonDisabled]}
-                        onPress={() => handleJoinRequestAction(request.uid, 'reject')}
-                        disabled={busy && processingRequestId === request.uid}
-                      >
-                        <Text style={styles.requestActionText}>Decline</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            ) : null}
-          </ScrollView>
-
-          {/* Composer, pinned to bottom like WhatsApp */}
-          {isMember ? (
-            <KeyboardAvoidingView
-              behavior="padding"
-              keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}
-              style={styles.composerOuter}
-            >
-              {editingMessage ? (
-                <View style={styles.replyPreview}>
-                  <View style={styles.replyPreviewBody}>
-                    <Text style={styles.replyPreviewLabel}>Editing message</Text>
-                    <Text style={styles.replyPreviewText} numberOfLines={2}>{editingMessage.text || ''}</Text>
-                  </View>
-                  <Pressable onPress={cancelEditingMessage} hitSlop={8}>
-                    <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
-                  </Pressable>
-                </View>
-              ) : replyTo ? (
-                <View style={styles.replyPreview}>
-                  <View style={[styles.replyPreviewBar, { backgroundColor: colorForName(replyTo.senderName || 'S') }]} />
-                  <View style={styles.replyPreviewBody}>
-                    <Text style={styles.replyPreviewLabel}>{replyTo.senderName || 'Student'}</Text>
-                    <Text style={styles.replyPreviewText} numberOfLines={1}>
-                      {messagePreview(replyTo)}
-                    </Text>
-                  </View>
-                  <Pressable onPress={() => setReplyTo(null)} hitSlop={8}>
-                    <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
-                  </Pressable>
-                </View>
-              ) : null}
-              <View style={styles.composer}>
-                {!canSendMessages ? (
-                  <View style={styles.permissionNotice}>
-                    <Ionicons name="lock-closed-outline" size={14} color={colors.brandDark} />
-                    <Text style={styles.permissionNoticeText}>Only admins can send messages in this group.</Text>
-                  </View>
-                ) : null}
-                <View style={styles.composerInputRow}>
-                  <Pressable
-                    accessibilityLabel="Open sticker picker"
-                    style={styles.stickerButton}
-                    onPress={() => setStickerPickerVisible(true)}
-                    disabled={!canSendMessages || busy}
-                  >
-                    <Ionicons name="happy-outline" size={22} color={canSendMessages ? colors.brand : colors.textTertiary} />
-                  </Pressable>
-                  <View style={styles.inputPill}>
-                    <TextInput
-                      value={editingMessage ? editText : draft}
-                      onChangeText={editingMessage ? setEditText : setDraft}
-                      placeholder={editingMessage ? 'Edit your message' : (canSendMessages ? 'Write a message' : 'Messaging is disabled for members')}
-                      placeholderTextColor={colors.textTertiary}
-                      style={styles.input}
-                      multiline
-                      editable={canSendMessages}
-                    />
-                  </View>
-                  <Pressable
-                    style={[styles.sendButton, (busy || !draft.trim() || !canSendMessages) && styles.sendButtonDisabled]}
-                    onPress={editingMessage ? saveEditedMessage : send}
-                    disabled={busy || !(editingMessage ? editText.trim() : draft.trim()) || !canSendMessages}
-                  >
-                    {busy ? <ActivityIndicator color="#fff" /> : <Ionicons name={editingMessage ? 'checkmark' : 'send'} size={18} color="#fff" />}
-                  </Pressable>
-                </View>
-              </View>
-            </KeyboardAvoidingView>
-          ) : null}
           <StickerPicker
             visible={stickerPickerVisible}
             onClose={() => setStickerPickerVisible(false)}
@@ -1601,7 +1869,7 @@ export default function GroupDetailPage() {
             <View style={styles.actionSheetHandleWrap} {...messageActionsSheet.panHandlers}>
               <View style={styles.actionSheetHandle} />
             </View>
-            {activeMessageActions?.senderId === user?.uid && messageWithinEditWindow(activeMessageActions) && activeMessageActions?.type !== 'sticker' ? (
+            {activeCanModify && activeMessageActions?.type !== 'sticker' ? (
               <Pressable
                 style={styles.actionSheetRow}
                 onPress={() => startEditingMessage(activeMessageActions)}
@@ -1612,7 +1880,7 @@ export default function GroupDetailPage() {
                 <Text style={styles.actionSheetLabel}>Edit message</Text>
               </Pressable>
             ) : null}
-            {activeMessageActions?.senderId === user?.uid && messageWithinEditWindow(activeMessageActions) ? (
+            {activeCanModify ? (
               <Pressable
                 style={styles.actionSheetRow}
                 onPress={() => {
@@ -1621,38 +1889,43 @@ export default function GroupDetailPage() {
                   removeGroupMessage(message);
                 }}
               >
-                <View style={styles.actionSheetIconWrap}>
+                <View style={[styles.actionSheetIconWrap, styles.actionSheetIconWrapDanger]}>
                   <Ionicons name="trash-outline" size={16} color={colors.danger} />
                 </View>
                 <Text style={[styles.actionSheetLabel, { color: colors.danger }]}>Delete message</Text>
               </Pressable>
             ) : null}
-            <Pressable
-              style={styles.actionSheetRow}
-              onPress={() => {
-                setReplyTo(activeMessageActions);
-                setActiveMessageActions(null);
-              }}
-            >
-              <View style={styles.actionSheetIconWrap}>
-                <Ionicons name="arrow-undo-outline" size={16} color={colors.brandDark} />
-              </View>
-              <Text style={styles.actionSheetLabel}>Reply</Text>
-            </Pressable>
-            <Pressable
-              style={styles.actionSheetRow}
-              onPress={() => {
-                const message = activeMessageActions;
-                setActiveMessageActions(null);
-                if (message) openReactionPicker(message);
-              }}
-            >
-              <View style={styles.actionSheetIconWrap}>
-                <Ionicons name="happy-outline" size={16} color={colors.brandDark} />
-              </View>
-              <Text style={styles.actionSheetLabel}>React</Text>
-            </Pressable>
-            {activeMessageActions?.senderName ? (
+            {!activeMessageActions?.deleted ? (
+              <>
+                <Pressable
+                  style={styles.actionSheetRow}
+                  onPress={() => {
+                    setReplyTo(activeMessageActions);
+                    setActiveMessageActions(null);
+                    setTimeout(() => inputRef.current?.focus(), 200);
+                  }}
+                >
+                  <View style={styles.actionSheetIconWrap}>
+                    <Ionicons name="arrow-undo-outline" size={16} color={colors.brandDark} />
+                  </View>
+                  <Text style={styles.actionSheetLabel}>Reply</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.actionSheetRow}
+                  onPress={() => {
+                    const message = activeMessageActions;
+                    setActiveMessageActions(null);
+                    if (message) openReactionPicker(message);
+                  }}
+                >
+                  <View style={styles.actionSheetIconWrap}>
+                    <Ionicons name="happy-outline" size={16} color={colors.brandDark} />
+                  </View>
+                  <Text style={styles.actionSheetLabel}>React</Text>
+                </Pressable>
+              </>
+            ) : null}
+            {activeMessageActions?.senderName && !activeMessageActions?.deleted && canSendMessages ? (
               <Pressable
                 style={styles.actionSheetRow}
                 onPress={() => {
@@ -1707,8 +1980,8 @@ export default function GroupDetailPage() {
                 )}
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.groupOptionsName}>{group?.name}</Text>
-                <Text style={styles.groupOptionsMeta}>{group?.memberCount || 0} members</Text>
+                <Text style={styles.groupOptionsName} numberOfLines={1}>{group?.name}</Text>
+                <Text style={styles.groupOptionsMeta}>{pluralize(Number(group?.memberCount || 0), 'member')}</Text>
               </View>
             </View>
 
@@ -1752,7 +2025,7 @@ export default function GroupDetailPage() {
 
             {isAdmin ? (
               <Pressable
-                style={[styles.linkCard, styles.dangerLinkCard]}
+                style={styles.linkCard}
                 onPress={() => {
                   setGroupOptionsVisible(false);
                   router.navigate({ pathname: '/community-settings', params: { groupId } });
@@ -1761,17 +2034,18 @@ export default function GroupDetailPage() {
                 <View style={[styles.linkIconWrap, styles.dangerIconWrap]}>
                   <Ionicons name="person-remove-outline" size={16} color={colors.danger} />
                 </View>
-                <Text style={styles.dangerLinkText}>Remove member</Text>
+                {/* linkText supplies flex/size/weight; the danger style only overrides colour */}
+                <Text style={[styles.linkText, styles.dangerLinkText]}>Remove member</Text>
                 <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
               </Pressable>
             ) : null}
 
             {membership && !isAdmin ? (
-              <Pressable style={[styles.linkCard, styles.dangerLinkCard]} onPress={confirmLeaveGroup} disabled={busy}>
+              <Pressable style={styles.linkCard} onPress={confirmLeaveGroup} disabled={busy}>
                 <View style={[styles.linkIconWrap, styles.dangerIconWrap]}>
                   <Ionicons name="exit-outline" size={16} color={colors.danger} />
                 </View>
-                <Text style={styles.dangerLinkText}>Leave group</Text>
+                <Text style={[styles.linkText, styles.dangerLinkText]}>Leave group</Text>
                 <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
               </Pressable>
             ) : null}
@@ -1782,18 +2056,14 @@ export default function GroupDetailPage() {
       {/* Admin: manage group modal, draggable */}
       <Modal visible={editVisible} transparent animationType="slide" onRequestClose={() => setEditVisible(false)}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setEditVisible(false)} />
-        <KeyboardAvoidingView
-          behavior="padding"
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-          style={styles.sheetWrap}
-        >
+        <KeyboardAvoidingView behavior="padding" style={styles.sheetWrap}>
           <Animated.View style={[styles.sheet, { transform: [{ translateY: editSheet.translateY }] }]}>
             <View style={styles.sheetHandleWrap} {...editSheet.panHandlers}>
               <View style={styles.sheetHandle} />
             </View>
             <Text style={styles.sheetTitle}>Manage group</Text>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <Pressable style={styles.photoPicker} onPress={pickPhoto}>
                 <View style={styles.photoCircle}>
                   {editPhotoUri ? (
@@ -1947,7 +2217,7 @@ function MessageRow({
   message,
   mine,
   showHeader,
-  isGroupedWithPrev,
+  isGroupedWithNext,
   senderColor,
   reactionEntries,
   pickerOpen,
@@ -1968,6 +2238,11 @@ function MessageRow({
   const swipeX = useRef(new Animated.Value(0)).current;
   const hasFiredHaptic = useRef(false);
 
+  // The PanResponder is created once, so read the latest props through a ref
+  // instead of capturing stale ones.
+  const latest = useRef({ message, onSwipeReply });
+  latest.current = { message, onSwipeReply };
+
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gesture) =>
@@ -1987,7 +2262,7 @@ function MessageRow({
       onPanResponderRelease: (_, gesture) => {
         const dx = mine ? Math.min(0, gesture.dx) : Math.max(0, gesture.dx);
         if (Math.abs(dx) >= SWIPE_REPLY_THRESHOLD) {
-          onSwipeReply(message);
+          latest.current.onSwipeReply(latest.current.message);
         }
         hasFiredHaptic.current = false;
         Animated.spring(swipeX, { toValue: 0, useNativeDriver: true, bounciness: 8, speed: 16 }).start();
@@ -2012,9 +2287,14 @@ function MessageRow({
     extrapolate: 'clamp',
   });
 
+  const isDeleted = Boolean(message.deleted);
+  const isSticker = message.type === 'sticker' && !isDeleted;
+  // Sticker bubbles are transparent, so the "mine" light-on-brand colours would be unreadable there.
+  const lightFooter = mine && !isSticker;
+
   return (
     <View
-      style={[styles.row, mine ? styles.rowMine : styles.rowTheirs, isGroupedWithPrev ? styles.rowGrouped : null]}
+      style={[styles.row, mine ? styles.rowMine : styles.rowTheirs, !isGroupedWithNext && styles.rowEnd]}
       {...panResponder.panHandlers}
     >
       <Animated.View
@@ -2048,7 +2328,8 @@ function MessageRow({
           style={[
             styles.bubble,
             mine ? styles.bubbleMine : styles.bubbleTheirs,
-            mine ? (isGroupedWithPrev && styles.bubbleMineGrouped) : (isGroupedWithPrev && styles.bubbleTheirsGrouped),
+            isGroupedWithNext && (mine ? styles.bubbleMineNoTail : styles.bubbleTheirsNoTail),
+            isSticker && styles.bubbleSticker,
           ]}
         >
           {showHeader ? (
@@ -2056,16 +2337,20 @@ function MessageRow({
           ) : null}
 
           {message.replyTo ? (
-            <View style={[styles.replyBlock, mine ? styles.replyBlockMine : styles.replyBlockTheirs]}>
-              <Text style={styles.replyAuthor}>{message.replyTo.senderName || 'Student'}</Text>
-              <Text style={styles.replyText} numberOfLines={2}>
+            <View style={[styles.replyBlock, mine && !isSticker ? styles.replyBlockMine : styles.replyBlockTheirs]}>
+              <Text style={[styles.replyAuthor, lightFooter && styles.replyAuthorMine]}>
+                {message.replyTo.senderName || 'Student'}
+              </Text>
+              <Text style={[styles.replyText, lightFooter && styles.replyTextMine]} numberOfLines={2}>
                 {message.replyTo.text || ''}
               </Text>
             </View>
           ) : null}
 
-          {message.deleted ? (
-            <Text style={[styles.messageBody, mine && styles.messageBodyMine, { fontStyle: 'italic', opacity: 0.75 }]}>This message was deleted</Text>
+          {isDeleted ? (
+            <Text style={[styles.messageBody, mine && styles.messageBodyMine, styles.messageDeleted]}>
+              This message was deleted
+            </Text>
           ) : message.type === 'sticker' ? (
             <StickerMessage message={message} isMine={mine} onLongPress={() => onOpenReactionPicker(message)} />
           ) : (
@@ -2074,18 +2359,36 @@ function MessageRow({
 
           <View style={styles.bubbleFooter}>
             {isReacting ? (
-              <ActivityIndicator size="small" color={mine ? colors.brandGlow : colors.brand} style={{ marginRight: 6 }} />
+              <ActivityIndicator size="small" color={lightFooter ? colors.brandGlow : colors.brand} style={{ marginRight: 2 }} />
             ) : null}
-            <Text style={[styles.messageTime, mine && styles.messageTimeMine]}>{formatShortTime(message.createdAt)}</Text>
-            {mine ? <Ionicons name="checkmark-done" size={14} color={colors.brandGlow} style={{ marginLeft: 4 }} /> : null}
-            {message.edited && !message.deleted ? <Text style={[styles.messageTime, mine && styles.messageTimeMine]}>edited</Text> : null}
-            <Pressable onPress={() => onOpenActions(message)} hitSlop={8} style={styles.kebabButton}>
+            {message.edited && !isDeleted ? (
+              <Text style={[styles.messageTime, lightFooter && styles.messageTimeMine]}>edited</Text>
+            ) : null}
+            <Text style={[styles.messageTime, lightFooter && styles.messageTimeMine]}>
+              {formatShortTime(message.createdAt)}
+            </Text>
+            {mine && !isDeleted ? (
               <Ionicons
-                name="ellipsis-vertical"
-                size={13}
-                color={mine ? 'rgba(255,255,255,0.85)' : colors.textTertiary}
+                name="checkmark-done"
+                size={14}
+                color={lightFooter ? colors.brandGlow : colors.textTertiary}
               />
-            </Pressable>
+            ) : null}
+            {!isDeleted ? (
+              <Pressable
+                onPress={() => onOpenActions(message)}
+                hitSlop={8}
+                style={styles.kebabButton}
+                accessibilityRole="button"
+                accessibilityLabel="Message actions"
+              >
+                <Ionicons
+                  name="ellipsis-vertical"
+                  size={13}
+                  color={lightFooter ? 'rgba(255,255,255,0.85)' : colors.textTertiary}
+                />
+              </Pressable>
+            ) : null}
           </View>
         </Pressable>
 

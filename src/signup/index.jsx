@@ -59,7 +59,7 @@ export default function SignupFlow() {
 
   const handleSubmit = useCallback(async () => {
     try {
-      const combinedErrors = [1, 2, 3].reduce((allErrors, step) => ({
+      const combinedErrors = [1, 2, 3, 4].reduce((allErrors, step) => ({
         ...allErrors,
         ...validateStep(step, formData),
       }), {});
@@ -68,7 +68,9 @@ export default function SignupFlow() {
           ? 1
           : Object.keys(combinedErrors).some((field) => ['university', 'department', 'studentType', 'level'].includes(field))
             ? 2
-            : 3;
+            : Object.keys(combinedErrors).some((field) => ['heardFrom', 'heardFromOther'].includes(field))
+              ? 3
+              : 4;
         goToStep(firstInvalidStep);
         setErrors(combinedErrors);
         setSubmitError('Please review the highlighted fields before creating your account.');

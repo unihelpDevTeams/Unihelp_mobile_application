@@ -157,9 +157,14 @@ service cloud.firestore {
             (request.resource.data.role == 'owner' && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.ownerId == uid) ||
             (request.resource.data.role in ['member', 'moderator'] &&
               getAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(uid)).data.uid == uid)
-          );
+          ) ||
+          ((groupOwner(groupId) || groupAdmin(groupId)) &&
+            request.resource.data.groupId == groupId &&
+            request.resource.data.role == 'member' &&
+            request.resource.data.joinedAt == request.time &&
+            getAfter(/databases/$(database)/documents/groups/$(groupId)/members/$(uid)).data.uid == uid);
         allow update: if false;
-        allow delete: if isUser(uid);
+        allow delete: if isUser(uid) || groupOwner(groupId) || groupAdmin(groupId);
       }
 
       match /activity/{activityId} {
@@ -197,10 +202,31 @@ service cloud.firestore {
         !areFriends(request.resource.data.from, request.resource.data.to) &&
         friendRequestAllowed(request.resource.data.from, request.resource.data.to);
       allow update: if signedIn() &&
-        resource.data.to == request.auth.uid &&
         request.resource.data.from == resource.data.from &&
         request.resource.data.to == resource.data.to &&
-        request.resource.data.status in ['accepted', 'declined'];
+        (
+          (resource.data.to == request.auth.uid &&
+            request.resource.data.status in ['accepted', 'declined'] &&
+            request.resource.data.respondedBy == request.auth.uid &&
+            request.resource.data.respondedAt == request.time &&
+            request.resource.data.updatedAt == request.time &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status', 'updatedAt', 'respondedAt', 'respondedBy'
+            ])) ||
+          (resource.data.from == request.auth.uid &&
+            resource.data.status == 'declined' &&
+            request.resource.data.status == 'pending' &&
+            request.resource.data.createdAt == request.time &&
+            request.resource.data.updatedAt == request.time &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status', 'fromProfile', 'toProfile', 'createdAt', 'updatedAt', 'respondedAt', 'respondedBy'
+            ]) &&
+            !('respondedAt' in request.resource.data) &&
+            !('respondedBy' in request.resource.data) &&
+            !blockedEitherWay(resource.data.from, resource.data.to) &&
+            !areFriends(resource.data.from, resource.data.to) &&
+            friendRequestAllowed(resource.data.from, resource.data.to))
+        );
       allow delete: if signedIn() && resource.data.from == request.auth.uid && resource.data.status == 'pending';
     }
 
@@ -307,6 +333,15 @@ service cloud.firestore {
         );
     }
 
+    match /notifications/{notificationId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow update: if signedIn() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow create, delete: if false;
+    }
+
     match /stickers/{stickerId} {
       allow read: if signedIn() &&
         resource.data.isActive != false &&
@@ -380,7 +415,7 @@ service cloud.firestore {
     }
 
     match /challenges/latestAttempts/items/{attemptId} {
-      allow read: if signedIn();
+      allow read: if false;
       allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
       allow update, delete: if false;
     }
@@ -445,14 +480,97 @@ service cloud.firestore {
 
     match /noteRequests/{requestId} {
       allow read: if signedIn();
-      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if signedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'pending';
+      allow update: if signedIn() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == resource.data.userId;
+      allow delete: if signedIn() && resource.data.userId == request.auth.uid;
     }
 
     match /questionRequests/{requestId} {
       allow read: if signedIn();
-      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if signedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'pending';
+      allow update: if signedIn() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == resource.data.userId;
+      allow delete: if signedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /question_requests/{requestId} {
+      allow read: if signedIn() &&
+        (resource.data.userId == request.auth.uid || isAdminRequest());
+      allow create: if signedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.courseCode is string &&
+        request.resource.data.courseCode.size() > 0 &&
+        request.resource.data.school is string &&
+        request.resource.data.school.size() > 0 &&
+        request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /requests/{requestId} {
+      allow read: if signedIn();
+      allow create: if request.resource.data.keys().hasOnly(['text', 'userId', 'status', 'createdAt']) &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() > 0 &&
+        request.resource.data.text.size() <= 1000 &&
+        request.resource.data.status == 'open' &&
+        request.resource.data.createdAt == request.time &&
+        (
+          (signedIn() && request.resource.data.userId == request.auth.uid) ||
+          (!signedIn() && request.resource.data.userId == null)
+        );
+      allow delete: if isAdminRequest() ||
+        (signedIn() && resource.data.createdAt is timestamp &&
+          request.time >= resource.data.createdAt + duration.value(48, 'h'));
+      allow update: if false;
+    }
+
+    match /reviews/{reviewId} {
+      allow read: if signedIn();
+      allow create: if signedIn() &&
+        reviewId == request.resource.data.tutorialId + '_' + request.auth.uid &&
+        request.resource.data.keys().hasOnly(['tutorialId', 'userId', 'rating', 'comment', 'createdAt']) &&
+        request.resource.data.tutorialId is string &&
+        exists(/databases/$(database)/documents/tutorials/$(request.resource.data.tutorialId)) &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.rating is int &&
+        request.resource.data.rating >= 1 &&
+        request.resource.data.rating <= 5 &&
+        request.resource.data.comment is string &&
+        request.resource.data.comment.size() <= 2000 &&
+        request.resource.data.createdAt == request.time;
+      allow update: if signedIn() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.tutorialId == resource.data.tutorialId &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating', 'comment']) &&
+        request.resource.data.rating is int &&
+        request.resource.data.rating >= 1 &&
+        request.resource.data.rating <= 5 &&
+        request.resource.data.comment is string &&
+        request.resource.data.comment.size() <= 2000;
+      allow delete: if false;
+    }
+
+    match /bookmarks/{bookmarkId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if signedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.storyId is string &&
+        request.resource.data.createdAt == request.time;
+      allow update: if signedIn() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['progress']);
+      allow delete: if signedIn() && resource.data.userId == request.auth.uid;
     }
 
     match /hostels/{hostelId} {
@@ -472,8 +590,38 @@ service cloud.firestore {
     match /stories/{storyId} {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.authorId == request.auth.uid;
-      allow update, delete: if signedIn() &&
-        (isAdminRequest() || resource.data.authorId == request.auth.uid);
+      allow update: if signedIn() &&
+        (isAdminRequest() || resource.data.authorId == request.auth.uid) &&
+        request.resource.data.authorId == resource.data.authorId;
+      allow update: if signedIn() &&
+        request.resource.data.authorId == resource.data.authorId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views']) &&
+        resource.data.views is int &&
+        request.resource.data.views == resource.data.views + 1;
+      allow update: if signedIn() &&
+        request.resource.data.authorId == resource.data.authorId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']) &&
+        resource.data.likes is int &&
+        request.resource.data.likes == resource.data.likes + 1;
+      allow delete: if signedIn() && (isAdminRequest() || resource.data.authorId == request.auth.uid);
+    }
+
+    match /storyChapters/{chapterId} {
+      allow read: if signedIn();
+      allow create: if signedIn() &&
+        request.resource.data.keys().hasOnly(['storyId', 'chapterTitle', 'content', 'chapterNumber', 'authorId', 'createdAt']) &&
+        request.resource.data.storyId is string &&
+        request.resource.data.chapterTitle is string &&
+        request.resource.data.chapterTitle.size() > 0 &&
+        request.resource.data.content is string &&
+        request.resource.data.content.size() > 0 &&
+        request.resource.data.content.size() <= 100000 &&
+        request.resource.data.chapterNumber is int &&
+        request.resource.data.chapterNumber > 0 &&
+        request.resource.data.authorId == request.auth.uid &&
+        get(/databases/$(database)/documents/stories/$(request.resource.data.storyId)).data.authorId == request.auth.uid &&
+        request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
     }
 
     match /study_materials/{materialId} {

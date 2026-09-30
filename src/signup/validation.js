@@ -129,6 +129,12 @@ export function validateStep(step, data) {
       }
       break;
     }
+    case 4: {
+      if (!data.photoURI) {
+        errors.photoURI = 'Please add a profile picture to continue.';
+      }
+      break;
+    }
     default:
       break;
   }

@@ -1,5 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Animated,
+  FlatList,
+  Image,
+  Pressable,
+  RefreshControl,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
@@ -21,36 +31,95 @@ const FILTERS = [
   { key: 'school', label: 'School' },
   { key: 'department', label: 'Department' },
   { key: 'level', label: 'Level' },
+  { key: 'interest', label: 'Interests' },
 ];
+
+const MISSING_PROFILE_HINT = {
+  school: 'Add your school to your profile to filter by school.',
+  department: 'Add your department to your profile to filter by department.',
+  level: 'Add your level to your profile to filter by level.',
+  interest: 'Add your interests to your profile to filter by interests.',
+};
+
+const TOAST_DURATION = 2600;
 
 const nameOf = (person = {}) => person.username || person.name || person.email || 'Student';
 const schoolOf = (person = {}) => person.school || person.university || '';
 const metaOf = (person = {}) => [schoolOf(person), person.department, person.level].filter(Boolean).join(' | ');
+const uidOf = (person = {}) => person.id || person.uid;
+const norm = (value) => String(value || '').trim().toLowerCase();
 
-function Avatar({ person, styles }) {
+const interestsOf = (person = {}) => (
+  Array.isArray(person.interests) ? person.interests.map(norm).filter(Boolean) : []
+);
+
+const mySchoolOf = (profile) => schoolOf(profile || {});
+
+// Whether the current user has the profile data needed for a given filter.
+const isFilterReady = (key, profile) => {
+  if (key === 'all') return true;
+  if (key === 'school') return !!mySchoolOf(profile);
+  if (key === 'department') return !!profile?.department;
+  if (key === 'level') return !!profile?.level;
+  if (key === 'interest') return interestsOf(profile).length > 0;
+  return true;
+};
+
+const matchesFilter = (person, key, profile) => {
+  if (key === 'all') return true;
+  if (key === 'school') return !!schoolOf(person) && norm(schoolOf(person)) === norm(mySchoolOf(profile));
+  if (key === 'department') return !!person.department && norm(person.department) === norm(profile?.department);
+  if (key === 'level') return !!person.level && norm(person.level) === norm(profile?.level);
+  if (key === 'interest') {
+    const mine = interestsOf(profile);
+    return interestsOf(person).some((item) => mine.includes(item));
+  }
+  return true;
+};
+
+const Avatar = memo(function Avatar({ person, styles }) {
   const uri = person.photo || person.avatar || person.photoURL || '';
-  return uri ? (
-    <Image source={{ uri }} style={styles.avatar} />
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [uri]);
+
+  return uri && !failed ? (
+    <Image source={{ uri }} style={styles.avatar} onError={() => setFailed(true)} />
   ) : (
     <View style={styles.avatarFallback}>
       <Text style={styles.avatarInitial}>{nameOf(person)[0]?.toUpperCase() || 'S'}</Text>
     </View>
   );
-}
+});
 
-function RelationshipAction({ person, currentUid, currentProfile, styles }) {
+function RelationshipAction({ person, currentUid, currentProfile, styles, onNotify }) {
   const { colors } = useTheme();
   const router = useRouter();
-  const targetUid = person.id || person.uid;
+  const targetUid = uidOf(person);
   const [relationship, setRelationship] = useState({ state: RELATIONSHIP.NONE });
   const [busy, setBusy] = useState(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!currentUid || !targetUid) return undefined;
-    return listenRelationship(currentUid, targetUid, setRelationship);
+    return listenRelationship(currentUid, targetUid, (next) => {
+      setRelationship(next || { state: RELATIONSHIP.NONE });
+    });
   }, [currentUid, targetUid]);
 
+  const openProfile = () => router.navigate(`/view-user-profile/${targetUid}`);
+
   const addFriend = async () => {
+    if (busy) return;
     setBusy(true);
     try {
       await sendFriendRequest({
@@ -59,11 +128,11 @@ function RelationshipAction({ person, currentUid, currentProfile, styles }) {
         currentProfile,
         targetProfile: person,
       });
-      Alert.alert('Request sent', `Your friend request was sent to ${nameOf(person)}.`);
+      onNotify?.(`Friend request sent to ${nameOf(person)}`, 'success');
     } catch (error) {
-      Alert.alert('Could not send request', error.message || 'Please try again.');
+      onNotify?.(error?.message || 'Could not send the request. Try again.', 'error');
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   };
 
@@ -71,7 +140,12 @@ function RelationshipAction({ person, currentUid, currentProfile, styles }) {
 
   if (relationship.state === RELATIONSHIP.FRIENDS) {
     return (
-      <Pressable style={[styles.smallButton, styles.friendButton]} onPress={() => router.navigate(`/view-user-profile/${targetUid}`)}>
+      <Pressable
+        style={({ pressed }) => [styles.smallButton, styles.friendButton, pressed && styles.buttonPressed]}
+        onPress={openProfile}
+        accessibilityRole="button"
+        accessibilityLabel={`You are friends with ${nameOf(person)}. Open profile`}
+      >
         <Ionicons name="checkmark-circle" size={15} color={colors.green} />
         <Text style={styles.friendButtonText}>Friends</Text>
       </Pressable>
@@ -80,7 +154,7 @@ function RelationshipAction({ person, currentUid, currentProfile, styles }) {
 
   if (relationship.state === RELATIONSHIP.SENT) {
     return (
-      <View style={[styles.smallButton, styles.sentButton]}>
+      <View style={[styles.smallButton, styles.sentButton]} accessibilityLabel="Friend request sent">
         <Ionicons name="time-outline" size={15} color={colors.grey} />
         <Text style={styles.sentButtonText}>Sent</Text>
       </View>
@@ -89,7 +163,12 @@ function RelationshipAction({ person, currentUid, currentProfile, styles }) {
 
   if (relationship.state === RELATIONSHIP.RECEIVED) {
     return (
-      <Pressable style={[styles.smallButton, styles.secondaryButton]} onPress={() => router.navigate(`/view-user-profile/${targetUid}`)}>
+      <Pressable
+        style={({ pressed }) => [styles.smallButton, styles.secondaryButton, pressed && styles.buttonPressed]}
+        onPress={openProfile}
+        accessibilityRole="button"
+        accessibilityLabel={`Respond to friend request from ${nameOf(person)}`}
+      >
         <Ionicons name="mail-unread-outline" size={15} color={colors.brand} />
         <Text style={styles.secondaryButtonText}>Respond</Text>
       </Pressable>
@@ -97,19 +176,36 @@ function RelationshipAction({ person, currentUid, currentProfile, styles }) {
   }
 
   return (
-    <Pressable style={styles.smallButton} onPress={addFriend} disabled={busy}>
-      {busy ? <ActivityIndicator size="small" color={colors.onBrand} /> : <Ionicons name="person-add-outline" size={15} color={colors.onBrand} />}
-      <Text style={styles.smallButtonText}>Add</Text>
+    <Pressable
+      style={({ pressed }) => [styles.smallButton, (pressed || busy) && styles.buttonPressed]}
+      onPress={addFriend}
+      disabled={busy}
+      accessibilityRole="button"
+      accessibilityLabel={`Add ${nameOf(person)} as a friend`}
+      accessibilityState={{ busy, disabled: busy }}
+    >
+      {busy ? (
+        <ActivityIndicator size="small" color={colors.onBrand} />
+      ) : (
+        <Ionicons name="person-add-outline" size={15} color={colors.onBrand} />
+      )}
+      <Text style={styles.smallButtonText}>{busy ? 'Sending' : 'Add'}</Text>
     </Pressable>
   );
 }
 
-function StudentRow({ person, currentUid, currentProfile, colors, styles }) {
+const StudentRow = memo(function StudentRow({ person, currentUid, currentProfile, colors, styles, onNotify }) {
   const router = useRouter();
-  const targetUid = person.id || person.uid;
+  const targetUid = uidOf(person);
+  const interests = Array.isArray(person.interests) ? person.interests.slice(0, 3).join(', ') : '';
 
   return (
-    <Pressable style={({ pressed }) => [styles.card, pressed && styles.cardPressed]} onPress={() => router.navigate(`/view-user-profile/${targetUid}`)}>
+    <Pressable
+      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+      onPress={() => router.navigate(`/view-user-profile/${targetUid}`)}
+      accessibilityRole="button"
+      accessibilityLabel={`View ${nameOf(person)}'s profile`}
+    >
       <Avatar person={person} styles={styles} />
       <View style={styles.cardBody}>
         <View style={styles.cardTop}>
@@ -122,14 +218,18 @@ function StudentRow({ person, currentUid, currentProfile, colors, styles }) {
           ) : null}
         </View>
         <Text style={styles.meta} numberOfLines={1}>{metaOf(person) || person.email || 'UniHelp student'}</Text>
-        {Array.isArray(person.interests) && person.interests.length ? (
-          <Text style={styles.interests} numberOfLines={1}>{person.interests.slice(0, 3).join(', ')}</Text>
-        ) : null}
+        {interests ? <Text style={styles.interests} numberOfLines={1}>{interests}</Text> : null}
       </View>
-      <RelationshipAction person={person} currentUid={currentUid} currentProfile={currentProfile} colors={colors} styles={styles} />
+      <RelationshipAction
+        person={person}
+        currentUid={currentUid}
+        currentProfile={currentProfile}
+        styles={styles}
+        onNotify={onNotify}
+      />
     </Pressable>
   );
-}
+});
 
 export default function FindFriendsPage() {
   const { user, profile } = useAuth();
@@ -143,60 +243,175 @@ export default function FindFriendsPage() {
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [searchError, setSearchError] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  const toastAnim = useRef(new Animated.Value(0)).current;
+  const toastTimer = useRef(null);
+
+  const query = search.trim();
+  const isSearching = query.length >= 2;
+
+  const showToast = useCallback((message, tone = 'success') => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ message, tone });
+    Animated.timing(toastAnim, { toValue: 1, duration: 180, useNativeDriver: true }).start();
+    toastTimer.current = setTimeout(() => {
+      Animated.timing(toastAnim, { toValue: 0, duration: 180, useNativeDriver: true }).start(() => setToast(null));
+    }, TOAST_DURATION);
+  }, [toastAnim]);
+
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
 
   const loadSuggested = useCallback(async () => {
     if (!uid) return;
-    const rows = await listSuggestedFriends({ uid, profile, pageSize: 40 });
-    setSuggested(rows);
+    try {
+      const rows = await listSuggestedFriends({ uid, profile, pageSize: 40 });
+      setSuggested(Array.isArray(rows) ? rows : []);
+      setLoadError(false);
+    } catch (error) {
+      setLoadError(true);
+    }
   }, [profile, uid]);
 
   useEffect(() => {
-    loadSuggested().finally(() => setLoading(false));
+    let active = true;
+    loadSuggested().finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
   }, [loadSuggested]);
 
+  // Debounced search. The cancelled flag stops a slow older request from overwriting newer results.
   useEffect(() => {
-    const run = async () => {
-      if (!uid || search.trim().length < 2) {
-        setResults([]);
-        return;
-      }
-      setSearching(true);
-      try {
-        const rows = await searchUsers(search, uid, 30);
-        setResults(rows);
-      } finally {
-        setSearching(false);
-      }
-    };
-    const timer = setTimeout(() => {
-      run().catch(() => setSearching(false));
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [search, uid]);
+    if (!uid || query.length < 2) {
+      setResults([]);
+      setSearching(false);
+      setSearchError(false);
+      return undefined;
+    }
 
-  const visibleRows = useMemo(() => {
-    const baseRows = search.trim().length >= 2 ? results : suggested;
-    return baseRows.filter((person) => {
-      if (filter === 'school') return schoolOf(person) && schoolOf(person) === (profile?.school || profile?.university);
-      if (filter === 'department') return person.department && person.department === profile?.department;
-      if (filter === 'level') return person.level && person.level === profile?.level;
-      if (filter === 'interest') return person.interests && person.interests === profile?.interests;
-      return true;
+    let cancelled = false;
+    setSearching(true);
+
+    const timer = setTimeout(async () => {
+      try {
+        const rows = await searchUsers(query, uid, 30);
+        if (cancelled) return;
+        setResults(Array.isArray(rows) ? rows : []);
+        setSearchError(false);
+      } catch (error) {
+        if (cancelled) return;
+        setResults([]);
+        setSearchError(true);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, uid]);
+
+  const baseRows = useMemo(() => {
+    const rows = isSearching ? results : suggested;
+    return rows.filter((person) => uidOf(person) && uidOf(person) !== uid);
+  }, [isSearching, results, suggested, uid]);
+
+  const filterCounts = useMemo(() => {
+    const counts = {};
+    FILTERS.forEach(({ key }) => {
+      counts[key] = key === 'all'
+        ? baseRows.length
+        : baseRows.filter((person) => matchesFilter(person, key, profile)).length;
     });
-  }, [filter, profile, results, search, suggested]);
+    return counts;
+  }, [baseRows, profile]);
+
+  const visibleRows = useMemo(
+    () => baseRows.filter((person) => matchesFilter(person, filter, profile)),
+    [baseRows, filter, profile],
+  );
+
+  const filterReady = isFilterReady(filter, profile);
 
   const onRefresh = async () => {
     setRefreshing(true);
     try {
       await loadSuggested();
-      if (search.trim().length >= 2 && uid) {
-        const rows = await searchUsers(search, uid, 30);
-        setResults(rows);
+      if (isSearching && uid) {
+        try {
+          const rows = await searchUsers(query, uid, 30);
+          setResults(Array.isArray(rows) ? rows : []);
+          setSearchError(false);
+        } catch (error) {
+          setSearchError(true);
+        }
       }
     } finally {
       setRefreshing(false);
     }
   };
+
+  const retry = () => {
+    if (isSearching) {
+      onRefresh();
+    } else {
+      setLoading(true);
+      loadSuggested().finally(() => setLoading(false));
+    }
+  };
+
+  const clearSearch = () => setSearch('');
+
+  const renderItem = useCallback(({ item }) => (
+    <StudentRow
+      person={item}
+      currentUid={uid}
+      currentProfile={profile}
+      colors={colors}
+      styles={styles}
+      onNotify={showToast}
+    />
+  ), [colors, profile, showToast, styles, uid]);
+
+  const hasError = isSearching ? searchError : loadError;
+
+  const emptyCopy = (() => {
+    if (hasError) {
+      return {
+        title: isSearching ? 'Search failed' : 'Could not load suggestions',
+        description: 'Check your connection, then tap Try again.',
+      };
+    }
+    if (filter !== 'all' && !filterReady) {
+      return { title: 'Profile details missing', description: MISSING_PROFILE_HINT[filter] };
+    }
+    if (filter !== 'all' && baseRows.length > 0) {
+      return {
+        title: 'No matches for this filter',
+        description: 'Switch to All to see everyone in these results.',
+      };
+    }
+    if (isSearching) {
+      return { title: 'No students found', description: 'Try another name, school, or department.' };
+    }
+    return {
+      title: 'No suggestions yet',
+      description: 'Complete your profile details to improve friend suggestions.',
+    };
+  })();
+
+  const listTitle = isSearching
+    ? `Search results (${visibleRows.length})`
+    : `Suggested for you (${visibleRows.length})`;
 
   return (
     <ScreenShell title="Find Friends" subtitle="Discover classmates and friends in other schools" showBack loading={loading} scrollable={false}>
@@ -209,8 +424,23 @@ export default function FindFriendsPage() {
           placeholderTextColor={colors.greyLight}
           style={styles.searchInput}
           autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          clearButtonMode="never"
+          accessibilityLabel="Search students"
         />
         {searching ? <ActivityIndicator size="small" color={colors.brand} /> : null}
+        {search.length > 0 ? (
+          <Pressable
+            onPress={clearSearch}
+            hitSlop={10}
+            style={styles.clearButton}
+            accessibilityRole="button"
+            accessibilityLabel="Clear search"
+          >
+            <Ionicons name="close-circle" size={18} color={colors.greyLight} />
+          </Pressable>
+        ) : null}
       </View>
 
       <FlatList
@@ -218,33 +448,100 @@ export default function FindFriendsPage() {
         data={FILTERS}
         keyExtractor={(item) => item.key}
         showsHorizontalScrollIndicator={false}
+        style={styles.filtersList}
         contentContainerStyle={styles.filters}
-        renderItem={({ item }) => (
-          <Pressable style={[styles.filterChip, filter === item.key && styles.filterChipActive]} onPress={() => setFilter(item.key)}>
-            <Text style={[styles.filterText, filter === item.key && styles.filterTextActive]}>{item.label}</Text>
-          </Pressable>
-        )}
+        keyboardShouldPersistTaps="handled"
+        extraData={filterCounts}
+        renderItem={({ item }) => {
+          const active = filter === item.key;
+          const count = filterCounts[item.key];
+          return (
+            <Pressable
+              style={({ pressed }) => [styles.filterChip, active && styles.filterChipActive, pressed && styles.buttonPressed]}
+              onPress={() => setFilter(item.key)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={`${item.label} filter, ${count} students`}
+            >
+              <Text style={[styles.filterText, active && styles.filterTextActive]}>{item.label}</Text>
+              {count > 0 ? (
+                <View style={[styles.countBadge, active && styles.countBadgeActive]}>
+                  <Text style={[styles.countText, active && styles.countTextActive]}>{count}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          );
+        }}
       />
+
+      {filter !== 'all' && !filterReady ? (
+        <View style={styles.hintBanner}>
+          <Ionicons name="information-circle-outline" size={16} color={colors.brandText} />
+          <Text style={styles.hintText}>{MISSING_PROFILE_HINT[filter]}</Text>
+        </View>
+      ) : null}
+
+      {hasError && visibleRows.length > 0 ? (
+        <View style={styles.hintBanner}>
+          <Ionicons name="cloud-offline-outline" size={16} color={colors.brandText} />
+          <Text style={styles.hintText}>Some results may be out of date.</Text>
+          <Pressable onPress={retry} hitSlop={8} accessibilityRole="button" accessibilityLabel="Try again">
+            <Text style={styles.retryText}>Try again</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <FlatList
         data={visibleRows}
-        keyExtractor={(item) => item.id || item.uid}
-        renderItem={({ item }) => (
-          <StudentRow person={item} currentUid={uid} currentProfile={profile} colors={colors} styles={styles} />
-        )}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
+        keyExtractor={(item, index) => String(uidOf(item) || index)}
+        renderItem={renderItem}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} colors={[colors.brand]} />}
         contentContainerStyle={visibleRows.length ? styles.listContent : styles.emptyContent}
         showsVerticalScrollIndicator={false}
-        ListHeaderComponent={visibleRows.length ? (
-          <Text style={styles.sectionTitle}>{search.trim().length >= 2 ? 'Search results' : 'Suggested for you'}</Text>
-        ) : null}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        initialNumToRender={10}
+        windowSize={7}
+        removeClippedSubviews
+        ListHeaderComponent={visibleRows.length ? <Text style={styles.sectionTitle}>{listTitle}</Text> : null}
         ListEmptyComponent={!loading ? (
-          <EmptyState
-            title={search.trim().length >= 2 ? 'No students found' : 'No suggestions yet'}
-            description={search.trim().length >= 2 ? 'Try another name, school, or department.' : 'Complete your profile details to improve friend suggestions.'}
-          />
+          <View>
+            <EmptyState title={emptyCopy.title} description={emptyCopy.description} />
+            {hasError ? (
+              <Pressable
+                style={({ pressed }) => [styles.retryButton, pressed && styles.buttonPressed]}
+                onPress={retry}
+                accessibilityRole="button"
+                accessibilityLabel="Try again"
+              >
+                <Ionicons name="refresh-outline" size={16} color={colors.onBrand} />
+                <Text style={styles.smallButtonText}>Try again</Text>
+              </Pressable>
+            ) : null}
+          </View>
         ) : null}
       />
+
+      {toast ? (
+        <Animated.View
+          pointerEvents="none"
+          accessibilityLiveRegion="polite"
+          style={[
+            styles.toast,
+            {
+              opacity: toastAnim,
+              transform: [{ translateY: toastAnim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+            },
+          ]}
+        >
+          <Ionicons
+            name={toast.tone === 'error' ? 'alert-circle' : 'checkmark-circle'}
+            size={18}
+            color={toast.tone === 'error' ? colors.greyLight : colors.green}
+          />
+          <Text style={styles.toastText} numberOfLines={2}>{toast.message}</Text>
+        </Animated.View>
+      ) : null}
     </ScreenShell>
   );
 }
@@ -269,13 +566,25 @@ const createStyles = (c, s, r) => ({
     fontSize: 14,
     paddingVertical: 10,
   },
+  clearButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // flexGrow: 0 stops the horizontal list from stretching vertically and pushing the results down.
+  filtersList: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
   filters: {
     gap: s.sm,
     paddingBottom: s.md,
   },
   filterChip: {
     height: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
     borderRadius: r.full,
     paddingHorizontal: s.md,
     backgroundColor: c.surface,
@@ -293,6 +602,61 @@ const createStyles = (c, s, r) => ({
   },
   filterTextActive: {
     color: c.onBrand,
+  },
+  countBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: c.canvasLight,
+  },
+  countBadgeActive: {
+    backgroundColor: 'rgba(255,255,255,0.25)',
+  },
+  countText: {
+    color: c.grey,
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  countTextActive: {
+    color: c.onBrand,
+  },
+  hintBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: s.sm,
+    backgroundColor: c.brandLight,
+    borderWidth: 1,
+    borderColor: c.brandBorder,
+    borderRadius: r.xl,
+    paddingHorizontal: s.md,
+    paddingVertical: s.sm,
+    marginBottom: s.md,
+  },
+  hintText: {
+    flex: 1,
+    color: c.brandText,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+  },
+  retryText: {
+    color: c.brand,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  retryButton: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 40,
+    borderRadius: r.full,
+    backgroundColor: c.brand,
+    paddingHorizontal: s.lg,
+    marginTop: s.md,
   },
   sectionTitle: {
     color: c.ink,
@@ -323,16 +687,19 @@ const createStyles = (c, s, r) => ({
   cardPressed: {
     backgroundColor: c.canvasLight,
   },
+  buttonPressed: {
+    opacity: 0.75,
+  },
   avatar: {
     width: 52,
     height: 52,
-    borderRadius: 17,
+    borderRadius: 18,
     backgroundColor: c.brandLight,
   },
   avatarFallback: {
     width: 52,
     height: 52,
-    borderRadius: 20,
+    borderRadius: 18,
     backgroundColor: c.brandLight,
     alignItems: 'center',
     justifyContent: 'center',
@@ -352,7 +719,7 @@ const createStyles = (c, s, r) => ({
     gap: s.sm,
   },
   name: {
-    flex: 1,
+    flexShrink: 1,
     color: c.ink,
     fontSize: 15,
     fontWeight: '900',
@@ -384,7 +751,7 @@ const createStyles = (c, s, r) => ({
     fontWeight: '900',
   },
   smallButton: {
-    minWidth: 68,
+    minWidth: 76,
     height: 36,
     borderRadius: r.full,
     backgroundColor: c.brand,
@@ -427,5 +794,25 @@ const createStyles = (c, s, r) => ({
     color: c.green,
     fontSize: 12,
     fontWeight: '900',
+  },
+  toast: {
+    position: 'absolute',
+    left: s.md,
+    right: s.md,
+    bottom: s.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: s.sm,
+    backgroundColor: c.ink,
+    borderRadius: r.xl,
+    paddingHorizontal: s.md,
+    paddingVertical: 12,
+    ...shadows.card,
+  },
+  toastText: {
+    flex: 1,
+    color: c.card,
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

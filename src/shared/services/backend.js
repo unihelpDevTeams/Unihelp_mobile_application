@@ -12,20 +12,21 @@ export const getApiUrl = () => {
 /**
  * Get a Firebase auth token for authenticated API requests.
  */
-async function getAuthToken() {
+async function getAuthToken(forceRefresh = false) {
   const currentUser = auth?.currentUser;
   if (!currentUser) {
-    throw new Error('Authentication is still loading. Please try again.');
+    throw new Error('Your session expired. Please sign in again.');
   }
 
   try {
-    const token = await currentUser.getIdToken();
+    const token = await currentUser.getIdToken(forceRefresh);
     if (!token) throw new Error('Firebase did not return an auth token.');
     return token;
   } catch (error) {
     console.error('[API auth] Failed to get Firebase ID token', {
       uid: currentUser.uid,
       email: currentUser.email,
+      forceRefresh,
       error,
     });
     throw new Error('Your login session expired. Please sign in again.');
@@ -35,11 +36,37 @@ async function getAuthToken() {
 /**
  * Build headers with optional auth token.
  */
-async function buildHeaders(extraHeaders = {}) {
+async function buildHeaders(extraHeaders = {}, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...extraHeaders };
-  const token = await getAuthToken();
+  const token = await getAuthToken(Boolean(options.forceRefresh));
   headers['Authorization'] = `Bearer ${token}`;
   return headers;
+}
+
+async function requestJson(path, { method = 'GET', payload, extraHeaders = {}, useFormData = false, forceRefresh = false } = {}) {
+  const headers = await buildHeaders(extraHeaders, { forceRefresh });
+  const requestInit = {
+    method,
+    headers,
+  };
+
+  if (payload !== undefined && !useFormData) {
+    requestInit.body = JSON.stringify(payload);
+  }
+
+  const response = await fetch(`${getApiUrl()}${path}`, requestInit);
+  const data = await parseResponse(response);
+
+  if (!response.ok) {
+    const message = data.message || data.error || 'Request failed';
+    if (response.status === 401 && !forceRefresh && auth?.currentUser) {
+      console.warn('[API auth] Received 401; refreshing Firebase token and retrying once.', { path });
+      return requestJson(path, { method, payload, extraHeaders, useFormData, forceRefresh: true });
+    }
+    throw new Error(`${response.status} ${message}`);
+  }
+
+  return data;
 }
 
 const parseResponse = async (response) => {
@@ -54,91 +81,23 @@ const parseResponse = async (response) => {
 };
 
 export async function postJson(path, payload) {
-  const headers = await buildHeaders();
-  const response = await fetch(`${getApiUrl()}${path}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
-
-  const data = await parseResponse(response);
-
-  if (!response.ok) {
-    const message = data.message || data.error || 'Request failed';
-    throw new Error(`${response.status} ${message}`);
-  }
-
-  return data;
+  return requestJson(path, { method: 'POST', payload });
 }
 
 export async function putJson(path, payload) {
-  const headers = await buildHeaders();
-  const response = await fetch(`${getApiUrl()}${path}`, {
-    method: 'PUT',
-    headers,
-    body: JSON.stringify(payload),
-  });
-
-  const data = await parseResponse(response);
-
-  if (!response.ok) {
-    const message = data.message || data.error || 'Request failed';
-    throw new Error(`${response.status} ${message}`);
-  }
-
-  return data;
+  return requestJson(path, { method: 'PUT', payload });
 }
 
 export async function patchJson(path, payload) {
-  const headers = await buildHeaders();
-  const response = await fetch(`${getApiUrl()}${path}`, {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify(payload),
-  });
-
-  const data = await parseResponse(response);
-
-  if (!response.ok) {
-    const message = data.message || data.error || 'Request failed';
-    throw new Error(`${response.status} ${message}`);
-  }
-
-  return data;
+  return requestJson(path, { method: 'PATCH', payload });
 }
 
 export async function deleteJson(path) {
-  const headers = await buildHeaders();
-  const response = await fetch(`${getApiUrl()}${path}`, {
-    method: 'DELETE',
-    headers,
-  });
-
-  const data = await parseResponse(response);
-
-  if (!response.ok) {
-    const message = data.message || data.error || 'Request failed';
-    throw new Error(`${response.status} ${message}`);
-  }
-
-  return data;
+  return requestJson(path, { method: 'DELETE' });
 }
 
 export async function getJson(path) {
-  const headers = await buildHeaders();
-  const response = await fetch(`${getApiUrl()}${path}`, {
-    method: 'GET',
-    headers,
-  });
-
-  const data = await parseResponse(response);
-
-  if (!response.ok) {
-    const message = data.message || data.error || 'Request failed';
-    throw new Error(`${response.status} ${message}`);
-  }
-
-  return data;
+  return requestJson(path, { method: 'GET' });
 }
 
 export async function uploadFeatureMedia(file, { feature = 'stories', resourceType = 'auto', onProgress } = {}) {

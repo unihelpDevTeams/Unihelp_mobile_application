@@ -62,28 +62,27 @@ const VoiceRecorderBar = memo(({ conversationId, onVoiceSent }) => {
       return;
     }
 
-    const animateWave = (index) => {
+    const waveLoops = waveAnims.map((anim) => {
       const randomDuration = 200 + Math.random() * 400;
       const randomHeight = 0.4 + Math.random() * 0.6;
-      Animated.sequence([
-        Animated.timing(waveAnims[index], {
+      const loop = Animated.loop(Animated.sequence([
+        Animated.timing(anim, {
           toValue: randomHeight,
           duration: randomDuration,
           useNativeDriver: false,
         }),
-        Animated.timing(waveAnims[index], {
+        Animated.timing(anim, {
           toValue: 0.3,
           duration: randomDuration * 0.7,
           useNativeDriver: false,
         }),
-      ]).start(() => {
-        if (isRecording) animateWave(index);
-      });
-    };
-
-    waveAnims.forEach((_, index) => animateWave(index));
+      ]));
+      loop.start();
+      return loop;
+    });
 
     return () => {
+      waveLoops.forEach((loop) => loop.stop());
       waveAnims.forEach((anim) => anim.stopAnimation());
     };
   }, [isRecording, waveAnims]);

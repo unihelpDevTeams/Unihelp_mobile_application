@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Keyboard, Platform, View, Text, Pressable, StyleSheet } from 'react-native';
 import { colors, spacing, borderRadius } from '../../shared/theme';
 import SearchableDropdown from '../components/SearchableDropdown';
 import SchoolTypeFilter from '../../shared/components/SchoolTypeFilter';
@@ -7,9 +7,32 @@ import { useUniversities } from '../hooks/useUniversities';
 import { useDepartments } from '../hooks/useDepartments';
 import { ACADEMIC_LEVELS } from '../validation';
 
+// Tracks the on-screen keyboard height so the step can reserve room for it.
+// Without this, the parent scroll area ends right under the last field and the
+// keyboard covers the dropdown results and level chips with nothing left to scroll.
+function useKeyboardHeight() {
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, (e) => setHeight(e?.endCoordinates?.height || 0));
+    const hideSub = Keyboard.addListener(hideEvent, () => setHeight(0));
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  return height;
+}
+
 export default function Step2AcademicInfo({ formData, errors, updateField }) {
   const { universities, loading: ul, searchText: us, setSearchText: sus, loadMore: lmu, schoolType, setSchoolType } = useUniversities();
   const { departments, loading: dl, searchText: ds, setSearchText: sds, selectUniversity } = useDepartments();
+  const keyboardHeight = useKeyboardHeight();
 
   useEffect(() => {
     if (formData.universityId) selectUniversity(formData.universityId);
@@ -33,16 +56,70 @@ export default function Step2AcademicInfo({ formData, errors, updateField }) {
 
   return (
     <View style={st.c}>
-      <View style={st.h}><Text style={st.t}>Academic Information</Text><Text style={st.sub}>Tell us about your academic background.</Text></View>
+      <View style={st.h}>
+        <Text style={st.t}>Academic Information</Text>
+        <Text style={st.sub}>Tell us about your academic background.</Text>
+      </View>
+
       <View style={st.card}>
         <SchoolTypeFilter value={schoolType} onChange={setSchoolType} />
-        <SearchableDropdown label="School" placeholder="Search for your school..." data={universities} value={formData.universityId} onSelect={onUni} loading={ul} searchText={us} onSearchChange={sus} onLoadMore={lmu} icon="school-outline" renderItemLabel={renderUniLabel} error={errors.university} />
-        <SearchableDropdown label="Department" placeholder="Search for your department..." data={departments} value={formData.departmentId} onSelect={onDept} loading={dl} searchText={ds} onSearchChange={sds} icon="layers-outline" renderItemLabel={renderDeptLabel} error={errors.department} />
-        <View style={st.f}><Text style={st.l}>Academic Level</Text>
-          <View style={st.grid}>{ACADEMIC_LEVELS.map((l) => { const s = formData.level === l.value; return (<Pressable key={l.value} style={({ pressed }) => [st.gi, s && st.giS, pressed && st.chP]} onPress={() => updateField('level', l.value)}><Text style={[st.gt, s && st.gtS]}>{l.label}</Text></Pressable>); })}</View>
+
+        <SearchableDropdown
+          label="School"
+          placeholder="Search for your school..."
+          data={universities}
+          value={formData.universityId}
+          onSelect={onUni}
+          loading={ul}
+          searchText={us}
+          onSearchChange={sus}
+          onLoadMore={lmu}
+          icon="school-outline"
+          renderItemLabel={renderUniLabel}
+          error={errors.university}
+        />
+
+        <SearchableDropdown
+          label="Department"
+          placeholder="Search for your department..."
+          data={departments}
+          value={formData.departmentId}
+          onSelect={onDept}
+          loading={dl}
+          searchText={ds}
+          onSearchChange={sds}
+          icon="layers-outline"
+          renderItemLabel={renderDeptLabel}
+          error={errors.department}
+        />
+
+        <View style={st.f}>
+          <Text style={st.l}>Academic Level</Text>
+          <View style={st.grid}>
+            {ACADEMIC_LEVELS.map((l) => {
+              const s = formData.level === l.value;
+              return (
+                <Pressable
+                  key={l.value}
+                  style={({ pressed }) => [st.gi, s && st.giS, pressed && st.chP]}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    updateField('level', l.value);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: s }}
+                >
+                  <Text style={[st.gt, s && st.gtS]}>{l.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
           {errors.level && <Text style={st.e}>{errors.level}</Text>}
         </View>
       </View>
+
+      {/* Reserves space equal to the keyboard so the parent scroll view can scroll every field above it. */}
+      {keyboardHeight > 0 ? <View style={{ height: keyboardHeight + spacing.lg }} /> : null}
     </View>
   );
 }

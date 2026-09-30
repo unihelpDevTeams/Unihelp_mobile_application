@@ -45,17 +45,24 @@ export default function Step3Profile({ formData, errors, updateField }) {
       <View style={s.card}>
         {/* Profile Picture */}
         <View style={s.avatarSection}>
-          <Pressable onPress={pickPhoto} style={({ pressed }) => [s.avatarWrap, pressed && s.avatarPressed]}>
+          <Pressable
+            onPress={pickPhoto}
+            style={({ pressed }) => [
+              s.avatarWrap,
+              errors.photoURI && s.avatarError,
+              pressed && s.avatarPressed,
+            ]}
+          >
             {formData.photoURI ? (
               <RNImage source={{ uri: formData.photoURI }} style={s.avatar} />
             ) : (
-              <View style={s.avatarPlaceholder}>
-                <Ionicons name="camera" size={28} color={colors.greyLight} />
-                <Text style={s.avatarLabel}>Add Photo</Text>
+              <View style={[s.avatarPlaceholder, errors.photoURI && s.avatarPlaceholderError]}>
+                <Ionicons name="camera" size={28} color={errors.photoURI ? colors.rose : colors.greyLight} />
+                <Text style={[s.avatarLabel, errors.photoURI && s.avatarLabelError]}>Add Photo</Text>
               </View>
             )}
           </Pressable>
-          <Text style={s.avatarHint}>Optional</Text>
+          <Text style={[s.avatarHint, errors.photoURI && s.avatarHintError]}>{errors.photoURI || 'Required'}</Text>
         </View>
 
         {/* Bio */}
@@ -77,11 +84,15 @@ const s = StyleSheet.create({
   card: { backgroundColor: colors.whiteTransparent, borderRadius: borderRadius['5xl'], borderWidth: 1, borderColor: colors.border, padding: spacing.xl, gap: spacing.lg },
   avatarSection: { alignItems: 'center', gap: spacing.xs },
   avatarWrap: { width: 86, height: 86, borderRadius: 28 },
+  avatarError: { borderWidth: 1.5, borderColor: colors.rose },
   avatarPressed: { opacity: 0.8 },
   avatar: { width: 86, height: 86, borderRadius: 28 },
   avatarPlaceholder: { width: 86, height: 86, borderRadius: 28, backgroundColor: colors.brandLight, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.brandBorder, borderStyle: 'dashed' },
+  avatarPlaceholderError: { borderColor: colors.rose, backgroundColor: colors.roseSoft || '#FFF1F2' },
   avatarLabel: { color: colors.brandText, fontWeight: '700', fontSize: 10, marginTop: 2 },
+  avatarLabelError: { color: colors.rose },
   avatarHint: { color: colors.grey, fontSize: 11 },
+  avatarHintError: { color: colors.rose, fontWeight: '700' },
   f: { gap: 6 }, l: { color: colors.inkLight, fontSize: 12.5, fontWeight: '700' },
   input: { borderWidth: 1, borderColor: colors.greyLight, borderRadius: borderRadius.xl, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, fontSize: 15, color: colors.ink, backgroundColor: colors.surface },
   bioInput: { minHeight: 80, paddingTop: spacing.md }, errB: { borderColor: colors.rose, borderWidth: 1.5 },

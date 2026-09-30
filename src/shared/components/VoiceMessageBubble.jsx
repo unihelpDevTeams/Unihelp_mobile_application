@@ -43,28 +43,27 @@ const VoiceMessageBubble = memo(({ message, isMine, onLongPress }) => {
       return;
     }
 
-    const animateWave = (index) => {
+    const waveLoops = waveAnims.map((anim) => {
       const randomDuration = 150 + Math.random() * 300;
       const randomHeight = 0.3 + Math.random() * 0.7;
-      Animated.sequence([
-        Animated.timing(waveAnims[index], {
+      const loop = Animated.loop(Animated.sequence([
+        Animated.timing(anim, {
           toValue: randomHeight,
           duration: randomDuration,
           useNativeDriver: false,
         }),
-        Animated.timing(waveAnims[index], {
+        Animated.timing(anim, {
           toValue: 0.2,
           duration: randomDuration * 0.6,
           useNativeDriver: false,
         }),
-      ]).start(() => {
-        if (isPlaying) animateWave(index);
-      });
-    };
-
-    waveAnims.forEach((_, index) => animateWave(index));
+      ]));
+      loop.start();
+      return loop;
+    });
 
     return () => {
+      waveLoops.forEach((loop) => loop.stop());
       waveAnims.forEach((anim) => anim.stopAnimation());
     };
   }, [isPlaying, waveAnims]);
