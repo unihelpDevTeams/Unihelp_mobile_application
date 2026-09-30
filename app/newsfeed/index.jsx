@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, FlatList, Modal, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, FlatList, Modal, Pressable, Text, TextInput, View, KeyboardAvoidingView, Platform } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -982,56 +982,61 @@ export default function NewsFeedPage() {
 
       <Modal visible={Boolean(commentsPost)} transparent animationType="slide" onRequestClose={closeComments}>
         <Pressable style={styles.modalBackdrop} onPress={closeComments}>
-          <Pressable style={styles.commentsSheet} onPress={(event) => event.stopPropagation()}>
-            <View style={styles.commentsHeader}>
-              <View>
-                <Text style={styles.commentsTitle}>Comments</Text>
-                <Text style={styles.commentsCount}>{commentsPost?.commentsCount || comments.length} comments</Text>
-              </View>
-              <Pressable onPress={closeComments} accessibilityRole="button" accessibilityLabel="Close comments">
-                <Ionicons name="close" size={24} color={colors.textSecondary} />
-              </Pressable>
-            </View>
-
-            {commentsLoading ? <ActivityIndicator style={{ marginTop: 32 }} color={colors.brand} /> : null}
-            {!commentsLoading && !comments.length ? (
-              <View style={styles.commentsEmpty}><Ionicons name="chatbubble-ellipses-outline" size={32} color={colors.textTertiary} /><Text style={styles.commentsEmptyText}>Be the first to comment</Text></View>
-            ) : null}
-            <FlatList
-              data={comments}
-              keyExtractor={(item) => item.id}
-              style={styles.commentsList}
-              renderItem={({ item }) => (
-                <View style={styles.commentItem}>
-                  {item.authorAvatar ? <Image source={{ uri: item.authorAvatar }} style={styles.commentAvatar} contentFit="cover" /> : <View style={styles.commentAvatar} />}
-                  <View style={styles.commentCopy}>
-                    <Text style={styles.commentAuthor}>{item.authorName || 'UniHelp student'}</Text>
-                    <Text style={styles.commentBody}>{item.content}</Text>
-                    <Text style={styles.commentDate}>{timeAgo(item.createdAt)}</Text>
-                  </View>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.commentsSheet}
+          >
+            <Pressable style={{ flex: 1 }} onPress={(event) => event.stopPropagation()}>
+              <View style={styles.commentsHeader}>
+                <View>
+                  <Text style={styles.commentsTitle}>Comments</Text>
+                  <Text style={styles.commentsCount}>{commentsPost?.commentsCount || comments.length} comments</Text>
                 </View>
-              )}
-              onEndReached={() => commentsPost && loadComments(commentsPost, true)}
-              onEndReachedThreshold={0.5}
-              ListFooterComponent={commentsLoadingMore ? <ActivityIndicator style={{ paddingVertical: 12 }} color={colors.brand} /> : commentsHasMore ? <Pressable style={styles.commentsMore} onPress={() => loadComments(commentsPost, true)}><Text style={styles.commentsMoreText}>Load more comments</Text></Pressable> : null}
-            />
+                <Pressable onPress={closeComments} accessibilityRole="button" accessibilityLabel="Close comments">
+                  <Ionicons name="close" size={24} color={colors.textSecondary} />
+                </Pressable>
+              </View>
 
-            <View style={styles.commentsComposer}>
-              <TextInput
-                value={commentText}
-                onChangeText={setCommentText}
-                placeholder="Add a comment..."
-                placeholderTextColor={colors.placeholder}
-                style={styles.commentInput}
-                editable={!commentPosting}
-                onSubmitEditing={() => commentsPost && addComment(commentsPost)}
-                returnKeyType="send"
+              {commentsLoading ? <ActivityIndicator style={{ marginTop: 32 }} color={colors.brand} /> : null}
+              {!commentsLoading && !comments.length ? (
+                <View style={styles.commentsEmpty}><Ionicons name="chatbubble-ellipses-outline" size={32} color={colors.textTertiary} /><Text style={styles.commentsEmptyText}>Be the first to comment</Text></View>
+              ) : null}
+              <FlatList
+                data={comments}
+                keyExtractor={(item) => item.id}
+                style={styles.commentsList}
+                renderItem={({ item }) => (
+                  <View style={styles.commentItem}>
+                    {item.authorAvatar ? <Image source={{ uri: item.authorAvatar }} style={styles.commentAvatar} contentFit="cover" /> : <View style={styles.commentAvatar} />}
+                    <View style={styles.commentCopy}>
+                      <Text style={styles.commentAuthor}>{item.authorName || 'UniHelp student'}</Text>
+                      <Text style={styles.commentBody}>{item.content}</Text>
+                      <Text style={styles.commentDate}>{timeAgo(item.createdAt)}</Text>
+                    </View>
+                  </View>
+                )}
+                onEndReached={() => commentsPost && loadComments(commentsPost, true)}
+                onEndReachedThreshold={0.5}
+                ListFooterComponent={commentsLoadingMore ? <ActivityIndicator style={{ paddingVertical: 12 }} color={colors.brand} /> : commentsHasMore ? <Pressable style={styles.commentsMore} onPress={() => loadComments(commentsPost, true)}><Text style={styles.commentsMoreText}>Load more comments</Text></Pressable> : null}
               />
-              <Pressable style={({ pressed }) => [styles.sendButton, (pressed || commentPosting) && styles.sendButtonDisabled]} onPress={() => commentsPost && addComment(commentsPost)} disabled={commentPosting || !commentText.trim()}>
-                {commentPosting ? <ActivityIndicator size="small" color={colors.onBrand} /> : <Ionicons name="send" size={16} color={colors.onBrand} />}
-              </Pressable>
-            </View>
-          </Pressable>
+
+              <View style={styles.commentsComposer}>
+                <TextInput
+                  value={commentText}
+                  onChangeText={setCommentText}
+                  placeholder="Add a comment..."
+                  placeholderTextColor={colors.placeholder}
+                  style={styles.commentInput}
+                  editable={!commentPosting}
+                  onSubmitEditing={() => commentsPost && addComment(commentsPost)}
+                  returnKeyType="send"
+                />
+                <Pressable style={({ pressed }) => [styles.sendButton, (pressed || commentPosting) && styles.sendButtonDisabled]} onPress={() => commentsPost && addComment(commentsPost)} disabled={commentPosting || !commentText.trim()}>
+                  {commentPosting ? <ActivityIndicator size="small" color={colors.onBrand} /> : <Ionicons name="send" size={16} color={colors.onBrand} />}
+                </Pressable>
+              </View>
+            </Pressable>
+          </KeyboardAvoidingView>
         </Pressable>
       </Modal>
 
