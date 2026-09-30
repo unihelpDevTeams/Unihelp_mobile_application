@@ -64,6 +64,7 @@ module.exports = {
     },
     android: {
       package: "com.zenithdev.unihelp",
+      googleServicesFile: "./google-services.json",
       softwareKeyboardLayoutMode: "resize",
       versionCode: 3,
       permissions: ["RECORD_AUDIO", "POST_NOTIFICATIONS"],

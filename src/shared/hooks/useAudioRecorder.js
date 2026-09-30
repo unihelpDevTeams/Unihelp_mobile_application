@@ -271,8 +271,35 @@ export function useAudioRecorder({ conversationId, isPremium }) {
       const durationSec = Math.max(1, Math.round(durationMs / 1000));
       const token = await auth.currentUser?.getIdToken();
 
+      const appendFileToFormData = (formData, fieldName, file) => {
+        if (!file) {
+          return;
+        }
+
+        if (typeof File !== 'undefined' && file instanceof File) {
+          formData.append(fieldName, file, file.name || `${fieldName}.bin`);
+          return;
+        }
+
+        if (typeof Blob !== 'undefined' && file instanceof Blob) {
+          formData.append(fieldName, file, file.name || `${fieldName}.bin`);
+          return;
+        }
+
+        if (file && typeof file === 'object' && (file.uri || file.path || file.url)) {
+          formData.append(fieldName, {
+            uri: file.uri || file.path || file.url,
+            name: file.name || file.fileName || file.filename || `${fieldName}.bin`,
+            type: file.type || file.mimeType || 'audio/mp4',
+          });
+          return;
+        }
+
+        formData.append(fieldName, file);
+      };
+
       const formData = new FormData();
-      formData.append('audio', {
+      appendFileToFormData(formData, 'audio', {
         uri,
         type: 'audio/mp4',
         name: `voice_${Date.now()}.m4a`,

@@ -100,6 +100,33 @@ export async function getJson(path) {
   return requestJson(path, { method: 'GET' });
 }
 
+const appendFileToFormData = (formData, fieldName, file) => {
+  if (!file) {
+    return;
+  }
+
+  if (typeof File !== 'undefined' && file instanceof File) {
+    formData.append(fieldName, file, file.name || `${fieldName}.bin`);
+    return;
+  }
+
+  if (typeof Blob !== 'undefined' && file instanceof Blob) {
+    formData.append(fieldName, file, file.name || `${fieldName}.bin`);
+    return;
+  }
+
+  if (file && typeof file === 'object' && (file.uri || file.path || file.url)) {
+    formData.append(fieldName, {
+      uri: file.uri || file.path || file.url,
+      name: file.name || file.fileName || file.filename || `${fieldName}.bin`,
+      type: file.type || file.mimeType || 'application/octet-stream',
+    });
+    return;
+  }
+
+  formData.append(fieldName, file);
+};
+
 export async function uploadFeatureMedia(file, { feature = 'stories', resourceType = 'auto', onProgress } = {}) {
   const headers = await buildHeaders({});
   delete headers['Content-Type'];
@@ -107,15 +134,7 @@ export async function uploadFeatureMedia(file, { feature = 'stories', resourceTy
   const formData = new FormData();
   formData.append('feature', feature);
   formData.append('resourceType', resourceType);
-  if (file?.uri && !file?.arrayBuffer) {
-    formData.append('file', {
-      uri: file.uri,
-      name: file.name || file.fileName || `${feature}-upload`,
-      type: file.type || file.mimeType || 'application/octet-stream',
-    });
-  } else {
-    formData.append('file', file);
-  }
+  appendFileToFormData(formData, 'file', file);
 
   const response = await fetch(`${getApiUrl()}/api/uploads`, {
     method: 'POST',
@@ -149,7 +168,8 @@ export async function uploadStickerMedia(file, { onProgress, rotation = 0 } = {}
     mov: 'video/quicktime',
   };
   const mimeType = file.mimeType || (file.type?.includes('/') ? file.type : extensionMimeTypes[extension]) || (file.type === 'video' ? 'video/mp4' : 'image/jpeg');
-  formData.append('file', {
+  appendFileToFormData(formData, 'file', {
+    ...file,
     uri: file.uri,
     name: fileName,
     type: mimeType,

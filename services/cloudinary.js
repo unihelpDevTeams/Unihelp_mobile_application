@@ -187,6 +187,33 @@ const optimizePdfFile = async (file) => {
   }
 };
 
+const appendFileToFormData = (formData, fieldName, file) => {
+  if (!file) {
+    return;
+  }
+
+  if (typeof File !== 'undefined' && file instanceof File) {
+    formData.append(fieldName, file, file.name || `${fieldName}.bin`);
+    return;
+  }
+
+  if (typeof Blob !== 'undefined' && file instanceof Blob) {
+    formData.append(fieldName, file, file.name || `${fieldName}.bin`);
+    return;
+  }
+
+  if (file && typeof file === 'object' && (file.uri || file.path || file.url)) {
+    formData.append(fieldName, {
+      uri: file.uri || file.path || file.url,
+      name: file.name || file.fileName || file.filename || `${fieldName}.bin`,
+      type: file.type || file.mimeType || 'application/octet-stream',
+    });
+    return;
+  }
+
+  formData.append(fieldName, file);
+};
+
 export const uploadToCloudinary = async (
   file,
   {
@@ -210,15 +237,7 @@ export const uploadToCloudinary = async (
     formData.append('upload_preset', CLOUDINARY_CONFIG.uploadPreset);
     formData.append('public_id', publicId);
 
-    if (file?.uri && !file?.arrayBuffer) {
-      formData.append('file', {
-        uri: file.uri,
-        name: file.name || file.fileName || extractFileNameFromUrl(file.uri) || 'file',
-        type: file.type || file.mimeType || (isPdfFile(file) ? 'application/pdf' : 'application/octet-stream'),
-      });
-    } else {
-      formData.append('file', file);
-    }
+    appendFileToFormData(formData, 'file', file);
 
     const xhr = new XMLHttpRequest();
 

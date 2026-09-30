@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
@@ -93,6 +94,11 @@ export const requestNotificationPermission = async () => {
       return null;
     }
 
+    if (Platform.OS === 'android' && !Device.isDevice) {
+      console.log('[push-debug] Push notification registration skipped on an emulator/simulator.');
+      return null;
+    }
+
     const Notifications = await loadNotificationsModule();
     if (!Notifications) return null;
 
@@ -116,20 +122,11 @@ export const requestNotificationPermission = async () => {
       return null;
     }
 
-    const projectId = getEasProjectId();
-    console.log('[push-debug] EAS project ID for Expo push token:', projectId);
+    const tokenResponse = await Notifications.getDevicePushTokenAsync();
+    const fcmToken = tokenResponse?.data;
 
-    if (!projectId) {
-      console.log('[push-debug] Missing EAS project ID; cannot request an Expo push token.');
-      return null;
-    }
-
-    const token = await Notifications.getExpoPushTokenAsync({
-      projectId,
-    });
-
-    console.log('[push-debug] Generated Expo push token:', token?.data);
-    return token?.data || null;
+    console.log('[push-debug] Generated native FCM token:', fcmToken);
+    return fcmToken || null;
   } catch (error) {
     console.log('Notification permission error:', error);
     return null;
@@ -158,7 +155,7 @@ export const registerPushNotificationsForCurrentUser = async () => {
 
     try {
       const userSnap = await getDoc(doc(db, 'users', currentUser.uid));
-      const existingToken = userSnap.exists() ? userSnap.data()?.expoPushToken : null;
+      const existingToken = userSnap.exists() ? userSnap.data()?.fcmToken || userSnap.data()?.expoPushToken : null;
 
       if (existingToken === token) {
         console.log('[push-debug] Push token unchanged; skipping Firestore write.', { uid: currentUser.uid });
@@ -168,39 +165,60 @@ export const registerPushNotificationsForCurrentUser = async () => {
       await setDoc(
         doc(db, 'users', currentUser.uid),
         {
-          expoPushToken: token,
+          fcmToken: token,
           pushNotificationsEnabled: true,
           pushTokenUpdatedAt: serverTimestamp(),
+          deviceType: Platform.OS,
         },
         { merge: true }
       );
 
       const idToken = await currentUser.getIdToken();
+      const endpoints = [
+        getApiUrl('/api/notifications/register-token'),
+        getApiUrl('/api/notifications/push-token'),
+      ];
 
-      const response = await fetch(getApiUrl('/api/notifications/push-token'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          expoPushToken: token,
-          deviceType: Platform.OS,
-        }),
-      });
+      let saved = false;
 
-      const responseBody = await response.json().catch(() => ({}));
+      for (const endpoint of endpoints) {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            token,
+            platform: Platform.OS,
+            deviceType: Platform.OS,
+          }),
+        });
 
-      if (!response.ok) {
+        const responseBody = await response.json().catch(() => ({}));
+
+        if (response.ok) {
+          saved = true;
+          console.log('[push-debug] Push token saved for authenticated user:', {
+            uid: currentUser.uid,
+            platform: Platform.OS,
+            backend: getApiBaseUrl(),
+            endpoint,
+          });
+          break;
+        }
+
         console.log('[push-debug] Backend push token save failed:', {
+          endpoint,
           status: response.status,
           response: responseBody,
         });
-      } else {
-        console.log('[push-debug] Push token saved for authenticated user:', {
+      }
+
+      if (!saved) {
+        console.log('[push-debug] Push token could not be saved with any backend endpoint.', {
           uid: currentUser.uid,
-          deviceType: Platform.OS,
-          backend: getApiBaseUrl(),
+          platform: Platform.OS,
         });
       }
 
