@@ -8,6 +8,7 @@ const PS = 50;
 function filterBySearch(list, text) {
   if (!text.trim()) return list;
   const q = text.toLowerCase();
+  // Filter matches against full name, abbreviation, or alternate spellings (aliases)
   return list.filter((u) => 
     u.name?.toLowerCase().includes(q) || 
     u.shortName?.toLowerCase().includes(q) ||

@@ -83,6 +83,8 @@ const normalizeUserProfile = (profile = {}, uid = null) => {
   const school = profile.school || profile.universityName || profile.university || '';
   const department = profile.department || profile.departmentName || '';
   
+  // Generate a dummy profile picture using ui-avatars for users without an uploaded photo
+  // Fixes the issue where empty profile photos were defaulting to the viewer's own picture
   let photo = profile.photo || profile.photoURL || profile.avatar || '';
   if (!photo && username) {
     photo = `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=random`;
