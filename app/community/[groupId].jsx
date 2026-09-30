@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  FlatList,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -1524,66 +1525,53 @@ export default function GroupDetailPage() {
   const activeCanModify =
     Boolean(activeMine) && !activeMessageActions?.deleted && messageWithinEditWindow(activeMessageActions);
 
-  const renderMessages = () => {
-    if (!isMember) {
-      return (
-        <EmptyState
-          title="Join to see the conversation"
-          description="Members can read and send messages in this group."
-        />
-      );
-    }
-    if (!messages.length) {
-      return <EmptyState title="No messages yet" description="Start the conversation when you are ready." />;
-    }
-    return messages.map((message, index) => {
-      const mine = message.senderId === user?.uid;
-      const prev = messages[index - 1];
-      const next = messages[index + 1];
-      const isGroupedWithPrev = inSameGroup(prev, message);
-      const isGroupedWithNext = inSameGroup(message, next);
-      const showHeader = !mine && !isGroupedWithPrev;
-      const senderColor = colorForName(message.senderName || 'Student');
-      const ms = getMillis(message);
-      const prevMs = getMillis(prev);
-      const showDate = Boolean(ms) && (!prevMs || !isSameDay(ms, prevMs));
-      const reactionEntries = Object.entries(message.reactions || {})
-        .filter(([, uids]) => Array.isArray(uids) && uids.length)
-        .sort((a, b) => b[1].length - a[1].length);
+  const renderMessageItem = ({ item: message, index }) => {
+    const mine = message.senderId === user?.uid;
+    const prev = messages[index - 1];
+    const next = messages[index + 1];
+    const isGroupedWithPrev = inSameGroup(prev, message);
+    const isGroupedWithNext = inSameGroup(message, next);
+    const showHeader = !mine && !isGroupedWithPrev;
+    const senderColor = colorForName(message.senderName || 'Student');
+    const ms = getMillis(message);
+    const prevMs = getMillis(prev);
+    const showDate = Boolean(ms) && (!prevMs || !isSameDay(ms, prevMs));
+    const reactionEntries = Object.entries(message.reactions || {})
+      .filter(([, uids]) => Array.isArray(uids) && uids.length)
+      .sort((a, b) => b[1].length - a[1].length);
 
-      return (
-        <React.Fragment key={message.id}>
-          {showDate ? (
-            <View style={styles.dateDividerWrap}>
-              <View style={styles.dateDividerPill}>
-                <Text style={styles.dateDividerText}>{dayLabel(ms)}</Text>
-              </View>
+    return (
+      <View key={message.id}>
+        {showDate ? (
+          <View style={styles.dateDividerWrap}>
+            <View style={styles.dateDividerPill}>
+              <Text style={styles.dateDividerText}>{dayLabel(ms)}</Text>
             </View>
-          ) : null}
-          <MessageRow
-            message={message}
-            mine={mine}
-            showHeader={showHeader}
-            isGroupedWithNext={isGroupedWithNext}
-            senderColor={senderColor}
-            reactionEntries={reactionEntries}
-            pickerOpen={reactionPickerFor === message.id}
-            isReacting={reactingMessageId === message.id}
-            isMember={isMember}
-            colors={colors}
-            styles={styles}
-            user={user}
-            router={router}
-            formatShortTime={formatShortTime}
-            initialsForName={initialsForName}
-            onOpenReactionPicker={openReactionPicker}
-            onToggleReaction={toggleReaction}
-            onSwipeReply={setReplyFromSwipe}
-            onOpenActions={setActiveMessageActions}
-          />
-        </React.Fragment>
-      );
-    });
+          </View>
+        ) : null}
+        <MessageRow
+          message={message}
+          mine={mine}
+          showHeader={showHeader}
+          isGroupedWithNext={isGroupedWithNext}
+          senderColor={senderColor}
+          reactionEntries={reactionEntries}
+          pickerOpen={reactionPickerFor === message.id}
+          isReacting={reactingMessageId === message.id}
+          isMember={isMember}
+          colors={colors}
+          styles={styles}
+          user={user}
+          router={router}
+          formatShortTime={formatShortTime}
+          initialsForName={initialsForName}
+          onOpenReactionPicker={openReactionPicker}
+          onToggleReaction={toggleReaction}
+          onSwipeReply={setReplyFromSwipe}
+          onOpenActions={setActiveMessageActions}
+        />
+      </View>
+    );
   };
 
   return (
@@ -1597,7 +1585,7 @@ export default function GroupDetailPage() {
           */}
           <KeyboardAvoidingView style={styles.flex} behavior="padding" keyboardVerticalOffset={keyboardOffset}>
             <View style={styles.chatArea}>
-              <ScrollView
+              <FlatList
                 ref={scrollRef}
                 style={styles.flex}
                 contentContainerStyle={styles.chatContent}
@@ -1608,137 +1596,123 @@ export default function GroupDetailPage() {
                 onScrollBeginDrag={() => setReactionPickerFor(null)}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-              >
-                {/* Group info card */}
-                <View style={styles.hero}>
-                  <View style={styles.heroActionsRow}>
-                    {isAdmin ? (
-                      <Pressable
-                        style={styles.heroIconButton}
-                        onPress={openEdit}
-                        hitSlop={8}
-                        accessibilityRole="button"
-                        accessibilityLabel="Manage group"
-                      >
-                        <Ionicons name="create-outline" size={16} color="#FFFFFF" />
-                      </Pressable>
-                    ) : null}
-                    {isMember ? (
-                      <Pressable
-                        style={styles.heroIconButton}
-                        onPress={() => setGroupOptionsVisible(true)}
-                        hitSlop={8}
-                        accessibilityRole="button"
-                        accessibilityLabel="Group options"
-                      >
-                        <Ionicons name="ellipsis-horizontal" size={16} color="#FFFFFF" />
-                      </Pressable>
-                    ) : null}
-                  </View>
-                  <View style={styles.heroTopRow}>
-                    <View style={styles.heroAvatar}>
-                      {groupPhotoUrl ? (
-                        <Image source={{ uri: groupPhotoUrl }} style={styles.heroAvatarImage} />
-                      ) : (
-                        <Text style={styles.heroAvatarText}>{initialsForName(group.name)}</Text>
-                      )}
-                    </View>
-                    <View style={styles.heroTextWrap}>
-                      <Text style={styles.heroTitle} numberOfLines={2}>{group.name}</Text>
-                      {group.description ? (
-                        <Text style={styles.heroText} numberOfLines={2}>
-                          {group.description}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </View>
-                  <View style={styles.metaRow}>
-                    <View style={styles.metaPill}>
-                      <Ionicons name="pricetag-outline" size={12} color="#E0E7FF" />
-                      <Text style={styles.meta}>{group.category || 'General'}</Text>
-                    </View>
-                    <View style={styles.metaPill}>
-                      <Ionicons name="people-outline" size={12} color="#E0E7FF" />
-                      <Text style={styles.meta}>{pluralize(Number(group.memberCount || 0), 'member')}</Text>
-                    </View>
-                    {group.privacy === 'private' ? (
-                      <View style={styles.metaPill}>
-                        <Ionicons name="lock-closed-outline" size={12} color="#E0E7FF" />
-                        <Text style={styles.meta}>Private</Text>
+                data={isMember ? messages : []}
+                keyExtractor={(item) => item.id}
+                renderItem={renderMessageItem}
+                ListHeaderComponent={
+                  <>
+                    <View style={styles.hero}>
+                      <View style={styles.heroActionsRow}>
+                        {isAdmin ? (
+                          <Pressable style={styles.heroIconButton} onPress={openEdit} hitSlop={8}>
+                            <Ionicons name="create-outline" size={16} color="#FFFFFF" />
+                          </Pressable>
+                        ) : null}
+                        {isMember ? (
+                          <Pressable style={styles.heroIconButton} onPress={() => setGroupOptionsVisible(true)} hitSlop={8}>
+                            <Ionicons name="ellipsis-horizontal" size={16} color="#FFFFFF" />
+                          </Pressable>
+                        ) : null}
                       </View>
-                    ) : null}
-                  </View>
-                </View>
-
-                {/* Pending requests sit right under the hero so admins actually see them */}
-                {isAdmin && joinRequests.length ? (
-                  <View style={styles.requestsCard}>
-                    <Text style={styles.requestsTitle}>Pending requests ({joinRequests.length})</Text>
-                    {requestMessage ? (
-                      <View style={styles.requestNotice}>
-                        <Ionicons name="information-circle-outline" size={14} color={colors.brand} />
-                        <Text style={styles.requestNoticeText}>{requestMessage}</Text>
-                      </View>
-                    ) : null}
-                    {joinRequests.map((request) => {
-                      const processing = busy && processingRequestId === request.uid;
-                      return (
-                        <View key={request.id} style={styles.requestRow}>
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.requestName} numberOfLines={1}>{request.name || 'Student'}</Text>
-                            <Text style={styles.requestMeta} numberOfLines={1}>{request.email || 'Awaiting review'}</Text>
-                          </View>
-                          <View style={styles.requestActions}>
-                            <Pressable
-                              style={[styles.requestApprove, processing && styles.requestButtonDisabled]}
-                              onPress={() => handleJoinRequestAction(request.uid, 'approve')}
-                              disabled={processing}
-                            >
-                              <Text style={styles.requestActionText}>Approve</Text>
-                            </Pressable>
-                            <Pressable
-                              style={[styles.requestReject, processing && styles.requestButtonDisabled]}
-                              onPress={() => handleJoinRequestAction(request.uid, 'reject')}
-                              disabled={processing}
-                            >
-                              <Text style={styles.requestActionText}>Decline</Text>
-                            </Pressable>
-                          </View>
+                      <View style={styles.heroTopRow}>
+                        <View style={styles.heroAvatar}>
+                          {groupPhotoUrl ? (
+                            <Image source={{ uri: groupPhotoUrl }} style={styles.heroAvatarImage} />
+                          ) : (
+                            <Text style={styles.heroAvatarText}>{initialsForName(group.name)}</Text>
+                          )}
                         </View>
-                      );
-                    })}
-                  </View>
-                ) : null}
+                        <View style={styles.heroTextWrap}>
+                          <Text style={styles.heroTitle} numberOfLines={2}>{group.name}</Text>
+                          {group.description ? (
+                            <Text style={styles.heroText} numberOfLines={2}>{group.description}</Text>
+                          ) : null}
+                        </View>
+                      </View>
+                      <View style={styles.metaRow}>
+                        <View style={styles.metaPill}>
+                          <Ionicons name="pricetag-outline" size={12} color="#E0E7FF" />
+                          <Text style={styles.meta}>{group.category || 'General'}</Text>
+                        </View>
+                        <View style={styles.metaPill}>
+                          <Ionicons name="people-outline" size={12} color="#E0E7FF" />
+                          <Text style={styles.meta}>{pluralize(Number(group.memberCount || 0), 'member')}</Text>
+                        </View>
+                        {group.privacy === 'private' ? (
+                          <View style={styles.metaPill}>
+                            <Ionicons name="lock-closed-outline" size={12} color="#E0E7FF" />
+                            <Text style={styles.meta}>Private</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    </View>
 
-                {!isMember ? (
-                  <Pressable style={styles.joinButton} onPress={join} disabled={busy}>
-                    {busy ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <>
-                        <Ionicons
-                          name={group.privacy === 'private' ? 'lock-closed-outline' : 'add-circle-outline'}
-                          size={16}
-                          color="#fff"
-                        />
-                        <Text style={styles.joinText}>
-                          {group.privacy === 'private' ? 'Request access' : 'Join group'}
-                        </Text>
-                      </>
-                    )}
-                  </Pressable>
-                ) : null}
+                    {isAdmin && joinRequests.length ? (
+                      <View style={styles.requestsCard}>
+                        <Text style={styles.requestsTitle}>Pending requests ({joinRequests.length})</Text>
+                        {requestMessage ? (
+                          <View style={styles.requestNotice}>
+                            <Ionicons name="information-circle-outline" size={14} color={colors.brand} />
+                            <Text style={styles.requestNoticeText}>{requestMessage}</Text>
+                          </View>
+                        ) : null}
+                        {joinRequests.map((request) => {
+                          const processing = busy && processingRequestId === request.uid;
+                          return (
+                            <View key={request.id} style={styles.requestRow}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.requestName} numberOfLines={1}>{request.name || 'Student'}</Text>
+                                <Text style={styles.requestMeta} numberOfLines={1}>{request.email || 'Awaiting review'}</Text>
+                              </View>
+                              <View style={styles.requestActions}>
+                                <Pressable
+                                  style={[styles.requestApprove, processing && styles.requestButtonDisabled]}
+                                  onPress={() => handleJoinRequestAction(request.uid, 'approve')}
+                                  disabled={processing}>
+                                  <Text style={styles.requestActionText}>Approve</Text>
+                                </Pressable>
+                                <Pressable
+                                  style={[styles.requestReject, processing && styles.requestButtonDisabled]}
+                                  onPress={() => handleJoinRequestAction(request.uid, 'reject')}
+                                  disabled={processing}>
+                                  <Text style={styles.requestActionText}>Decline</Text>
+                                </Pressable>
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    ) : null}
 
-                {reactionError ? (
-                  <View style={styles.reactionToast}>
-                    <Ionicons name="alert-circle-outline" size={14} color={colors.danger} />
-                    <Text style={styles.reactionToastText}>{reactionError}</Text>
-                  </View>
-                ) : null}
+                    {!isMember ? (
+                      <Pressable style={styles.joinButton} onPress={join} disabled={busy}>
+                        {busy ? (
+                          <ActivityIndicator color="#fff" />
+                        ) : (
+                          <>
+                            <Ionicons name={group.privacy === 'private' ? 'lock-closed-outline' : 'add-circle-outline'} size={16} color="#fff" />
+                            <Text style={styles.joinText}>{group.privacy === 'private' ? 'Request access' : 'Join group'}</Text>
+                          </>
+                        )}
+                      </Pressable>
+                    ) : null}
 
-                {/* Messages */}
-                <View style={styles.messagesWrap}>{renderMessages()}</View>
-              </ScrollView>
+                    {reactionError ? (
+                      <View style={styles.reactionToast}>
+                        <Ionicons name="alert-circle-outline" size={14} color={colors.danger} />
+                        <Text style={styles.reactionToastText}>{reactionError}</Text>
+                      </View>
+                    ) : null}
+
+                    {!isMember ? (
+                      <EmptyState title="Join to see the conversation" description="Members can read and send messages in this group." />
+                    ) : null}
+                  </>
+                }
+                ListEmptyComponent={
+                  isMember ? <EmptyState title="No messages yet" description="Start the conversation when you are ready." /> : null
+                }
+              />
 
               {showJumpToLatest && isMember ? (
                 <Pressable
