@@ -77,12 +77,16 @@ const orderedList = async (name, field = 'createdAt', direction = 'desc', pageSi
   return page.items;
 };
 
-const normalizeUserProfile = (profile = {}, uid = auth.currentUser?.uid) => {
+const normalizeUserProfile = (profile = {}, uid = null) => {
   if (!profile) return null;
   const username = profile.username || profile.displayName || profile.display_name || profile.name || '';
   const school = profile.school || profile.universityName || profile.university || '';
   const department = profile.department || profile.departmentName || '';
-  const photo = profile.photo || profile.photoURL || profile.avatar || '';
+  
+  let photo = profile.photo || profile.photoURL || profile.avatar || '';
+  if (!photo && username) {
+    photo = `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=random`;
+  }
 
   return {
     ...profile,
@@ -91,7 +95,7 @@ const normalizeUserProfile = (profile = {}, uid = auth.currentUser?.uid) => {
     username,
     usernameLower: profile.usernameLower || (username ? username.trim().toLowerCase() : ''),
     displayName: profile.displayName || profile.display_name || username,
-    email: profile.email || auth.currentUser?.email || '',
+    email: profile.email || '',
     school,
     universityName: profile.universityName || school,
     universityId: profile.universityId || profile.schoolId || '',

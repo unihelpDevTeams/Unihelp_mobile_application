@@ -67,8 +67,14 @@ function dayLabel(key) {
 // packing), and for every session we prefer whichever active day currently
 // has the least scheduled time — and, among ties, a day this course isn't
 // already sitting on — so the week ends up spread out rather than clumped.
-function generateSchedule(courses, activeDays) {
-  const slotsPerDay = Math.floor((DAY_END_MINUTES - DAY_START_MINUTES) / SLOT_MINUTES);
+function generateSchedule(courses, activeDays, timePreference = 'allday') {
+  let startMins = DAY_START_MINUTES;
+  let endMins = DAY_END_MINUTES;
+  if (timePreference === 'morning') { startMins = 6 * 60; endMins = 12 * 60; }
+  else if (timePreference === 'afternoon') { startMins = 12 * 60; endMins = 18 * 60; }
+  else if (timePreference === 'night') { startMins = 18 * 60; endMins = 23 * 60 + 45; }
+
+  const slotsPerDay = Math.floor((endMins - startMins) / SLOT_MINUTES);
   const occupancy = {};
   const dayLoadMinutes = {};
   activeDays.forEach((day) => {
@@ -109,7 +115,7 @@ function generateSchedule(courses, activeDays) {
         if (free) {
           for (let offset = 0; offset < neededSlots; offset += 1) slots[start + offset] = course.id;
           dayLoadMinutes[day] += course.durationMinutes;
-          const startMinutes = DAY_START_MINUTES + start * SLOT_MINUTES;
+          const startMinutes = startMins + start * SLOT_MINUTES;
           entries.push({
             id: `${course.id}-${day}-${start}`,
             courseId: course.id,
@@ -193,6 +199,7 @@ export default function SmartTimetablePage() {
 
   const [loading, setLoading] = useState(true);
   const [activeDays, setActiveDays] = useState(DEFAULT_ACTIVE_DAYS);
+  const [timePreference, setTimePreference] = useState('allday');
   const [courses, setCourses] = useState([]);
   const [schedule, setSchedule] = useState(null); // { entries, unscheduled, generatedAt }
   const [scheduleStale, setScheduleStale] = useState(false);
@@ -227,6 +234,7 @@ export default function SmartTimetablePage() {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed?.courses)) setCourses(parsed.courses);
         if (Array.isArray(parsed?.activeDays) && parsed.activeDays.length) setActiveDays(parsed.activeDays);
+        if (parsed?.timePreference) setTimePreference(parsed.timePreference);
         if (parsed?.schedule) setSchedule(parsed.schedule);
       } catch {
         // Corrupted or missing data just means we start from a blank slate.
@@ -243,6 +251,7 @@ export default function SmartTimetablePage() {
     const payload = {
       courses: overrides.courses ?? courses,
       activeDays: overrides.activeDays ?? activeDays,
+      timePreference: overrides.timePreference ?? timePreference,
       schedule: overrides.schedule !== undefined ? overrides.schedule : schedule,
     };
     try {
@@ -315,7 +324,7 @@ export default function SmartTimetablePage() {
 
     setGenerating(true);
     try {
-      const { entries, unscheduled } = generateSchedule(courses, activeDays);
+      const { entries, unscheduled } = generateSchedule(courses, activeDays, timePreference);
       const nextSchedule = { entries, unscheduled, generatedAt: Date.now() };
       setSchedule(nextSchedule);
       setScheduleStale(false);
@@ -418,6 +427,32 @@ export default function SmartTimetablePage() {
                 accessibilityState={{ selected: active }}
               >
                 <Text style={[styles.dayChipText, active && styles.dayChipTextActive]}>{day.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      {/* Preferred reading time */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Preferred reading time</Text>
+        <View style={styles.dayRow}>
+          {['allday', 'morning', 'afternoon', 'night'].map((pref) => {
+            const labels = { allday: 'Any Time', morning: 'Morning', afternoon: 'Afternoon', night: 'Night' };
+            const active = timePreference === pref;
+            return (
+              <Pressable
+                key={pref}
+                onPress={() => {
+                  setTimePreference(pref);
+                  persist({ timePreference: pref });
+                  setScheduleStale(true);
+                }}
+                style={[styles.dayChip, active && styles.dayChipActive]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+              >
+                <Text style={[styles.dayChipText, active && styles.dayChipTextActive]}>{labels[pref]}</Text>
               </Pressable>
             );
           })}

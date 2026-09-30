@@ -8,7 +8,11 @@ const PS = 50;
 function filterBySearch(list, text) {
   if (!text.trim()) return list;
   const q = text.toLowerCase();
-  return list.filter((u) => u.name?.toLowerCase().includes(q) || u.shortName?.toLowerCase().includes(q));
+  return list.filter((u) => 
+    u.name?.toLowerCase().includes(q) || 
+    u.shortName?.toLowerCase().includes(q) ||
+    u.aliases?.some(alias => alias.toLowerCase().includes(q))
+  );
 }
 
 function filterByType(list, type) {

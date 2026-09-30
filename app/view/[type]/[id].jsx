@@ -494,6 +494,18 @@ export default function RecordViewPage() {
       console.warn('[PDF preview] blocked before request', { type, id, hasDocumentUrl: !!asset?.hasDocumentUrl });
       return;
     }
+    
+    if (type === 'question' && !isPremiumUser) {
+      Alert.alert(
+        'Premium Required',
+        'Viewing past questions requires an active UniHelp Premium subscription.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'View Premium', onPress: () => router.navigate('/premium') }
+        ]
+      );
+      return;
+    }
     closePdfPreview();
     setPdfPreviewUrl('');
     setPdfPreviewError(false);
@@ -1000,8 +1012,14 @@ export default function RecordViewPage() {
                     accessibilityRole="button"
                     accessibilityLabel="Preview document"
                   >
-                    <Ionicons name="eye-outline" size={15} color={colors.onBrand} />
-                    <Text style={styles.primaryButtonText}>Preview document</Text>
+                    <Ionicons 
+                      name={type === 'question' && !isPremiumUser ? 'lock-closed' : 'eye-outline'} 
+                      size={15} 
+                      color={colors.onBrand} 
+                    />
+                    <Text style={styles.primaryButtonText}>
+                      {type === 'question' && !isPremiumUser ? 'Unlock Premium to View' : 'Preview document'}
+                    </Text>
                   </Pressable>
                 </View>
               </View>
