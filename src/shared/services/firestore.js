@@ -13,6 +13,7 @@ import {
   serverTimestamp,
   setDoc,
   startAfter,
+  Timestamp,
   updateDoc,
   where,
 } from 'firebase/firestore';
@@ -476,7 +477,12 @@ export async function fetchNotificationsPage({ uid = auth.currentUser?.uid, page
 
   if (!firestoreDone) {
     try {
-      const constraints = [orderBy('createdAt', 'desc'), orderBy(documentId(), 'desc')];
+      const cutoff = Timestamp.fromMillis(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const constraints = [
+        where('createdAt', '>=', cutoff),
+        orderBy('createdAt', 'desc'),
+        orderBy(documentId(), 'desc'),
+      ];
       if (firestoreCursor) constraints.push(startAfter(firestoreCursor));
       constraints.push(limit(pageSize));
       firestoreSnapshot = await getDocs(query(
