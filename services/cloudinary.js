@@ -1,4 +1,5 @@
 import { PDFDocument } from "pdf-lib";
+import * as ImageManipulator from "expo-image-manipulator";
 
 import {
   CLOUDINARY_CONFIG,
@@ -300,7 +301,43 @@ const optimizeFileForUpload = async (file) => {
     return optimizePdfFile(file);
   }
 
-  return file;
+  return compressImageForUpload(file);
+};
+
+export const compressImageForUpload = async (file, options = {}) => {
+  if (!file || typeof file !== "object") return file;
+
+  const uri = file.uri || file.path || file.url;
+  if (!uri || typeof uri !== "string") return file;
+
+  const mimeType = String(file.type || file.mimeType || "image/jpeg");
+  if (!mimeType.startsWith("image/")) return file;
+
+  const maxWidth = Number(options.maxWidth || 1600);
+  const maxHeight = Number(options.maxHeight || 1600);
+  const quality = Number(options.quality ?? 0.72);
+
+  try {
+    const format = mimeType === "image/png" ? ImageManipulator.SaveFormat.PNG : ImageManipulator.SaveFormat.JPEG;
+    const compressed = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: maxWidth, height: maxHeight } }],
+      { compress: quality, format }
+    );
+
+    if (!compressed?.uri) return file;
+
+    return {
+      ...file,
+      uri: compressed.uri,
+      width: compressed.width || file.width,
+      height: compressed.height || file.height,
+      size: file.size || 0,
+    };
+  } catch (error) {
+    console.warn("[Upload] Failed to compress image before upload.", error);
+    return file;
+  }
 };
 
 export const uploadImage = async (file, onProgress) => {

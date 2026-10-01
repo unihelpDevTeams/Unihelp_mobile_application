@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, FlatList, Modal, Pressable, Text, TextInput, View, KeyboardAvoidingView, Platform } from 'react-native';
+import { ActivityIndicator, Alert, Animated, AppState, Easing, FlatList, Modal, Pressable, Text, TextInput, View, KeyboardAvoidingView, Platform } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -31,6 +31,10 @@ const PRESET_COLORS = {
   dark: '#111827',
 };
 
+// Pagination / freshness settings.
+const PAGE_SIZE = 20;
+const NEW_POSTS_POLL_MS = 60 * 1000;
+
 const getPostHashtags = (item) => item.tags?.length
   ? item.tags
   : [...new Set((item.content || '').match(/#[a-zA-Z0-9_]{1,40}/g) || [])].map((tag) => tag.toLowerCase());
@@ -61,6 +65,19 @@ const timeAgo = (value) => {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
+// Reads the paging info off a feed response in one place.
+const readPageInfo = (response) => {
+  const cursor = response?.nextCursor || null;
+  const hasMore = typeof response?.hasMore === 'boolean' ? response.hasMore && Boolean(cursor) : Boolean(cursor);
+  return { cursor, hasMore };
+};
+
+const fetchFeedPage = (cursor) => {
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+  if (cursor) params.set('cursor', cursor);
+  return getJson(`/api/feed?${params.toString()}`);
+};
+
 export default function NewsFeedPage() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -69,6 +86,11 @@ export default function NewsFeedPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [feedCursor, setFeedCursor] = useState(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(false);
+  const [newPosts, setNewPosts] = useState(null); // { count, avatars }
   const [composerOpen, setComposerOpen] = useState(false);
   const [content, setContent] = useState('');
   const [postType, setPostType] = useState('text');
@@ -99,6 +121,13 @@ export default function NewsFeedPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const viewedPosts = useRef(new Set());
   const marqueeX = useRef(new Animated.Value(0)).current;
+  const listRef = useRef(null);
+  const pillAnim = useRef(new Animated.Value(0)).current;
+  // Incremented on every refresh so slow "load more" / refresh responses
+  // from an older request can never overwrite newer data.
+  const requestIdRef = useRef(0);
+  const itemsRef = useRef([]);
+  const busyRef = useRef(true);
 
   const styles = useThemeStyles((c, s, r) => ({
     // Header — a quieter, card-based intro instead of a full-bleed brand block.
@@ -322,6 +351,52 @@ export default function NewsFeedPage() {
     hashtagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
     hashtag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: r.lg, backgroundColor: c.brandLight },
     hashtagText: { color: c.brandText, fontSize: 11, fontWeight: '800' },
+
+    // "New posts" pill — floats over the top of the list.
+    pillLayer: { position: 'absolute', top: 10, left: 0, right: 0, alignItems: 'center', zIndex: 20 },
+    pill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingVertical: 8,
+      paddingLeft: 10,
+      paddingRight: 14,
+      borderRadius: 999,
+      backgroundColor: c.brand,
+      shadowColor: '#000',
+      shadowOpacity: 0.22,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 6,
+    },
+    pillAvatars: { flexDirection: 'row', alignItems: 'center' },
+    pillAvatar: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: c.brand, backgroundColor: c.brandLight },
+    pillText: { color: c.onBrand, fontSize: 12.5, fontWeight: '800' },
+
+    // List footer — load more / caught up
+    footer: { paddingVertical: s.lg, paddingHorizontal: s.lg, alignItems: 'center', gap: 8 },
+    loadMoreButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      minWidth: 200,
+      paddingHorizontal: 22,
+      paddingVertical: 12,
+      borderRadius: 999,
+      backgroundColor: c.brandLight,
+      borderWidth: 1,
+      borderColor: c.brand,
+    },
+    loadMoreText: { color: c.brandText, fontSize: 13, fontWeight: '800' },
+    loadMoreHint: { color: c.textTertiary, fontSize: 11.5, fontWeight: '600' },
+    loadMoreErrorText: { color: c.error || '#DC2626', fontSize: 12, fontWeight: '700', textAlign: 'center' },
+    caughtUp: { flexDirection: 'row', alignItems: 'center', gap: 12, width: '100%', paddingVertical: s.sm },
+    caughtUpLine: { flex: 1, height: 1, backgroundColor: c.borderDefault },
+    caughtUpCenter: { alignItems: 'center', gap: 4 },
+    caughtUpIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brandLight },
+    caughtUpTitle: { color: c.textPrimary, fontSize: 13, fontWeight: '800' },
+    caughtUpText: { color: c.textTertiary, fontSize: 11.5, fontWeight: '500' },
   }));
 
   // Single marquee loop. (Previously declared twice, which spun up two
@@ -337,49 +412,154 @@ export default function NewsFeedPage() {
     return () => animation.stop();
   }, [marqueeX]);
 
+  // Keep refs in sync so the background "new posts" check never needs to
+  // re-create its interval when the list changes.
+  useEffect(() => { itemsRef.current = items; }, [items]);
+  useEffect(() => { busyRef.current = loading || refreshing || loadingMore || posting; }, [loading, refreshing, loadingMore, posting]);
+
+  // Slide the "new posts" pill in when there is something to show.
+  useEffect(() => {
+    if (newPosts) {
+      pillAnim.setValue(0);
+      Animated.spring(pillAnim, { toValue: 1, friction: 8, tension: 90, useNativeDriver: true }).start();
+    }
+  }, [Boolean(newPosts)]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Adds author hydration (name / avatar / premium flag) for any posts that
+  // the backend returned without it. Shared by refresh and load-more.
+  const hydrateItems = useCallback(async (rawItems) => Promise.all(rawItems.map(async (item) => {
+    if (typeof item.authorPremium === 'boolean') return item;
+    try {
+      const author = await getUserProfileById(item.authorId);
+      return {
+        ...item,
+        authorName: item.authorName || author?.username || author?.displayName || 'UniHelp student',
+        authorAvatar: item.authorAvatar || author?.photoThumb || author?.photoURL || author?.photo || author?.avatar || '',
+        authorPremium: isPremiumActive(author),
+      };
+    } catch {
+      return item;
+    }
+  })), []);
+
   const loadFeed = useCallback(async (refresh = false) => {
     if (!user?.uid) {
       setItems([]);
+      setFeedCursor(null);
+      setHasMore(false);
       setLoading(false);
       setRefreshing(false);
       return;
     }
 
+    const requestId = ++requestIdRef.current;
+    setLoadingMore(false);
+    setLoadMoreError(false);
     if (refresh) setRefreshing(true); else setLoading(true);
     try {
-      const response = await getJson('/api/feed?limit=20');
+      const response = await fetchFeedPage(null);
+      if (requestId !== requestIdRef.current) return;
       const nextItems = Array.isArray(response?.items) ? response.items : [];
       console.log('[Feed] Loaded feed', { uid: user?.uid, count: nextItems.length });
-      const hydratedItems = await Promise.all(nextItems.map(async (item) => {
-        if (typeof item.authorPremium === 'boolean') return item;
-        try {
-          const author = await getUserProfileById(item.authorId);
-          return {
-            ...item,
-            authorName: item.authorName || author?.username || author?.displayName || 'UniHelp student',
-            authorAvatar: item.authorAvatar || author?.photoThumb || author?.photoURL || author?.photo || author?.avatar || '',
-            authorPremium: isPremiumActive(author),
-          };
-        } catch {
-          return item;
-        }
-      }));
+      const hydratedItems = await hydrateItems(nextItems);
+      if (requestId !== requestIdRef.current) return;
+      const page = readPageInfo(response);
       setItems(hydratedItems);
+      setFeedCursor(page.cursor);
+      setHasMore(page.hasMore);
+      setNewPosts(null);
       setLikedPostIds((current) => {
         const next = new Set();
         hydratedItems.forEach((item) => { if (item.likedByMe || current.has(item.id)) next.add(item.id); });
         return next;
       });
     } catch (error) {
+      if (requestId !== requestIdRef.current) return;
       console.error('[Feed] Failed to load feed', error);
       Alert.alert('Feed unavailable', error.message || "Couldn't load your feed.");
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [user?.uid]);
+  }, [user?.uid, hydrateItems]);
 
   useEffect(() => { loadFeed(); }, [loadFeed]);
+
+  // Appends the next page of older posts.
+  const loadMore = useCallback(async () => {
+    if (!hasMore || !feedCursor || loadingMore || loading || refreshing) return;
+    const requestId = requestIdRef.current;
+    setLoadingMore(true);
+    setLoadMoreError(false);
+    try {
+      const response = await fetchFeedPage(feedCursor);
+      if (requestId !== requestIdRef.current) return;
+      const pageItems = Array.isArray(response?.items) ? response.items : [];
+      const hydratedItems = await hydrateItems(pageItems);
+      if (requestId !== requestIdRef.current) return;
+      const page = readPageInfo(response);
+      setItems((current) => {
+        const seen = new Set(current.map((item) => item.id));
+        return [...current, ...hydratedItems.filter((item) => !seen.has(item.id))];
+      });
+      setLikedPostIds((current) => {
+        const next = new Set(current);
+        hydratedItems.forEach((item) => { if (item.likedByMe) next.add(item.id); });
+        return next;
+      });
+      setFeedCursor(page.cursor);
+      setHasMore(page.hasMore);
+    } catch (error) {
+      if (requestId !== requestIdRef.current) return;
+      console.error('[Feed] Failed to load more posts', error);
+      setLoadMoreError(true);
+    } finally {
+      if (requestId === requestIdRef.current) setLoadingMore(false);
+    }
+  }, [hasMore, feedCursor, loadingMore, loading, refreshing, hydrateItems]);
+
+  // Quietly checks the first page for posts we haven't loaded yet and shows
+  // the "new posts" pill instead of shifting the list under the reader.
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+    let cancelled = false;
+
+    const checkForNewPosts = async () => {
+      if (cancelled || busyRef.current || AppState.currentState !== 'active') return;
+      const known = new Set(itemsRef.current.map((item) => item.id));
+      if (!known.size) return;
+      try {
+        const response = await fetchFeedPage(null);
+        if (cancelled || busyRef.current) return;
+        const fresh = (Array.isArray(response?.items) ? response.items : []).filter((item) => item?.id && !known.has(item.id));
+        if (!fresh.length) return;
+        const avatars = [...new Set(fresh.map((item) => item.authorAvatar).filter(Boolean))].slice(0, 3);
+        setNewPosts({ count: fresh.length, avatars });
+      } catch {
+        // Silent — this is a background check and the next tick will retry.
+      }
+    };
+
+    const timer = setInterval(checkForNewPosts, NEW_POSTS_POLL_MS);
+    const subscription = AppState.addEventListener('change', (state) => { if (state === 'active') checkForNewPosts(); });
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, [user?.uid]);
+
+  const scrollToTop = useCallback(() => {
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }, []);
+
+  const showNewPosts = useCallback(async () => {
+    setNewPosts(null);
+    scrollToTop();
+    await loadFeed(true);
+  }, [loadFeed, scrollToTop]);
 
   const openImagePicker = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -727,8 +907,74 @@ export default function NewsFeedPage() {
     );
   };
 
+  // Bottom of the list: spinner while loading, a clear button when there is
+  // more, a retry message on failure, and a quiet "all caught up" ending.
+  const renderFooter = () => {
+    if (!items.length) return null;
+
+    if (loadingMore) {
+      return (
+        <View style={styles.footer}>
+          <ActivityIndicator color={colors.brand} />
+          <Text style={styles.loadMoreHint}>Loading more posts…</Text>
+        </View>
+      );
+    }
+
+    if (loadMoreError) {
+      return (
+        <View style={styles.footer}>
+          <Text style={styles.loadMoreErrorText}>Couldn't load more posts. Check your connection and try again.</Text>
+          <Pressable
+            style={({ pressed }) => [styles.loadMoreButton, pressed && { opacity: 0.75 }]}
+            onPress={loadMore}
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading more posts"
+          >
+            <Ionicons name="refresh" size={16} color={colors.brandText} />
+            <Text style={styles.loadMoreText}>Try again</Text>
+          </Pressable>
+        </View>
+      );
+    }
+
+    if (hasMore) {
+      return (
+        <View style={styles.footer}>
+          <Pressable
+            style={({ pressed }) => [styles.loadMoreButton, pressed && { opacity: 0.75 }]}
+            onPress={loadMore}
+            accessibilityRole="button"
+            accessibilityLabel="Load more posts"
+          >
+            <Text style={styles.loadMoreText}>Load more posts</Text>
+            <Ionicons name="chevron-down" size={16} color={colors.brandText} />
+          </Pressable>
+          <Text style={styles.loadMoreHint}>{items.length} posts loaded</Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.footer}>
+        <View style={styles.caughtUp}>
+          <View style={styles.caughtUpLine} />
+          <View style={styles.caughtUpCenter}>
+            <View style={styles.caughtUpIcon}><Ionicons name="checkmark-done" size={18} color={colors.brandText} /></View>
+            <Text style={styles.caughtUpTitle}>You're all caught up</Text>
+            <Text style={styles.caughtUpText}>You've seen every recent post</Text>
+          </View>
+          <View style={styles.caughtUpLine} />
+        </View>
+      </View>
+    );
+  };
+
   const canSubmit = content.trim().length > 0 && !(postType === 'image' && !selectedImage);
   const activeFilterCount = [typeFilter !== 'all', sortFilter !== 'smart', timeFilter !== 'all'].filter(Boolean).length;
+  const newPostsLabel = newPosts
+    ? `${newPosts.count >= PAGE_SIZE ? `${PAGE_SIZE}+` : newPosts.count} new ${newPosts.count === 1 ? 'post' : 'posts'}`
+    : '';
 
   const headerActions = (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
@@ -874,6 +1120,7 @@ export default function NewsFeedPage() {
         </View>
       ) : (
         <FlatList
+          ref={listRef}
           data={visibleItems}
           keyExtractor={(item) => item.id}
           renderItem={renderPost}
@@ -882,11 +1129,40 @@ export default function NewsFeedPage() {
           refreshing={refreshing}
           onRefresh={() => loadFeed(true)}
           ListEmptyComponent={!loading ? (
-            <EmptyState title={items.length && !visibleItems.length ? 'No matching posts' : 'Your feed is quiet'} description={items.length && !visibleItems.length ? 'Try another search or filter.' : 'Add friends and start sharing what is happening around campus.'} />
+            <EmptyState title={items.length && !visibleItems.length ? 'No matching posts' : 'Your feed is quiet'} description={items.length && !visibleItems.length ? (hasMore ? 'Nothing in the posts loaded so far. Try another filter or load more.' : 'Try another search or filter.') : 'Add friends and start sharing what is happening around campus.'} />
           ) : null}
+          ListFooterComponent={renderFooter}
           contentContainerStyle={{ paddingBottom: 30 }}
         />
       )}
+
+      {newPosts ? (
+        <View style={styles.pillLayer} pointerEvents="box-none">
+          <Animated.View
+            style={{
+              opacity: pillAnim,
+              transform: [{ translateY: pillAnim.interpolate({ inputRange: [0, 1], outputRange: [-24, 0] }) }, { scale: pillAnim.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }) }],
+            }}
+          >
+            <Pressable
+              style={({ pressed }) => [styles.pill, pressed && { opacity: 0.85 }]}
+              onPress={showNewPosts}
+              accessibilityRole="button"
+              accessibilityLabel={`Show ${newPostsLabel}`}
+            >
+              {newPosts.avatars.length ? (
+                <View style={styles.pillAvatars}>
+                  {newPosts.avatars.map((uri, index) => (
+                    <Image key={uri} source={{ uri }} style={[styles.pillAvatar, index > 0 && { marginLeft: -8 }]} contentFit="cover" />
+                  ))}
+                </View>
+              ) : null}
+              <Ionicons name="arrow-up" size={14} color={colors.onBrand} />
+              <Text style={styles.pillText}>{newPostsLabel}</Text>
+            </Pressable>
+          </Animated.View>
+        </View>
+      ) : null}
 
       <Modal visible={filtersOpen} transparent animationType="slide" onRequestClose={() => setFiltersOpen(false)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setFiltersOpen(false)}>

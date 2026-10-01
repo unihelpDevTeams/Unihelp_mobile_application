@@ -617,7 +617,8 @@ export const listSuggestedFriends = async ({ uid, profile = {}, pageSize = 20 } 
       score += Math.min(sharedInterests * 8, 24);
       if (student.verifiedTutor) score += 10;
       if (student.lastActiveAt) score += 4;
-      return { ...student, score };
+      const cappedScore = Math.min(score, 100);
+      return { ...student, score: cappedScore, matchPercentage: cappedScore };
     })
     .filter((student) => student.score > 0)
     .sort((left, right) => right.score - left.score)

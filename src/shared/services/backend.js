@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import { auth } from '../../../firebase/config';
+import { compressImageForUpload } from '../../../services/cloudinary';
 
 const extra = Constants.expoConfig?.extra || Constants.manifest?.extra || {};
 
@@ -128,13 +129,17 @@ const appendFileToFormData = (formData, fieldName, file) => {
 };
 
 export async function uploadFeatureMedia(file, { feature = 'stories', resourceType = 'auto', onProgress } = {}) {
+  const normalizedFile = resourceType === 'image' || String(file?.type || file?.mimeType || '').startsWith('image/')
+    ? await compressImageForUpload(file, { maxWidth: 1600, maxHeight: 1600, quality: 0.72 })
+    : file;
+
   const headers = await buildHeaders({});
   delete headers['Content-Type'];
 
   const formData = new FormData();
   formData.append('feature', feature);
   formData.append('resourceType', resourceType);
-  appendFileToFormData(formData, 'file', file);
+  appendFileToFormData(formData, 'file', normalizedFile);
 
   const response = await fetch(`${getApiUrl()}/api/uploads`, {
     method: 'POST',
@@ -153,10 +158,14 @@ export async function uploadFeatureMedia(file, { feature = 'stories', resourceTy
 }
 
 export async function uploadStickerMedia(file, { onProgress, rotation = 0 } = {}) {
+  const normalizedFile = file && (String(file?.type || file?.mimeType || '').startsWith('image/') || file?.uri)
+    ? await compressImageForUpload(file, { maxWidth: 1400, maxHeight: 1400, quality: 0.75 })
+    : file;
+
   const headers = await buildHeaders({});
   delete headers['Content-Type'];
   const formData = new FormData();
-  const fileName = file.name || file.fileName || `sticker-media.${file.type === 'video' ? 'mp4' : 'jpg'}`;
+  const fileName = normalizedFile.name || normalizedFile.fileName || `sticker-media.${normalizedFile.type === 'video' ? 'mp4' : 'jpg'}`;
   const extension = fileName.split('.').pop()?.toLowerCase();
   const extensionMimeTypes = {
     jpg: 'image/jpeg',
@@ -167,10 +176,10 @@ export async function uploadStickerMedia(file, { onProgress, rotation = 0 } = {}
     webm: 'video/webm',
     mov: 'video/quicktime',
   };
-  const mimeType = file.mimeType || (file.type?.includes('/') ? file.type : extensionMimeTypes[extension]) || (file.type === 'video' ? 'video/mp4' : 'image/jpeg');
+  const mimeType = normalizedFile.mimeType || (normalizedFile.type?.includes('/') ? normalizedFile.type : extensionMimeTypes[extension]) || (normalizedFile.type === 'video' ? 'video/mp4' : 'image/jpeg');
   appendFileToFormData(formData, 'file', {
-    ...file,
-    uri: file.uri,
+    ...normalizedFile,
+    uri: normalizedFile.uri,
     name: fileName,
     type: mimeType,
   });
