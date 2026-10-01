@@ -53,7 +53,8 @@ const safeHaptic = (fn) => {
 
 export default function FlashCardsPage() {
   const { colors } = useTheme();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
+  const cardHeight = Math.min(390, Math.max(250, height - 390));
   const [reloadKey, setReloadKey] = useState(0);
   const { formulas, loading, error } = useFormulas(reloadKey);
 
@@ -266,7 +267,6 @@ export default function FlashCardsPage() {
 
   const nextCard = () => navigateRef.current(1);
   const prevCard = () => navigateRef.current(-1);
-  const deckHeight = Math.min(420, Math.max(300, width * 0.62));
 
   const panResponder = useRef(
     PanResponder.create({
@@ -482,7 +482,7 @@ export default function FlashCardsPage() {
       // Deck wrapper: holds the peeking "next card" plus the interactive card on top of it.
       cardDeck: {
         width: width - s.lg * 2,
-        height: deckHeight,
+        height: cardHeight,
         alignSelf: 'center',
       },
       cardContainer: {
@@ -555,7 +555,7 @@ export default function FlashCardsPage() {
         alignItems: 'center',
         justifyContent: 'center',
         flex: 1,
-        paddingVertical: s.lg,
+        paddingVertical: s.sm,
       },
       formulaTitle: {
         ...typography['5xl'],
@@ -703,7 +703,7 @@ export default function FlashCardsPage() {
         marginTop: s.md,
       },
       formulaWrap: {
-        minHeight: 118,
+        minHeight: 84,
         width: '100%',
         justifyContent: 'center',
         borderRadius: borderRadius.xl,
@@ -714,7 +714,7 @@ export default function FlashCardsPage() {
       },
       skeletonCard: {
         width: width - s.lg * 2,
-        height: deckHeight,
+        height: cardHeight,
         borderRadius: borderRadius['3xl'],
         backgroundColor: c.surfaceSecondary,
         borderWidth: 1,
@@ -743,7 +743,7 @@ export default function FlashCardsPage() {
         backgroundColor: c.surfacePrimary,
       },
     }),
-    [isShuffled, width]
+    [cardHeight, isShuffled, width]
   );
 
   if (loading) {
@@ -872,7 +872,9 @@ export default function FlashCardsPage() {
                     accessibilityRole="button"
                     accessibilityLabel="Flip card to reveal the answer"
                   >
-                    <Text style={styles.formulaTitle}>{currentFormula?.title || 'Untitled Formula'}</Text>
+                    <Text style={styles.formulaTitle} numberOfLines={3} adjustsFontSizeToFit minimumFontScale={0.72}>
+                      {currentFormula?.title || 'Untitled Formula'}
+                    </Text>
                     <Text style={styles.formulaSubject}>{currentFormula?.subject || 'General'}</Text>
                   </Pressable>
                   <View style={styles.hintRow}>
@@ -914,7 +916,7 @@ export default function FlashCardsPage() {
                       )}
                     </View>
                     {currentFormula?.explanation ? (
-                      <Text style={styles.explanation} numberOfLines={3}>
+                      <Text style={styles.explanation} numberOfLines={2}>
                         {currentFormula.explanation}
                       </Text>
                     ) : null}

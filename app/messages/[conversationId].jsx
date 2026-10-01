@@ -6,9 +6,10 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Modal,
-  PanResponder,
   Platform,
   Pressable,
+  Animated,
+  PanResponder,
   Text,
   TextInput,
   View,
@@ -122,6 +123,34 @@ const toMillis = (value) => {
   const date = typeof value === 'string' ? new Date(value) : value?.toDate ? value.toDate() : value;
   return Number.isNaN(date?.getTime?.()) ? 0 : date.getTime();
 };
+
+function SwipeToReply({ children, disabled, onReply, colors }) {
+  const [translateX] = useState(() => new Animated.Value(0));
+  const panResponder = React.useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gesture) =>
+      !disabled && gesture.dx > 12 && gesture.dx > Math.abs(gesture.dy) * 1.3,
+    onPanResponderMove: (_, gesture) => translateX.setValue(Math.min(68, gesture.dx)),
+    onPanResponderRelease: (_, gesture) => {
+      if (gesture.dx >= 58) onReply();
+      Animated.spring(translateX, { toValue: 0, useNativeDriver: true, friction: 7, tension: 90 }).start();
+    },
+    onPanResponderTerminate: () => {
+      Animated.spring(translateX, { toValue: 0, useNativeDriver: true, friction: 7, tension: 90 }).start();
+    },
+  }), [disabled, onReply, translateX]);
+  const replyOpacity = translateX.interpolate({ inputRange: [0, 58], outputRange: [0, 1], extrapolate: 'clamp' });
+
+  return (
+    <View style={{ position: 'relative' }}>
+      <Animated.View style={{ position: 'absolute', left: 8, top: '50%', opacity: replyOpacity, transform: [{ translateY: -10 }] }}>
+        <Ionicons name="arrow-undo" size={18} color={colors.brand} />
+      </Animated.View>
+      <Animated.View {...panResponder.panHandlers} style={{ transform: [{ translateX }] }}>
+        {children}
+      </Animated.View>
+    </View>
+  );
+}
 
 export default function ConversationPage() {
   const router = useRouter();
@@ -869,25 +898,6 @@ export default function ConversationPage() {
 
   const isMine = (item) => item.senderId === user?.uid;
 
-  const createReplyGesture = (item) => PanResponder.create({
-    onMoveShouldSetPanResponder: (_, gesture) => {
-      if (item.deleted) return false;
-      const horizontalDrag = Math.abs(gesture.dx);
-      const verticalDrag = Math.abs(gesture.dy);
-      return horizontalDrag > 16 && horizontalDrag > verticalDrag * 1.2 && gesture.dx < -12;
-    },
-    onPanResponderRelease: (_, gesture) => {
-      const horizontalDrag = Math.abs(gesture.dx);
-      if (horizontalDrag > 40 && gesture.dx < -12) {
-        setReplyTo({
-          ...item,
-          senderName: item.senderName || (isMine(item) ? 'You' : otherUser?.name || 'Student'),
-          text: item.text || item.body || item.caption || (item.type === 'voice' ? 'Voice message' : 'Attachment'),
-        });
-      }
-    },
-  });
-
   return (
     <ScreenShell title={headerTitle} subtitle={headerSubtitle} showBack loading={loading} scrollable={false}>
       <FriendRequestModal
@@ -950,6 +960,11 @@ export default function ConversationPage() {
               const isVoice = item.type === 'voice';
               const isSticker = item.type === 'sticker';
               return (
+                <SwipeToReply
+                  disabled={deleted}
+                  onReply={() => setReplyTo(item)}
+                  colors={colors}
+                >
                 <View>
                   {!mine && !deleted ? <Text style={[styles.sender, (isVoice || isSticker) && { marginBottom: 4 }]}>{item.senderName || 'Student'}</Text> : null}
                   {!deleted && item.replyTo ? (
@@ -979,27 +994,26 @@ export default function ConversationPage() {
                       </View>
                     </View>
                   ) : (
-                    <View {...createReplyGesture(item).panHandlers}>
-                      <Pressable
-                        onLongPress={() => setActiveMessage(item)}
-                        delayLongPress={220}
-                        style={({ pressed }) => [
-                          styles.bubble,
-                          mine ? styles.mine : styles.theirs,
-                          pressed && styles.bubblePressed,
-                        ]}
-                      >
-                        <Text style={[styles.text, mine && styles.mineText]}>
-                          {busy ? 'Deleting…' : (item.text || item.body || item.caption || 'Attachment')}
-                        </Text>
-                        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 6, gap: 4 }}>
-                          <Text style={[styles.timestamp, mine && styles.mineTimestamp]}>{formatTime(item.createdAt)}</Text>
-                          {mine ? renderMessageStatus(item) : null}
-                        </View>
-                      </Pressable>
-                    </View>
+                    <Pressable
+                      onLongPress={() => setActiveMessage(item)}
+                      delayLongPress={220}
+                      style={({ pressed }) => [
+                        styles.bubble,
+                        mine ? styles.mine : styles.theirs,
+                        pressed && styles.bubblePressed,
+                      ]}
+                    >
+                      <Text style={[styles.text, mine && styles.mineText]}>
+                        {busy ? 'Deleting…' : (item.text || item.body || item.caption || 'Attachment')}
+                      </Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 6, gap: 4 }}>
+                        <Text style={[styles.timestamp, mine && styles.mineTimestamp]}>{formatTime(item.createdAt)}</Text>
+                        {mine ? renderMessageStatus(item) : null}
+                      </View>
+                    </Pressable>
                   )}
                 </View>
+                </SwipeToReply>
               );
             }}
             contentContainerStyle={styles.listContent}
