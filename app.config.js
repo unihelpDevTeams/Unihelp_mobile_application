@@ -2,6 +2,8 @@ const dotenv = require("dotenv");
 
 dotenv.config();
 
+const googleServicesFile = process.env.GOOGLE_SERVICES_JSON || "./google-services.json";
+
 const extra = {
   EXPO_PUBLIC_APP_URL: process.env.EXPO_PUBLIC_APP_URL || "https://unihelp.app",
   EXPO_PUBLIC_API_URL:
@@ -64,7 +66,7 @@ module.exports = {
     },
     android: {
       package: "com.zenithdev.unihelp",
-      googleServicesFile: "./google-services.json",
+      googleServicesFile,
       softwareKeyboardLayoutMode: "resize",
       versionCode: 3,
       permissions: ["RECORD_AUDIO", "POST_NOTIFICATIONS"],
@@ -110,6 +112,11 @@ module.exports = {
     updates: {
       url: `https://u.expo.dev/${easProjectId}`,
     },
+      "build": {
+        "production": {
+          "environment": "production"
+        }
+      },
     runtimeVersion: {
       policy: "appVersion",
     },
