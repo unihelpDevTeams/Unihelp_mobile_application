@@ -124,7 +124,7 @@ const fields = [
   { key: 'bio', label: 'About', placeholder: 'Tell others a little about yourself', icon: 'chatbubble-ellipses-outline', multiline: true, maxLength: BIO_MAX_LENGTH },
   { key: 'school', label: 'School', placeholder: 'Add your school', icon: 'school-outline' },
   { key: 'department', label: 'Department', placeholder: 'Add your department', icon: 'library-outline' },
-  { key: 'level', label: 'Level', placeholder: 'e.g. 200L', icon: 'ribbon-outline' },
+  { key: 'level', label: 'Level', placeholder: 'e.g. ND 1', icon: 'ribbon-outline' },
   { key: 'location', label: 'Location', placeholder: 'Add your city or campus', icon: 'location-outline' },
 ];
 

@@ -58,6 +58,9 @@ export default function ScreenShell({
   onProfilePress,
   menuFooterNote,
   showPremiumExpiryWarning = true,
+  showHeader = true,
+  onSearch,
+  headerScrollY,
 }) {
   const router = useRouter();
   const { profile, user, logout } = useAuth();
@@ -397,22 +400,42 @@ export default function ScreenShell({
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
-        <HeaderBar
-          title={title}
-          subtitle={subtitle}
-          showBack={showBack}
-          onBack={() => router.back()}
-          showSearch={showUniversityIcons}
-          onSearch={() => router.navigate('/search')}
-          showNotifications={showUniversityIcons}
-          hasUnreadNotifications={hasUnreadNotifications}
-          onNotifications={() => router.navigate('/notifications')}
-          showMenu={showMenu}
-          onMenu={() => setMenuOpen(true)}
-          actions={actions}
-          colors={colors}
-          styles={styles}
-        />
+        {showHeader && (
+          <Animated.View
+            style={headerScrollY ? {
+              transform: [{
+                translateY: headerScrollY.interpolate({
+                  inputRange: [0, 60],
+                  outputRange: [0, -60],
+                  extrapolate: 'clamp'
+                })
+              }],
+              marginTop: headerScrollY.interpolate({
+                inputRange: [0, 60],
+                outputRange: [0, -60],
+                extrapolate: 'clamp'
+              }),
+              zIndex: 10,
+            } : { zIndex: 10 }}
+          >
+            <HeaderBar
+              title={title}
+              subtitle={subtitle}
+              showBack={showBack}
+              onBack={() => router.back()}
+              showSearch={showUniversityIcons || Boolean(onSearch)}
+              onSearch={onSearch ? onSearch : () => router.navigate('/search')}
+              showNotifications={showUniversityIcons}
+              hasUnreadNotifications={hasUnreadNotifications}
+              onNotifications={() => router.navigate('/notifications')}
+              showMenu={showMenu}
+              onMenu={() => setMenuOpen(true)}
+              actions={actions}
+              colors={colors}
+              styles={styles}
+            />
+          </Animated.View>
+        )}
         {content}
         {overlayContent ? (
           <View pointerEvents="box-none" style={styles.overlay}>{overlayContent}</View>
@@ -489,7 +512,7 @@ function PremiumExpiryNotice({ status, onPress, colors, styles }) {
   );
 }
 
-function HeaderBar({
+export function HeaderBar({
   title, subtitle, showBack, onBack,
   showSearch, onSearch, showNotifications, hasUnreadNotifications, onNotifications,
   showMenu, onMenu, actions, colors, styles,

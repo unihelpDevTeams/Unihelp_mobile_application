@@ -211,7 +211,7 @@ export default function GroupDetailPage() {
     chatContent: {
       paddingHorizontal: 14,
       paddingTop: 12,
-      paddingBottom: 40,
+      paddingBottom: 60,
     },
 
     /* Jump to latest */
@@ -1577,13 +1577,13 @@ export default function GroupDetailPage() {
   return (
     <ScreenShell title="Group" subtitle={group?.name || groupId} showBack loading={loading} scrollable={false}>
       {group ? (
-        <View ref={containerRef} onLayout={measureKeyboardOffset} style={styles.screen}>
+        <View style={styles.screen}>
           {/*
             The list and the composer are siblings in one column. The composer is NOT absolutely
             positioned, so the list ends exactly where the composer starts and the last message can
-            never sit underneath it. The keyboard just pads this view from the bottom.
+            never sit underneath it. ScreenShell provides the KeyboardAvoidingView.
           */}
-          <KeyboardAvoidingView style={styles.flex} behavior="padding" keyboardVerticalOffset={keyboardOffset}>
+          <View style={styles.flex}>
             <View style={styles.chatArea}>
               <FlatList
                 ref={scrollRef}
@@ -1816,7 +1816,7 @@ export default function GroupDetailPage() {
                 </View>
               </View>
             ) : null}
-          </KeyboardAvoidingView>
+          </View>
 
           <StickerPicker
             visible={stickerPickerVisible}

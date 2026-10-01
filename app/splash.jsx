@@ -18,30 +18,26 @@ export default function SplashScreen() {
     spinner: { marginTop: s.lg },
   }));
 
-  const spinAnim = useRef(new Animated.Value(0)).current;
-  React.useEffect(() => {
-    const loop = Animated.loop(
-      Animated.timing(spinAnim, { toValue: 1, duration: 1200, easing: Easing.linear, useNativeDriver: true })
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [spinAnim]);
+  const scaleAnim = useRef(new Animated.Value(0.8)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  const rotate = spinAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  React.useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 800, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+      Animated.spring(scaleAnim, { toValue: 1, friction: 5, tension: 20, useNativeDriver: true }),
+    ]).start();
+  }, [fadeAnim, scaleAnim]);
 
   return (
     <View style={styles.container}>
-      <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
+      <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}>
         <View style={styles.logoWrapper}>
           <View style={styles.logoContainer}>
-            <Ionicons name="school" size={48} color={colors.brand} />
+            <Ionicons name="school" size={56} color={colors.brand} />
           </View>
         </View>
         <Text style={styles.appName}>Unihelp</Text>
         <Text style={styles.tagline}>Study smarter. Learn faster.</Text>
-        <Animated.View style={[styles.spinner, { transform: [{ rotate }] }]}>
-          <Ionicons name="sync-outline" size={24} color={colors.onBrand} />
-        </Animated.View>
       </Animated.View>
     </View>
   );

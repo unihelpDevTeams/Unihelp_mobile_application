@@ -803,7 +803,7 @@ export default function CgpaPage() {
                   <View style={styles.inputContainer}>
                     <MaterialCommunityIcons name="calendar-month-outline" size={18} color={colors.brand} />
                     <TextInput
-                      placeholder="e.g. 100L First Semester"
+                      placeholder="e.g. ND 1 First Semester"
                       placeholderTextColor={colors.grey}
                       style={styles.input}
                       value={semester.name}

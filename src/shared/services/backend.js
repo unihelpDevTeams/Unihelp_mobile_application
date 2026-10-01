@@ -55,16 +55,23 @@ async function requestJson(path, { method = 'GET', payload, extraHeaders = {}, u
     requestInit.body = JSON.stringify(payload);
   }
 
-  const response = await fetch(`${getApiUrl()}${path}`, requestInit);
+  let response;
+  try {
+    response = await fetch(`${getApiUrl()}${path}`, requestInit);
+  } catch (error) {
+    console.warn(`[Network Error] ${method} ${path}`, error);
+    throw new Error('Network error. Please check your connection and try again.');
+  }
+
   const data = await parseResponse(response);
 
   if (!response.ok) {
-    const message = data.message || data.error || 'Request failed';
+    const message = data.message || data.error || 'Request failed. Please try again.';
     if (response.status === 401 && !forceRefresh && auth?.currentUser) {
       console.warn('[API auth] Received 401; refreshing Firebase token and retrying once.', { path });
       return requestJson(path, { method, payload, extraHeaders, useFormData, forceRefresh: true });
     }
-    throw new Error(`${response.status} ${message}`);
+    throw new Error(message);
   }
 
   return data;
@@ -141,16 +148,22 @@ export async function uploadFeatureMedia(file, { feature = 'stories', resourceTy
   formData.append('resourceType', resourceType);
   appendFileToFormData(formData, 'file', normalizedFile);
 
-  const response = await fetch(`${getApiUrl()}/api/uploads`, {
-    method: 'POST',
-    headers,
-    body: formData,
-  });
+  let response;
+  try {
+    response = await fetch(`${getApiUrl()}/api/uploads`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+  } catch (error) {
+    console.warn('[Network Error] POST /api/uploads', error);
+    throw new Error('Network error. Please check your connection and try again.');
+  }
 
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data.message || data.error || 'Upload failed');
+    throw new Error(data.message || data.error || 'Upload failed. Please try again.');
   }
 
   if (onProgress) onProgress(100);
@@ -184,13 +197,19 @@ export async function uploadStickerMedia(file, { onProgress, rotation = 0 } = {}
     type: mimeType,
   });
   formData.append('rotation', String(rotation));
-  const response = await fetch(`${getApiUrl()}/api/stickers/upload`, {
-    method: 'POST',
-    headers,
-    body: formData,
-  });
+  let response;
+  try {
+    response = await fetch(`${getApiUrl()}/api/stickers/upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+  } catch (error) {
+    console.warn('[Network Error] POST /api/stickers/upload', error);
+    throw new Error('Network error. Please check your connection and try again.');
+  }
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.message || data.error || 'Sticker upload failed');
+  if (!response.ok) throw new Error(data.message || data.error || 'Sticker upload failed. Please try again.');
   onProgress?.(100);
   return data.data || data;
 }

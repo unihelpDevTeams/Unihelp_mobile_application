@@ -121,8 +121,9 @@ export default function NewsFeedPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const viewedPosts = useRef(new Set());
   const marqueeX = useRef(new Animated.Value(0)).current;
-  const listRef = useRef(null);
   const pillAnim = useRef(new Animated.Value(0)).current;
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const listRef = useRef(null);
   // Incremented on every refresh so slow "load more" / refresh responses
   // from an older request can never overwrite newer data.
   const requestIdRef = useRef(0);
@@ -982,14 +983,20 @@ export default function NewsFeedPage() {
         <Ionicons name="options-outline" size={24} color={colors.textPrimary} />
         {activeFilterCount > 0 && <View style={styles.filterBadge}><Text style={styles.filterBadgeText}>{activeFilterCount}</Text></View>}
       </Pressable>
-      <Pressable onPress={() => setSearchOpen(!searchOpen)} hitSlop={8}>
-        <Ionicons name="search" size={22} color={colors.textPrimary} />
-      </Pressable>
     </View>
   );
 
   return (
-    <ScreenShell title="Feed" subtitle="What is happening with your friends." showBack={false} scrollable={false} loading={loading} actions={headerActions}>
+    <ScreenShell 
+      title="Feed" 
+      subtitle="What is happening with your friends." 
+      showBack={false} 
+      scrollable={false} 
+      loading={loading} 
+      actions={headerActions}
+      onSearch={() => setSearchOpen(!searchOpen)}
+      headerScrollY={scrollY}
+    >
       {searchOpen && (
         <View style={[styles.searchWrap, { marginHorizontal: 16, marginTop: 12, marginBottom: 4 }]}>
           <Ionicons name="search-outline" size={17} color={colors.textTertiary} />
@@ -1119,7 +1126,7 @@ export default function NewsFeedPage() {
           ))}
         </View>
       ) : (
-        <FlatList
+        <Animated.FlatList
           ref={listRef}
           data={visibleItems}
           keyExtractor={(item) => item.id}
@@ -1128,6 +1135,11 @@ export default function NewsFeedPage() {
           viewabilityConfig={viewabilityConfig}
           refreshing={refreshing}
           onRefresh={() => loadFeed(true)}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: false }
+          )}
+          scrollEventThrottle={16}
           ListEmptyComponent={!loading ? (
             <EmptyState title={items.length && !visibleItems.length ? 'No matching posts' : 'Your feed is quiet'} description={items.length && !visibleItems.length ? (hasMore ? 'Nothing in the posts loaded so far. Try another filter or load more.' : 'Try another search or filter.') : 'Add friends and start sharing what is happening around campus.'} />
           ) : null}

@@ -19,10 +19,12 @@ import { NetworkProvider, useNetwork } from '../context/NetworkContext';
 import OfflineBanner from '../components/OfflineBanner';
 import { isPremiumActive } from '../src/shared/services/premium';
 
+import SplashScreen from './splash';
+
 function GlobalPreloader() {
   const { loading } = useAuth();
   if (!loading) return null;
-  return <FullScreenLoader label="Preparing your experience..." />;
+  return <SplashScreen />;
 }
 
 function AppContent() {
@@ -41,7 +43,7 @@ function AppContent() {
 
   // Prevent flash - don't render until theme is loaded
   if (!themeLoaded) {
-    return <FullScreenLoader label="Preparing your experience..." />;
+    return <SplashScreen />;
   }
 
   return (

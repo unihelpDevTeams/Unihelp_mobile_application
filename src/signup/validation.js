@@ -39,13 +39,10 @@ export const VALIDATION_RULES = {
 };
 
 export const ACADEMIC_LEVELS = [
-  { label: '100 Level', value: '100' },
-  { label: '200 Level', value: '200' },
-  { label: '300 Level', value: '300' },
-  { label: '400 Level', value: '400' },
-  { label: '500 Level', value: '500' },
-  { label: '600 Level', value: '600' },
-  { label: 'Postgraduate', value: 'postgraduate' },
+  { label: 'ND 1', value: 'ND 1' },
+  { label: 'ND 2', value: 'ND 2' },
+  { label: 'HND 1', value: 'HND 1' },
+  { label: 'HND 2', value: 'HND 2' },
 ];
 
 export const INTEREST_OPTIONS = [
