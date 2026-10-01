@@ -60,6 +60,7 @@ export default function ScreenShell({
   showPremiumExpiryWarning = true,
   showHeader = true,
   onSearch,
+  showNotifications,
   headerScrollY,
 }) {
   const router = useRouter();
@@ -373,6 +374,7 @@ export default function ScreenShell({
   }, [menuSections, premiumUnlocked, profile?.role, uploadCounts]);
 
   const showUniversityIcons = !profile?.role || profile?.role === 'university';
+  const shouldShowNotifications = typeof showNotifications === 'boolean' ? showNotifications : showUniversityIcons;
   const body = loading ? <FullScreenLoader label="Loading..." /> : children;
   const footer = showFooter ? <View style={{ height: 12 }} /> : null;
 
@@ -425,7 +427,7 @@ export default function ScreenShell({
               onBack={() => router.back()}
               showSearch={showUniversityIcons || Boolean(onSearch)}
               onSearch={onSearch ? onSearch : () => router.navigate('/search')}
-              showNotifications={showUniversityIcons}
+              showNotifications={shouldShowNotifications}
               hasUnreadNotifications={hasUnreadNotifications}
               onNotifications={() => router.navigate('/notifications')}
               showMenu={showMenu}

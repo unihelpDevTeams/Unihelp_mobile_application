@@ -266,6 +266,7 @@ export default function FlashCardsPage() {
 
   const nextCard = () => navigateRef.current(1);
   const prevCard = () => navigateRef.current(-1);
+  const deckHeight = Math.min(420, Math.max(300, width * 0.62));
 
   const panResponder = useRef(
     PanResponder.create({
@@ -481,7 +482,7 @@ export default function FlashCardsPage() {
       // Deck wrapper: holds the peeking "next card" plus the interactive card on top of it.
       cardDeck: {
         width: width - s.lg * 2,
-        height: Math.min(390, Math.max(330, width * 0.92)),
+        height: deckHeight,
         alignSelf: 'center',
       },
       cardContainer: {
@@ -713,7 +714,7 @@ export default function FlashCardsPage() {
       },
       skeletonCard: {
         width: width - s.lg * 2,
-        height: Math.min(390, Math.max(330, width * 0.92)),
+        height: deckHeight,
         borderRadius: borderRadius['3xl'],
         backgroundColor: c.surfaceSecondary,
         borderWidth: 1,

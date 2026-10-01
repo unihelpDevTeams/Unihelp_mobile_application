@@ -6,6 +6,7 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   Text,
@@ -56,6 +57,64 @@ const formatShortTime = (value) => {
   if (!value) return '';
   const date = typeof value === 'string' ? new Date(value) : value?.toDate ? value.toDate() : value;
   return date.toLocaleDateString([], { hour: 'numeric', minute: '2-digit' });
+};
+
+const createMessageClientId = () => `local_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+const sortMessages = (items = []) => [...items].sort((left, right) => {
+  const leftTime = toMillis(left?.createdAt);
+  const rightTime = toMillis(right?.createdAt);
+  if (leftTime && rightTime && leftTime !== rightTime) return leftTime - rightTime;
+  return String(left?.id || '').localeCompare(String(right?.id || ''));
+});
+
+const reconcileIncomingMessage = (prevMessages = [], incomingMessage = null) => {
+  if (!incomingMessage) return prevMessages;
+
+  const nextMessages = prevMessages.map((existingMessage) => {
+    const sameMessageId = existingMessage.id === incomingMessage.id;
+    const sameLocalId = Boolean(
+      incomingMessage.clientTempId &&
+      (existingMessage.clientTempId === incomingMessage.clientTempId ||
+        existingMessage.localId === incomingMessage.clientTempId ||
+        existingMessage.id === incomingMessage.clientTempId)
+    );
+    const sameReply = Boolean(
+      !sameMessageId &&
+      !sameLocalId &&
+      incomingMessage.localId &&
+      (existingMessage.localId === incomingMessage.localId ||
+        existingMessage.id === incomingMessage.localId ||
+        existingMessage.clientTempId === incomingMessage.localId)
+    );
+
+    if (sameMessageId || sameLocalId || sameReply) {
+      return {
+        ...existingMessage,
+        ...incomingMessage,
+        id: incomingMessage.id || existingMessage.id,
+        status: incomingMessage.status || existingMessage.status || 'sent',
+        clientTempId: incomingMessage.clientTempId || existingMessage.clientTempId || existingMessage.localId || incomingMessage.localId || existingMessage.id,
+        localId: incomingMessage.localId || existingMessage.localId || incomingMessage.clientTempId || existingMessage.clientTempId || existingMessage.id,
+      };
+    }
+
+    return existingMessage;
+  });
+
+  const alreadyPresent = nextMessages.some((message) =>
+    message.id === incomingMessage.id ||
+    message.clientTempId === incomingMessage.clientTempId ||
+    message.localId === incomingMessage.localId ||
+    message.clientTempId === incomingMessage.localId ||
+    message.localId === incomingMessage.clientTempId
+  );
+
+  if (!alreadyPresent) {
+    nextMessages.push({ ...incomingMessage, status: incomingMessage.status || 'sent' });
+  }
+
+  return sortMessages(nextMessages);
 };
 
 const toMillis = (value) => {
@@ -309,10 +368,10 @@ export default function ConversationPage() {
     }
     
     const handleReceiveMessage = (newMessage) => {
-      setMessages((prev) => {
-        if (prev.find(m => m.id === newMessage.id)) return prev;
-        return [...prev, newMessage].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-      });
+      setMessages((prev) => reconcileIncomingMessage(prev, {
+        ...newMessage,
+        status: newMessage?.status || 'sent',
+      }));
     };
     
     const handleTyping = ({ userId, isTyping, name }) => {
@@ -389,6 +448,54 @@ export default function ConversationPage() {
     }
   };
 
+  const markFailedMessage = (clientId, errorMessage) => {
+    setMessages((prev) => prev.map((message) => {
+      const matches = message.clientTempId === clientId || message.localId === clientId || message.id === clientId;
+      if (!matches) return message;
+      return {
+        ...message,
+        status: 'failed',
+        failedReason: errorMessage || 'Failed to send',
+      };
+    }));
+  };
+
+  const retrySendMessage = async (message) => {
+    if (!conversation || !user || !canChat || sending || !message) return;
+
+    const clientId = message.clientTempId || message.localId || message.id;
+    setMessages((prev) => prev.map((entry) => {
+      if (entry.id !== message.id && entry.clientTempId !== clientId && entry.localId !== clientId) return entry;
+      return { ...entry, status: 'sending', failedReason: null };
+    }));
+
+    setSending(true);
+    try {
+      const messagePayload = {
+        type: message.type || 'text',
+        text: message.text || '',
+        attachments: Array.isArray(message.attachments) ? message.attachments : [],
+        replyTo: message.replyTo || null,
+        clientTempId: clientId,
+        senderName: profile?.name || user.displayName || 'Student',
+      };
+
+      const response = await sendDirectMessage(conversation, user, profile || {}, messagePayload);
+      const nextMessage = response?.message || response || message;
+      setMessages((prev) => reconcileIncomingMessage(prev, {
+        ...nextMessage,
+        clientTempId: clientId,
+        localId: clientId,
+        status: nextMessage?.status || 'sent',
+      }));
+    } catch (error) {
+      markFailedMessage(clientId, error?.message || 'Failed to send');
+      showSendError(error);
+    } finally {
+      setSending(false);
+    }
+  };
+
   const handleAcceptMessageRequest = async () => {
     if (!pendingMessageRequest || !currentUid) return;
     setRelationshipBusy(true);
@@ -435,6 +542,32 @@ export default function ConversationPage() {
     } finally {
       setRelationshipBusy(false);
     }
+  };
+
+  const renderMessageStatus = (message) => {
+    if (!message || message.senderId !== currentUid) return null;
+
+    if (message.status === 'sending') {
+      return <ActivityIndicator size="small" color={colors.textTertiary} />;
+    }
+
+    if (message.status === 'failed') {
+      return (
+        <Pressable onPress={() => retrySendMessage(message)} hitSlop={8}>
+          <Ionicons name="alert-circle" size={13} color={colors.error} />
+        </Pressable>
+      );
+    }
+
+    if (message.status === 'read') {
+      return <Ionicons name="checkmark-done" size={13} color={colors.brand} />;
+    }
+
+    if (message.status === 'delivered') {
+      return <Ionicons name="checkmark-done" size={13} color={colors.textTertiary} />;
+    }
+
+    return <Ionicons name="checkmark" size={13} color={colors.textTertiary} />;
   };
 
   const renderRelationshipPrompt = () => {
@@ -510,24 +643,52 @@ export default function ConversationPage() {
   };
 
   const send = async () => {
-    if (!draft.trim() || !conversation || !user || !canChat) return;
+    const nextText = draft.trim();
+    if (!nextText || !conversation || !user || !canChat) return;
+
+    const clientId = createMessageClientId();
+    const optimisticMessage = {
+      id: clientId,
+      localId: clientId,
+      clientTempId: clientId,
+      senderId: currentUid,
+      senderName: profile?.name || user.displayName || 'Student',
+      text: nextText,
+      type: 'text',
+      createdAt: new Date().toISOString(),
+      status: 'sending',
+      attachments: [],
+      replyTo: replyTo ? {
+        id: replyTo.id,
+        senderId: replyTo.senderId || '',
+        senderName: replyTo.senderName || 'Student',
+        text: messagePreview(replyTo),
+      } : null,
+    };
+
+    setMessages((prev) => reconcileIncomingMessage(prev, optimisticMessage));
+    setDraft('');
+    setReplyTo(null);
     setSending(true);
+
     try {
-      await sendDirectMessage(conversation, user, profile || {}, {
-        text: draft.trim(),
+      const response = await sendDirectMessage(conversation, user, profile || {}, {
+        text: nextText,
         attachments: [],
-        replyTo: replyTo ? {
-          id: replyTo.id,
-          senderId: replyTo.senderId || '',
-          senderName: replyTo.senderName || 'Student',
-          text: messagePreview(replyTo),
-        } : null,
+        replyTo: optimisticMessage.replyTo,
+        clientTempId: clientId,
       });
-      setDraft('');
-      setReplyTo(null);
+      const nextMessage = response?.message || response || optimisticMessage;
+      setMessages((prev) => reconcileIncomingMessage(prev, {
+        ...nextMessage,
+        clientTempId: clientId,
+        localId: clientId,
+        status: nextMessage?.status || 'sent',
+      }));
       scrollToBottom();
-      getSocket().emit("typing", { conversationId, userId: currentUid, isTyping: false });
+      getSocket().emit('typing', { conversationId, userId: currentUid, isTyping: false });
     } catch (error) {
+      markFailedMessage(clientId, error?.message || 'Failed to send');
       showSendError(error);
     } finally {
       setSending(false);
@@ -708,6 +869,25 @@ export default function ConversationPage() {
 
   const isMine = (item) => item.senderId === user?.uid;
 
+  const createReplyGesture = (item) => PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gesture) => {
+      if (item.deleted) return false;
+      const horizontalDrag = Math.abs(gesture.dx);
+      const verticalDrag = Math.abs(gesture.dy);
+      return horizontalDrag > 16 && horizontalDrag > verticalDrag * 1.2 && gesture.dx < -12;
+    },
+    onPanResponderRelease: (_, gesture) => {
+      const horizontalDrag = Math.abs(gesture.dx);
+      if (horizontalDrag > 40 && gesture.dx < -12) {
+        setReplyTo({
+          ...item,
+          senderName: item.senderName || (isMine(item) ? 'You' : otherUser?.name || 'Student'),
+          text: item.text || item.body || item.caption || (item.type === 'voice' ? 'Voice message' : 'Attachment'),
+        });
+      }
+    },
+  });
+
   return (
     <ScreenShell title={headerTitle} subtitle={headerSubtitle} showBack loading={loading} scrollable={false}>
       <FriendRequestModal
@@ -793,23 +973,31 @@ export default function ConversationPage() {
                   ) : isVoice ? (
                     <View>
                       <VoiceMessageBubble message={item} isMine={mine} onLongPress={() => setActiveMessage(item)} />
-                      <Text style={[styles.timestamp, { marginTop: -6, marginBottom: 10 }, mine && { textAlign: 'right' }]}>{formatTime(item.createdAt)}</Text>
+                      <View style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start', alignItems: 'center', marginTop: -2, marginBottom: 10, gap: 4 }}>
+                        <Text style={[styles.timestamp, mine && styles.mineTimestamp]}>{formatTime(item.createdAt)}</Text>
+                        {mine ? renderMessageStatus(item) : null}
+                      </View>
                     </View>
                   ) : (
-                    <Pressable
-                      onLongPress={() => setActiveMessage(item)}
-                      delayLongPress={220}
-                      style={({ pressed }) => [
-                        styles.bubble,
-                        mine ? styles.mine : styles.theirs,
-                        pressed && styles.bubblePressed,
-                      ]}
-                    >
-                      <Text style={[styles.text, mine && styles.mineText]}>
-                        {busy ? 'Deleting…' : (item.text || item.body || item.caption || 'Attachment')}
-                      </Text>
-                      <Text style={[styles.timestamp, mine && styles.mineTimestamp]}>{formatTime(item.createdAt)}</Text>
-                    </Pressable>
+                    <View {...createReplyGesture(item).panHandlers}>
+                      <Pressable
+                        onLongPress={() => setActiveMessage(item)}
+                        delayLongPress={220}
+                        style={({ pressed }) => [
+                          styles.bubble,
+                          mine ? styles.mine : styles.theirs,
+                          pressed && styles.bubblePressed,
+                        ]}
+                      >
+                        <Text style={[styles.text, mine && styles.mineText]}>
+                          {busy ? 'Deleting…' : (item.text || item.body || item.caption || 'Attachment')}
+                        </Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 6, gap: 4 }}>
+                          <Text style={[styles.timestamp, mine && styles.mineTimestamp]}>{formatTime(item.createdAt)}</Text>
+                          {mine ? renderMessageStatus(item) : null}
+                        </View>
+                      </Pressable>
+                    </View>
                   )}
                 </View>
               );

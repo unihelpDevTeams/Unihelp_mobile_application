@@ -1,8 +1,9 @@
 import React, { useRef } from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Animated, Easing, Text, View } from 'react-native';
+import { Image } from 'expo-image';
 import { useTheme } from '../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../src/shared/theme/createStyles';
+import favicon from '../assets/images/favicon.png';
 
 export default function SplashScreen() {
   const { colors } = useTheme();
@@ -32,7 +33,7 @@ export default function SplashScreen() {
       <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}>
         <View style={styles.logoWrapper}>
           <View style={styles.logoContainer}>
-            <Ionicons name="school" size={56} color={colors.brand} />
+            <Image source={favicon} style={{ width: 74, height: 74 }} contentFit="contain" />
           </View>
         </View>
         <Text style={styles.appName}>Unihelp</Text>

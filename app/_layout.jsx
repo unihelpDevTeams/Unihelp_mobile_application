@@ -2,8 +2,16 @@ import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import React, { useEffect } from 'react';
-import { Text } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Modal,
+  Pressable,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { Accelerometer } from 'expo-sensors';
+import * as Haptics from 'expo-haptics';
 import { useFonts, Manrope_400Regular, Manrope_500Medium, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold } from '@expo-google-fonts/manrope';
 import { useFonts as useSoraFonts, Sora_400Regular, Sora_500Medium, Sora_600SemiBold, Sora_700Bold, Sora_800ExtraBold } from '@expo-google-fonts/sora';
 import '@/global.css';
@@ -18,6 +26,7 @@ import { FullScreenLoader } from '../src/shared/components/AILoaders';
 import { NetworkProvider, useNetwork } from '../context/NetworkContext';
 import OfflineBanner from '../components/OfflineBanner';
 import { isPremiumActive } from '../src/shared/services/premium';
+import { submitReport } from '../src/shared/services/support';
 
 import SplashScreen from './splash';
 
@@ -29,17 +38,74 @@ function GlobalPreloader() {
 
 function AppContent() {
   const { colors, isDark, themeLoaded } = useTheme();
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const { promo, visible: promoVisible, dismiss: dismissPromo, markClicked: markPromoClicked } = usePromoSpotlight();
   const { isOnline } = useNetwork();
   const router = useRouter();
   const premiumUnlocked = isPremiumActive(profile);
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [reportProblem, setReportProblem] = useState('');
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [reportError, setReportError] = useState('');
+  const lastShakeRef = useRef(0);
+  const shakeMagnitudeRef = useRef(0);
 
   useEffect(() => {
     if (isOnline === false && premiumUnlocked && router.pathname !== '/offline-center' && router.pathname !== '/premium') {
       router.navigate('/offline-center');
     }
   }, [isOnline, premiumUnlocked, router]);
+
+  useEffect(() => {
+    const subscription = Accelerometer.addListener(({ x, y, z }) => {
+      const magnitude = Math.sqrt(x * x + y * y + z * z);
+      const now = Date.now();
+      const delta = Math.abs(magnitude - shakeMagnitudeRef.current);
+      const shakeThreshold = 1.6;
+      const cooldownMs = 5000;
+
+      if (delta > shakeThreshold && now - lastShakeRef.current > cooldownMs) {
+        lastShakeRef.current = now;
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+        setReportModalVisible(true);
+      }
+
+      shakeMagnitudeRef.current = magnitude;
+    });
+
+    return () => subscription.remove();
+  }, []);
+
+  const handleSubmitReport = async () => {
+    const trimmed = reportProblem.trim();
+    if (!trimmed) {
+      setReportError('Please describe the problem before sending your report.');
+      return;
+    }
+
+    if (!user) {
+      setReportError('You must be signed in to submit a report.');
+      return;
+    }
+
+    setReportSubmitting(true);
+    setReportError('');
+
+    try {
+      await submitReport({
+        reportType: 'bug',
+        title: 'Device shake report',
+        description: trimmed,
+        attachments: [],
+      });
+      setReportProblem('');
+      setReportModalVisible(false);
+    } catch (error) {
+      setReportError(error?.message || 'Could not submit the bug report right now.');
+    } finally {
+      setReportSubmitting(false);
+    }
+  };
 
   // Prevent flash - don't render until theme is loaded
   if (!themeLoaded) {
@@ -81,6 +147,100 @@ function AppContent() {
         onAction={markPromoClicked}
       />
       <OfflineBanner />
+      <Modal
+        visible={reportModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          setReportModalVisible(false);
+          setReportError('');
+        }}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.45)', justifyContent: 'flex-end' }}
+          onPress={() => {
+            setReportModalVisible(false);
+            setReportError('');
+          }}
+        >
+          <Pressable
+            style={{
+              backgroundColor: colors.surfacePrimary,
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              paddingHorizontal: 18,
+              paddingTop: 16,
+              paddingBottom: 28,
+            }}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <Text style={{ fontSize: 20, fontWeight: '800', color: colors.textPrimary, marginBottom: 8 }}>
+              Report a bug
+            </Text>
+            <Text style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 16 }}>
+              Describe what happened and send it to the UniHelp team.
+            </Text>
+            <TextInput
+              value={reportProblem}
+              onChangeText={setReportProblem}
+              placeholder="What went wrong?"
+              placeholderTextColor={colors.textTertiary}
+              multiline
+              numberOfLines={6}
+              style={{
+                minHeight: 128,
+                backgroundColor: colors.surfaceSecondary,
+                borderWidth: 1,
+                borderColor: colors.borderDefault,
+                borderRadius: 16,
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+                color: colors.textPrimary,
+                textAlignVertical: 'top',
+                marginBottom: 12,
+              }}
+            />
+            {reportError ? (
+              <Text style={{ color: colors.error, fontSize: 12.5, marginBottom: 12 }}>{reportError}</Text>
+            ) : null}
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <Pressable
+                onPress={() => {
+                  setReportModalVisible(false);
+                  setReportProblem('');
+                  setReportError('');
+                }}
+                style={{
+                  flex: 1,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: colors.borderDefault,
+                  paddingVertical: 12,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ fontWeight: '700', color: colors.textSecondary }}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleSubmitReport}
+                disabled={reportSubmitting || !reportProblem.trim()}
+                style={{
+                  flex: 1,
+                  borderRadius: 12,
+                  backgroundColor: colors.brand,
+                  paddingVertical: 12,
+                  alignItems: 'center',
+                  opacity: reportSubmitting || !reportProblem.trim() ? 0.6 : 1,
+                }}
+              >
+                <Text style={{ fontWeight: '800', color: colors.onBrand }}>
+                  {reportSubmitting ? 'Sending...' : 'Submit'}
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ThemeGate>
   );
 }
