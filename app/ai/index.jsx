@@ -14,6 +14,8 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
+import MaskedView from '@react-native-masked-view/masked-view';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import ScreenShell from '../../src/shared/components/ScreenShell';
@@ -142,13 +144,13 @@ export default function AiPage() {
     // Home / workspace hero
     welcomeWrap: { flex: 1, paddingTop: 40, paddingHorizontal: s.sm },
     geminiHero: { alignItems: 'flex-start', marginBottom: 40 },
-    geminiHello: { fontSize: 36, fontWeight: '600', color: c.brand, letterSpacing: -0.5, marginBottom: 4 },
-    geminiSub: { fontSize: 36, fontWeight: '600', color: c.textTertiary, letterSpacing: -0.5 },
-    sectionLabel: { color: c.textSecondary, fontSize: 13, fontWeight: '600', marginBottom: s.md },
+    geminiHello: { fontSize: 36, fontWeight: '700', letterSpacing: -0.8, marginBottom: 4 },
+    geminiSub: { fontSize: 36, fontWeight: '700', color: c.textTertiary, letterSpacing: -0.8 },
+    sectionLabel: { color: c.textSecondary, fontSize: 13, fontWeight: '700', marginBottom: s.md, textTransform: 'uppercase', letterSpacing: 0.5 },
     quickPromptGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: s.sm, marginBottom: 32 },
-    quickPromptCard: { width: '48%', backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault, borderRadius: 24, padding: s.lg, gap: 12 },
+    quickPromptCard: { width: '48%', backgroundColor: c.surface, shadowColor: c.brand, shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 2, borderWidth: 1, borderColor: c.borderDefault, borderRadius: 24, padding: s.lg, gap: 12 },
     quickPromptIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
-    quickPromptTitle: { color: c.textPrimary, fontSize: 13, fontWeight: '500', lineHeight: 18 },
+    quickPromptTitle: { color: c.textPrimary, fontSize: 13, fontWeight: '600', lineHeight: 18 },
     quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: s.sm },
 
     // Messages list
@@ -158,14 +160,14 @@ export default function AiPage() {
     rowUser: { alignSelf: 'flex-end', justifyContent: 'flex-end', paddingLeft: '10%' },
     avatar: { width: 26, height: 26, borderRadius: r.sm, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
     bubbleGroup: { flexShrink: 1 },
-    userBubble: { backgroundColor: c.brand, alignSelf: 'flex-end', borderRadius: r['2xl'], borderBottomRightRadius: 6, padding: s.md, maxWidth: '100%' },
-    userText: { color: c.onBrand, fontWeight: '600', fontSize: 13.5, lineHeight: 20.5 },
-    studyCard: { backgroundColor: c.surface, borderWidth: 1, borderColor: c.borderDefault, borderRadius: r['2xl'], overflow: 'hidden', maxWidth: '100%' },
+    userBubble: { backgroundColor: c.surfaceSecondary || c.canvasLight, alignSelf: 'flex-end', borderRadius: 24, borderBottomRightRadius: 6, paddingHorizontal: 16, paddingVertical: 12, maxWidth: '100%' },
+    userText: { color: c.textPrimary, fontWeight: '500', fontSize: 14.5, lineHeight: 22 },
+    studyCard: { backgroundColor: c.surface, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 2, borderWidth: 1, borderColor: c.borderDefault, borderRadius: r['2xl'], overflow: 'hidden', maxWidth: '100%' },
     studyCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: s.md, paddingTop: s.sm, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: c.borderDefault },
     studyCardHeaderIcon: { width: 20, height: 20, borderRadius: r.xs, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
     studyCardHeaderText: { color: c.brandText, fontSize: 10.5, fontWeight: '900', letterSpacing: 0.4, textTransform: 'uppercase' },
     studyCardBody: { padding: s.md },
-    aiText: { fontSize: 13.5, lineHeight: 20.5, color: c.textPrimary },
+    aiText: { fontSize: 14.5, lineHeight: 24, color: c.textPrimary },
 
     timeText: { fontSize: 10.5, marginTop: 4, color: c.textTertiary },
     timeTextUser: { textAlign: 'right', marginRight: 4 },
@@ -178,9 +180,9 @@ export default function AiPage() {
     retryButton: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     retryText: { color: c.error, fontSize: 12, fontWeight: '900', textDecorationLine: 'underline' },
 
-    bottomDock: { gap: s.sm, paddingTop: s.md, paddingBottom: 16, backgroundColor: c.background },
-    composer: { backgroundColor: c.card, borderRadius: 32, borderWidth: 1, borderColor: c.borderDefault, paddingVertical: 6, paddingHorizontal: 6, gap: 8 },
-    composerFocused: { borderColor: c.brand },
+    bottomDock: { gap: s.sm, paddingTop: s.sm, paddingBottom: 16, backgroundColor: c.canvas },
+    composer: { backgroundColor: c.surface, shadowColor: c.brand, shadowOpacity: 0.08, shadowRadius: 15, shadowOffset: { width: 0, height: -2 }, elevation: 8, borderRadius: 32, borderWidth: 1, borderColor: c.borderDefault, paddingVertical: 6, paddingHorizontal: 6, gap: 8 },
+    composerFocused: { borderColor: c.brand, shadowOpacity: 0.15 },
     composerRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     attachmentChip: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: c.surfaceSecondary || c.canvasLight, borderRadius: r.xl, paddingHorizontal: s.md, paddingVertical: 10, marginHorizontal: 12, marginTop: 12 },
     attachmentIconWrap: { width: 28, height: 28, borderRadius: 14, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },
@@ -468,7 +470,23 @@ export default function AiPage() {
           >
             {!formMode ? (
               <View style={styles.geminiHero}>
-                <Text style={styles.geminiHello}>Hello, {profile?.displayName?.split(' ')[0] || 'Student'}</Text>
+                <MaskedView
+                  maskElement={
+                    <Text style={styles.geminiHello}>
+                      Hello, {profile?.displayName?.split(' ')[0] || 'Student'}
+                    </Text>
+                  }
+                >
+                  <LinearGradient
+                    colors={['#4285F4', '#D96570', '#F4B400']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                  >
+                    <Text style={[styles.geminiHello, { opacity: 0 }]}>
+                      Hello, {profile?.displayName?.split(' ')[0] || 'Student'}
+                    </Text>
+                  </LinearGradient>
+                </MaskedView>
                 <Text style={styles.geminiSub}>How can I help you today?</Text>
               </View>
             ) : null}

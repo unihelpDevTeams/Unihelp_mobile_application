@@ -6,7 +6,7 @@ import { useThemeStyles } from '../src/shared/theme/createStyles';
 
 export default function SplashScreen() {
   const { colors } = useTheme();
-  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
 
   const styles = useThemeStyles((c, s, r) => ({
     container: { flex: 1, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center' },
@@ -19,7 +19,6 @@ export default function SplashScreen() {
   }));
 
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
-  const fadeAnim = useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
     Animated.parallel([
