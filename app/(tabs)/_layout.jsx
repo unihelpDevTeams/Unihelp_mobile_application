@@ -220,19 +220,24 @@ export default function TabsLayout() {
                   <View
                     style={{
                       position: 'absolute',
-                      top: -7,
-                      right: -10,
-                      minWidth: 17,
-                      height: 17,
-                      paddingHorizontal: 3,
-                      borderRadius: 9,
-                      backgroundColor: colors.red || '#EF4444',
+                      top: -8,
+                      right: -12,
+                      minWidth: 18,
+                      height: 18,
+                      paddingHorizontal: 5,
+                      borderRadius: 10,
+                      backgroundColor: '#EF4444',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      borderWidth: 1.5,
+                      borderWidth: 2,
                       borderColor: colors.tabBarBackground,
+                      shadowColor: '#000',
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: 0.2,
+                      shadowRadius: 4,
+                      elevation: 4,
                     }}>
-                    <Text style={{ color: '#FFFFFF', fontSize: 9, fontWeight: '800' }}>
+                    <Text style={{ color: '#FFFFFF', fontSize: 9, fontWeight: '900', lineHeight: 10 }}>
                       {unreadChats > 99 ? '99+' : unreadChats}
                     </Text>
                   </View>
@@ -269,20 +274,25 @@ export default function TabsLayout() {
                   <View
                     style={{
                       position: 'absolute',
-                      top: -7,
-                      right: -10,
-                      minWidth: 17,
-                      height: 17,
-                      paddingHorizontal: 3,
-                      borderRadius: 9,
-                      backgroundColor: colors.red || '#EF4444',
+                      top: -8,
+                      right: -12,
+                      minWidth: 18,
+                      height: 18,
+                      paddingHorizontal: 5,
+                      borderRadius: 10,
+                      backgroundColor: '#EF4444',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      borderWidth: 1.5,
+                      borderWidth: 2,
                       borderColor: colors.tabBarBackground,
+                      shadowColor: '#000',
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: 0.2,
+                      shadowRadius: 4,
+                      elevation: 4,
                     }}
                   >
-                    <Text style={{ color: '#FFFFFF', fontSize: 9, fontWeight: '800' }}>
+                    <Text style={{ color: '#FFFFFF', fontSize: 9, fontWeight: '900', lineHeight: 10 }}>
                       {unreadGroupMessages > 99 ? '99+' : unreadGroupMessages}
                     </Text>
                   </View>

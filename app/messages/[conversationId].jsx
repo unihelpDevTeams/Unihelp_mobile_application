@@ -1,16 +1,16 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   FlatList,
   Image,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
-  Animated,
-  PanResponder,
   Text,
   TextInput,
   View,
@@ -49,19 +49,151 @@ import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { getSocket } from '../../src/shared/services/socket';
 import { getJson } from '../../src/shared/services/backend';
 
-const formatTime = (value) => {
-  if (!value) return '';
-  const date = typeof value === 'string' ? new Date(value) : value?.toDate ? value.toDate() : value;
-  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+/* -------------------------------------------------------------------------- */
+/*                                  Constants                                 */
+/* -------------------------------------------------------------------------- */
+
+const CHAT_PAGE_SIZE = 20;
+const EDIT_WINDOW_MS = 60 * 60 * 1000;
+const GROUP_GAP_MS = 5 * 60 * 1000;
+const MAX_LENGTH = 4000;
+const TYPING_REFRESH_MS = 3000;
+const TYPING_IDLE_MS = 2000;
+const REMOTE_TYPING_TIMEOUT_MS = 5000;
+
+// Keeps unsent drafts when the user leaves and re-enters a conversation.
+const DRAFT_CACHE = new Map();
+
+const STATUS_RANK = { failed: 0, sending: 0, sent: 1, delivered: 2, read: 3 };
+
+/* -------------------------------------------------------------------------- */
+/*                                   Helpers                                  */
+/* -------------------------------------------------------------------------- */
+
+const toDate = (value) => {
+  if (!value) return null;
+  let date = value;
+  if (typeof value === 'string' || typeof value === 'number') date = new Date(value);
+  else if (typeof value?.toDate === 'function') date = value.toDate();
+  else if (typeof value?.seconds === 'number') date = new Date(value.seconds * 1000);
+  else if (typeof value?._seconds === 'number') date = new Date(value._seconds * 1000);
+  return date instanceof Date && !Number.isNaN(date.getTime()) ? date : null;
 };
 
-const formatShortTime = (value) => {
-  if (!value) return '';
-  const date = typeof value === 'string' ? new Date(value) : value?.toDate ? value.toDate() : value;
-  return date.toLocaleDateString([], { hour: 'numeric', minute: '2-digit' });
+const toMillis = (value) => toDate(value)?.getTime() || 0;
+
+const formatTime = (value) => {
+  const date = toDate(value);
+  return date ? date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+};
+
+const dayKey = (date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+
+const formatDayLabel = (date) => {
+  const now = new Date();
+  const startOf = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startOf(now) - startOf(date)) / 86400000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays > 1 && diffDays < 7) return date.toLocaleDateString([], { weekday: 'long' });
+  const sameYear = date.getFullYear() === now.getFullYear();
+  return date.toLocaleDateString([], {
+    month: 'short',
+    day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
 };
 
 const createMessageClientId = () => `local_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+const messageKey = (message) => message?.clientTempId || message?.localId || message?.id;
+
+const previewOf = (message) => {
+  if (!message) return '';
+  if (message.deleted) return 'Message deleted';
+  if (message.type === 'voice') return '[Voice Message]';
+  if (message.type === 'sticker') return '[Sticker]';
+  const text = String(message.text || message.body || message.caption || '').trim();
+  if (!text) return message.attachments?.length ? '[Attachment]' : '';
+  return text.length > 80 ? `${text.slice(0, 80).trim()}…` : text;
+};
+
+const buildReplyPayload = (message) =>
+  message
+    ? {
+        id: message.id,
+        senderId: message.senderId || '',
+        senderName: message.senderName || 'Student',
+        text: previewOf(message),
+      }
+    : null;
+
+const payloadFromMessage = (message) => {
+  const type = message.type || 'text';
+  const base = { type, replyTo: message.replyTo || null };
+  if (type === 'voice') {
+    return {
+      ...base,
+      audioUrl: message.audioUrl,
+      duration: message.duration || 0,
+      played: false,
+      cloudinaryPublicId: message.cloudinaryPublicId || '',
+    };
+  }
+  if (type === 'sticker') return { ...base, stickerId: message.stickerId };
+  return {
+    ...base,
+    text: message.text || '',
+    attachments: Array.isArray(message.attachments) ? message.attachments : [],
+  };
+};
+
+const sortMessages = (items = []) =>
+  [...items].sort((left, right) => {
+    const leftTime = toMillis(left?.createdAt);
+    const rightTime = toMillis(right?.createdAt);
+    if (leftTime && rightTime && leftTime !== rightTime) return leftTime - rightTime;
+    return String(left?.id || '').localeCompare(String(right?.id || ''));
+  });
+
+const keysOf = (message) => [message?.id, message?.clientTempId, message?.localId].filter(Boolean);
+
+/**
+ * Merges one incoming message into the list. Matches on any shared id
+ * (server id, client temp id, local id) so optimistic messages are replaced
+ * in place instead of duplicated. Never downgrades a status (read -> sent).
+ */
+const reconcileIncomingMessage = (prevMessages = [], incoming = null) => {
+  if (!incoming) return prevMessages;
+  const incomingKeys = new Set(keysOf(incoming));
+  if (!incomingKeys.size) return prevMessages;
+
+  let matched = false;
+  const next = prevMessages.map((existing) => {
+    if (!keysOf(existing).some((key) => incomingKeys.has(key))) return existing;
+    matched = true;
+    const clientKey =
+      incoming.clientTempId || existing.clientTempId || existing.localId || incoming.localId;
+    const incomingStatus = incoming.status || 'sent';
+    const status =
+      (STATUS_RANK[existing.status] ?? 0) > (STATUS_RANK[incomingStatus] ?? 0)
+        ? existing.status
+        : incomingStatus;
+    return {
+      ...existing,
+      ...incoming,
+      id: incoming.id || existing.id,
+      status,
+      clientTempId: clientKey,
+      localId: clientKey,
+    };
+  });
+
+  if (!matched) next.push({ ...incoming, status: incoming.status || 'sent' });
+  return sortMessages(next);
+};
+
+const mergeFetchedMessages = (prev, fetched) => fetched.reduce(reconcileIncomingMessage, prev);
 
 const renderLinkedMessageText = (text, mine, colors) => {
   const content = String(text || '');
@@ -73,7 +205,9 @@ const renderLinkedMessageText = (text, mine, colors) => {
   while ((match = urlPattern.exec(content))) {
     const matchedUrl = match[0];
     const trailingPunctuation = matchedUrl.match(/[.,!?;:)}\]]+$/)?.[0] || '';
-    const visibleUrl = trailingPunctuation ? matchedUrl.slice(0, -trailingPunctuation.length) : matchedUrl;
+    const visibleUrl = trailingPunctuation
+      ? matchedUrl.slice(0, -trailingPunctuation.length)
+      : matchedUrl;
     if (!visibleUrl) continue;
 
     if (match.index > lastIndex) parts.push(content.slice(lastIndex, match.index));
@@ -99,88 +233,51 @@ const renderLinkedMessageText = (text, mine, colors) => {
   return parts;
 };
 
-const sortMessages = (items = []) => [...items].sort((left, right) => {
-  const leftTime = toMillis(left?.createdAt);
-  const rightTime = toMillis(right?.createdAt);
-  if (leftTime && rightTime && leftTime !== rightTime) return leftTime - rightTime;
-  return String(left?.id || '').localeCompare(String(right?.id || ''));
-});
+/* -------------------------------------------------------------------------- */
+/*                              Small components                              */
+/* -------------------------------------------------------------------------- */
 
-const reconcileIncomingMessage = (prevMessages = [], incomingMessage = null) => {
-  if (!incomingMessage) return prevMessages;
+function SwipeToReply({ children, disabled, onReply, color }) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const replyRef = useRef(onReply);
+  replyRef.current = onReply;
 
-  const nextMessages = prevMessages.map((existingMessage) => {
-    const sameMessageId = existingMessage.id === incomingMessage.id;
-    const sameLocalId = Boolean(
-      incomingMessage.clientTempId &&
-      (existingMessage.clientTempId === incomingMessage.clientTempId ||
-        existingMessage.localId === incomingMessage.clientTempId ||
-        existingMessage.id === incomingMessage.clientTempId)
-    );
-    const sameReply = Boolean(
-      !sameMessageId &&
-      !sameLocalId &&
-      incomingMessage.localId &&
-      (existingMessage.localId === incomingMessage.localId ||
-        existingMessage.id === incomingMessage.localId ||
-        existingMessage.clientTempId === incomingMessage.localId)
-    );
+  const reset = useCallback(() => {
+    Animated.spring(translateX, { toValue: 0, useNativeDriver: true, friction: 7, tension: 90 }).start();
+  }, [translateX]);
 
-    if (sameMessageId || sameLocalId || sameReply) {
-      return {
-        ...existingMessage,
-        ...incomingMessage,
-        id: incomingMessage.id || existingMessage.id,
-        status: incomingMessage.status || existingMessage.status || 'sent',
-        clientTempId: incomingMessage.clientTempId || existingMessage.clientTempId || existingMessage.localId || incomingMessage.localId || existingMessage.id,
-        localId: incomingMessage.localId || existingMessage.localId || incomingMessage.clientTempId || existingMessage.clientTempId || existingMessage.id,
-      };
-    }
-
-    return existingMessage;
-  });
-
-  const alreadyPresent = nextMessages.some((message) =>
-    message.id === incomingMessage.id ||
-    message.clientTempId === incomingMessage.clientTempId ||
-    message.localId === incomingMessage.localId ||
-    message.clientTempId === incomingMessage.localId ||
-    message.localId === incomingMessage.clientTempId
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, g) =>
+          !disabled && g.dx > 12 && g.dx > Math.abs(g.dy) * 1.5,
+        onPanResponderMove: (_, g) => translateX.setValue(Math.max(0, Math.min(72, g.dx))),
+        onPanResponderRelease: (_, g) => {
+          if (g.dx >= 60) replyRef.current?.();
+          reset();
+        },
+        onPanResponderTerminate: reset,
+      }),
+    [disabled, reset, translateX]
   );
 
-  if (!alreadyPresent) {
-    nextMessages.push({ ...incomingMessage, status: incomingMessage.status || 'sent' });
-  }
-
-  return sortMessages(nextMessages);
-};
-
-const toMillis = (value) => {
-  if (!value) return 0;
-  const date = typeof value === 'string' ? new Date(value) : value?.toDate ? value.toDate() : value;
-  return Number.isNaN(date?.getTime?.()) ? 0 : date.getTime();
-};
-
-function SwipeToReply({ children, disabled, onReply, colors }) {
-  const [translateX] = useState(() => new Animated.Value(0));
-  const panResponder = React.useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponder: (_, gesture) =>
-      !disabled && gesture.dx > 12 && gesture.dx > Math.abs(gesture.dy) * 1.3,
-    onPanResponderMove: (_, gesture) => translateX.setValue(Math.min(68, gesture.dx)),
-    onPanResponderRelease: (_, gesture) => {
-      if (gesture.dx >= 58) onReply();
-      Animated.spring(translateX, { toValue: 0, useNativeDriver: true, friction: 7, tension: 90 }).start();
-    },
-    onPanResponderTerminate: () => {
-      Animated.spring(translateX, { toValue: 0, useNativeDriver: true, friction: 7, tension: 90 }).start();
-    },
-  }), [disabled, onReply, translateX]);
-  const replyOpacity = translateX.interpolate({ inputRange: [0, 58], outputRange: [0, 1], extrapolate: 'clamp' });
+  const iconOpacity = translateX.interpolate({ inputRange: [0, 60], outputRange: [0, 1], extrapolate: 'clamp' });
+  const iconScale = translateX.interpolate({ inputRange: [0, 60], outputRange: [0.5, 1], extrapolate: 'clamp' });
 
   return (
-    <View style={{ position: 'relative' }}>
-      <Animated.View style={{ position: 'absolute', left: 8, top: '50%', opacity: replyOpacity, transform: [{ translateY: -10 }] }}>
-        <Ionicons name="arrow-undo" size={18} color={colors.brand} />
+    <View>
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          left: 10,
+          top: '50%',
+          marginTop: -10,
+          opacity: iconOpacity,
+          transform: [{ scale: iconScale }],
+        }}
+      >
+        <Ionicons name="arrow-undo" size={18} color={color} />
       </Animated.View>
       <Animated.View {...panResponder.panHandlers} style={{ transform: [{ translateX }] }}>
         {children}
@@ -189,20 +286,210 @@ function SwipeToReply({ children, disabled, onReply, colors }) {
   );
 }
 
+function TypingBubble({ styles }) {
+  const dots = useRef([0, 1, 2].map(() => new Animated.Value(0.3))).current;
+
+  useEffect(() => {
+    const loops = dots.map((value, index) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(index * 160),
+          Animated.timing(value, { toValue: 1, duration: 320, useNativeDriver: true }),
+          Animated.timing(value, { toValue: 0.3, duration: 320, useNativeDriver: true }),
+          Animated.delay((2 - index) * 160),
+        ])
+      )
+    );
+    loops.forEach((loop) => loop.start());
+    return () => loops.forEach((loop) => loop.stop());
+  }, [dots]);
+
+  return (
+    <View style={styles.typingRow}>
+      <View style={[styles.bubble, styles.theirs, styles.typingBubble, { borderTopLeftRadius: 20, borderBottomLeftRadius: 4 }]}>
+        {dots.map((value, index) => (
+          <Animated.View key={index} style={[styles.typingDot, { opacity: value }]} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+const StatusIcon = ({ message, colors, onBubble }) => {
+  if (message.status === 'sending') {
+    return <ActivityIndicator size="small" color={onBubble ? colors.onBrand : colors.textTertiary} style={{ transform: [{ scale: 0.6 }] }} />;
+  }
+  if (message.status === 'read') {
+    return <Ionicons name="checkmark-done" size={14} color={onBubble ? colors.onBrand : colors.brand} />;
+  }
+  if (message.status === 'delivered') {
+    return <Ionicons name="checkmark-done" size={14} color={onBubble ? 'rgba(255,255,255,0.65)' : colors.textTertiary} />;
+  }
+  return <Ionicons name="checkmark" size={14} color={onBubble ? 'rgba(255,255,255,0.65)' : colors.textTertiary} />;
+};
+
+const MessageRow = React.memo(function MessageRow({
+  message,
+  groupStart,
+  groupEnd,
+  mine,
+  highlighted,
+  styles,
+  colors,
+  onLongPress,
+  onReply,
+  onRetry,
+  onJumpToReply,
+}) {
+  const deleted = !!message.deleted;
+  const isVoice = message.type === 'voice';
+  const isSticker = message.type === 'sticker';
+  const failed = message.status === 'failed';
+  const sending = message.status === 'sending';
+  const edited = Boolean(message.edited || message.editedAt);
+  const showFooter = groupEnd || failed || sending;
+
+  const handleLongPress = useCallback(() => onLongPress(message), [onLongPress, message]);
+  const handleReply = useCallback(() => onReply(message), [onReply, message]);
+
+  const radius = mine
+    ? { borderTopRightRadius: groupStart ? 20 : 6, borderBottomRightRadius: groupEnd ? 4 : 6 }
+    : { borderTopLeftRadius: groupStart ? 20 : 6, borderBottomLeftRadius: groupEnd ? 4 : 6 };
+
+  const replyBlock = message.replyTo ? (
+    <Pressable
+      onPress={() => onJumpToReply(message.replyTo.id)}
+      style={[
+        styles.replyBlock,
+        mine ? styles.replyBlockMine : styles.replyBlockTheirs,
+        (isVoice || isSticker) && styles.replyBlockStandalone,
+        (isVoice || isSticker) && { alignSelf: mine ? 'flex-end' : 'flex-start' },
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel="Jump to replied message"
+    >
+      <Text style={[styles.replyAuthor, mine && styles.replyAuthorMine]} numberOfLines={1}>
+        {message.replyTo.senderName || 'Student'}
+      </Text>
+      <Text style={[styles.replyText, mine && styles.replyTextMine]} numberOfLines={2}>
+        {message.replyTo.text || ''}
+      </Text>
+    </Pressable>
+  ) : null;
+
+  const footer = showFooter ? (
+    <View style={[styles.bubbleFooter, { justifyContent: mine ? 'flex-end' : 'flex-start' }]}>
+      {failed ? (
+        <Pressable onPress={() => onRetry(message)} hitSlop={8} style={styles.failedRow} accessibilityRole="button" accessibilityLabel="Retry sending message">
+          <Ionicons name="alert-circle" size={14} color={colors.error} />
+          <Text style={styles.failedText}>Not sent · Tap to retry</Text>
+        </Pressable>
+      ) : (
+        <>
+          {edited ? <Text style={[styles.metaText, mine && styles.mineMeta]}>Edited</Text> : null}
+          <Text style={[styles.metaText, mine && styles.mineMeta]}>{formatTime(message.createdAt)}</Text>
+          {mine ? <StatusIcon message={message} colors={colors} onBubble={!isVoice && !isSticker} /> : null}
+        </>
+      )}
+    </View>
+  ) : null;
+
+  let body;
+  if (deleted) {
+    body = (
+      <View style={[styles.bubble, mine ? styles.mine : styles.theirs, radius, styles.bubbleDeleted]}>
+        <View style={styles.deletedRow}>
+          <Ionicons name="ban-outline" size={14} color={mine ? 'rgba(255,255,255,0.8)' : colors.textSecondary} />
+          <Text style={[styles.deletedText, mine && styles.mineDeletedText]}>
+            {isVoice ? 'This voice message was deleted' : 'This message was deleted'}
+          </Text>
+        </View>
+        {showFooter ? (
+          <View style={[styles.bubbleFooter, { justifyContent: 'flex-end' }]}>
+            <Text style={[styles.metaText, mine && styles.mineMeta]}>{formatTime(message.createdAt)}</Text>
+          </View>
+        ) : null}
+      </View>
+    );
+  } else if (isSticker) {
+    body = (
+      <View>
+        {replyBlock}
+        <StickerMessage message={message} isMine={mine} onLongPress={handleLongPress} />
+        {footer ? <View style={styles.outsideFooter}>{footer}</View> : null}
+      </View>
+    );
+  } else if (isVoice) {
+    body = (
+      <View>
+        {replyBlock}
+        <VoiceMessageBubble message={message} isMine={mine} onLongPress={handleLongPress} />
+        {footer ? <View style={styles.outsideFooter}>{footer}</View> : null}
+      </View>
+    );
+  } else {
+    body = (
+      <Pressable
+        onLongPress={handleLongPress}
+        delayLongPress={220}
+        style={({ pressed }) => [
+          styles.bubble,
+          mine ? styles.mine : styles.theirs,
+          radius,
+          failed && styles.bubbleFailed,
+          pressed && styles.bubblePressed,
+        ]}
+      >
+        {replyBlock}
+        <Text style={[styles.text, mine && styles.mineText]}>
+          {renderLinkedMessageText(message.text || message.body || message.caption || 'Attachment', mine, colors)}
+        </Text>
+        {footer}
+      </Pressable>
+    );
+  }
+
+  return (
+    <SwipeToReply disabled={deleted || failed || sending} onReply={handleReply} color={colors.brand}>
+      <View
+        style={[
+          styles.rowWrap,
+          { marginBottom: groupEnd ? 10 : 2 },
+          highlighted && styles.rowHighlight,
+        ]}
+      >
+        {body}
+      </View>
+    </SwipeToReply>
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/*                                    Screen                                  */
+/* -------------------------------------------------------------------------- */
+
 export default function ConversationPage() {
   const router = useRouter();
-  const { conversationId } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const conversationId = Array.isArray(params.conversationId) ? params.conversationId[0] : params.conversationId;
   const { user, profile } = useAuth();
   const { colors } = useTheme();
 
   const [conversation, setConversation] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [lastVisibleMessageId, setLastVisibleMessageId] = useState(null);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [connected, setConnected] = useState(true);
+  const [draft, setDraft] = useState(() => DRAFT_CACHE.get(conversationId) || '');
   const [replyTo, setReplyTo] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
   const [editText, setEditText] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
   const [activeMessage, setActiveMessage] = useState(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
@@ -212,93 +499,157 @@ export default function ConversationPage() {
   const [relationshipBusy, setRelationshipBusy] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [typingName, setTypingName] = useState('');
   const [stickerPickerVisible, setStickerPickerVisible] = useState(false);
   const [friendRequestVisible, setFriendRequestVisible] = useState(false);
-  const [typingName, setTypingName] = useState('');
-  let typingTimeout = useRef(null);
-
-  // Modal UI States
   const [showOptionsSheet, setShowOptionsSheet] = useState(false);
   const [dialogConfig, setDialogConfig] = useState(null);
+  const [showScrollDown, setShowScrollDown] = useState(false);
+  const [newBelow, setNewBelow] = useState(0);
+  const [highlightId, setHighlightId] = useState(null);
+  const [toast, setToast] = useState('');
 
   const listRef = useRef(null);
+  const inputRef = useRef(null);
+  const nearBottomRef = useRef(true);
+  const initialScrollDone = useRef(false);
+  const lastMessageKeyRef = useRef(null);
+  const typingTimeout = useRef(null);
+  const typingSentAt = useRef(0);
+  const remoteTypingTimer = useRef(null);
+  const highlightTimer = useRef(null);
+  const toastTimer = useRef(null);
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const hasConnectedOnce = useRef(false);
+  const retryRef = useRef(null);
+  const listDataRef = useRef([]);
+
+  /* ------------------------------- Styles -------------------------------- */
 
   const styles = useThemeStyles((c) => ({
-    headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16, paddingHorizontal: 2 },
-    avatarWrapper: { width: 56, height: 56, borderRadius: 18, overflow: 'hidden', backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
-    avatar: { width: 56, height: 56 },
-    avatarFallback: { width: 56, height: 56, borderRadius: 18, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
-    avatarInitial: { color: c.brandDark, fontWeight: '800', fontSize: 24 },
+    headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12, paddingHorizontal: 2 },
+    avatarWrapper: { width: 48, height: 48, borderRadius: 16, overflow: 'hidden', backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
+    avatar: { width: 48, height: 48 },
+    avatarFallback: { width: 48, height: 48, borderRadius: 16, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
+    avatarInitial: { color: c.brandDark, fontWeight: '800', fontSize: 20 },
     headerMeta: { flex: 1 },
     headerName: { fontSize: 16, fontWeight: '800', color: c.textPrimary },
-    headerHint: { marginTop: 4, color: c.textSecondary, fontSize: 13 },
+    headerStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 },
+    headerStatusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: c.brand },
+    headerHint: { color: c.textSecondary, fontSize: 12.5 },
+    headerHintActive: { color: c.brand, fontWeight: '700' },
     headerAction: {
       width: 38, height: 38, borderRadius: 14, backgroundColor: c.surfaceSecondary,
       alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.borderDefault,
     },
     headerActionPressed: { opacity: 0.82 },
+
+    banner: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+      backgroundColor: c.surfaceSecondary, borderRadius: 12, paddingVertical: 7, marginBottom: 8,
+    },
+    bannerText: { color: c.textSecondary, fontSize: 12.5, fontWeight: '600' },
+
     messagesPane: { flex: 1 },
-    listContent: { paddingTop: 20, paddingBottom: 16, paddingHorizontal: 12 },
-    bubble: { 
-      paddingVertical: 10, paddingHorizontal: 14, marginBottom: 12, 
-      maxWidth: '82%', minWidth: '40%',
-      shadowColor: c.shadow || '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 1, elevation: 1
+    listContent: { paddingTop: 12, paddingBottom: 12, paddingHorizontal: 10 },
+    centerFill: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+    retryButton: {
+      flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.brand,
+      borderRadius: 14, paddingHorizontal: 16, paddingVertical: 10,
     },
-    bubblePressed: { opacity: 0.85 },
-    mine: { 
-      alignSelf: 'flex-end', backgroundColor: c.brand, 
-      borderTopLeftRadius: 20, borderTopRightRadius: 20, borderBottomLeftRadius: 20, borderBottomRightRadius: 4,
-      marginLeft: 48 
+    retryButtonText: { color: c.onBrand, fontWeight: '800', fontSize: 13.5 },
+
+    listHeader: { alignItems: 'center', paddingVertical: 14 },
+    listHeaderText: { color: c.textTertiary, fontSize: 12 },
+
+    dateWrap: { alignItems: 'center', marginVertical: 12 },
+    datePill: { backgroundColor: c.surfaceSecondary, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: c.borderDefault },
+    dateText: { color: c.textSecondary, fontSize: 11.5, fontWeight: '700' },
+
+    rowWrap: { borderRadius: 16 },
+    rowHighlight: { backgroundColor: c.brandLight },
+    bubble: {
+      paddingVertical: 9, paddingHorizontal: 13, maxWidth: '82%',
+      borderRadius: 20,
+      shadowColor: c.shadow || '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 1, elevation: 1,
     },
-    theirs: { 
-      alignSelf: 'flex-start', backgroundColor: c.surfacePrimary, 
-      borderTopLeftRadius: 20, borderTopRightRadius: 20, borderBottomRightRadius: 20, borderBottomLeftRadius: 4,
-      marginRight: 48,
-      borderWidth: 1, borderColor: c.borderDefault 
-    },
-    bubbleDeleted: { opacity: 0.7, backgroundColor: c.skeleton, borderWidth: 0 },
-    sender: { fontWeight: '700', fontSize: 12.5, color: c.brand, marginBottom: 4, marginLeft: 2 },
+    bubblePressed: { opacity: 0.88 },
+    bubbleFailed: { borderWidth: 1, borderColor: c.error },
+    mine: { alignSelf: 'flex-end', backgroundColor: c.brand },
+    theirs: { alignSelf: 'flex-start', backgroundColor: c.surfacePrimary, borderWidth: 1, borderColor: c.borderDefault },
+    bubbleDeleted: { opacity: 0.75, backgroundColor: c.skeleton, borderWidth: 0 },
     text: { color: c.textPrimary, lineHeight: 22, fontSize: 15.5 },
-    stickerButton: { width: 40, height: 44, borderRadius: 22, backgroundColor: c.surfaceSecondary, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.borderDefault },
     mineText: { color: c.onBrand },
     deletedRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
     deletedText: { fontSize: 13.5, fontStyle: 'italic', color: c.textSecondary },
-    mineDeletedText: { color: 'rgba(255,255,255,0.8)' },
-    timestamp: { marginTop: 4, fontSize: 10.5, color: c.textTertiary, textAlign: 'right' },
-    mineTimestamp: { color: 'rgba(255,255,255,0.7)' },
-    replyBlock: {
-      backgroundColor: 'rgba(0,0,0,0.04)', borderLeftWidth: 4, borderLeftColor: c.brand,
-      padding: 10, borderRadius: 12, marginBottom: 8,
+    mineDeletedText: { color: 'rgba(255,255,255,0.85)' },
+    bubbleFooter: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
+    outsideFooter: { marginTop: 2, marginBottom: 2, paddingHorizontal: 4 },
+    metaText: { fontSize: 10.5, color: c.textTertiary },
+    mineMeta: { color: 'rgba(255,255,255,0.75)' },
+    failedRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    failedText: { fontSize: 11.5, fontWeight: '700', color: c.error },
+
+    replyBlock: { borderLeftWidth: 3, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 10, marginBottom: 6 },
+    replyBlockMine: { backgroundColor: 'rgba(255,255,255,0.18)', borderLeftColor: c.onBrand },
+    replyBlockTheirs: { backgroundColor: c.surfaceSecondary, borderLeftColor: c.brand },
+    replyBlockStandalone: { maxWidth: '82%', marginHorizontal: 4 },
+    replyAuthor: { fontWeight: '800', color: c.brand, fontSize: 12 },
+    replyAuthorMine: { color: c.onBrand },
+    replyText: { marginTop: 1, color: c.textSecondary, fontSize: 13 },
+    replyTextMine: { color: 'rgba(255,255,255,0.85)' },
+
+    typingRow: { paddingHorizontal: 0, paddingTop: 4, paddingBottom: 6 },
+    typingBubble: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 14, paddingHorizontal: 16 },
+    typingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: c.textTertiary },
+
+    scrollFab: {
+      position: 'absolute', right: 14, bottom: 12, width: 42, height: 42, borderRadius: 21,
+      backgroundColor: c.surfacePrimary, borderWidth: 1, borderColor: c.borderDefault,
+      alignItems: 'center', justifyContent: 'center',
+      shadowColor: c.shadow || '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 4,
     },
-    replyAuthor: { fontWeight: '800', color: c.brand, fontSize: 12.5 },
-    replyText: { marginTop: 2, color: c.textSecondary, fontSize: 13.5 },
-    replyPreview: {
-      backgroundColor: c.surfaceSecondary, borderRadius: 18, padding: 12, marginBottom: 8,
-      borderLeftWidth: 4, borderLeftColor: c.brand,
+    scrollFabBadge: {
+      position: 'absolute', top: -6, right: -4, minWidth: 20, height: 20, borderRadius: 10,
+      backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5,
     },
-    replyPreviewHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-    replyPreviewLabel: { fontWeight: '800', color: c.brand, fontSize: 12.5 },
-    replyCancel: { color: c.textTertiary, fontWeight: '700', fontSize: 12 },
-    replyPreviewText: { color: c.textPrimary, fontSize: 14 },
+    scrollFabBadgeText: { color: c.onBrand, fontSize: 11, fontWeight: '800' },
+
+    toast: {
+      position: 'absolute', top: 10, alignSelf: 'center', backgroundColor: c.textPrimary,
+      borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8,
+    },
+    toastText: { color: c.surfacePrimary, fontSize: 13, fontWeight: '700' },
+
     composerContainer: {
       backgroundColor: c.surfacePrimary, borderTopWidth: 1, borderTopColor: c.borderDefault,
-      paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 24 : 12, paddingHorizontal: 12
+      paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 24 : 12, paddingHorizontal: 12,
     },
-    composer: {
-      flexDirection: 'row', alignItems: 'flex-end', gap: 8,
-    },
+    composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+    stickerButton: { width: 40, height: 44, borderRadius: 22, backgroundColor: c.surfaceSecondary, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.borderDefault },
+    inputWrap: { flex: 1 },
     input: {
-      flex: 1, minHeight: 44, maxHeight: 120, backgroundColor: c.inputBackground,
+      minHeight: 44, maxHeight: 120, backgroundColor: c.inputBackground,
       borderWidth: 1, borderColor: c.borderDefault, borderRadius: 22,
       paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, color: c.textPrimary,
-      fontSize: 15.5, lineHeight: 20
+      fontSize: 15.5, lineHeight: 20,
     },
-    inputAndroid: { marginBottom: 0 },
-    button: {
-      backgroundColor: c.brand, borderRadius: 22, width: 44, height: 44,
-      alignItems: 'center', justifyContent: 'center',
-    },
+    inputEditing: { borderColor: c.brand },
+    counter: { alignSelf: 'flex-end', marginTop: 3, marginRight: 8, fontSize: 11, color: c.textTertiary },
+    counterLimit: { color: c.error, fontWeight: '700' },
+    button: { backgroundColor: c.brand, borderRadius: 22, width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
     buttonDisabled: { backgroundColor: c.brandGlow, opacity: 0.6 },
+
+    composerBanner: {
+      flexDirection: 'row', alignItems: 'center', gap: 10,
+      backgroundColor: c.surfaceSecondary, borderRadius: 16, padding: 10, marginBottom: 8,
+      borderLeftWidth: 4, borderLeftColor: c.brand,
+    },
+    composerBannerBody: { flex: 1 },
+    composerBannerLabel: { fontWeight: '800', color: c.brand, fontSize: 12.5 },
+    composerBannerText: { color: c.textPrimary, fontSize: 13.5, marginTop: 2 },
+    composerBannerClose: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: c.skeleton },
+
     modalOverlay: { flex: 1, backgroundColor: c.overlay, justifyContent: 'flex-end' },
     sheet: {
       backgroundColor: c.bottomSheetBackground, borderTopLeftRadius: 24, borderTopRightRadius: 24,
@@ -306,12 +657,12 @@ export default function ConversationPage() {
     },
     sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: c.borderDefault, alignSelf: 'center', marginBottom: 14 },
     sheetTitle: { fontSize: 17, fontWeight: '800', color: c.textPrimary, textAlign: 'center', marginBottom: 2 },
-    sheetSubtitle: { fontSize: 13, color: c.textSecondary, textAlign: 'center', marginBottom: 14 },
-    sheetPreview: {
-      fontSize: 12.5, color: c.textSecondary, backgroundColor: c.surfaceSecondary,
-      borderRadius: 12, padding: 10, marginBottom: 10,
-    },
-    sheetOption: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13 },
+    sheetSubtitle: { fontSize: 13, color: c.textSecondary, textAlign: 'center', marginBottom: 10 },
+    sheetPreview: { fontSize: 13, color: c.textSecondary, backgroundColor: c.surfaceSecondary, borderRadius: 12, padding: 12, marginBottom: 8 },
+    sheetHint: { fontSize: 12, color: c.textTertiary, textAlign: 'center', marginTop: 4 },
+    sheetOption: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11 },
+    sheetOptionIcon: { width: 36, height: 36, borderRadius: 12, backgroundColor: c.surfaceSecondary, alignItems: 'center', justifyContent: 'center' },
+    sheetOptionIconDanger: { backgroundColor: c.dangerLight },
     sheetOptionText: { fontSize: 15, fontWeight: '700', color: c.textPrimary },
     sheetCancel: { marginTop: 6, paddingVertical: 13, alignItems: 'center', borderTopWidth: 1, borderTopColor: c.borderDefault },
     sheetCancelText: { fontSize: 15, fontWeight: '700', color: c.textSecondary },
@@ -322,28 +673,28 @@ export default function ConversationPage() {
     confirmDeleteText: { color: c.onBrand, fontWeight: '800', fontSize: 14 },
     dialogPrimaryBtn: { borderRadius: 14, paddingVertical: 13, alignItems: 'center' },
     dialogPrimaryText: { color: c.onBrand, fontWeight: '800', fontSize: 14.5 },
+
     relationshipCard: {
       flexDirection: 'row', alignItems: 'center', gap: 12,
       backgroundColor: c.brandLight, borderWidth: 1, borderColor: c.borderDefault,
-      borderRadius: 18, padding: 14, marginBottom: 12,
+      borderRadius: 18, padding: 14, marginTop: 8, marginBottom: 12,
     },
-    relationshipIcon: {
-      width: 38, height: 38, borderRadius: 14, backgroundColor: c.surfacePrimary,
-      alignItems: 'center', justifyContent: 'center',
-    },
+    relationshipIcon: { width: 38, height: 38, borderRadius: 14, backgroundColor: c.surfacePrimary, alignItems: 'center', justifyContent: 'center' },
     relationshipCopy: { flex: 1 },
     relationshipTitle: { color: c.textPrimary, fontSize: 14, fontWeight: '800' },
     relationshipText: { color: c.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: 3 },
-    relationshipButton: {
-      flexDirection: 'row', alignItems: 'center', gap: 6,
-      backgroundColor: c.brand, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9,
-    },
+    relationshipButton: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.brand, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9 },
     relationshipButtonMuted: { backgroundColor: c.skeleton },
     relationshipButtonText: { color: c.onBrand, fontSize: 12, fontWeight: '800' },
     relationshipButtonTextMuted: { color: c.textSecondary },
   }));
 
+  /* ---------------------------- Derived values --------------------------- */
+
   const currentUid = user?.uid || profile?.uid;
+  const currentUidRef = useRef(currentUid);
+  currentUidRef.current = currentUid;
+
   const otherId = conversation?.memberIds?.find((id) => id !== currentUid);
   const otherUser = conversation?.memberInfo?.[otherId] || {};
   const headerTitle = otherUser.name || 'Chat';
@@ -351,34 +702,73 @@ export default function ConversationPage() {
 
   const areFriends = relationship.state === RELATIONSHIP.FRIENDS;
   const isBlocked = relationship.state === RELATIONSHIP.BLOCKED;
-  const mySentMessages = messages.filter((m) => m.senderId === currentUid);
-  const hasSentIntro = mySentMessages.length > 0;
-
+  const hasSentIntro = messages.some((m) => m.senderId === currentUid && m.status !== 'failed');
   const canChat = !isBlocked && (areFriends || !hasSentIntro);
 
-  const visibleMessages = messages.filter((message) => {
+  const isMine = useCallback((item) => item?.senderId === currentUid, [currentUid]);
+
+  const visibleMessages = useMemo(() => {
     const clearedAt = toMillis(conversation?.clearedFor?.[currentUid]);
-    return !clearedAt || toMillis(message.createdAt) > clearedAt;
-  });
+    return messages.filter((message) => !clearedAt || toMillis(message.createdAt) > clearedAt);
+  }, [messages, conversation?.clearedFor, currentUid]);
 
-  const messagePreview = (message) => {
-    if (!message?.text) return '';
-    const text = message.text.trim();
-    return text.length > 80 ? `${text.slice(0, 80).trim()}…` : text;
-  };
+  const listData = useMemo(() => {
+    const sameGroup = (a, b) => {
+      if (!a || !b || a.senderId !== b.senderId) return false;
+      const da = toDate(a.createdAt);
+      const db = toDate(b.createdAt);
+      if (!da || !db) return true;
+      return dayKey(da) === dayKey(db) && Math.abs(db.getTime() - da.getTime()) <= GROUP_GAP_MS;
+    };
 
-  const scrollToBottom = (animated = true) => {
-    setTimeout(() => listRef.current?.scrollToEnd?.({ animated }), 100);
-  };
+    const out = [];
+    let previousDay = '';
+    visibleMessages.forEach((message, index) => {
+      const date = toDate(message.createdAt);
+      const key = date ? dayKey(date) : '';
+      if (key && key !== previousDay) {
+        out.push({ kind: 'date', key: `date-${key}`, label: formatDayLabel(date) });
+        previousDay = key;
+      }
+      out.push({
+        kind: 'message',
+        key: messageKey(message),
+        message,
+        groupStart: !sameGroup(visibleMessages[index - 1], message),
+        groupEnd: !sameGroup(message, visibleMessages[index + 1]),
+      });
+    });
+    return out;
+  }, [visibleMessages]);
+  listDataRef.current = listData;
 
-  // Helper dialog handlers
+  const lastMessage = visibleMessages[visibleMessages.length - 1];
+  const lastKey = lastMessage ? messageKey(lastMessage) : null;
+  const lastIncomingId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].senderId !== currentUid) return messages[i].id;
+    }
+    return null;
+  }, [messages, currentUid]);
+
+  /* ------------------------------- Utilities ------------------------------ */
+
+  const scrollToBottom = useCallback((animated = true) => {
+    setTimeout(() => listRef.current?.scrollToEnd?.({ animated }), 80);
+  }, []);
+
+  const showToast = useCallback((text) => {
+    setToast(text);
+    clearTimeout(toastTimer.current);
+    Animated.timing(toastOpacity, { toValue: 1, duration: 160, useNativeDriver: true }).start();
+    toastTimer.current = setTimeout(() => {
+      Animated.timing(toastOpacity, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => setToast(''));
+    }, 1800);
+  }, [toastOpacity]);
+
   const showAlertDialog = (title, subtitle, icon = 'alert-circle-outline', iconBgColor = colors.dangerLight, iconColor = colors.error) => {
     setDialogConfig({
-      title,
-      subtitle,
-      icon,
-      iconBgColor,
-      iconColor,
+      title, subtitle, icon, iconBgColor, iconColor,
       primaryText: 'OK',
       primaryStyle: 'brand',
       onPrimary: () => setDialogConfig(null),
@@ -403,74 +793,170 @@ export default function ConversationPage() {
     });
   };
 
+  /* -------------------------------- Loading ------------------------------- */
+
   useEffect(() => {
     const load = async () => {
       const data = await fetchRecord('conversations', conversationId);
       setConversation(data);
       setLoading(false);
     };
-
     load().catch(() => setLoading(false));
   }, [conversationId]);
 
+  const loadOlderMessages = useCallback(async () => {
+    if (!conversationId || !hasMoreMessages || loadingOlderMessages || !lastVisibleMessageId) return;
+    setLoadingOlderMessages(true);
+    try {
+      const data = await getJson(
+        `/api/chat/${conversationId}/messages?limit=${CHAT_PAGE_SIZE}&cursor=${encodeURIComponent(lastVisibleMessageId)}`
+      );
+      if (!data?.success) return;
+      const older = Array.isArray(data.messages) ? data.messages : [];
+      if (older.length) {
+        setMessages((prev) => mergeFetchedMessages(prev, older));
+        setLastVisibleMessageId(data.cursor || older[0]?.id || lastVisibleMessageId);
+      }
+      setHasMoreMessages(Boolean(data.hasMore));
+    } catch (error) {
+      console.log('Failed to fetch older messages', error);
+    } finally {
+      setLoadingOlderMessages(false);
+    }
+  }, [conversationId, hasMoreMessages, lastVisibleMessageId, loadingOlderMessages]);
+
+  // Initial load, live updates, and gap-filling after reconnects.
   useEffect(() => {
     if (!conversationId) return undefined;
-    
-    // Initial load via REST API
-    getJson(`/api/chat/${conversationId}/messages`)
-      .then(data => {
-        if (data?.success) setMessages(data.messages || []);
-      })
-      .catch(err => console.log('Failed to fetch messages', err));
+    let cancelled = false;
+
+    const fetchLatest = async (initial) => {
+      try {
+        const data = await getJson(`/api/chat/${conversationId}/messages?limit=${CHAT_PAGE_SIZE}`);
+        if (cancelled) return;
+        if (!data?.success) throw new Error(data?.message || 'Failed to load messages');
+        const fetched = Array.isArray(data.messages) ? data.messages : [];
+        setMessages((prev) => mergeFetchedMessages(prev, fetched));
+        if (initial) {
+          setLastVisibleMessageId(fetched.length ? fetched[0]?.id || null : null);
+          setHasMoreMessages(Boolean(data.hasMore));
+          setLoadError(false);
+        }
+      } catch (error) {
+        console.log('Failed to fetch messages', error);
+        if (initial && !cancelled) setLoadError(true);
+      } finally {
+        if (initial && !cancelled) setMessagesLoading(false);
+      }
+    };
+
+    setMessagesLoading(true);
+    setLoadError(false);
+    fetchLatest(true);
 
     const socket = getSocket();
-    
+
     const handleConnect = () => {
-      socket.emit("join_conversation", conversationId);
+      setConnected(true);
+      socket.emit('join_conversation', conversationId);
+      if (hasConnectedOnce.current) fetchLatest(false);
+      hasConnectedOnce.current = true;
     };
+    const handleDisconnect = () => setConnected(false);
 
-    if (socket.connected) {
-      handleConnect();
-    }
-    
+    if (socket.connected) handleConnect();
+    else setConnected(false);
+
     const handleReceiveMessage = (newMessage) => {
-      setMessages((prev) => reconcileIncomingMessage(prev, {
-        ...newMessage,
-        status: newMessage?.status || 'sent',
-      }));
-    };
-    
-    const handleTyping = ({ userId, isTyping, name }) => {
-      if (userId === user?.uid) return;
-      setIsTyping(isTyping);
-      if (isTyping && name) setTypingName(name);
+      if (newMessage?.conversationId && newMessage.conversationId !== conversationId) return;
+      if (newMessage?.senderId && newMessage.senderId !== currentUidRef.current) setIsTyping(false);
+      setMessages((prev) =>
+        reconcileIncomingMessage(prev, { ...newMessage, status: newMessage?.status || 'sent' })
+      );
     };
 
-    socket.on("connect", handleConnect);
-    socket.on("receive_message", handleReceiveMessage);
-    socket.on("typing_update", handleTyping);
+    const handleTyping = ({ userId, isTyping: typing, name }) => {
+      if (userId === currentUidRef.current) return;
+      setIsTyping(Boolean(typing));
+      if (typing && name) setTypingName(name);
+      clearTimeout(remoteTypingTimer.current);
+      if (typing) {
+        // Safety net in case the "stopped typing" event is lost.
+        remoteTypingTimer.current = setTimeout(() => setIsTyping(false), REMOTE_TYPING_TIMEOUT_MS);
+      }
+    };
+
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+    socket.on('connect_error', handleDisconnect);
+    socket.on('receive_message', handleReceiveMessage);
+    socket.on('typing_update', handleTyping);
 
     return () => {
-      socket.off("connect", handleConnect);
-      socket.off("receive_message", handleReceiveMessage);
-      socket.off("typing_update", handleTyping);
+      cancelled = true;
+      clearTimeout(remoteTypingTimer.current);
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('connect_error', handleDisconnect);
+      socket.off('receive_message', handleReceiveMessage);
+      socket.off('typing_update', handleTyping);
     };
-  }, [conversationId]);
+  }, [conversationId, reloadKey]);
+
+  // Cleanup timers and tell the other side we stopped typing when leaving.
+  useEffect(
+    () => () => {
+      clearTimeout(typingTimeout.current);
+      clearTimeout(highlightTimer.current);
+      clearTimeout(toastTimer.current);
+      if (typingSentAt.current) {
+        try {
+          getSocket().emit('typing', { conversationId, userId: currentUidRef.current, isTyping: false });
+        } catch (error) {
+          // ignore
+        }
+      }
+    },
+    [conversationId]
+  );
+
+  // Auto-scroll: only for genuinely new tail messages, never when older pages load.
+  useEffect(() => {
+    if (!lastKey) {
+      lastMessageKeyRef.current = null;
+      return;
+    }
+    if (lastMessageKeyRef.current === null) {
+      lastMessageKeyRef.current = lastKey;
+      return;
+    }
+    if (lastMessageKeyRef.current === lastKey) return;
+    lastMessageKeyRef.current = lastKey;
+
+    if (lastMessage?.senderId === currentUid || nearBottomRef.current) {
+      scrollToBottom(true);
+    } else {
+      setNewBelow((count) => count + 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastKey]);
 
   useEffect(() => {
-    if (messages.length) scrollToBottom();
-  }, [messages]);
+    if (isTyping && nearBottomRef.current) scrollToBottom(true);
+  }, [isTyping, scrollToBottom]);
 
   useEffect(() => {
-    const showSub = Keyboard.addListener('keyboardDidShow', () => scrollToBottom(true));
+    const showSub = Keyboard.addListener('keyboardDidShow', () => {
+      if (nearBottomRef.current) scrollToBottom(true);
+    });
     return () => showSub.remove();
-  }, []);
+  }, [scrollToBottom]);
 
   useEffect(() => {
     if (conversationId && user?.uid) {
       markConversationRead(conversationId, user.uid).catch(() => {});
     }
-  }, [conversationId, user?.uid, messages]);
+  }, [conversationId, user?.uid, lastIncomingId]);
 
   useEffect(() => {
     setAvatarFailed(false);
@@ -481,7 +967,6 @@ export default function ConversationPage() {
       setRelationship({ state: RELATIONSHIP.NONE });
       return undefined;
     }
-
     return listenRelationship(currentUid, otherId, setRelationship);
   }, [currentUid, otherId]);
 
@@ -490,275 +975,58 @@ export default function ConversationPage() {
       setPendingMessageRequest(null);
       return undefined;
     }
-
     return listenIncomingMessageRequests(currentUid, (rows) => {
       const request = rows.find((item) => item.from === otherId && item.status === 'pending');
       setPendingMessageRequest(request || null);
     });
   }, [currentUid, otherId]);
 
-  const handleAddFriend = async () => {
-    if (!currentUid || !otherId) return;
-    setRelationshipBusy(true);
-    try {
-      await sendFriendRequest({
-        currentUid,
-        targetUid: otherId,
-        currentProfile: profile,
-        targetProfile: { ...otherUser, uid: otherId },
-      });
-    } catch (error) {
-      showAlertDialog('Friend request', error.message || 'Could not send friend request.');
-    } finally {
-      setRelationshipBusy(false);
+  /* ------------------------------ Typing events --------------------------- */
+
+  const stopTyping = useCallback(() => {
+    clearTimeout(typingTimeout.current);
+    if (typingSentAt.current) {
+      typingSentAt.current = 0;
+      getSocket().emit('typing', { conversationId, userId: currentUid, isTyping: false });
     }
+  }, [conversationId, currentUid]);
+
+  const handleDraftChange = (text) => {
+    if (editingMessage) {
+      setEditText(text);
+      return;
+    }
+    setDraft(text);
+    if (text) DRAFT_CACHE.set(conversationId, text);
+    else DRAFT_CACHE.delete(conversationId);
+
+    if (!text.trim()) {
+      stopTyping();
+      return;
+    }
+    const now = Date.now();
+    if (!typingSentAt.current || now - typingSentAt.current > TYPING_REFRESH_MS) {
+      typingSentAt.current = now;
+      getSocket().emit('typing', {
+        conversationId,
+        userId: currentUid,
+        isTyping: true,
+        name: profile?.name || user?.displayName || 'Student',
+      });
+    }
+    clearTimeout(typingTimeout.current);
+    typingTimeout.current = setTimeout(stopTyping, TYPING_IDLE_MS);
   };
+
+  /* -------------------------------- Sending ------------------------------- */
 
   const markFailedMessage = (clientId, errorMessage) => {
-    setMessages((prev) => prev.map((message) => {
-      const matches = message.clientTempId === clientId || message.localId === clientId || message.id === clientId;
-      if (!matches) return message;
-      return {
-        ...message,
-        status: 'failed',
-        failedReason: errorMessage || 'Failed to send',
-      };
-    }));
-  };
-
-  const retrySendMessage = async (message) => {
-    if (!conversation || !user || !canChat || sending || !message) return;
-
-    const clientId = message.clientTempId || message.localId || message.id;
-    setMessages((prev) => prev.map((entry) => {
-      if (entry.id !== message.id && entry.clientTempId !== clientId && entry.localId !== clientId) return entry;
-      return { ...entry, status: 'sending', failedReason: null };
-    }));
-
-    setSending(true);
-    try {
-      const messagePayload = {
-        type: message.type || 'text',
-        text: message.text || '',
-        attachments: Array.isArray(message.attachments) ? message.attachments : [],
-        replyTo: message.replyTo || null,
-        clientTempId: clientId,
-        senderName: profile?.name || user.displayName || 'Student',
-      };
-
-      const response = await sendDirectMessage(conversation, user, profile || {}, messagePayload);
-      const nextMessage = response?.message || response || message;
-      setMessages((prev) => reconcileIncomingMessage(prev, {
-        ...nextMessage,
-        clientTempId: clientId,
-        localId: clientId,
-        status: nextMessage?.status || 'sent',
-      }));
-    } catch (error) {
-      markFailedMessage(clientId, error?.message || 'Failed to send');
-      showSendError(error);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const handleAcceptMessageRequest = async () => {
-    if (!pendingMessageRequest || !currentUid) return;
-    setRelationshipBusy(true);
-    try {
-      await acceptMessageRequest({
-        request: pendingMessageRequest,
-        currentUid,
-        currentProfile: profile,
-      });
-    } catch (error) {
-      showAlertDialog('Message request', error.message || 'Could not accept request.');
-    } finally {
-      setRelationshipBusy(false);
-    }
-  };
-
-  const handleDeclineMessageRequest = async () => {
-    if (!pendingMessageRequest || !currentUid) return;
-    setRelationshipBusy(true);
-    try {
-      await declineMessageRequest({
-        request: pendingMessageRequest,
-        currentUid,
-        currentProfile: profile,
-      });
-    } catch (error) {
-      showAlertDialog('Message request', error.message || 'Could not decline request.');
-    } finally {
-      setRelationshipBusy(false);
-    }
-  };
-
-  const handleAcceptFriend = async () => {
-    if (!relationship.request || !currentUid) return;
-    setRelationshipBusy(true);
-    try {
-      await acceptFriendRequest({
-        request: relationship.request,
-        currentUid,
-        currentProfile: profile,
-      });
-    } catch (error) {
-      showAlertDialog('Friend request', error.message || 'Could not accept friend request.');
-    } finally {
-      setRelationshipBusy(false);
-    }
-  };
-
-  const renderMessageStatus = (message) => {
-    if (!message || message.senderId !== currentUid) return null;
-
-    if (message.status === 'sending') {
-      return <ActivityIndicator size="small" color={colors.textTertiary} />;
-    }
-
-    if (message.status === 'failed') {
-      return (
-        <Pressable onPress={() => retrySendMessage(message)} hitSlop={8}>
-          <Ionicons name="alert-circle" size={13} color={colors.error} />
-        </Pressable>
-      );
-    }
-
-    if (message.status === 'read') {
-      return <Ionicons name="checkmark-done" size={13} color={colors.brand} />;
-    }
-
-    if (message.status === 'delivered') {
-      return <Ionicons name="checkmark-done" size={13} color={colors.textTertiary} />;
-    }
-
-    return <Ionicons name="checkmark" size={13} color={colors.textTertiary} />;
-  };
-
-  const renderRelationshipPrompt = () => {
-    if (!otherId || relationship.state === RELATIONSHIP.FRIENDS) return null;
-
-    const isReceived = relationship.state === RELATIONSHIP.RECEIVED;
-    const isSent = relationship.state === RELATIONSHIP.SENT;
-    const hasIntroRequest = !!pendingMessageRequest;
-
-    const title = hasIntroRequest
-      ? 'Accept intro message'
-      : isReceived
-        ? 'Friend request waiting'
-        : isSent
-          ? 'Friend request sent'
-          : isBlocked
-            ? 'Chat unavailable'
-            : 'Add friend to keep chatting';
-
-    const text = hasIntroRequest
-      ? `${headerTitle} sent you an introductory message. Accept to become friends and continue this chat.`
-      : isReceived
-        ? `${headerTitle} wants to connect. Accept the request to continue this chat freely.`
-        : isSent
-          ? 'You can continue chatting after the request is accepted.'
-          : isBlocked
-            ? 'Messaging is unavailable for this student.'
-            : hasSentIntro
-              ? 'You have sent an intro message. Add them as a friend to continue chatting.'
-              : 'You can send one intro message before becoming friends.';
-
-    return (
-      <View style={styles.relationshipCard}>
-        <View style={styles.relationshipIcon}>
-          <Ionicons
-            name={isBlocked ? 'ban-outline' : hasIntroRequest || isReceived ? 'person-add-outline' : 'people-outline'}
-            size={19}
-            color={isBlocked ? colors.error : colors.brandText}
-          />
-        </View>
-        <View style={styles.relationshipCopy}>
-          <Text style={styles.relationshipTitle}>{title}</Text>
-          <Text style={styles.relationshipText}>{text}</Text>
-        </View>
-        {hasIntroRequest ? (
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Pressable style={styles.relationshipButton} onPress={handleAcceptMessageRequest} disabled={relationshipBusy}>
-              {relationshipBusy ? <ActivityIndicator color={colors.onBrand} size="small" /> : <Ionicons name="checkmark" size={15} color={colors.onBrand} />}
-              <Text style={styles.relationshipButtonText}>Accept</Text>
-            </Pressable>
-            <Pressable style={[styles.relationshipButton, styles.relationshipButtonMuted]} onPress={handleDeclineMessageRequest} disabled={relationshipBusy}>
-              {relationshipBusy ? <ActivityIndicator color={colors.textSecondary} size="small" /> : <Ionicons name="close" size={15} color={colors.textSecondary} />}
-              <Text style={[styles.relationshipButtonText, styles.relationshipButtonTextMuted]}>Decline</Text>
-            </Pressable>
-          </View>
-        ) : isReceived ? (
-          <Pressable style={styles.relationshipButton} onPress={handleAcceptFriend} disabled={relationshipBusy}>
-            {relationshipBusy ? <ActivityIndicator color={colors.onBrand} size="small" /> : <Ionicons name="checkmark" size={15} color={colors.onBrand} />}
-            <Text style={styles.relationshipButtonText}>Accept</Text>
-          </Pressable>
-        ) : isSent || isBlocked ? (
-          <View style={[styles.relationshipButton, styles.relationshipButtonMuted]}>
-            <Text style={[styles.relationshipButtonText, styles.relationshipButtonTextMuted]}>{isSent ? 'Pending' : 'Blocked'}</Text>
-          </View>
-        ) : (
-          <Pressable style={styles.relationshipButton} onPress={handleAddFriend} disabled={relationshipBusy}>
-            {relationshipBusy ? <ActivityIndicator color={colors.onBrand} size="small" /> : <Ionicons name="person-add-outline" size={15} color={colors.onBrand} />}
-            <Text style={styles.relationshipButtonText}>Add</Text>
-          </Pressable>
-        )}
-      </View>
+    setMessages((prev) =>
+      prev.map((message) => {
+        if (messageKey(message) !== clientId && message.id !== clientId) return message;
+        return { ...message, status: 'failed', failedReason: errorMessage || 'Failed to send' };
+      })
     );
-  };
-
-  const send = async () => {
-    const nextText = draft.trim();
-    if (!nextText || !conversation || !user || !canChat) return;
-
-    const clientId = createMessageClientId();
-    const optimisticMessage = {
-      id: clientId,
-      localId: clientId,
-      clientTempId: clientId,
-      senderId: currentUid,
-      senderName: profile?.name || user.displayName || 'Student',
-      text: nextText,
-      type: 'text',
-      createdAt: new Date().toISOString(),
-      status: 'sending',
-      attachments: [],
-      replyTo: replyTo ? {
-        id: replyTo.id,
-        senderId: replyTo.senderId || '',
-        senderName: replyTo.senderName || 'Student',
-        text: messagePreview(replyTo),
-      } : null,
-    };
-
-    setMessages((prev) => reconcileIncomingMessage(prev, optimisticMessage));
-    setDraft('');
-    setReplyTo(null);
-    setSending(true);
-
-    try {
-      const response = await sendDirectMessage(conversation, user, profile || {}, {
-        text: nextText,
-        attachments: [],
-        replyTo: optimisticMessage.replyTo,
-        clientTempId: clientId,
-      });
-      const nextMessage = response?.message || response || optimisticMessage;
-      setMessages((prev) => reconcileIncomingMessage(prev, {
-        ...nextMessage,
-        clientTempId: clientId,
-        localId: clientId,
-        status: nextMessage?.status || 'sent',
-      }));
-      scrollToBottom();
-      getSocket().emit('typing', { conversationId, userId: currentUid, isTyping: false });
-    } catch (error) {
-      markFailedMessage(clientId, error?.message || 'Failed to send');
-      showSendError(error);
-    } finally {
-      setSending(false);
-    }
   };
 
   const showSendError = (error) => {
@@ -766,123 +1034,186 @@ export default function ConversationPage() {
       setFriendRequestVisible(true);
       return;
     }
-    showAlertDialog('Message not sent', error.message || 'You can only send direct messages to friends.');
+    showAlertDialog('Message not sent', error?.message || 'You can only send direct messages to friends.');
     console.error('Failed to send message', error);
   };
 
-  const sendVoiceMessage = useCallback(async (voiceResult) => {
-    if (!conversation || !user || !voiceResult?.audioUrl || !canChat) return;
-
-    const clientId = createMessageClientId();
-    const optimisticMessage = {
-      id: clientId,
-      localId: clientId,
-      clientTempId: clientId,
-      senderId: currentUid,
-      senderName: profile?.name || user.displayName || 'Student',
-      audioUrl: voiceResult.audioUrl,
-      duration: voiceResult.duration || 0,
-      played: false,
-      cloudinaryPublicId: voiceResult.cloudinaryPublicId || voiceResult.publicId || '',
-      type: 'voice',
-      createdAt: new Date().toISOString(),
-      status: 'sending',
-      replyTo: replyTo ? {
-        id: replyTo.id,
-        senderId: replyTo.senderId || '',
-        senderName: replyTo.senderName || 'Student',
-        text: '[Voice Message]',
-      } : null,
-    };
-
-    setMessages((prev) => reconcileIncomingMessage(prev, optimisticMessage));
-    setReplyTo(null);
-    scrollToBottom();
-
+  const deliver = async (clientId, payload, fallbackMessage) => {
     try {
       const response = await sendDirectMessage(conversation, user, profile || {}, {
-        type: 'voice',
+        ...payload,
+        clientTempId: clientId,
+      });
+      const next = response?.message || response || fallbackMessage;
+      setMessages((prev) =>
+        reconcileIncomingMessage(prev, {
+          ...next,
+          clientTempId: clientId,
+          localId: clientId,
+          status: next?.status || 'sent',
+        })
+      );
+      return true;
+    } catch (error) {
+      markFailedMessage(clientId, error?.message || 'Failed to send');
+      showSendError(error);
+      return false;
+    }
+  };
+
+  const baseOptimistic = (clientId) => ({
+    id: clientId,
+    localId: clientId,
+    clientTempId: clientId,
+    senderId: currentUid,
+    senderName: profile?.name || user?.displayName || 'Student',
+    createdAt: new Date().toISOString(),
+    status: 'sending',
+  });
+
+  const send = async () => {
+    const nextText = draft.trim();
+    if (!nextText || !conversation || !user || !canChat) return;
+
+    const clientId = createMessageClientId();
+    const reply = buildReplyPayload(replyTo);
+    const optimistic = { ...baseOptimistic(clientId), type: 'text', text: nextText, attachments: [], replyTo: reply };
+
+    setMessages((prev) => reconcileIncomingMessage(prev, optimistic));
+    setDraft('');
+    DRAFT_CACHE.delete(conversationId);
+    setReplyTo(null);
+    stopTyping();
+    scrollToBottom();
+
+    await deliver(clientId, { type: 'text', text: nextText, attachments: [], replyTo: reply }, optimistic);
+  };
+
+  const sendVoiceMessage = useCallback(
+    async (voiceResult) => {
+      if (!conversation || !user || !voiceResult?.audioUrl || !canChat) return;
+
+      const clientId = createMessageClientId();
+      const reply = buildReplyPayload(replyTo);
+      const voiceFields = {
         audioUrl: voiceResult.audioUrl,
         duration: voiceResult.duration || 0,
         played: false,
         cloudinaryPublicId: voiceResult.cloudinaryPublicId || voiceResult.publicId || '',
-        replyTo: replyTo ? {
-          id: replyTo.id,
-          senderId: replyTo.senderId || '',
-          senderName: replyTo.senderName || 'Student',
-          text: '[Voice Message]',
-        } : null,
-        clientTempId: clientId,
-      });
-      const nextMessage = response?.message || response || {
-        ...optimisticMessage,
-        status: 'sent',
       };
-      setMessages((prev) => reconcileIncomingMessage(prev, {
-        ...nextMessage,
-        clientTempId: clientId,
+      const optimistic = {
+        id: clientId,
         localId: clientId,
-        status: nextMessage?.status || 'sent',
-      }));
-    } catch (err) {
-      markFailedMessage(clientId, err?.message || 'Failed to send');
-      showSendError(err);
-    }
-  }, [canChat, conversation, user, profile, replyTo, currentUid]);
+        clientTempId: clientId,
+        senderId: currentUid,
+        senderName: profile?.name || user.displayName || 'Student',
+        createdAt: new Date().toISOString(),
+        status: 'sending',
+        type: 'voice',
+        ...voiceFields,
+        replyTo: reply,
+      };
+
+      setMessages((prev) => reconcileIncomingMessage(prev, optimistic));
+      setReplyTo(null);
+      scrollToBottom();
+
+      try {
+        const response = await sendDirectMessage(conversation, user, profile || {}, {
+          type: 'voice',
+          ...voiceFields,
+          replyTo: reply,
+          clientTempId: clientId,
+        });
+        const next = response?.message || response || { ...optimistic, status: 'sent' };
+        setMessages((prev) =>
+          reconcileIncomingMessage(prev, { ...next, clientTempId: clientId, localId: clientId, status: next?.status || 'sent' })
+        );
+      } catch (error) {
+        markFailedMessage(clientId, error?.message || 'Failed to send');
+        showSendError(error);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [canChat, conversation, user, profile, replyTo, currentUid]
+  );
 
   const sendSticker = async (sticker) => {
-    if (!sticker || !conversation || !user || sending || !canChat) return;
+    if (!sticker || !conversation || !user || !canChat) return;
     const clientId = createMessageClientId();
-    const optimisticMessage = {
-      id: clientId,
-      localId: clientId,
-      clientTempId: clientId,
-      senderId: currentUid,
-      senderName: profile?.name || user.displayName || 'Student',
-      type: 'sticker',
-      stickerId: sticker.id,
-      createdAt: new Date().toISOString(),
-      status: 'sending',
-      replyTo: replyTo ? { id: replyTo.id, senderId: replyTo.senderId || '', senderName: replyTo.senderName || 'Student', text: '[Sticker]' } : null,
-    };
+    const reply = buildReplyPayload(replyTo);
+    const optimistic = { ...baseOptimistic(clientId), type: 'sticker', stickerId: sticker.id, replyTo: reply };
 
-    setMessages((prev) => reconcileIncomingMessage(prev, optimisticMessage));
+    setMessages((prev) => reconcileIncomingMessage(prev, optimistic));
     setReplyTo(null);
     scrollToBottom();
-    setSending(true);
-    try {
-      const response = await sendDirectMessage(conversation, user, profile || {}, {
-        type: 'sticker',
-        stickerId: sticker.id,
-        replyTo: replyTo ? { id: replyTo.id, senderId: replyTo.senderId || '', senderName: replyTo.senderName || 'Student', text: '[Sticker]' } : null,
-        clientTempId: clientId,
-      });
-      const nextMessage = response?.message || response || { ...optimisticMessage, status: 'sent' };
-      setMessages((prev) => reconcileIncomingMessage(prev, {
-        ...nextMessage,
-        clientTempId: clientId,
-        localId: clientId,
-        status: nextMessage?.status || 'sent',
-      }));
-    } catch (error) { markFailedMessage(clientId, error?.message || 'Failed to send'); showSendError(error); }
-    finally { setSending(false); }
+    await deliver(clientId, { type: 'sticker', stickerId: sticker.id, replyTo: reply }, { ...optimistic, status: 'sent' });
   };
+
+  const retrySendMessage = async (message) => {
+    if (!conversation || !user || isBlocked || !message || message.status === 'sending') return;
+    const clientId = messageKey(message);
+    setMessages((prev) =>
+      prev.map((entry) =>
+        messageKey(entry) === clientId ? { ...entry, status: 'sending', failedReason: null } : entry
+      )
+    );
+    await deliver(clientId, payloadFromMessage(message), message);
+  };
+  retryRef.current = retrySendMessage;
+  const handleRetry = useCallback((message) => retryRef.current?.(message), []);
+
+  const discardFailedMessage = (message) => {
+    const key = messageKey(message);
+    setMessages((prev) => prev.filter((entry) => messageKey(entry) !== key));
+  };
+
+  /* ------------------------------- Message sheet -------------------------- */
+
+  const openSheet = useCallback((message) => {
+    setConfirmingDelete(false);
+    setActiveMessage(message);
+  }, []);
 
   const closeSheet = () => {
     setActiveMessage(null);
     setConfirmingDelete(false);
   };
 
-  const messageWithinEditWindow = (message) => {
+  const withinEditWindow = (message) => {
     const sentAt = toMillis(message?.createdAt);
-    return Boolean(sentAt && Date.now() - sentAt <= 60 * 60 * 1000);
+    return Boolean(sentAt && Date.now() - sentAt <= EDIT_WINDOW_MS);
+  };
+
+  const startReply = useCallback((message) => {
+    if (!message || message.deleted) return;
+    setEditingMessage(null);
+    setEditText('');
+    setReplyTo(message);
+    setTimeout(() => inputRef.current?.focus?.(), 50);
+  }, []);
+
+  const handleReplyFromSheet = () => {
+    if (activeMessage) startReply(activeMessage);
+    closeSheet();
+  };
+
+  const handleCopyFromSheet = async () => {
+    if (activeMessage?.text) {
+      await Clipboard.setStringAsync(activeMessage.text);
+      showToast('Copied to clipboard');
+    }
+    closeSheet();
   };
 
   const startEditingMessage = () => {
-    if (!activeMessage || !isMine(activeMessage) || !messageWithinEditWindow(activeMessage) || activeMessage.type !== 'text') return;
+    if (!activeMessage || !isMine(activeMessage) || !withinEditWindow(activeMessage)) return;
+    if (activeMessage.type && activeMessage.type !== 'text') return;
+    setReplyTo(null);
     setEditingMessage(activeMessage);
     setEditText(activeMessage.text || '');
     closeSheet();
+    setTimeout(() => inputRef.current?.focus?.(), 80);
   };
 
   const cancelEditingMessage = () => {
@@ -891,39 +1222,43 @@ export default function ConversationPage() {
   };
 
   const saveEditedMessage = async () => {
-    if (!editingMessage || !editText.trim()) return;
+    const nextText = editText.trim();
+    if (!editingMessage || !nextText || savingEdit) return;
+    if (nextText === String(editingMessage.text || '').trim()) {
+      cancelEditingMessage();
+      return;
+    }
+    setSavingEdit(true);
     try {
-      await updateDirectMessage(conversationId, editingMessage.id, editText, currentUid);
+      await updateDirectMessage(conversationId, editingMessage.id, nextText, currentUid);
+      const targetId = editingMessage.id;
+      setMessages((prev) =>
+        prev.map((m) => (m.id === targetId ? { ...m, text: nextText, edited: true } : m))
+      );
       cancelEditingMessage();
     } catch (error) {
-      showAlertDialog('Edit failed', error.message || 'Unable to edit this message.');
+      showAlertDialog('Edit failed', error?.message || 'Unable to edit this message.');
+    } finally {
+      setSavingEdit(false);
     }
-  };
-
-  const handleReplyFromSheet = () => {
-    if (activeMessage) setReplyTo(activeMessage);
-    closeSheet();
-  };
-
-  const handleCopyFromSheet = async () => {
-    if (activeMessage?.text) {
-      await Clipboard.setStringAsync(activeMessage.text);
-    }
-    closeSheet();
   };
 
   const handleConfirmDelete = async () => {
     if (!activeMessage || !conversationId) return;
-    setDeletingId(activeMessage.id);
+    const target = activeMessage;
+    setDeletingId(target.id);
     try {
-      await deleteDirectMessage(conversationId, activeMessage.id, { voice: activeMessage.type === 'voice' });
+      await deleteDirectMessage(conversationId, target.id, { voice: target.type === 'voice' });
+      setMessages((prev) => prev.map((m) => (m.id === target.id ? { ...m, deleted: true } : m)));
     } catch (error) {
-      showAlertDialog('Delete failed', error.message || 'Unable to delete this message.');
+      showAlertDialog('Delete failed', error?.message || 'Unable to delete this message.');
     } finally {
       setDeletingId(null);
       closeSheet();
     }
   };
+
+  /* ------------------------------ Chat actions ---------------------------- */
 
   const clearChat = async () => {
     if (!conversationId || !currentUid) return;
@@ -937,8 +1272,9 @@ export default function ConversationPage() {
         clearedFor: { ...(current?.clearedFor || {}), [currentUid]: new Date() },
         unread: { ...(current?.unread || {}), [currentUid]: 0 },
       }));
+      showToast('Chat cleared');
     } catch (error) {
-      showAlertDialog('Clear chat failed', error.message || 'Unable to clear this chat.');
+      showAlertDialog('Clear chat failed', error?.message || 'Unable to clear this chat.');
     } finally {
       setRoomBusy('');
     }
@@ -949,9 +1285,10 @@ export default function ConversationPage() {
     setRoomBusy('delete');
     try {
       await deleteConversationForUser(conversationId, currentUid);
+      DRAFT_CACHE.delete(conversationId);
       router.back();
     } catch (error) {
-      showAlertDialog('Delete chat failed', error.message || 'Unable to delete this chat.');
+      showAlertDialog('Delete chat failed', error?.message || 'Unable to delete this chat.');
       setRoomBusy('');
     }
   };
@@ -959,6 +1296,11 @@ export default function ConversationPage() {
   const showChatOptions = () => {
     if (roomBusy) return;
     setShowOptionsSheet(true);
+  };
+
+  const handleViewProfile = () => {
+    setShowOptionsSheet(false);
+    if (otherId) router.navigate(`/view-user-profile/${otherId}`);
   };
 
   const handlePromptClearChat = () => {
@@ -993,7 +1335,275 @@ export default function ConversationPage() {
     }, 200);
   };
 
-  const isMine = (item) => item.senderId === user?.uid;
+  /* ------------------------------ Relationship ---------------------------- */
+
+  const runRelationshipAction = async (title, fallback, action) => {
+    setRelationshipBusy(true);
+    try {
+      await action();
+    } catch (error) {
+      showAlertDialog(title, error?.message || fallback);
+    } finally {
+      setRelationshipBusy(false);
+    }
+  };
+
+  const handleAddFriend = () => {
+    if (!currentUid || !otherId) return;
+    runRelationshipAction('Friend request', 'Could not send friend request.', () =>
+      sendFriendRequest({
+        currentUid,
+        targetUid: otherId,
+        currentProfile: profile,
+        targetProfile: { ...otherUser, uid: otherId },
+      })
+    );
+  };
+
+  const handleAcceptMessageRequest = () => {
+    if (!pendingMessageRequest || !currentUid) return;
+    runRelationshipAction('Message request', 'Could not accept request.', () =>
+      acceptMessageRequest({ request: pendingMessageRequest, currentUid, currentProfile: profile })
+    );
+  };
+
+  const handleDeclineMessageRequest = () => {
+    if (!pendingMessageRequest || !currentUid) return;
+    runRelationshipAction('Message request', 'Could not decline request.', () =>
+      declineMessageRequest({ request: pendingMessageRequest, currentUid, currentProfile: profile })
+    );
+  };
+
+  const handleAcceptFriend = () => {
+    if (!relationship.request || !currentUid) return;
+    runRelationshipAction('Friend request', 'Could not accept friend request.', () =>
+      acceptFriendRequest({ request: relationship.request, currentUid, currentProfile: profile })
+    );
+  };
+
+  /* ------------------------------ List behavior --------------------------- */
+
+  const jumpToMessage = useCallback(
+    (id) => {
+      const index = listDataRef.current.findIndex(
+        (entry) => entry.message && (entry.message.id === id || entry.message.clientTempId === id)
+      );
+      if (index < 0) {
+        showToast('That message is further up in the chat');
+        return;
+      }
+      listRef.current?.scrollToIndex?.({ index, viewPosition: 0.5, animated: true });
+      setHighlightId(listDataRef.current[index].message.id);
+      clearTimeout(highlightTimer.current);
+      highlightTimer.current = setTimeout(() => setHighlightId(null), 1600);
+    },
+    [showToast]
+  );
+
+  const handleScroll = useCallback(
+    (event) => {
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+      const distance = contentSize.height - layoutMeasurement.height - contentOffset.y;
+      nearBottomRef.current = distance < 120;
+      const far = distance > 320;
+      setShowScrollDown((prev) => (prev === far ? prev : far));
+      if (distance < 120) setNewBelow(0);
+      if (initialScrollDone.current && contentOffset.y <= 48) loadOlderMessages();
+    },
+    [loadOlderMessages]
+  );
+
+  const handleContentSizeChange = useCallback(() => {
+    if (!initialScrollDone.current && listRef.current) {
+      initialScrollDone.current = true;
+      listRef.current.scrollToEnd({ animated: false });
+    }
+  }, []);
+
+  const handleScrollToIndexFailed = useCallback((info) => {
+    listRef.current?.scrollToOffset?.({ offset: info.averageItemLength * info.index, animated: true });
+    setTimeout(() => {
+      listRef.current?.scrollToIndex?.({ index: info.index, viewPosition: 0.5, animated: true });
+    }, 350);
+  }, []);
+
+  const renderItem = useCallback(
+    ({ item }) => {
+      if (item.kind === 'date') {
+        return (
+          <View style={styles.dateWrap}>
+            <View style={styles.datePill}>
+              <Text style={styles.dateText}>{item.label}</Text>
+            </View>
+          </View>
+        );
+      }
+      const { message } = item;
+      if (deletingId === message.id) {
+        return (
+          <View style={[styles.rowWrap, { marginBottom: 10 }]}>
+            <View style={[styles.bubble, styles.mine, styles.bubbleDeleted]}>
+              <Text style={[styles.deletedText, styles.mineDeletedText]}>Deleting…</Text>
+            </View>
+          </View>
+        );
+      }
+      return (
+        <MessageRow
+          message={message}
+          groupStart={item.groupStart}
+          groupEnd={item.groupEnd}
+          mine={message.senderId === currentUid}
+          highlighted={highlightId === message.id}
+          styles={styles}
+          colors={colors}
+          onLongPress={openSheet}
+          onReply={startReply}
+          onRetry={handleRetry}
+          onJumpToReply={jumpToMessage}
+        />
+      );
+    },
+    [styles, colors, currentUid, highlightId, deletingId, openSheet, startReply, handleRetry, jumpToMessage]
+  );
+
+  /* ------------------------------- Renderers ------------------------------ */
+
+  const renderRelationshipPrompt = () => {
+    if (!otherId || areFriends) return null;
+
+    const isReceived = relationship.state === RELATIONSHIP.RECEIVED;
+    const isSent = relationship.state === RELATIONSHIP.SENT;
+    const hasIntroRequest = !!pendingMessageRequest;
+
+    const title = hasIntroRequest
+      ? 'Accept intro message'
+      : isReceived
+        ? 'Friend request waiting'
+        : isSent
+          ? 'Friend request sent'
+          : isBlocked
+            ? 'Chat unavailable'
+            : 'Add friend to keep chatting';
+
+    const text = hasIntroRequest
+      ? `${headerTitle} sent you an introductory message. Accept to become friends and continue this chat.`
+      : isReceived
+        ? `${headerTitle} wants to connect. Accept the request to continue this chat freely.`
+        : isSent
+          ? 'You can continue chatting after the request is accepted.'
+          : isBlocked
+            ? 'Messaging is unavailable for this student.'
+            : hasSentIntro
+              ? 'You have sent an intro message. Add them as a friend to continue chatting.'
+              : 'You can send one intro message before becoming friends.';
+
+    const busyIcon = (icon, color) =>
+      relationshipBusy ? <ActivityIndicator color={color} size="small" /> : <Ionicons name={icon} size={15} color={color} />;
+
+    return (
+      <View style={styles.relationshipCard}>
+        <View style={styles.relationshipIcon}>
+          <Ionicons
+            name={isBlocked ? 'ban-outline' : hasIntroRequest || isReceived ? 'person-add-outline' : 'people-outline'}
+            size={19}
+            color={isBlocked ? colors.error : colors.brandText}
+          />
+        </View>
+        <View style={styles.relationshipCopy}>
+          <Text style={styles.relationshipTitle}>{title}</Text>
+          <Text style={styles.relationshipText}>{text}</Text>
+        </View>
+        {hasIntroRequest ? (
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Pressable style={styles.relationshipButton} onPress={handleAcceptMessageRequest} disabled={relationshipBusy}>
+              {busyIcon('checkmark', colors.onBrand)}
+              <Text style={styles.relationshipButtonText}>Accept</Text>
+            </Pressable>
+            <Pressable style={[styles.relationshipButton, styles.relationshipButtonMuted]} onPress={handleDeclineMessageRequest} disabled={relationshipBusy}>
+              {busyIcon('close', colors.textSecondary)}
+              <Text style={[styles.relationshipButtonText, styles.relationshipButtonTextMuted]}>Decline</Text>
+            </Pressable>
+          </View>
+        ) : isReceived ? (
+          <Pressable style={styles.relationshipButton} onPress={handleAcceptFriend} disabled={relationshipBusy}>
+            {busyIcon('checkmark', colors.onBrand)}
+            <Text style={styles.relationshipButtonText}>Accept</Text>
+          </Pressable>
+        ) : isSent || isBlocked ? (
+          <View style={[styles.relationshipButton, styles.relationshipButtonMuted]}>
+            <Text style={[styles.relationshipButtonText, styles.relationshipButtonTextMuted]}>{isSent ? 'Pending' : 'Blocked'}</Text>
+          </View>
+        ) : (
+          <Pressable style={styles.relationshipButton} onPress={handleAddFriend} disabled={relationshipBusy}>
+            {busyIcon('person-add-outline', colors.onBrand)}
+            <Text style={styles.relationshipButtonText}>Add</Text>
+          </Pressable>
+        )}
+      </View>
+    );
+  };
+
+  const renderSheetActions = () => {
+    const m = activeMessage;
+    if (!m) return null;
+    const mine = isMine(m);
+    const failed = m.status === 'failed';
+    const sending = m.status === 'sending';
+    const editable = mine && !failed && !sending && withinEditWindow(m);
+    const isText = !m.type || m.type === 'text';
+
+    const Option = ({ icon, label, onPress, danger }) => (
+      <Pressable style={styles.sheetOption} onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>
+        <View style={[styles.sheetOptionIcon, danger && styles.sheetOptionIconDanger]}>
+          <Ionicons name={icon} size={18} color={danger ? colors.error : colors.textPrimary} />
+        </View>
+        <Text style={[styles.sheetOptionText, danger && { color: colors.error }]}>{label}</Text>
+      </Pressable>
+    );
+
+    return (
+      <>
+        <Text style={styles.sheetPreview} numberOfLines={2}>{previewOf(m)}</Text>
+        {failed ? (
+          <>
+            <Option icon="refresh" label="Retry sending" onPress={() => { closeSheet(); handleRetry(m); }} />
+            <Option icon="trash-outline" label="Discard message" danger onPress={() => { discardFailedMessage(m); closeSheet(); }} />
+          </>
+        ) : (
+          <>
+            {!sending ? <Option icon="arrow-undo-outline" label="Reply" onPress={handleReplyFromSheet} /> : null}
+            {m.text ? <Option icon="copy-outline" label="Copy text" onPress={handleCopyFromSheet} /> : null}
+            {editable && isText ? <Option icon="create-outline" label="Edit message" onPress={startEditingMessage} /> : null}
+            {editable ? <Option icon="trash-outline" label="Delete message" danger onPress={() => setConfirmingDelete(true)} /> : null}
+            {mine && !editable && !sending ? (
+              <Text style={styles.sheetHint}>Messages can be edited or deleted within 1 hour of sending.</Text>
+            ) : null}
+          </>
+        )}
+      </>
+    );
+  };
+
+  /* --------------------------------- Render -------------------------------- */
+
+  const activeText = editingMessage ? editText : draft;
+  const canSubmit = Boolean(activeText.trim()) && !savingEdit;
+  const nearLimit = activeText.length > MAX_LENGTH * 0.85;
+
+  const statusText = isTyping
+    ? `${typingName || 'Student'} is typing…`
+    : isBlocked
+      ? 'Unavailable'
+      : areFriends
+        ? 'Friends'
+        : 'Direct message';
+
+  const listHeader = loadingOlderMessages ? (
+    <View style={styles.listHeader}><ActivityIndicator size="small" color={colors.brand} /></View>
+  ) : !hasMoreMessages && visibleMessages.length ? (
+    <View style={styles.listHeader}><Text style={styles.listHeaderText}>Beginning of your conversation</Text></View>
+  ) : null;
 
   return (
     <ScreenShell title={headerTitle} subtitle={headerSubtitle} showBack loading={loading} scrollable={false}>
@@ -1001,18 +1611,23 @@ export default function ConversationPage() {
         visible={friendRequestVisible}
         person={{ ...otherUser, uid: otherId }}
         onClose={() => setFriendRequestVisible(false)}
-        onAdd={() => sendFriendRequest({
-          currentUid,
-          targetUid: otherId,
-          currentProfile: profile,
-          targetProfile: { ...otherUser, uid: otherId },
-        })}
+        onAdd={() =>
+          sendFriendRequest({
+            currentUid,
+            targetUid: otherId,
+            currentProfile: profile,
+            targetProfile: { ...otherUser, uid: otherId },
+          })
+        }
       />
+
       <View style={styles.headerRow}>
         <Pressable
           style={styles.avatarWrapper}
           onPress={() => otherId && router.navigate(`/view-user-profile/${otherId}`)}
           disabled={!otherId}
+          accessibilityRole="button"
+          accessibilityLabel={`View ${headerTitle}'s profile`}
         >
           {otherUser.avatar && !avatarFailed ? (
             <Image source={{ uri: otherUser.avatar }} style={styles.avatar} onError={() => setAvatarFailed(true)} />
@@ -1023,10 +1638,11 @@ export default function ConversationPage() {
           )}
         </Pressable>
         <View style={styles.headerMeta}>
-          <Text style={styles.headerName}>{headerTitle}</Text>
-          <Text style={styles.headerHint}>
-            {isTyping ? `${typingName || 'Student'} is typing...` : (conversation?.lastMessage ? `Last seen ${formatShortTime(conversation.updatedAt)}` : 'Send a message to start')}
-          </Text>
+          <Text style={styles.headerName} numberOfLines={1}>{headerTitle}</Text>
+          <View style={styles.headerStatusRow}>
+            {isTyping ? <View style={styles.headerStatusDot} /> : null}
+            <Text style={[styles.headerHint, isTyping && styles.headerHintActive]} numberOfLines={1}>{statusText}</Text>
+          </View>
         </View>
         <Pressable
           style={({ pressed }) => [styles.headerAction, pressed && styles.headerActionPressed]}
@@ -1039,195 +1655,158 @@ export default function ConversationPage() {
         </Pressable>
       </View>
 
+      {!connected && !messagesLoading ? (
+        <View style={styles.banner}>
+          <ActivityIndicator size="small" color={colors.textSecondary} />
+          <Text style={styles.bannerText}>Reconnecting…</Text>
+        </View>
+      ) : null}
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         style={{ flex: 1 }}
       >
         <View style={styles.messagesPane}>
-        {visibleMessages.length ? (
-          <FlatList
-            ref={listRef}
-            data={visibleMessages}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => {
-              const mine = isMine(item);
-              const deleted = !!item.deleted;
-              const busy = deletingId === item.id;
-              const isVoice = item.type === 'voice';
-              const isSticker = item.type === 'sticker';
-              return (
-                <SwipeToReply
-                  disabled={deleted}
-                  onReply={() => setReplyTo(item)}
-                  colors={colors}
-                >
-                <View>
-                  {!mine && !deleted ? <Text style={[styles.sender, (isVoice || isSticker) && { marginBottom: 4 }]}>{item.senderName || 'Student'}</Text> : null}
-                  {!deleted && item.replyTo ? (
-                    <View style={styles.replyBlock}>
-                      <Text style={styles.replyAuthor}>{item.replyTo.senderName || 'Student'}</Text>
-                      <Text style={styles.replyText}>{item.replyTo.text || ''}</Text>
-                    </View>
-                  ) : null}
-                  {deleted ? (
-                    <View style={[styles.bubble, mine ? styles.mine : styles.theirs, styles.bubbleDeleted]}>
-                      <View style={styles.deletedRow}>
-                        <Ionicons name="ban-outline" size={14} color={mine ? 'rgba(255,255,255,0.75)' : colors.textSecondary} />
-                        <Text style={[styles.deletedText, mine && styles.mineDeletedText]}>
-                          {isVoice ? 'This voice message was deleted' : 'This message was deleted'}
-                        </Text>
-                      </View>
-                      <Text style={[styles.timestamp, mine && styles.mineTimestamp]}>{formatTime(item.createdAt)}</Text>
-                    </View>
-                  ) : isSticker ? (
-                    <StickerMessage message={item} isMine={mine} onLongPress={() => setActiveMessage(item)} />
-                  ) : isVoice ? (
-                    <View>
-                      <VoiceMessageBubble message={item} isMine={mine} onLongPress={() => setActiveMessage(item)} />
-                      <View style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start', alignItems: 'center', marginTop: -2, marginBottom: 10, gap: 4 }}>
-                        <Text style={[styles.timestamp, mine && styles.mineTimestamp]}>{formatTime(item.createdAt)}</Text>
-                        {mine ? renderMessageStatus(item) : null}
-                      </View>
-                    </View>
-                  ) : (
-                    <Pressable
-                      onLongPress={() => setActiveMessage(item)}
-                      delayLongPress={220}
-                      style={({ pressed }) => [
-                        styles.bubble,
-                        mine ? styles.mine : styles.theirs,
-                        pressed && styles.bubblePressed,
-                      ]}
-                    >
-                      <Text style={[styles.text, mine && styles.mineText]}>
-                        {busy ? 'Deleting…' : renderLinkedMessageText(item.text || item.body || item.caption || 'Attachment', mine, colors)}
-                      </Text>
-                      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 6, gap: 4 }}>
-                        <Text style={[styles.timestamp, mine && styles.mineTimestamp]}>{formatTime(item.createdAt)}</Text>
-                        {mine ? renderMessageStatus(item) : null}
-                      </View>
-                    </Pressable>
-                  )}
+          {messagesLoading ? (
+            <View style={styles.centerFill}>
+              <ActivityIndicator color={colors.brand} />
+            </View>
+          ) : loadError && !messages.length ? (
+            <View style={styles.centerFill}>
+              <EmptyState title="Couldn't load messages" description="Check your connection and try again." />
+              <Pressable style={styles.retryButton} onPress={() => setReloadKey((key) => key + 1)} accessibilityRole="button">
+                <Ionicons name="refresh" size={16} color={colors.onBrand} />
+                <Text style={styles.retryButtonText}>Try again</Text>
+              </Pressable>
+            </View>
+          ) : listData.length ? (
+            <FlatList
+              ref={listRef}
+              data={listData}
+              keyExtractor={(item) => item.key}
+              renderItem={renderItem}
+              onScroll={handleScroll}
+              scrollEventThrottle={64}
+              onContentSizeChange={handleContentSizeChange}
+              onScrollToIndexFailed={handleScrollToIndexFailed}
+              maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
+              ListHeaderComponent={listHeader}
+              ListFooterComponent={isTyping ? <TypingBubble styles={styles} /> : null}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+              keyboardDismissMode="on-drag"
+              keyboardShouldPersistTaps="handled"
+              initialNumToRender={20}
+              windowSize={11}
+            />
+          ) : (
+            <EmptyState
+              title="No messages yet"
+              description={canChat ? 'Say hello and start the conversation.' : 'Messages will show up here once you are connected.'}
+            />
+          )}
+
+          {showScrollDown ? (
+            <Pressable style={styles.scrollFab} onPress={() => scrollToBottom(true)} accessibilityRole="button" accessibilityLabel="Scroll to latest message">
+              <Ionicons name="chevron-down" size={22} color={colors.textPrimary} />
+              {newBelow > 0 ? (
+                <View style={styles.scrollFabBadge}>
+                  <Text style={styles.scrollFabBadgeText}>{newBelow > 99 ? '99+' : newBelow}</Text>
                 </View>
-                </SwipeToReply>
-              );
-            }}
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}
-            keyboardDismissMode="on-drag"
-          />
-        ) : (
-          <EmptyState
-            title="No messages yet"
-            description="Send a message to start this chat again."
-          />
-        )}
-      </View>
-
-      {renderRelationshipPrompt()}
-
-      {canChat ? (
-        <View style={styles.composerContainer}>
-          {editingMessage ? (
-            <View style={styles.replyPreview}>
-              <View style={styles.replyPreviewHeader}>
-                <Text style={styles.replyPreviewLabel}>Editing message</Text>
-                <Pressable onPress={cancelEditingMessage}>
-                  <Text style={styles.replyCancel}>Cancel</Text>
-                </Pressable>
-              </View>
-              <Text style={styles.replyPreviewText} numberOfLines={2}>{editingMessage.text || ''}</Text>
-            </View>
-          ) : replyTo ? (
-            <View style={styles.replyPreview}>
-              <View style={styles.replyPreviewHeader}>
-                <Text style={styles.replyPreviewLabel}>Replying to {replyTo.senderName || 'Student'}</Text>
-                <Pressable onPress={() => setReplyTo(null)}>
-                  <Text style={styles.replyCancel}>Cancel</Text>
-                </Pressable>
-              </View>
-              <Text style={styles.replyPreviewText}>{messagePreview(replyTo)}</Text>
-            </View>
+              ) : null}
+            </Pressable>
           ) : null}
-          <View style={styles.composer}>
-            <Pressable style={styles.stickerButton} onPress={() => setStickerPickerVisible(true)} accessibilityRole="button" accessibilityLabel="Open sticker picker">
-              <Ionicons name="happy-outline" size={22} color={colors.brand} />
-            </Pressable>
-            <VoiceRecorderBar
-              conversationId={conversationId}
-              onVoiceSent={sendVoiceMessage}
-            />
-            <TextInput
-              value={editingMessage ? editText : draft}
-              onChangeText={(text) => {
-                if (editingMessage) {
-                  setEditText(text);
-                  return;
-                }
-                setDraft(text);
-                const socket = getSocket();
-                socket.emit("typing", { conversationId, userId: currentUid, isTyping: true, name: profile?.name || user?.displayName || 'Student' });
-                if (typingTimeout.current) clearTimeout(typingTimeout.current);
-                typingTimeout.current = setTimeout(() => {
-                  socket.emit("typing", { conversationId, userId: currentUid, isTyping: false });
-                }, 2000);
-              }}
-              placeholder="Type a message..."
-              placeholderTextColor={colors.placeholder}
-              style={[styles.input, Platform.OS !== 'ios' && styles.inputAndroid]}
-              multiline
-            />
-            <Pressable
-              style={[styles.button, (!(editingMessage ? editText.trim() : draft.trim()) || sending) && styles.buttonDisabled]}
-              onPress={editingMessage ? saveEditedMessage : send}
-              disabled={sending || !(editingMessage ? editText.trim() : draft.trim())}
-            >
-              {sending ? <ActivityIndicator color="#fff" /> : <Ionicons name={editingMessage ? 'checkmark' : 'arrow-up'} size={18} color={colors.onBrand} />}
-            </Pressable>
-          </View>
+
+          {toast ? (
+            <Animated.View pointerEvents="none" style={[styles.toast, { opacity: toastOpacity }]}>
+              <Text style={styles.toastText}>{toast}</Text>
+            </Animated.View>
+          ) : null}
         </View>
-      ) : null}
+
+        {renderRelationshipPrompt()}
+
+        {canChat ? (
+          <View style={styles.composerContainer}>
+            {editingMessage ? (
+              <View style={styles.composerBanner}>
+                <Ionicons name="create-outline" size={18} color={colors.brand} />
+                <View style={styles.composerBannerBody}>
+                  <Text style={styles.composerBannerLabel}>Editing message</Text>
+                  <Text style={styles.composerBannerText} numberOfLines={1}>{editingMessage.text || ''}</Text>
+                </View>
+                <Pressable style={styles.composerBannerClose} onPress={cancelEditingMessage} accessibilityRole="button" accessibilityLabel="Cancel editing">
+                  <Ionicons name="close" size={16} color={colors.textSecondary} />
+                </Pressable>
+              </View>
+            ) : replyTo ? (
+              <View style={styles.composerBanner}>
+                <Ionicons name="arrow-undo" size={18} color={colors.brand} />
+                <View style={styles.composerBannerBody}>
+                  <Text style={styles.composerBannerLabel}>Replying to {replyTo.senderName || 'Student'}</Text>
+                  <Text style={styles.composerBannerText} numberOfLines={1}>{previewOf(replyTo)}</Text>
+                </View>
+                <Pressable style={styles.composerBannerClose} onPress={() => setReplyTo(null)} accessibilityRole="button" accessibilityLabel="Cancel reply">
+                  <Ionicons name="close" size={16} color={colors.textSecondary} />
+                </Pressable>
+              </View>
+            ) : null}
+
+            <View style={styles.composer}>
+              {!editingMessage ? (
+                <>
+                  <Pressable style={styles.stickerButton} onPress={() => setStickerPickerVisible(true)} accessibilityRole="button" accessibilityLabel="Open sticker picker">
+                    <Ionicons name="happy-outline" size={22} color={colors.brand} />
+                  </Pressable>
+                  <VoiceRecorderBar conversationId={conversationId} onVoiceSent={sendVoiceMessage} />
+                </>
+              ) : null}
+              <View style={styles.inputWrap}>
+                <TextInput
+                  ref={inputRef}
+                  value={activeText}
+                  onChangeText={handleDraftChange}
+                  placeholder={editingMessage ? 'Edit your message…' : 'Type a message...'}
+                  placeholderTextColor={colors.placeholder}
+                  style={[styles.input, editingMessage && styles.inputEditing]}
+                  maxLength={MAX_LENGTH}
+                  multiline
+                />
+                {nearLimit ? (
+                  <Text style={[styles.counter, activeText.length >= MAX_LENGTH && styles.counterLimit]}>
+                    {activeText.length}/{MAX_LENGTH}
+                  </Text>
+                ) : null}
+              </View>
+              <Pressable
+                style={[styles.button, !canSubmit && styles.buttonDisabled]}
+                onPress={editingMessage ? saveEditedMessage : send}
+                disabled={!canSubmit}
+                accessibilityRole="button"
+                accessibilityLabel={editingMessage ? 'Save edited message' : 'Send message'}
+              >
+                {savingEdit ? (
+                  <ActivityIndicator color={colors.onBrand} />
+                ) : (
+                  <Ionicons name={editingMessage ? 'checkmark' : 'arrow-up'} size={18} color={colors.onBrand} />
+                )}
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
       </KeyboardAvoidingView>
 
       <StickerPicker visible={stickerPickerVisible} onClose={() => setStickerPickerVisible(false)} onSelect={sendSticker} />
 
-      {/* Message Context Actions Sheet */}
-      <Modal visible={!!activeMessage} transparent animationType="fade" onRequestClose={closeSheet}>
+      {/* Message actions */}
+      <Modal visible={!!activeMessage} transparent animationType="fade" statusBarTranslucent onRequestClose={closeSheet}>
         <Pressable style={styles.modalOverlay} onPress={closeSheet}>
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
             <View style={styles.sheetHandle} />
-
             {!confirmingDelete ? (
               <>
-                <Text style={styles.sheetPreview} numberOfLines={2}>
-                  {activeMessage ? messagePreview(activeMessage) : ''}
-                </Text>
-
-                <Pressable style={styles.sheetOption} onPress={handleReplyFromSheet}>
-                  <Ionicons name="arrow-undo-outline" size={18} color={colors.textPrimary} />
-                  <Text style={styles.sheetOptionText}>Reply</Text>
-                </Pressable>
-
-                <Pressable style={styles.sheetOption} onPress={handleCopyFromSheet}>
-                  <Ionicons name="copy-outline" size={18} color={colors.textPrimary} />
-                  <Text style={styles.sheetOptionText}>Copy text</Text>
-                </Pressable>
-
-                {activeMessage && isMine(activeMessage) && messageWithinEditWindow(activeMessage) ? (
-                  <Pressable style={styles.sheetOption} onPress={startEditingMessage}>
-                    <Ionicons name="create-outline" size={18} color={colors.textPrimary} />
-                    <Text style={styles.sheetOptionText}>Edit message</Text>
-                  </Pressable>
-                ) : null}
-
-                {activeMessage && isMine(activeMessage) && messageWithinEditWindow(activeMessage) ? (
-                  <Pressable style={styles.sheetOption} onPress={() => setConfirmingDelete(true)}>
-                    <Ionicons name="trash-outline" size={18} color={colors.error} />
-                    <Text style={[styles.sheetOptionText, { color: colors.error }]}>Delete message</Text>
-                  </Pressable>
-                ) : null}
-
+                {renderSheetActions()}
                 <Pressable style={styles.sheetCancel} onPress={closeSheet}>
                   <Text style={styles.sheetCancelText}>Cancel</Text>
                 </Pressable>
@@ -1253,21 +1832,34 @@ export default function ConversationPage() {
         </Pressable>
       </Modal>
 
-      {/* Chat Options Sheet */}
-      <Modal visible={showOptionsSheet} transparent animationType="fade" onRequestClose={() => setShowOptionsSheet(false)}>
+      {/* Chat options */}
+      <Modal visible={showOptionsSheet} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setShowOptionsSheet(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setShowOptionsSheet(false)}>
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>Chat options</Text>
             <Text style={styles.sheetSubtitle}>Changes only affect your side of this chat.</Text>
 
+            {otherId ? (
+              <Pressable style={styles.sheetOption} onPress={handleViewProfile}>
+                <View style={styles.sheetOptionIcon}>
+                  <Ionicons name="person-outline" size={18} color={colors.textPrimary} />
+                </View>
+                <Text style={styles.sheetOptionText}>View profile</Text>
+              </Pressable>
+            ) : null}
+
             <Pressable style={styles.sheetOption} onPress={handlePromptClearChat}>
-              <Ionicons name="brush-outline" size={20} color={colors.textPrimary} />
+              <View style={styles.sheetOptionIcon}>
+                <Ionicons name="brush-outline" size={18} color={colors.textPrimary} />
+              </View>
               <Text style={styles.sheetOptionText}>Clear chat</Text>
             </Pressable>
 
             <Pressable style={styles.sheetOption} onPress={handlePromptDeleteChat}>
-              <Ionicons name="trash-outline" size={20} color={colors.error} />
+              <View style={[styles.sheetOptionIcon, styles.sheetOptionIconDanger]}>
+                <Ionicons name="trash-outline" size={18} color={colors.error} />
+              </View>
               <Text style={[styles.sheetOptionText, { color: colors.error }]}>Delete chat</Text>
             </Pressable>
 
@@ -1278,9 +1870,12 @@ export default function ConversationPage() {
         </Pressable>
       </Modal>
 
-      {/* Custom Universal Confirmation & Error Dialog Modal */}
-      <Modal visible={!!dialogConfig} transparent animationType="fade" onRequestClose={() => setDialogConfig(null)}>
-        <Pressable style={styles.modalOverlay} onPress={() => dialogConfig?.onSecondary ? dialogConfig.onSecondary() : setDialogConfig(null)}>
+      {/* Universal confirmation / error dialog */}
+      <Modal visible={!!dialogConfig} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setDialogConfig(null)}>
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => (dialogConfig?.onSecondary ? dialogConfig.onSecondary() : setDialogConfig(null))}
+        >
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
             <View style={styles.sheetHandle} />
             {dialogConfig?.icon ? (
@@ -1288,7 +1883,6 @@ export default function ConversationPage() {
                 <Ionicons name={dialogConfig.icon} size={24} color={dialogConfig.iconColor} />
               </View>
             ) : null}
-
             {dialogConfig?.title ? <Text style={styles.confirmTitle}>{dialogConfig.title}</Text> : null}
             {dialogConfig?.subtitle ? <Text style={styles.confirmSubtitle}>{dialogConfig.subtitle}</Text> : null}
 

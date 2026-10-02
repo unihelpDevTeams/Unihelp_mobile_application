@@ -37,6 +37,9 @@ import {
   leaveGroup,
   listGroupJoinRequests,
   listenGroupMessages,
+  loadOlderGroupMessages,
+  loadRecentGroupMessages,
+  MESSAGE_PAGE_SIZE,
   rejectGroupJoinRequest,
   requestJoinGroup,
   sendGroupMessage,
@@ -72,6 +75,20 @@ const initialsForName = (name = '') =>
     .join('') || '?';
 
 const pluralize = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+const mergeUniqueMessages = (items = []) => {
+  const byId = new Map();
+  for (const item of items) {
+    if (!item || !item.id) continue;
+    byId.set(item.id, item);
+  }
+  return [...byId.values()].sort((left, right) => {
+    const leftTime = getMillis(left);
+    const rightTime = getMillis(right);
+    if (leftTime && rightTime && leftTime !== rightTime) return leftTime - rightTime;
+    return String(left?.id || '').localeCompare(String(right?.id || ''));
+  });
+};
 
 // createdAt can be a Firestore Timestamp, a {seconds} object, a Date/ISO string, or null (pending write).
 const getMillis = (message) => {
@@ -139,6 +156,9 @@ export default function GroupDetailPage() {
   const [group, setGroup] = useState(null);
   const [membership, setMembership] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [messageCursor, setMessageCursor] = useState(null);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [joinRequests, setJoinRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -1169,7 +1189,11 @@ export default function GroupDetailPage() {
     const near = distanceFromBottom < NEAR_BOTTOM_PX;
     nearBottomRef.current = near;
     setShowJumpToLatest(!near);
-  }, []);
+
+    if (contentOffset.y <= 48 && hasMoreMessages && !loadingOlderMessages && messageCursor) {
+      loadOlderMessages();
+    }
+  }, [hasMoreMessages, loadOlderMessages, loadingOlderMessages, messageCursor]);
 
   const handleContentSizeChange = () => {
     // Only auto-follow new content if the reader is already at the bottom,
@@ -1249,12 +1273,49 @@ export default function GroupDetailPage() {
     load().catch(() => setLoading(false));
   }, [load]);
 
+  const loadOlderMessages = useCallback(async () => {
+    if (!groupId || !isMember || !hasMoreMessages || loadingOlderMessages || !messageCursor) return;
+    setLoadingOlderMessages(true);
+    try {
+      const result = await loadOlderGroupMessages(groupId, messageCursor);
+      const olderMessages = Array.isArray(result?.messages) ? result.messages : [];
+      if (olderMessages.length) {
+        setMessages((prev) => mergeUniqueMessages([...olderMessages, ...prev]));
+        setMessageCursor(result.cursor || null);
+      }
+      setHasMoreMessages(Boolean(result?.hasMore));
+    } catch (error) {
+      console.log('Failed to fetch older group messages', error);
+    } finally {
+      setLoadingOlderMessages(false);
+    }
+  }, [groupId, hasMoreMessages, isMember, loadingOlderMessages, messageCursor]);
+
   // Gate on `isMember` (not the raw membership doc) so owners/admins whose privileges come
   // from group.adminId / group.ownerId still get a message listener.
   useEffect(() => {
     if (!groupId || !isMember) return undefined;
-    const unsubscribe = listenGroupMessages(groupId, setMessages);
-    return () => unsubscribe?.();
+
+    let didCancel = false;
+    const initialiseMessages = async () => {
+      const result = await loadRecentGroupMessages(groupId, MESSAGE_PAGE_SIZE);
+      if (didCancel) return;
+      const nextMessages = Array.isArray(result?.messages) ? result.messages : [];
+      setMessages(nextMessages);
+      setMessageCursor(result?.cursor || null);
+      setHasMoreMessages(Boolean(result?.hasMore));
+    };
+
+    initialiseMessages();
+
+    const unsubscribe = listenGroupMessages(groupId, (incomingMessages) => {
+      setMessages((prev) => mergeUniqueMessages([...prev, ...incomingMessages]));
+    });
+
+    return () => {
+      didCancel = true;
+      unsubscribe?.();
+    };
   }, [groupId, isMember]);
 
   const join = async () => {

@@ -24,7 +24,8 @@ import { getApiUrl, sendAppNotification, postJson } from './backend';
 import { canSendDirectMessage, createOrOpenFriendConversation } from './friendships';
 
 export const PAGE_SIZE = 20;
-export const MESSAGE_PAGE_SIZE = 25;
+export const CHAT_PAGE_SIZE = 20;
+export const MESSAGE_PAGE_SIZE = CHAT_PAGE_SIZE;
 export const MESSAGE_EDIT_WINDOW_MS = 60 * 60 * 1000;
 
 const normalizeSearch = (value = '') => value.trim().toLowerCase();
@@ -304,8 +305,18 @@ export const listenGroupMessages = (groupId, callback) => {
   });
 };
 
+export const loadRecentGroupMessages = async (groupId, pageSize = MESSAGE_PAGE_SIZE) => {
+  if (!groupId) return { messages: [], cursor: null, hasMore: false };
+  const snap = await getDocs(query(collection(db, 'groups', groupId, 'messages'), orderBy('createdAt', 'desc'), limit(pageSize)));
+  return {
+    messages: mapDocs(snap).reverse(),
+    cursor: snap.docs[snap.docs.length - 1] || null,
+    hasMore: snap.docs.length === pageSize,
+  };
+};
+
 export const loadOlderGroupMessages = async (groupId, cursor) => {
-  if (!cursor) return { messages: [], cursor: null, hasMore: false };
+  if (!groupId || !cursor) return { messages: [], cursor: null, hasMore: false };
   const snap = await getDocs(query(collection(db, 'groups', groupId, 'messages'), orderBy('createdAt', 'desc'), startAfter(cursor), limit(MESSAGE_PAGE_SIZE)));
   return {
     messages: mapDocs(snap).reverse(),
