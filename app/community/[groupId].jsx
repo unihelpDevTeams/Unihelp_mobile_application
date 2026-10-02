@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
 import StickerPicker from '../../src/shared/components/StickerPicker';
@@ -235,20 +236,24 @@ export default function GroupDetailPage() {
     },
 
     /* Hero / group info */
-    hero: {
-      backgroundColor: c.brand,
-      borderRadius: 20,
-      padding: 16,
+    compactHero: {
+      backgroundColor: c.surface,
+      borderRadius: 16,
+      padding: 12,
       marginBottom: 12,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      shadowColor: c.shadow || '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.05,
+      shadowRadius: 6,
+      elevation: 2,
     },
-    heroActionsRow: {
-      position: 'absolute',
-      top: 14,
-      right: 14,
+    heroActionsRowInline: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
-      zIndex: 2,
+      gap: 4,
+      marginLeft: 'auto',
     },
     heroIconButton: {
       width: 32,
@@ -256,25 +261,25 @@ export default function GroupDetailPage() {
       borderRadius: 16,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: 'rgba(255,255,255,0.18)',
+      backgroundColor: c.brandLight,
     },
     heroTopRow: {
       flexDirection: 'row',
       alignItems: 'center',
     },
     heroAvatar: {
-      width: 46,
-      height: 46,
-      borderRadius: 23,
-      backgroundColor: 'rgba(255,255,255,0.18)',
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: c.brand,
       alignItems: 'center',
       justifyContent: 'center',
-      marginRight: 12,
+      marginRight: 10,
       overflow: 'hidden',
     },
     heroAvatarImage: {
-      width: 46,
-      height: 46,
+      width: 40,
+      height: 40,
     },
     heroAvatarText: {
       color: '#FFFFFF',
@@ -283,38 +288,26 @@ export default function GroupDetailPage() {
     },
     heroTextWrap: {
       flex: 1,
-      paddingRight: 70,
+      justifyContent: 'center',
+      paddingRight: 8,
     },
     heroTitle: {
-      color: '#FFFFFF',
-      fontSize: 18,
+      color: c.textPrimary,
+      fontSize: 15,
       fontWeight: '800',
+      marginBottom: 2,
     },
     heroText: {
-      marginTop: 3,
-      color: '#E0E7FF',
+      color: c.textSecondary,
       fontSize: 12,
-      lineHeight: 17,
     },
-    metaRow: {
-      marginTop: 12,
-      flexDirection: 'row',
-      gap: 8,
-      flexWrap: 'wrap',
-    },
-    metaPill: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: 'rgba(255,255,255,0.14)',
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      borderRadius: 999,
-    },
-    meta: {
-      color: '#E0E7FF',
-      fontSize: 11,
-      fontWeight: '700',
+    heroDescription: {
+      color: c.textTertiary,
+      fontSize: 12,
+      marginTop: 8,
+      paddingTop: 8,
+      borderTopWidth: 1,
+      borderTopColor: c.borderDefault,
     },
 
     /* Join / leave */
@@ -437,6 +430,49 @@ export default function GroupDetailPage() {
       shadowOpacity: 0.1,
       shadowRadius: 1,
       elevation: 1,
+    },
+    bubbleAdmin: {
+      borderWidth: 2,
+      borderColor: '#FFD700',
+    },
+    bubblePremium: {
+      borderWidth: 1,
+      borderColor: '#8A2BE2',
+    },
+    adminBadge: {
+      position: 'absolute',
+      top: -8,
+      left: 14,
+      backgroundColor: '#FFD700',
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 10,
+      zIndex: 10,
+      shadowColor: '#FFD700',
+      shadowOpacity: 0.8,
+      shadowRadius: 4,
+      elevation: 3,
+    },
+    adminBadgeText: {
+      fontSize: 8,
+      fontWeight: '900',
+      color: '#000',
+      textTransform: 'uppercase',
+    },
+    premiumBadge: {
+      position: 'absolute',
+      top: -6,
+      left: 14,
+      backgroundColor: '#8A2BE2',
+      paddingHorizontal: 4,
+      paddingVertical: 1,
+      borderRadius: 8,
+      zIndex: 10,
+    },
+    premiumBadgeText: {
+      fontSize: 8,
+      fontWeight: '800',
+      color: '#FFF',
     },
     // Only the last bubble in a group gets the "tail" corner (radius 4).
     bubbleTheirs: {
@@ -1574,8 +1610,14 @@ export default function GroupDetailPage() {
     );
   };
 
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const handleScrollCombined = Animated.event(
+    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+    { useNativeDriver: false, listener: handleScroll }
+  );
+
   return (
-    <ScreenShell title="Group" subtitle={group?.name || groupId} showBack loading={loading} scrollable={false}>
+    <ScreenShell title="Group" subtitle={group?.name || groupId} showBack loading={loading} scrollable={false} headerScrollY={scrollY}>
       {group ? (
         <View style={styles.screen}>
           {/*
@@ -1590,7 +1632,7 @@ export default function GroupDetailPage() {
                 style={styles.flex}
                 contentContainerStyle={styles.chatContent}
                 showsVerticalScrollIndicator={false}
-                onScroll={handleScroll}
+                onScroll={handleScrollCombined}
                 scrollEventThrottle={16}
                 onContentSizeChange={handleContentSizeChange}
                 onScrollBeginDrag={() => setReactionPickerFor(null)}
@@ -1601,19 +1643,7 @@ export default function GroupDetailPage() {
                 renderItem={renderMessageItem}
                 ListHeaderComponent={
                   <>
-                    <View style={styles.hero}>
-                      <View style={styles.heroActionsRow}>
-                        {isAdmin ? (
-                          <Pressable style={styles.heroIconButton} onPress={openEdit} hitSlop={8}>
-                            <Ionicons name="create-outline" size={16} color="#FFFFFF" />
-                          </Pressable>
-                        ) : null}
-                        {isMember ? (
-                          <Pressable style={styles.heroIconButton} onPress={() => setGroupOptionsVisible(true)} hitSlop={8}>
-                            <Ionicons name="ellipsis-horizontal" size={16} color="#FFFFFF" />
-                          </Pressable>
-                        ) : null}
-                      </View>
+                    <View style={styles.compactHero}>
                       <View style={styles.heroTopRow}>
                         <View style={styles.heroAvatar}>
                           {groupPhotoUrl ? (
@@ -1623,28 +1653,28 @@ export default function GroupDetailPage() {
                           )}
                         </View>
                         <View style={styles.heroTextWrap}>
-                          <Text style={styles.heroTitle} numberOfLines={2}>{group.name}</Text>
-                          {group.description ? (
-                            <Text style={styles.heroText} numberOfLines={2}>{group.description}</Text>
+                          <Text style={styles.heroTitle} numberOfLines={1}>{group.name}</Text>
+                          <Text style={styles.heroText} numberOfLines={1}>
+                            {group.privacy === 'private' ? 'Private • ' : ''}
+                            {pluralize(Number(group.memberCount || 0), 'member')}
+                          </Text>
+                        </View>
+                        <View style={styles.heroActionsRowInline}>
+                          {isAdmin ? (
+                            <Pressable style={styles.heroIconButton} onPress={openEdit} hitSlop={8}>
+                              <Ionicons name="create-outline" size={18} color={colors.brand} />
+                            </Pressable>
+                          ) : null}
+                          {isMember ? (
+                            <Pressable style={styles.heroIconButton} onPress={() => setGroupOptionsVisible(true)} hitSlop={8}>
+                              <Ionicons name="ellipsis-vertical" size={18} color={colors.brand} />
+                            </Pressable>
                           ) : null}
                         </View>
                       </View>
-                      <View style={styles.metaRow}>
-                        <View style={styles.metaPill}>
-                          <Ionicons name="pricetag-outline" size={12} color="#E0E7FF" />
-                          <Text style={styles.meta}>{group.category || 'General'}</Text>
-                        </View>
-                        <View style={styles.metaPill}>
-                          <Ionicons name="people-outline" size={12} color="#E0E7FF" />
-                          <Text style={styles.meta}>{pluralize(Number(group.memberCount || 0), 'member')}</Text>
-                        </View>
-                        {group.privacy === 'private' ? (
-                          <View style={styles.metaPill}>
-                            <Ionicons name="lock-closed-outline" size={12} color="#E0E7FF" />
-                            <Text style={styles.meta}>Private</Text>
-                          </View>
-                        ) : null}
-                      </View>
+                      {group.description ? (
+                        <Text style={styles.heroDescription} numberOfLines={2}>{group.description}</Text>
+                      ) : null}
                     </View>
 
                     {isAdmin && joinRequests.length ? (
@@ -2248,6 +2278,18 @@ function MessageRow({
     })
   ).current;
 
+  const auraAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (message.senderRole === 'admin') {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(auraAnim, { toValue: 1, duration: 1500, useNativeDriver: true }),
+          Animated.timing(auraAnim, { toValue: 0, duration: 1500, useNativeDriver: true })
+        ])
+      ).start();
+    }
+  }, [message.senderRole, auraAnim]);
+
   const handlePressIn = () => {
     Animated.spring(scaleAnim, { toValue: 0.97, useNativeDriver: true, speed: 40, bounciness: 6 }).start();
   };
@@ -2293,6 +2335,15 @@ function MessageRow({
       ) : null}
 
       <Animated.View style={[styles.bubbleColumn, { transform: [{ translateX: swipeX }, { scale: scaleAnim }] }]}>
+        {message.senderRole === 'admin' ? (
+          <>
+            <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: '#FFD700', borderRadius: 20, opacity: auraAnim, transform: [{ scale: 1.05 }] }]} />
+            <View style={[styles.adminBadge, { right: mine ? 14 : undefined }]}><Text style={styles.adminBadgeText}>GOD BADGE</Text></View>
+          </>
+        ) : message.senderPremium ? (
+          <View style={[styles.premiumBadge, { right: mine ? 14 : undefined }]}><Text style={styles.premiumBadgeText}>PREMIUM</Text></View>
+        ) : null}
+
         <Pressable
           onLongPress={() => onOpenReactionPicker(message)}
           onPressIn={handlePressIn}
@@ -2304,6 +2355,8 @@ function MessageRow({
             mine ? styles.bubbleMine : styles.bubbleTheirs,
             isGroupedWithNext && (mine ? styles.bubbleMineNoTail : styles.bubbleTheirsNoTail),
             isSticker && styles.bubbleSticker,
+            !isSticker && message.senderRole === 'admin' && styles.bubbleAdmin,
+            !isSticker && message.senderRole !== 'admin' && message.senderPremium && styles.bubblePremium,
           ]}
         >
           {showHeader ? (

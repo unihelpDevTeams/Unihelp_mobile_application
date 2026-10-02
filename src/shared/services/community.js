@@ -43,6 +43,8 @@ const userSummary = (user, profile = {}) => ({
   name: profile.username || user.displayName || user.email || 'Student',
   email: user.email || '',
   avatar: profile.photo || user.photoURL || '',
+  premium: profile.premium || false,
+  role: profile.role || 'user',
 });
 
 export const searchUsers = async (term, currentUid, pageSize = 12) => {
@@ -352,6 +354,8 @@ export const sendGroupMessage = async (groupId, user, profile, payload) => {
     senderId: user.uid,
     senderName: summary.name,
     senderAvatar: summary.avatar,
+    senderPremium: summary.premium,
+    senderRole: summary.role,
     reactions: {},
     createdAt: serverTimestamp(),
   });

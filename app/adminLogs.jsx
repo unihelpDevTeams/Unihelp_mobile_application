@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, Pressable, SafeAreaView, RefreshControl } from 'react-native';
+import { View, Text, FlatList, StyleSheet, Pressable, SafeAreaView, RefreshControl, Platform } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { getErrorLogs, clearErrorLogs } from '../src/utils/errorLogger';
