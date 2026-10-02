@@ -61,6 +61,13 @@ export function useAudioPlayback({ isPremium }) {
         interruptionMode: 'duckOthers',
         shouldRouteThroughEarpiece: false,
       });
+
+      try {
+        await player.stop();
+      } catch (_stopError) {
+        // Ignore stale-player cleanup issues; continue with the new source.
+      }
+
       setPosition(0);
       player.replace({ uri: audioUrl });
       player.play();

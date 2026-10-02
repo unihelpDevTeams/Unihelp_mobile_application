@@ -1,5 +1,6 @@
 import { PDFDocument } from "pdf-lib";
 import * as ImageManipulator from "expo-image-manipulator";
+import * as FileSystem from "expo-file-system/legacy";
 
 import {
   CLOUDINARY_CONFIG,
@@ -188,31 +189,66 @@ const optimizePdfFile = async (file) => {
   }
 };
 
-const appendFileToFormData = (formData, fieldName, file) => {
-  if (!file) {
+const appendFileToFormData = async (formData, fieldName, file) => {
+  if (file == null) {
     return;
   }
 
-  if (typeof File !== 'undefined' && file instanceof File) {
+  const fileCtor = typeof globalThis !== 'undefined' ? globalThis.File : undefined;
+  const blobCtor = typeof globalThis !== 'undefined' ? globalThis.Blob : undefined;
+
+  if (fileCtor && file instanceof fileCtor) {
     formData.append(fieldName, file, file.name || `${fieldName}.bin`);
     return;
   }
 
-  if (typeof Blob !== 'undefined' && file instanceof Blob) {
+  if (blobCtor && file instanceof blobCtor) {
     formData.append(fieldName, file, file.name || `${fieldName}.bin`);
     return;
   }
 
-  if (file && typeof file === 'object' && (file.uri || file.path || file.url)) {
-    formData.append(fieldName, {
-      uri: file.uri || file.path || file.url,
-      name: file.name || file.fileName || file.filename || `${fieldName}.bin`,
-      type: file.type || file.mimeType || 'application/octet-stream',
-    });
+  if (typeof file === 'string' || typeof file === 'number' || typeof file === 'boolean') {
+    formData.append(fieldName, String(file));
     return;
   }
 
-  formData.append(fieldName, file);
+  const uriSource = file && typeof file === 'object' && (file.uri || file.path || file.url);
+  if (uriSource) {
+    const sourceUri = file.uri || file.path || file.url;
+    const fileName = file.name || file.fileName || file.filename || `${fieldName}.bin`;
+    const type = file.type || file.mimeType || 'application/octet-stream';
+
+    try {
+      if (!blobCtor) {
+        throw new Error('Blob unavailable');
+      }
+
+      const base64 = await FileSystem.readAsStringAsync(sourceUri, { encoding: FileSystem.EncodingType.Base64 });
+      const binaryString = atob(base64);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let index = 0; index < binaryString.length; index += 1) {
+        bytes[index] = binaryString.charCodeAt(index);
+      }
+
+      const resolvedBlob = new blobCtor([bytes], { type });
+      formData.append(fieldName, resolvedBlob, fileName);
+      return;
+    } catch (_error) {
+      throw new Error(`Unable to prepare upload file for ${fieldName}.`);
+    }
+  }
+
+  if (file && typeof file === 'object' && typeof file.arrayBuffer === 'function') {
+    if (!blobCtor) {
+      throw new Error(`Blob implementation unavailable for ${fieldName}.`);
+    }
+
+    const blob = new blobCtor([await file.arrayBuffer()], { type: file.type || 'application/octet-stream' });
+    formData.append(fieldName, blob, file.name || `${fieldName}.bin`);
+    return;
+  }
+
+  throw new Error(`Unsupported FormDataPart for ${fieldName}`);
 };
 
 export const uploadToCloudinary = async (
@@ -230,62 +266,68 @@ export const uploadToCloudinary = async (
   }
 
   return new Promise((resolve, reject) => {
-    const formData = new FormData();
-    const basePublicId = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-    const publicId = validationKind === "pdf" ? `${basePublicId}.pdf` : basePublicId;
-    const uploadUrl = `${CLOUDINARY_BASE_URL}/${resourceType}/upload`;
-
-    formData.append('upload_preset', CLOUDINARY_CONFIG.uploadPreset);
-    formData.append('public_id', publicId);
-
-    appendFileToFormData(formData, 'file', file);
-
-    const xhr = new XMLHttpRequest();
-
-    xhr.upload.addEventListener('progress', (event) => {
-      if (event.lengthComputable && onProgress) {
-        const percent = Math.round((event.loaded / event.total) * 100);
-        onProgress(percent);
-      }
-    });
-
-    xhr.addEventListener('load', () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const response = JSON.parse(xhr.responseText);
-          if (onProgress) onProgress(100);
-          resolve({
-            secure_url: response.secure_url,
-            public_id: response.public_id,
-            format: response.format,
-            bytes: response.bytes,
-            resource_type: response.resource_type,
-            original_filename: file?.name || extractFileNameFromUrl(file?.uri || '') || '',
-          });
-        } catch {
-          reject(new Error('Failed to parse upload response'));
-        }
-        return;
-      }
-
-      let message = 'Upload failed';
+    (async () => {
       try {
-        const errorResponse = JSON.parse(xhr.responseText);
-        message = errorResponse.error?.message || message;
-      } catch (_) {}
-      reject(new Error(message));
-    });
+        const formData = new FormData();
+        const basePublicId = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+        const publicId = validationKind === "pdf" ? `${basePublicId}.pdf` : basePublicId;
+        const uploadUrl = `${CLOUDINARY_BASE_URL}/${resourceType}/upload`;
 
-    xhr.addEventListener('error', () => {
-      reject(new Error('Network error. Check your internet connection.'));
-    });
+        formData.append('upload_preset', CLOUDINARY_CONFIG.uploadPreset);
+        formData.append('public_id', publicId);
 
-    xhr.addEventListener('abort', () => {
-      reject(new Error('Upload was cancelled'));
-    });
+        await appendFileToFormData(formData, 'file', file);
 
-    xhr.open('POST', uploadUrl);
-    xhr.send(formData);
+        const xhr = new XMLHttpRequest();
+
+        xhr.upload.addEventListener('progress', (event) => {
+          if (event.lengthComputable && onProgress) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            onProgress(percent);
+          }
+        });
+
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const response = JSON.parse(xhr.responseText);
+              if (onProgress) onProgress(100);
+              resolve({
+                secure_url: response.secure_url,
+                public_id: response.public_id,
+                format: response.format,
+                bytes: response.bytes,
+                resource_type: response.resource_type,
+                original_filename: file?.name || extractFileNameFromUrl(file?.uri || '') || '',
+              });
+            } catch {
+              reject(new Error('Failed to parse upload response'));
+            }
+            return;
+          }
+
+          let message = 'Upload failed';
+          try {
+            const errorResponse = JSON.parse(xhr.responseText);
+            message = errorResponse.error?.message || message;
+          } catch (_) {}
+          reject(new Error(message));
+        });
+
+        xhr.addEventListener('error', () => {
+          reject(new Error('Network error. Check your internet connection.'));
+        });
+
+        xhr.addEventListener('abort', () => {
+          reject(new Error('Upload was cancelled'));
+        });
+
+        xhr.open('POST', uploadUrl);
+        xhr.send(formData);
+      } catch (error) {
+        reject(error);
+      }
+    })();
   });
 };
 

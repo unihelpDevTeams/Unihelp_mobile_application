@@ -5,6 +5,7 @@ import {
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -61,6 +62,42 @@ const formatShortTime = (value) => {
 };
 
 const createMessageClientId = () => `local_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+const renderLinkedMessageText = (text, mine, colors) => {
+  const content = String(text || '');
+  const urlPattern = /https?:\/\/[^\s]+|www\.[^\s]+/gi;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = urlPattern.exec(content))) {
+    const matchedUrl = match[0];
+    const trailingPunctuation = matchedUrl.match(/[.,!?;:)}\]]+$/)?.[0] || '';
+    const visibleUrl = trailingPunctuation ? matchedUrl.slice(0, -trailingPunctuation.length) : matchedUrl;
+    if (!visibleUrl) continue;
+
+    if (match.index > lastIndex) parts.push(content.slice(lastIndex, match.index));
+    parts.push(
+      <Text
+        key={`link-${match.index}`}
+        accessibilityRole="link"
+        style={{ color: mine ? colors.onBrand : colors.brand, textDecorationLine: 'underline' }}
+        onPress={() => {
+          const url = /^https?:\/\//i.test(visibleUrl) ? visibleUrl : `https://${visibleUrl}`;
+          Linking.openURL(url).catch(() => {});
+        }}
+      >
+        {visibleUrl}
+      </Text>
+    );
+    if (trailingPunctuation) parts.push(trailingPunctuation);
+    lastIndex = match.index + matchedUrl.length;
+  }
+
+  if (!parts.length) return content;
+  if (lastIndex < content.length) parts.push(content.slice(lastIndex));
+  return parts;
+};
 
 const sortMessages = (items = []) => [...items].sort((left, right) => {
   const leftTime = toMillis(left?.createdAt);
@@ -735,8 +772,35 @@ export default function ConversationPage() {
 
   const sendVoiceMessage = useCallback(async (voiceResult) => {
     if (!conversation || !user || !voiceResult?.audioUrl || !canChat) return;
+
+    const clientId = createMessageClientId();
+    const optimisticMessage = {
+      id: clientId,
+      localId: clientId,
+      clientTempId: clientId,
+      senderId: currentUid,
+      senderName: profile?.name || user.displayName || 'Student',
+      audioUrl: voiceResult.audioUrl,
+      duration: voiceResult.duration || 0,
+      played: false,
+      cloudinaryPublicId: voiceResult.cloudinaryPublicId || voiceResult.publicId || '',
+      type: 'voice',
+      createdAt: new Date().toISOString(),
+      status: 'sending',
+      replyTo: replyTo ? {
+        id: replyTo.id,
+        senderId: replyTo.senderId || '',
+        senderName: replyTo.senderName || 'Student',
+        text: '[Voice Message]',
+      } : null,
+    };
+
+    setMessages((prev) => reconcileIncomingMessage(prev, optimisticMessage));
+    setReplyTo(null);
+    scrollToBottom();
+
     try {
-      await sendDirectMessage(conversation, user, profile || {}, {
+      const response = await sendDirectMessage(conversation, user, profile || {}, {
         type: 'voice',
         audioUrl: voiceResult.audioUrl,
         duration: voiceResult.duration || 0,
@@ -748,26 +812,59 @@ export default function ConversationPage() {
           senderName: replyTo.senderName || 'Student',
           text: '[Voice Message]',
         } : null,
+        clientTempId: clientId,
       });
-      setReplyTo(null);
-      scrollToBottom();
+      const nextMessage = response?.message || response || {
+        ...optimisticMessage,
+        status: 'sent',
+      };
+      setMessages((prev) => reconcileIncomingMessage(prev, {
+        ...nextMessage,
+        clientTempId: clientId,
+        localId: clientId,
+        status: nextMessage?.status || 'sent',
+      }));
     } catch (err) {
+      markFailedMessage(clientId, err?.message || 'Failed to send');
       showSendError(err);
     }
-  }, [canChat, conversation, user, profile, replyTo]);
+  }, [canChat, conversation, user, profile, replyTo, currentUid]);
 
   const sendSticker = async (sticker) => {
     if (!sticker || !conversation || !user || sending || !canChat) return;
+    const clientId = createMessageClientId();
+    const optimisticMessage = {
+      id: clientId,
+      localId: clientId,
+      clientTempId: clientId,
+      senderId: currentUid,
+      senderName: profile?.name || user.displayName || 'Student',
+      type: 'sticker',
+      stickerId: sticker.id,
+      createdAt: new Date().toISOString(),
+      status: 'sending',
+      replyTo: replyTo ? { id: replyTo.id, senderId: replyTo.senderId || '', senderName: replyTo.senderName || 'Student', text: '[Sticker]' } : null,
+    };
+
+    setMessages((prev) => reconcileIncomingMessage(prev, optimisticMessage));
+    setReplyTo(null);
+    scrollToBottom();
     setSending(true);
     try {
-      await sendDirectMessage(conversation, user, profile || {}, {
+      const response = await sendDirectMessage(conversation, user, profile || {}, {
         type: 'sticker',
         stickerId: sticker.id,
         replyTo: replyTo ? { id: replyTo.id, senderId: replyTo.senderId || '', senderName: replyTo.senderName || 'Student', text: '[Sticker]' } : null,
+        clientTempId: clientId,
       });
-      setReplyTo(null);
-      scrollToBottom();
-    } catch (error) { showSendError(error); }
+      const nextMessage = response?.message || response || { ...optimisticMessage, status: 'sent' };
+      setMessages((prev) => reconcileIncomingMessage(prev, {
+        ...nextMessage,
+        clientTempId: clientId,
+        localId: clientId,
+        status: nextMessage?.status || 'sent',
+      }));
+    } catch (error) { markFailedMessage(clientId, error?.message || 'Failed to send'); showSendError(error); }
     finally { setSending(false); }
   };
 
@@ -1004,7 +1101,7 @@ export default function ConversationPage() {
                       ]}
                     >
                       <Text style={[styles.text, mine && styles.mineText]}>
-                        {busy ? 'Deleting…' : (item.text || item.body || item.caption || 'Attachment')}
+                        {busy ? 'Deleting…' : renderLinkedMessageText(item.text || item.body || item.caption || 'Attachment', mine, colors)}
                       </Text>
                       <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 6, gap: 4 }}>
                         <Text style={[styles.timestamp, mine && styles.mineTimestamp]}>{formatTime(item.createdAt)}</Text>

@@ -271,52 +271,21 @@ export function useAudioRecorder({ conversationId, isPremium }) {
       const durationSec = Math.max(1, Math.round(durationMs / 1000));
       const token = await auth.currentUser?.getIdToken();
 
-      const appendFileToFormData = (formData, fieldName, file) => {
-        if (!file) {
-          return;
-        }
-
-        if (typeof File !== 'undefined' && file instanceof File) {
-          formData.append(fieldName, file, file.name || `${fieldName}.bin`);
-          return;
-        }
-
-        if (typeof Blob !== 'undefined' && file instanceof Blob) {
-          formData.append(fieldName, file, file.name || `${fieldName}.bin`);
-          return;
-        }
-
-        if (file && typeof file === 'object' && (file.uri || file.path || file.url)) {
-          formData.append(fieldName, {
-            uri: file.uri || file.path || file.url,
-            name: file.name || file.fileName || file.filename || `${fieldName}.bin`,
-            type: file.type || file.mimeType || 'audio/mp4',
-          });
-          return;
-        }
-
-        formData.append(fieldName, file);
-      };
-
-      const formData = new FormData();
-      appendFileToFormData(formData, 'audio', {
-        uri,
-        type: 'audio/mp4',
-        name: `voice_${Date.now()}.m4a`,
-      });
-      formData.append('conversationId', conversationId);
-      formData.append('duration', String(durationSec));
-
-      const response = await fetch(`${getApiUrl()}/api/voice/upload`, {
-        method: 'POST',
+      const response = await FileSystem.uploadAsync(`${getApiUrl()}/api/voice/upload`, uri, {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'audio',
+        mimeType: 'audio/mp4',
+        parameters: {
+          conversationId: String(conversationId),
+          duration: String(durationSec),
+        },
         headers: {
           Authorization: `Bearer ${token}`,
         },
-        body: formData,
       });
-
-      const result = await response.json();
-      if (!response.ok || !result.success) {
+      const result = JSON.parse(response.body || '{}');
+      if (response.status < 200 || response.status >= 300 || !result.success) {
         throw new Error(result.error || 'Upload failed.');
       }
 

@@ -306,8 +306,8 @@ export default function NewsFeedPage() {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-      marginHorizontal: s.md,
-      marginTop: s.sm,
+        marginHorizontal: s.md,
+        marginTop: s.sm,
       marginBottom: s.xs || 4,
       paddingHorizontal: s.md,
       borderRadius: r.xl,
@@ -319,7 +319,7 @@ export default function NewsFeedPage() {
 
     // Composer entry (top of the list)
     stickyHeader: {
-      backgroundColor: c.surface,
+      backgroundColor: c.background,
       borderBottomWidth: 1,
       borderBottomColor: c.borderDefault,
       zIndex: 10,
@@ -412,10 +412,9 @@ export default function NewsFeedPage() {
 
     // Post cards
     card: {
-      backgroundColor: c.surface,
+      backgroundColor: c.background,
       borderBottomWidth: 1,
       borderBottomColor: c.borderDefault,
-      paddingHorizontal: s.lg,
       paddingTop: s.lg,
       paddingBottom: s.sm,
     },

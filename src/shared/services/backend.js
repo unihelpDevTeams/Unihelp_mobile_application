@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import * as FileSystem from 'expo-file-system/legacy';
 import { auth } from '../../../firebase/config';
 import { compressImageForUpload } from '../../../services/cloudinary';
 
@@ -108,31 +109,89 @@ export async function getJson(path) {
   return requestJson(path, { method: 'GET' });
 }
 
-const appendFileToFormData = (formData, fieldName, file) => {
-  if (!file) {
+const appendFileToFormData = async (formData, fieldName, file) => {
+  if (file == null) {
     return;
   }
 
-  if (typeof File !== 'undefined' && file instanceof File) {
+  const fileCtor = typeof globalThis !== 'undefined' ? globalThis.File : undefined;
+  const blobCtor = typeof globalThis !== 'undefined' ? globalThis.Blob : undefined;
+
+  if (fileCtor && file instanceof fileCtor) {
     formData.append(fieldName, file, file.name || `${fieldName}.bin`);
     return;
   }
 
-  if (typeof Blob !== 'undefined' && file instanceof Blob) {
+  if (blobCtor && file instanceof blobCtor) {
     formData.append(fieldName, file, file.name || `${fieldName}.bin`);
     return;
   }
 
-  if (file && typeof file === 'object' && (file.uri || file.path || file.url)) {
-    formData.append(fieldName, {
-      uri: file.uri || file.path || file.url,
-      name: file.name || file.fileName || file.filename || `${fieldName}.bin`,
-      type: file.type || file.mimeType || 'application/octet-stream',
-    });
+  if (typeof file === 'string' || typeof file === 'number' || typeof file === 'boolean') {
+    formData.append(fieldName, String(file));
     return;
   }
 
-  formData.append(fieldName, file);
+  const uriSource = file && typeof file === 'object' && (file.uri || file.path || file.url);
+  if (uriSource) {
+    const uri = file.uri || file.path || file.url;
+    const fileName = file.name || file.fileName || file.filename || `${fieldName}.bin`;
+    const type = file.type || file.mimeType || 'application/octet-stream';
+
+      try {
+        if (!blobCtor) {
+          throw new Error('Blob unavailable');
+        }
+
+        const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+        const binaryString = atob(base64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let index = 0; index < binaryString.length; index += 1) {
+          bytes[index] = binaryString.charCodeAt(index);
+        }
+
+        const blobValue = new blobCtor([bytes], { type });
+        formData.append(fieldName, blobValue, fileName);
+        return;
+      } catch {
+        try {
+          const response = await fetch(uri);
+          if (!response.ok) {
+            throw new Error(`Unable to fetch media from ${uri}: ${response.status}`);
+          }
+          const blobValue = await response.blob();
+          formData.append(fieldName, blobValue, fileName);
+          return;
+        } catch {
+          throw new Error(`Unable to convert media for ${fieldName}. Please try again.`);
+        }
+      }
+  }
+
+  if (file && typeof file === 'object' && typeof file.arrayBuffer === 'function') {
+    const blob = blobCtor ? new blobCtor([await file.arrayBuffer()], { type: file.type || 'application/octet-stream' }) : file;
+    formData.append(fieldName, blob, file.name || `${fieldName}.bin`);
+    return;
+  }
+
+  throw new Error(`Unsupported FormDataPart for ${fieldName}`);
+};
+
+const uploadLocalFileMultipart = async (path, uri, fieldName, mimeType, parameters = {}) => {
+  const headers = await buildHeaders({});
+  const result = await FileSystem.uploadAsync(`${getApiUrl()}${path}`, uri, {
+    httpMethod: 'POST',
+    uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+    fieldName,
+    mimeType,
+    parameters,
+    headers,
+  });
+  const data = JSON.parse(result.body || '{}');
+  if (result.status < 200 || result.status >= 300) {
+    throw new Error(data.message || data.error || 'Upload failed. Please try again.');
+  }
+  return data;
 };
 
 export async function uploadFeatureMedia(file, { feature = 'stories', resourceType = 'auto', onProgress } = {}) {
@@ -140,13 +199,25 @@ export async function uploadFeatureMedia(file, { feature = 'stories', resourceTy
     ? await compressImageForUpload(file, { maxWidth: 1600, maxHeight: 1600, quality: 0.72 })
     : file;
 
+  if (normalizedFile?.uri) {
+    const data = await uploadLocalFileMultipart(
+      '/api/uploads',
+      normalizedFile.uri,
+      'file',
+      normalizedFile.mimeType || normalizedFile.type || 'application/octet-stream',
+      { feature, resourceType }
+    );
+    onProgress?.(100);
+    return data;
+  }
+
   const headers = await buildHeaders({});
   delete headers['Content-Type'];
 
   const formData = new FormData();
   formData.append('feature', feature);
   formData.append('resourceType', resourceType);
-  appendFileToFormData(formData, 'file', normalizedFile);
+  await appendFileToFormData(formData, 'file', normalizedFile);
 
   let response;
   try {
@@ -190,7 +261,20 @@ export async function uploadStickerMedia(file, { onProgress, rotation = 0 } = {}
     mov: 'video/quicktime',
   };
   const mimeType = normalizedFile.mimeType || (normalizedFile.type?.includes('/') ? normalizedFile.type : extensionMimeTypes[extension]) || (normalizedFile.type === 'video' ? 'video/mp4' : 'image/jpeg');
-  appendFileToFormData(formData, 'file', {
+
+  if (normalizedFile.uri) {
+    const data = await uploadLocalFileMultipart(
+      '/api/stickers/upload',
+      normalizedFile.uri,
+      'file',
+      mimeType,
+      { rotation: String(rotation) }
+    );
+    onProgress?.(100);
+    return data.data || data;
+  }
+
+  await appendFileToFormData(formData, 'file', {
     ...normalizedFile,
     uri: normalizedFile.uri,
     name: fileName,
