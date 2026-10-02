@@ -861,7 +861,7 @@ export default function StudyMaterials() {
   );
 
   return (
-    <ScreenShell title="Resources" subtitle={`${resourceTypeLabel} library`} showBack={false}>
+    <ScreenShell scrollable={false} title="Resources" subtitle={`${resourceTypeLabel} library`} showBack={false}>
       {loading ? (
         <View style={styles.loadingWrap}>
           {ListHeader}

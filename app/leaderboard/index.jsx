@@ -73,7 +73,7 @@ export default function LeaderboardScreen() {
   };
 
   return (
-    <ScreenShell title="Leaderboard" subtitle="Top contributors this week" showBack>
+    <ScreenShell scrollable={false} title="Leaderboard" subtitle="Top contributors this week" showBack>
       {/* Timeframe Selector */}
       <View style={styles.timeframeContainer}>
         {['weekly', 'monthly', 'alltime'].map((period) => (

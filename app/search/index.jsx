@@ -305,7 +305,7 @@ export default function SearchScreen() {
   };
 
   return (
-    <ScreenShell title="Search" subtitle="Find notes and past questions" showBack>
+    <ScreenShell scrollable={false} title="Search" subtitle="Find notes and past questions" showBack>
       {/* Search Input */}
       <View style={styles.searchContainer}>
         <Ionicons name="search" size={20} color={colors.textTertiary} />

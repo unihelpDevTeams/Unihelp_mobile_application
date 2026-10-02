@@ -1555,7 +1555,7 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.root}>
-      <ScreenShell showFooter={false}>
+      <ScreenShell scrollable={false} showFooter={false}>
         {/* PREMIUM MARQUEE: slim, scrolling, always visible without hogging space */}
         {!premiumUnlocked ? <PremiumMarquee onPress={() => router.navigate('/premium')} /> : null}
 

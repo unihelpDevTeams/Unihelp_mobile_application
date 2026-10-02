@@ -813,7 +813,7 @@ export default function StudentMarketplacePage() {
   );
 
   return (
-    <ScreenShell title="Student Marketplace" subtitle="Buy and sell student essentials within your community" showBack loading={loading}>
+    <ScreenShell scrollable={false} title="Student Marketplace" subtitle="Buy and sell student essentials within your community" showBack loading={loading}>
       {/* Integrated FlatList Feed */}
       <FlatList
         data={hasActiveFilters ? filteredItems : []}

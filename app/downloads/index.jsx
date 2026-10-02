@@ -105,7 +105,7 @@ export default function DownloadsScreen() {
   ) : null;
 
   return (
-    <ScreenShell title="Downloads" subtitle="Access your offline study materials" showBack>
+    <ScreenShell scrollable={false} title="Downloads" subtitle="Access your offline study materials" showBack>
       <ConfirmDialog
         visible={Boolean(deleteTarget)}
         title="Delete download?"

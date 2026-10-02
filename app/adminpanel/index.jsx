@@ -294,7 +294,7 @@ export default function AdminPanelPage() {
 
   if (!isAdmin) {
     return (
-      <ScreenShell title="Admin Panel" subtitle="Admin-only operations." showBack>
+      <ScreenShell scrollable={false} title="Admin Panel" subtitle="Admin-only operations." showBack>
         <View style={pageStyles.restricted}>
           <Ionicons name="shield-checkmark-outline" size={48} color={colors.textSecondary} />
           <Text style={pageStyles.restrictedTitle}>Access Restricted</Text>
@@ -477,7 +477,7 @@ export default function AdminPanelPage() {
   };
 
   return (
-    <ScreenShell title="Admin Panel" subtitle={activeNav?.section ? `${activeNav.section} / ${activeNav.label}` : `Welcome, ${profile?.username || 'Admin'}`} showBack loading={loading && activeTab === 'listings'}>
+    <ScreenShell scrollable={false} title="Admin Panel" subtitle={activeNav?.section ? `${activeNav.section} / ${activeNav.label}` : `Welcome, ${profile?.username || 'Admin'}`} showBack loading={loading && activeTab === 'listings'}>
       {/* Compact top bar: brand + current admin identity + refresh. Replaces the
           previous large gradient hero card with a slim, Stripe/Linear-style bar. */}
       <View style={pageStyles.topBar}>

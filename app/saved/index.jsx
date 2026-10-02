@@ -60,7 +60,7 @@ export default function SavedScreen() {
   };
 
   return (
-    <ScreenShell title="Saved" subtitle="Your bookmarked study materials" showBack>
+    <ScreenShell scrollable={false} title="Saved" subtitle="Your bookmarked study materials" showBack>
       {/* Filter Chips */}
       <View style={styles.filtersContainer}>
         <Chip label="All" selected={activeType === 'all'} onPress={() => setActiveType('all')} />

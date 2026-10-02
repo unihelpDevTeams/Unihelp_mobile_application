@@ -245,7 +245,7 @@ export default function AdminSupportCenter() {
 
   if (!isAdmin) {
     return (
-      <ScreenShell title="Support Center" subtitle="Admin-only operations." showBack>
+      <ScreenShell scrollable={false} title="Support Center" subtitle="Admin-only operations." showBack>
         <View style={styles.restricted}>
           <Ionicons name="shield-checkmark-outline" size={48} color="#64748B" />
           <Text style={styles.restrictedTitle}>Access Restricted</Text>
@@ -326,7 +326,7 @@ export default function AdminSupportCenter() {
   };
 
   return (
-    <ScreenShell
+    <ScreenShell scrollable={false}
       title="Support Center"
       subtitle="Manage contact messages, reports, and suggestions"
       showBack

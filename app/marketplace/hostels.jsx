@@ -581,7 +581,7 @@ export default function HostelsPage() {
   );
 
   return (
-    <ScreenShell title="Hostels" subtitle="Find affordable accommodation around campus" showBack loading={loading}>
+    <ScreenShell scrollable={false} title="Hostels" subtitle="Find affordable accommodation around campus" showBack loading={loading}>
       <FlatList
         data={hasActiveFilters ? filteredHostels : []}
         keyExtractor={(item, index) => item?.id ?? `hostel-${index}`}
