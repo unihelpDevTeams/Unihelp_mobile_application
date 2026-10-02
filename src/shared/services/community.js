@@ -464,8 +464,14 @@ export const deleteGroup = async (groupId, currentUserId) => {
 };
 
 export const listenConversationMessages = (conversationId, callback) => {
-  const q = query(collection(db, 'conversations', conversationId, 'messages'), orderBy('createdAt', 'asc'));
-  return onSnapshot(q, (snap) => callback(mapDocs(snap)));
+  const q = query(
+    collection(db, 'conversations', conversationId, 'messages'),
+    orderBy('createdAt', 'desc'),
+    limit(MESSAGE_PAGE_SIZE)
+  );
+  return onSnapshot(q, (snap) => {
+    callback(mapDocs(snap).reverse(), snap.docs[snap.docs.length - 1] || null);
+  });
 };
 
 export const startConversation = async (currentUser, otherUser, profile) => {
