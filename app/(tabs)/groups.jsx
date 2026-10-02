@@ -14,7 +14,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { fetchGroups, fetchUserGroups } from '../../services/firestoreSync';
+import { fetchGroupRecommendations, fetchUserGroups } from '../../services/firestoreSync';
 import { joinPublicGroup, requestJoinGroup } from '../../src/shared/services/community';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
@@ -62,6 +62,14 @@ const groupTitle = (group) => group?.name || group?.title || 'Untitled group';
 const groupDescription = (group) => group?.description || group?.summary || 'No description yet.';
 const normalize = (value = '') => String(value).trim().toLowerCase();
 const getMemberCount = (group = {}) => Number(group.memberCount || group.members?.length || 0);
+const personalizedGroupRandom = (uid, groupId) => {
+  const value = `${uid || 'guest'}:${groupId}`;
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) + hash + value.charCodeAt(index)) | 0;
+  }
+  return (hash >>> 0) / 0xffffffff;
+};
 
 const pickImage = (group = {}) => {
   const candidates = [
@@ -528,12 +536,15 @@ export default function Groups() {
         return true;
       })
       .sort((a, b) => {
-        // Your groups first, then most active, then alphabetical.
         if (a.isJoined !== b.isJoined) return a.isJoined ? -1 : 1;
-        if (a.memberCount !== b.memberCount) return b.memberCount - a.memberCount;
-        return groupTitle(a.group).localeCompare(groupTitle(b.group));
+        const score = (entry) => (
+          Number(entry.group.friendMemberCount || 0) * 100 +
+          Math.log1p(entry.memberCount) * 6 +
+          personalizedGroupRandom(user?.uid, entry.group.id) * 36
+        );
+        return score(b) - score(a);
       });
-  }, [categoryFilter, entries, membershipFilter, query]);
+  }, [categoryFilter, entries, membershipFilter, query, user?.uid]);
 
   const hasActiveFilters = Boolean(normalize(query)) || categoryFilter !== 'All' || membershipFilter !== 'all';
 
@@ -561,7 +572,10 @@ export default function Groups() {
       // Only show the full-screen spinner on the first load; refresh silently afterwards.
       if (!hasLoadedRef.current) setLoading(true);
       setError('');
-      Promise.all([fetchGroups(), user?.uid ? fetchUserGroups(user.uid) : Promise.resolve([])])
+      Promise.all([
+        fetchGroupRecommendations(user?.uid),
+        user?.uid ? fetchUserGroups(user.uid) : Promise.resolve([]),
+      ])
         .then(([items, memberships]) => {
           if (!active) return;
           hasLoadedRef.current = true;
@@ -575,6 +589,7 @@ export default function Groups() {
           );
         })
         .catch((fetchError) => {
+          console.error('[Groups] Failed to load recommendations or memberships. Firestore index details, if required, are included in the error:', fetchError);
           if (active) {
             animateNext();
             setError(fetchError?.message || 'Could not load groups. Try again.');
@@ -821,7 +836,7 @@ export default function Groups() {
 
             {/* Section header */}
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Groups</Text>
+              <Text style={styles.sectionTitle}>Picked for you</Text>
               <View style={styles.sectionActions}>
                 {hasActiveFilters ? (
                   <Pressable onPress={resetFilters} hitSlop={8} accessibilityRole="button">
@@ -924,6 +939,7 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
   const { group, role, isJoined, isRequested, isPrivate, needsApproval, memberCount } = entry;
   const title = groupTitle(group);
   const imageUrl = pickImage(group);
+  const friendMemberCount = Number(group.friendMemberCount || 0);
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
@@ -990,6 +1006,17 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
             />
             {group.category ? (
               <Meta icon="pricetag-outline" text={group.category} styles={styles} colors={colors} />
+            ) : null}
+            {friendMemberCount > 0 ? (
+              <Meta
+                icon="people-outline"
+                text={`${friendMemberCount} ${friendMemberCount === 1 ? 'friend' : 'friends'} here`}
+                styles={styles}
+                colors={colors}
+              />
+            ) : null}
+            {group.isPopular ? (
+              <Meta icon="flame-outline" text="Popular" styles={styles} colors={colors} />
             ) : null}
             <Meta
               icon={isPrivate ? 'lock-closed-outline' : 'globe-outline'}

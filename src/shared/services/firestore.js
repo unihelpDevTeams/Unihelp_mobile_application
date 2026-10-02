@@ -1,6 +1,7 @@
 import {
   addDoc,
   collection,
+  collectionGroup,
   deleteDoc,
   doc,
   documentId,
@@ -316,6 +317,66 @@ export async function fetchGroupsPage({ pageSize = 20, cursor = null } = {}) {
 
 export async function fetchGroups() {
   return (await fetchGroupsPage({ pageSize: 20 })).items;
+}
+
+export async function fetchGroupRecommendations(uid = auth.currentUser?.uid) {
+  const groupsRef = collection(db, COLLECTIONS.groups);
+  const [recentSnapshot, popularSnapshot, friendsSnapshot] = await Promise.all([
+    getDocs(query(groupsRef, orderBy('lastActivityAt', 'desc'), limit(30))),
+    getDocs(query(groupsRef, orderBy('memberCount', 'desc'), limit(30))),
+    uid
+      ? getDocs(query(collection(db, COLLECTIONS.friends), where('users', 'array-contains', uid), limit(40)))
+      : Promise.resolve(null),
+  ]);
+
+  const groupsById = new Map();
+  const popularGroupIds = new Set(popularSnapshot.docs.map((item) => item.id));
+  for (const item of [...recentSnapshot.docs, ...popularSnapshot.docs]) {
+    groupsById.set(item.id, {
+      id: item.id,
+      ...item.data(),
+      isPopular: popularGroupIds.has(item.id),
+    });
+  }
+
+  const friendIds = [...new Set(
+    (friendsSnapshot?.docs || [])
+      .flatMap((friendship) => friendship.data()?.users || [])
+      .filter((friendId) => friendId && friendId !== uid)
+  )].slice(0, 30);
+  const friendMemberCounts = new Map();
+
+  if (friendIds.length) {
+    const memberships = await getDocs(query(
+      collectionGroup(db, 'members'),
+      where('uid', 'in', friendIds),
+      limit(80)
+    ));
+    const friendGroupIds = new Set();
+
+    for (const membership of memberships.docs) {
+      const pathParts = membership.ref.path.split('/');
+      if (pathParts.length !== 4 || pathParts[0] !== 'groups' || pathParts[2] !== 'members') continue;
+      const groupId = pathParts[1];
+      friendGroupIds.add(groupId);
+      friendMemberCounts.set(groupId, (friendMemberCounts.get(groupId) || 0) + 1);
+    }
+
+    const missingGroupIds = [...friendGroupIds].filter((groupId) => !groupsById.has(groupId)).slice(0, 12);
+    const friendGroups = await Promise.all(
+      missingGroupIds.map((groupId) => getDoc(doc(db, COLLECTIONS.groups, groupId)))
+    );
+    for (const groupSnapshot of friendGroups) {
+      if (groupSnapshot.exists()) {
+        groupsById.set(groupSnapshot.id, { id: groupSnapshot.id, ...groupSnapshot.data() });
+      }
+    }
+  }
+
+  return [...groupsById.values()].map((group) => ({
+    ...group,
+    friendMemberCount: friendMemberCounts.get(group.id) || 0,
+  }));
 }
 
 export async function fetchUserGroups(uid = auth.currentUser?.uid) {

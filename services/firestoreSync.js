@@ -21,6 +21,7 @@ export {
   listenUnreadConversationCount,
   fetchFormulas,
   fetchGroups,
+  fetchGroupRecommendations,
   fetchUserGroups,
   countUserUploads,
   fetchUserDocuments,
