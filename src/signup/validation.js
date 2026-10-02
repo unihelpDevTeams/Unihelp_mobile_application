@@ -39,6 +39,12 @@ export const VALIDATION_RULES = {
 };
 
 export const ACADEMIC_LEVELS = [
+  { label: '100 level', value: '100 level' },
+  { label: '200 level', value: '200 level' },
+  { label: '300 level', value: '300 level' },
+  { label: '400 level', value: '400 level' },
+  { label: '500 level', value: '500 level' },
+  { label: '600 level', value: '600 level' },
   { label: 'ND 1', value: 'ND 1' },
   { label: 'ND 2', value: 'ND 2' },
   { label: 'HND 1', value: 'HND 1' },
@@ -58,6 +64,21 @@ export const INTEREST_OPTIONS = [
   'Biology',
   'Accounting',
   'Law',
+  'comedian',
+  'Politics',
+  'Sports',
+  'Music',
+  'Art',
+  'Travel',
+  'Food',
+  'Gaming',
+  'Fitness',
+  'Photography',
+  'Fashion',
+  'Technology',
+  'Environment',
+  'History',
+  'Psychology',
 ];
 
 /**

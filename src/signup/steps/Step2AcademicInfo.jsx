@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Keyboard, Platform, View, Text, Pressable, StyleSheet } from 'react-native';
-import { colors, spacing, borderRadius } from '../../shared/theme';
+import { Keyboard, Platform, View, Text, Pressable } from 'react-native';
+import { spacing, borderRadius } from '../../shared/theme';
+import { useThemeStyles } from '../../shared/theme/createStyles';
 import SearchableDropdown from '../components/SearchableDropdown';
 import SchoolTypeFilter from '../../shared/components/SchoolTypeFilter';
 import { useUniversities } from '../hooks/useUniversities';
@@ -30,6 +31,7 @@ function useKeyboardHeight() {
 }
 
 export default function Step2AcademicInfo({ formData, errors, updateField }) {
+  const st = useThemeStyles((themeColors) => createStyles(themeColors));
   const { universities, loading: ul, searchText: us, setSearchText: sus, loadMore: lmu, schoolType, setSchoolType } = useUniversities();
   const { departments, loading: dl, searchText: ds, setSearchText: sds, selectUniversity } = useDepartments();
   const keyboardHeight = useKeyboardHeight();
@@ -124,7 +126,7 @@ export default function Step2AcademicInfo({ formData, errors, updateField }) {
   );
 }
 
-const st = StyleSheet.create({
+const createStyles = (colors) => ({
   c: { gap: spacing['2xl'] }, h: { gap: spacing.xs }, t: { color: colors.ink, fontSize: 24, fontWeight: '900' },
   sub: { color: colors.grey, fontSize: 14, lineHeight: 21 },
   card: { backgroundColor: colors.whiteTransparent, borderRadius: borderRadius['5xl'], borderWidth: 1, borderColor: colors.border, padding: spacing.xl, gap: spacing.lg },
@@ -134,5 +136,5 @@ const st = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   gi: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: borderRadius.full, backgroundColor: colors.canvasLight, borderWidth: 1, borderColor: colors.border },
   giS: { backgroundColor: colors.brand, borderColor: colors.brand }, gt: { fontSize: 13, fontWeight: '600', color: colors.ink },
-  gtS: { color: colors.surface },
+  gtS: { color: colors.onBrand },
 });

@@ -1,9 +1,11 @@
 import React from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, Image as RNImage } from 'react-native';
+import { View, Text, ScrollView, Pressable, Image as RNImage } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, borderRadius } from '../../shared/theme';
+import { spacing, borderRadius } from '../../shared/theme';
+import { useTheme } from '../../shared/theme/ThemeContext';
+import { useThemeStyles } from '../../shared/theme/createStyles';
 
-function SummaryRow({ label, value, onEdit }) {
+function SummaryRow({ label, value, onEdit, styles, colors }) {
   if (!value) return null;
   return (
     <View style={styles.summaryRow}>
@@ -20,7 +22,7 @@ function SummaryRow({ label, value, onEdit }) {
   );
 }
 
-function SectionHeader({ title, step, onEdit }) {
+function SectionHeader({ title, step, onEdit, styles, colors }) {
   return (
     <View style={styles.sectionHeader}>
       <View style={styles.sectionHeaderLeft}>
@@ -40,6 +42,8 @@ function SectionHeader({ title, step, onEdit }) {
 }
 
 export default function Step4Confirmation({ formData, onEditStep }) {
+  const { colors } = useTheme();
+  const styles = useThemeStyles((themeColors) => createStyles(themeColors));
   const fullName = `${formData.firstName} ${formData.lastName}`.trim();
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -58,29 +62,29 @@ export default function Step4Confirmation({ formData, onEditStep }) {
       )}
 
       <View style={styles.card}>
-        <SectionHeader title="Basic Information" step={1} onEdit={() => onEditStep(1)} />
-        <SummaryRow label="Name" value={fullName} />
-        <SummaryRow label="Username" value={formData.username} />
-        <SummaryRow label="Email" value={formData.email} />
+        <SectionHeader title="Basic Information" step={1} onEdit={() => onEditStep(1)} styles={styles} colors={colors} />
+        <SummaryRow label="Name" value={fullName} styles={styles} colors={colors} />
+        <SummaryRow label="Username" value={formData.username} styles={styles} colors={colors} />
+        <SummaryRow label="Email" value={formData.email} styles={styles} colors={colors} />
       </View>
 
       <View style={styles.card}>
-        <SectionHeader title="Academic Information" step={2} onEdit={() => onEditStep(2)} />
-        <SummaryRow label="University" value={formData.universityName} />
-        <SummaryRow label="Department" value={formData.departmentName} />
-        <SummaryRow label="Faculty" value={formData.faculty} />
-        <SummaryRow label="Level" value={formData.level ? `${formData.level} Level` : ''} />
+        <SectionHeader title="Academic Information" step={2} onEdit={() => onEditStep(2)} styles={styles} colors={colors} />
+        <SummaryRow label="University" value={formData.universityName} styles={styles} colors={colors} />
+        <SummaryRow label="Department" value={formData.departmentName} styles={styles} colors={colors} />
+        <SummaryRow label="Faculty" value={formData.faculty} styles={styles} colors={colors} />
+        <SummaryRow label="Level" value={formData.level ? `${formData.level} Level` : ''} styles={styles} colors={colors} />
       </View>
 
       <View style={styles.card}>
-        <SectionHeader title="How you found Unihelp" step={3} onEdit={() => onEditStep(3)} />
-        <SummaryRow label="Source" value={formData.heardFrom} />
-        <SummaryRow label="Source details" value={formData.heardFromOther} />
+        <SectionHeader title="How you found Unihelp" step={3} onEdit={() => onEditStep(3)} styles={styles} colors={colors} />
+        <SummaryRow label="Source" value={formData.heardFrom} styles={styles} colors={colors} />
+        <SummaryRow label="Source details" value={formData.heardFromOther} styles={styles} colors={colors} />
       </View>
 
       <View style={styles.card}>
-        <SectionHeader title="Profile" step={4} onEdit={() => onEditStep(4)} />
-        <SummaryRow label="Bio" value={formData.bio} />
+        <SectionHeader title="Profile" step={4} onEdit={() => onEditStep(4)} styles={styles} colors={colors} />
+        <SummaryRow label="Bio" value={formData.bio} styles={styles} colors={colors} />
         {formData.interests?.length > 0 && (
           <View style={styles.interestsSection}>
             <Text style={styles.summaryLabel}>Interests</Text>
@@ -98,7 +102,7 @@ export default function Step4Confirmation({ formData, onEditStep }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => ({
   screen: { flex: 1 },
   content: { gap: spacing.lg, paddingBottom: spacing['2xl'] },
 
@@ -122,7 +126,7 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.xs },
   sectionHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   sectionStepDot: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.brand, alignItems: 'center', justifyContent: 'center' },
-  sectionStepDotText: { color: colors.surface, fontWeight: '800', fontSize: 12 },
+  sectionStepDotText: { color: colors.onBrand, fontWeight: '800', fontSize: 12 },
   sectionTitle: { color: colors.ink, fontWeight: '700', fontSize: 15 },
   sectionEditButton: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   sectionEditButtonText: { color: colors.brandText, fontWeight: '600', fontSize: 12 },

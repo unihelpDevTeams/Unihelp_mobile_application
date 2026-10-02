@@ -5,7 +5,6 @@ import {
   LayoutAnimation,
   Platform,
   Pressable,
-  StyleSheet,
   Text,
   TextInput,
   UIManager,
@@ -15,7 +14,9 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
-import { colors, spacing, borderRadius } from '../../shared/theme';
+import { spacing, borderRadius } from '../../shared/theme';
+import { useTheme } from '../../shared/theme/ThemeContext';
+import { useThemeStyles } from '../../shared/theme/createStyles';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -23,7 +24,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 const FALLBACK_ICON = 'radio-button-off-outline';
 
-function SkeletonChip({ delay }) {
+function SkeletonChip({ delay, styles }) {
   const shimmer = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -53,7 +54,7 @@ function SkeletonChip({ delay }) {
   return <Animated.View style={[styles.skeletonChip, { opacity }]} />;
 }
 
-function OptionChip({ option, active, onPress, index }) {
+function OptionChip({ option, active, onPress, index, styles, colors }) {
   const scale = useRef(new Animated.Value(0.92)).current;
   const opacity = useRef(new Animated.Value(0)).current;
 
@@ -127,7 +128,7 @@ function OptionChip({ option, active, onPress, index }) {
         </View>
         {active && (
           <View style={styles.checkBadge}>
-            <Ionicons name="checkmark" size={10} color={colors.white} />
+            <Ionicons name="checkmark" size={10} color={colors.onBrand} />
           </View>
         )}
       </Pressable>
@@ -136,6 +137,8 @@ function OptionChip({ option, active, onPress, index }) {
 }
 
 export default function Step3HeardFrom({ formData, errors, updateField }) {
+  const { colors } = useTheme();
+  const styles = useThemeStyles((themeColors) => createStyles(themeColors));
   const [remoteSources, setRemoteSources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
@@ -259,7 +262,7 @@ export default function Step3HeardFrom({ formData, errors, updateField }) {
         {loading ? (
           <View style={styles.skeletonGrid}>
             {[0, 80, 150, 210, 260].map((delay) => (
-              <SkeletonChip key={delay} delay={delay} />
+              <SkeletonChip key={delay} delay={delay} styles={styles} />
             ))}
           </View>
         ) : (
@@ -282,6 +285,8 @@ export default function Step3HeardFrom({ formData, errors, updateField }) {
                     index={index}
                     active={selected === option.name}
                     onPress={() => handleSelect(option.name)}
+                    styles={styles}
+                    colors={colors}
                   />
                 ))}
               </View>
@@ -301,7 +306,7 @@ export default function Step3HeardFrom({ formData, errors, updateField }) {
         {selected && !isCustom ? (
           <View style={styles.selectedBanner}>
             <View style={styles.selectedCheckWrap}>
-              <Ionicons name="checkmark" size={12} color={colors.white} />
+              <Ionicons name="checkmark" size={12} color={colors.onBrand} />
             </View>
             <Text style={styles.selectedBannerText} numberOfLines={1}>
               Selected: <Text style={styles.selectedBannerValue}>{selected}</Text>
@@ -346,7 +351,7 @@ export default function Step3HeardFrom({ formData, errors, updateField }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => ({
   container: {
     gap: spacing.xl || 20,
   },
@@ -382,7 +387,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   card: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: borderRadius.xl || 16,
     borderWidth: 1,
     borderColor: colors.border,
@@ -494,12 +499,12 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 10,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   optionIconWrapActive: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
   },
   optionLogo: { width: 44, height: 44, borderRadius: 10, backgroundColor: colors.canvasLight },
   optionCopy: { flex: 1, gap: 3 },

@@ -4,11 +4,12 @@ import {
   Text,
   TextInput,
   Pressable,
-  StyleSheet,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, borderRadius } from '../../shared/theme';
+import { spacing, borderRadius } from '../../shared/theme';
+import { useTheme } from '../../shared/theme/ThemeContext';
+import { useThemeStyles } from '../../shared/theme/createStyles';
 import { useUsernameCheck } from '../hooks/useUsernameCheck';
 
 const LABELS = {
@@ -22,6 +23,8 @@ const LABELS = {
 
 export default function Step1BasicInfo({ formData, errors, updateField }) {
   const [showPassword, setShowPassword] = useState(false);
+  const { colors } = useTheme();
+  const styles = useThemeStyles((themeColors) => createStyles(themeColors));
 
   const {
     onChangeUsername,
@@ -207,7 +210,7 @@ export default function Step1BasicInfo({ formData, errors, updateField }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => ({
   container: {
     gap: spacing['2xl'],
   },

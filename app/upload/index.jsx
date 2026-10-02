@@ -23,12 +23,7 @@ import {
   updateQuestion,
   updateStudentListing,
 } from '../../services/firestoreSync';
-import {
-  toCloudinaryAsset,
-  uploadFile,
-  uploadImage,
-  uploadPDF,
-} from '../../services/cloudinary';
+import { toCloudinaryAsset } from '../../services/cloudinary';
 import { postJson, uploadFeatureMedia } from '../../src/shared/services/backend';
 import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
@@ -579,20 +574,12 @@ export default function UploadPage() {
       });
     }
 
-    if (config.fileKind === 'pdf') {
-      return uploadPDF(file, (percent) => {
+    return uploadFeatureMedia(file, {
+      feature: 'resources',
+      resourceType: 'auto',
+      onProgress: (percent) => {
         setProgress((current) => ({ ...current, [file.name]: Math.round(percent) }));
-      });
-    }
-
-    if (config.fileKind === 'images') {
-      return uploadImage(file, (percent) => {
-        setProgress((current) => ({ ...current, [file.name]: Math.round(percent) }));
-      });
-    }
-
-    return uploadFile(file, (percent) => {
-      setProgress((current) => ({ ...current, [file.name]: Math.round(percent) }));
+      },
     });
   };
 
@@ -618,9 +605,12 @@ export default function UploadPage() {
           fileName: uploaded.name || '',
           fileSize: uploaded.size || 0,
           files: uploadedAttachments,
-          fileAsset: toCloudinaryAsset(uploaded),
-          cloudinaryPublicId: uploaded.publicId || '',
-          cloudinaryResourceType: uploaded.resourceType || 'raw',
+          fileAsset: {
+            url: uploaded.url || '',
+            publicId: uploaded.publicId || '',
+            resourceType: uploaded.resourceType || 'raw',
+            provider: 'r2',
+          },
         };
       }
       return payload;

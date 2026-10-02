@@ -1,11 +1,16 @@
 import React from 'react';
-import { Alert, View, Text, TextInput, Pressable, StyleSheet, Image as RNImage } from 'react-native';
+import { Alert, View, Text, TextInput, Pressable, Image as RNImage } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { colors, spacing, borderRadius } from '../../shared/theme';
+import { spacing, borderRadius } from '../../shared/theme';
+import { useTheme } from '../../shared/theme/ThemeContext';
+import { useThemeStyles } from '../../shared/theme/createStyles';
 import InterestSelector from '../components/InterestSelector';
 
 export default function Step3Profile({ formData, errors, updateField }) {
+  const { colors } = useTheme();
+  const s = useThemeStyles((themeColors) => createStyles(themeColors));
+
   const pickPhoto = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
@@ -77,7 +82,7 @@ export default function Step3Profile({ formData, errors, updateField }) {
   );
 }
 
-const s = StyleSheet.create({
+const createStyles = (colors) => ({
   container: { gap: spacing['2xl'] }, head: { gap: spacing.xs },
   title: { color: colors.ink, fontSize: 24, fontWeight: '900' },
   sub: { color: colors.grey, fontSize: 14, lineHeight: 21 },
@@ -88,7 +93,7 @@ const s = StyleSheet.create({
   avatarPressed: { opacity: 0.8 },
   avatar: { width: 86, height: 86, borderRadius: 28 },
   avatarPlaceholder: { width: 86, height: 86, borderRadius: 28, backgroundColor: colors.brandLight, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.brandBorder, borderStyle: 'dashed' },
-  avatarPlaceholderError: { borderColor: colors.rose, backgroundColor: colors.roseSoft || '#FFF1F2' },
+  avatarPlaceholderError: { borderColor: colors.rose, backgroundColor: colors.redLight },
   avatarLabel: { color: colors.brandText, fontWeight: '700', fontSize: 10, marginTop: 2 },
   avatarLabelError: { color: colors.rose },
   avatarHint: { color: colors.grey, fontSize: 11 },

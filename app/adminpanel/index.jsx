@@ -377,7 +377,6 @@ export default function AdminPanelPage() {
               );
             })}
           </View>
-
           {loading ? (
             <View style={pageStyles.loadingContainer}>
               <PageLoader label={`Loading ${ADMIN_COLLECTION_MAP[listingType].label}...`} />
