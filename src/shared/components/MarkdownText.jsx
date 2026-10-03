@@ -67,7 +67,7 @@ export default function MarkdownText({ children, style }) {
                 return (
                   <View key={lineIndex} style={styles.listItem}>
                     <Text style={styles.listBullet}>{'\u2022'}</Text>
-                    <InlineText style={styles.listItemText}>{content}</InlineText>
+                    <InlineText style={styles.listItemText} styles={styles}>{content}</InlineText>
                   </View>
                 );
               })}
@@ -84,7 +84,7 @@ export default function MarkdownText({ children, style }) {
                 return (
                   <View key={lineIndex} style={styles.listItem}>
                     <Text style={styles.listBullet}>{lineIndex + 1}.</Text>
-                    <InlineText style={styles.listItemText}>{content}</InlineText>
+                    <InlineText style={styles.listItemText} styles={styles}>{content}</InlineText>
                   </View>
                 );
               })}
