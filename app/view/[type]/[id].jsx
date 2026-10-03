@@ -597,6 +597,16 @@ export default function RecordViewPage() {
     }
   };
 
+  const composeMessageText = () => {
+    const displayPrice = item?.price ?? item?.rent;
+    const priceText = displayPrice ? `\nPrice: ${formatNaira(displayPrice)}` : '';
+    const locationText = (item?.location || item?.address) ? `\nLocation: ${item.location || item.address}` : '';
+    const conditionText = item?.condition ? `\nCondition: ${item.condition}` : '';
+    const categoryText = item?.category ? `\nCategory: ${item.category}` : '';
+    const details = `${priceText}${categoryText}${conditionText}${locationText}`;
+    return `Hi, I'm interested in "${title}" - is it still available?${details ? '\n' + details : ''}`;
+  };
+
   const messageOwnerInApp = async () => {
     if (!user) {
       Alert.alert('Sign in required', 'Sign in to message the owner directly.');
@@ -612,8 +622,9 @@ export default function RecordViewPage() {
       );
       const conversationRef = { id: conversationId, memberIds: [user.uid, ownerId] };
       const messageAttachments = mediaItems?.[0] ? [{ type: 'image', url: mediaItems[0] }] : [];
+      
       await sendDirectMessage(conversationRef, user, profile || {}, {
-        text: `Hi, I'm interested in "${title}" - is it still available?`,
+        text: composeMessageText(),
         attachments: messageAttachments,
         replyTo: null,
       });
@@ -632,8 +643,7 @@ export default function RecordViewPage() {
 
   const messageOwnerOnWhatsApp = async () => {
     if (!whatsAppNumber) return;
-    const message = `Hi, I'm interested in "${title}" on UniHelp - is it still available?`;
-    const url = `https://wa.me/${whatsAppNumber}?text=${encodeURIComponent(message)}`;
+    const url = `https://wa.me/${whatsAppNumber}?text=${encodeURIComponent(composeMessageText())}`;
     try {
       await Linking.openURL(url);
       setContactSheetVisible(false);
