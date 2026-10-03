@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -7,6 +7,7 @@ import {
   listenToPushTokenChanges,
   registerPushNotificationsForCurrentUser,
 } from '../services/pushNotifications';
+import { handleNotificationAction } from '../src/shared/services/notificationActions';
 
 const getRouteTarget = (data = {}) => {
   const conversationId = data?.conversationId || data?.data?.conversationId;
@@ -62,8 +63,24 @@ export function PushNotificationBootstrap() {
       console.log('Foreground notification received:', notification);
     });
 
-    const removeResponseHandler = listenToNotificationResponses((response) => {
-      const target = getRouteTarget(response?.notification?.request?.content?.data || {});
+    const removeResponseHandler = listenToNotificationResponses(async (response) => {
+      const payload = response?.notification?.request?.content?.data || response?.notification?.request?.content?.body || {};
+      const target = getRouteTarget(payload);
+
+      if (response?.actionIdentifier && response.actionIdentifier !== 'default') {
+        const result = await handleNotificationAction({
+          actionIdentifier: response.actionIdentifier,
+          userText: response.userText,
+          notification: response.notification,
+          currentUserId: userId,
+        });
+
+        if (result?.route) {
+          router.push(result.route);
+          return;
+        }
+      }
+
       if (typeof target === 'string') {
         router.push(target);
       } else {
@@ -78,7 +95,7 @@ export function PushNotificationBootstrap() {
       removeResponseHandler.remove();
       removeTokenChangeHandler.remove();
     };
-  }, [router]);
+  }, [router, userId]);
 
   useEffect(() => {
     if (loading || !userId) {

@@ -39,7 +39,7 @@ module.exports = {
     name: "UniHelp",
     slug: "unihelpteam",
     owner: "unihelpdevteam",
-    version: "1.0.4",
+    version: "1.0.5",
     orientation: "portrait",
     icon: "./assets/images/icon-square.png",
     scheme: "unihelp",
@@ -64,7 +64,7 @@ module.exports = {
       package: "com.zenithdev.unihelp",
       googleServicesFile,
       softwareKeyboardLayoutMode: "resize",
-      versionCode: 4,
+      versionCode: 5,
       permissions: ["RECORD_AUDIO", "POST_NOTIFICATIONS"],
       adaptiveIcon: {
         foregroundImage: "./assets/images/icon-square.png",

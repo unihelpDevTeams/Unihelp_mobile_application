@@ -3,6 +3,11 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
+import {
+  NOTIFICATION_ACTION_IDS,
+  getNotificationActionList,
+  getNotificationCategoryForType,
+} from '../src/shared/services/notificationActions';
 
 const DEFAULT_API_URL = 'https://unihelp-backend-dg0o.onrender.com';
 const ANDROID_DEFAULT_CHANNEL_ID = 'default';
@@ -51,11 +56,6 @@ const getApiUrl = (path = '/api/notifications/push-token') => {
   return `${normalizedBase}${normalizedPath}`;
 };
 
-const getEasProjectId = () => {
-  const extra = getExtra();
-  return extra?.eas?.projectId || Constants.easConfig?.projectId || null;
-};
-
 export const configureAndroidNotificationChannels = async () => {
   if (Platform.OS !== 'android' || isAndroidExpoGo) {
     return null;
@@ -73,6 +73,50 @@ export const configureAndroidNotificationChannels = async () => {
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     sound: 'default',
   });
+
+  const categoryMap = {
+    unihelp_message: {
+      actions: [
+        { identifier: NOTIFICATION_ACTION_IDS.REPLY, buttonTitle: 'Reply', textInput: { submitButtonTitle: 'Send', placeholder: 'Type a message' } },
+        { identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read' },
+        { identifier: NOTIFICATION_ACTION_IDS.MUTE, buttonTitle: 'Mute' },
+      ],
+    },
+    unihelp_group_message: {
+      actions: [
+        { identifier: NOTIFICATION_ACTION_IDS.REPLY, buttonTitle: 'Reply', textInput: { submitButtonTitle: 'Send', placeholder: 'Type a message' } },
+        { identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read' },
+        { identifier: NOTIFICATION_ACTION_IDS.MUTE, buttonTitle: 'Mute' },
+      ],
+    },
+    unihelp_comment: {
+      actions: [
+        { identifier: NOTIFICATION_ACTION_IDS.REPLY, buttonTitle: 'Reply', textInput: { submitButtonTitle: 'Send', placeholder: 'Reply' } },
+        { identifier: NOTIFICATION_ACTION_IDS.LIKE, buttonTitle: 'Like' },
+        { identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read' },
+      ],
+    },
+    unihelp_like: {
+      actions: [{ identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read' }],
+    },
+    unihelp_general: {
+      actions: [{ identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read' }],
+    },
+    unihelp_promotion: {
+      actions: [
+        { identifier: NOTIFICATION_ACTION_IDS.VIEW, buttonTitle: 'View' },
+        { identifier: NOTIFICATION_ACTION_IDS.DISMISS, buttonTitle: 'Dismiss' },
+      ],
+    },
+  };
+
+  for (const [categoryIdentifier, config] of Object.entries(categoryMap)) {
+    await Notifications.setNotificationCategoryAsync(categoryIdentifier, config.actions, {
+      previewPlaceholder: 'New UniHelp update',
+      showTitle: true,
+      showSubtitle: true,
+    });
+  }
 
   console.log('[push-debug] Android notification channel ready:', {
     id: ANDROID_DEFAULT_CHANNEL_ID,
@@ -288,6 +332,42 @@ export const listenToForegroundMessages = (handler) => addLazyNotificationListen
   (Notifications, callback) => Notifications.addNotificationReceivedListener(callback),
   handler
 );
+
+export const registerNotificationCategoryForPayload = async (payload = {}) => {
+  if (Platform.OS !== 'android' || isAndroidExpoGo) return null;
+
+  const Notifications = await loadNotificationsModule();
+  if (!Notifications) return null;
+
+  const rawType = payload?.type || payload?.category || payload?.notificationType || 'general';
+  const categoryIdentifier = getNotificationCategoryForType(rawType);
+  const actions = getNotificationActionList(rawType);
+
+  if (!actions.length) {
+    return null;
+  }
+
+  try {
+    const category = await Notifications.setNotificationCategoryAsync(categoryIdentifier, actions.map((action) => ({
+      identifier: action.action,
+      buttonTitle: action.title,
+      ...(action.action === NOTIFICATION_ACTION_IDS.REPLY ? {
+        textInput: {
+          submitButtonTitle: 'Send',
+          placeholder: 'Type a message',
+        },
+      } : {}),
+    })), {
+      previewPlaceholder: 'New UniHelp update',
+      showTitle: true,
+      showSubtitle: true,
+    });
+    return category;
+  } catch (error) {
+    console.warn('Unable to register notification category for payload:', error);
+    return null;
+  }
+};
 
 export const listenToNotificationResponses = (handler) => addLazyNotificationListener(
   (Notifications, callback) => Notifications.addNotificationResponseReceivedListener(callback),

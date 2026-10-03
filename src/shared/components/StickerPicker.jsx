@@ -4,7 +4,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../../context/AuthContext';
 import { isPremiumActive } from '../services/premium';
-import { fetchFavoriteStickers, fetchRecentStickers, fetchStickerPacks, fetchStickers, recordStickerUse } from '../services/stickers';
+import {
+  fetchFavoriteStickers,
+  fetchRecentStickers,
+  fetchStickerPacks,
+  fetchStickers,
+  favoriteSticker,
+  recordStickerUse,
+} from '../services/stickers';
 import { useTheme } from '../theme/ThemeContext';
 import { useThemeStyles } from '../theme/createStyles';
 
