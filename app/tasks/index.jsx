@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import api from '../../src/shared/api';
+import { getJson, postJson, putJson, deleteJson } from '../../src/shared/services/backend';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
 import ConfirmDialog from '../../src/shared/components/ConfirmDialog';
@@ -355,7 +355,7 @@ export default function TasksPage() {
       return;
     }
     try {
-      const data = await api.get('/api/tasks');
+      const data = await getJson('/api/tasks');
       if (isMounted.current) setTasks(data || []);
     } finally {
       if (isMounted.current) setLoading(false);
@@ -392,7 +392,7 @@ export default function TasksPage() {
       if (form.dueDate) {
         isoDate = new Date(form.dueDate).toISOString();
       }
-      await api.post('/api/tasks', {
+      await postJson('/api/tasks', {
         title: form.title.trim(),
         description: form.description.trim(),
         due_date: isoDate
@@ -413,7 +413,7 @@ export default function TasksPage() {
     if (pendingIds.has(task.id)) return;
     setPending(task.id, true);
     try {
-      await api.put(`/api/tasks/${task.id}`, { completed: !task.completed });
+      await putJson(`/api/tasks/${task.id}`, { completed: !task.completed });
       await load();
     } catch (error) {
       Alert.alert('Could not update task', error?.message || 'Please try again.');
@@ -426,7 +426,7 @@ export default function TasksPage() {
     if (pendingIds.has(task.id)) return;
     setPending(task.id, true);
     try {
-      await api.delete(`/api/tasks/${task.id}`);
+      await deleteJson(`/api/tasks/${task.id}`);
       await load();
     } catch (error) {
       Alert.alert('Could not delete task', error?.message || 'Please try again.');

@@ -527,7 +527,7 @@ export default function ConversationPage() {
   /* ------------------------------- Styles -------------------------------- */
 
   const styles = useThemeStyles((c) => ({
-    headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12, paddingHorizontal: 2 },
+    headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: c.borderDefault, marginBottom: 8, paddingHorizontal: 4 },
     avatarWrapper: { width: 48, height: 48, borderRadius: 16, overflow: 'hidden', backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
     avatar: { width: 48, height: 48 },
     avatarFallback: { width: 48, height: 48, borderRadius: 16, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
@@ -1606,7 +1606,7 @@ export default function ConversationPage() {
   ) : null;
 
   return (
-    <ScreenShell title={headerTitle} subtitle={headerSubtitle} showBack loading={loading} scrollable={false}>
+    <ScreenShell showHeader={false} loading={loading} scrollable={false}>
       <FriendRequestModal
         visible={friendRequestVisible}
         person={{ ...otherUser, uid: otherId }}
@@ -1622,6 +1622,9 @@ export default function ConversationPage() {
       />
 
       <View style={styles.headerRow}>
+        <Pressable onPress={() => router.back()} style={{ padding: 4 }} accessibilityRole="button" accessibilityLabel="Go back">
+          <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+        </Pressable>
         <Pressable
           style={styles.avatarWrapper}
           onPress={() => otherId && router.navigate(`/view-user-profile/${otherId}`)}
