@@ -39,8 +39,9 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
     tabText: { color: c.textSecondary, fontSize: 12, fontWeight: '800' },
     tabTextActive: { color: c.onBrand },
     grid: { gap: 10 },
-    sticker: { width: '22%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
+    sticker: { width: '22%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center', position: 'relative' },
     image: { width: 62, height: 62 },
+    favoriteBadge: { position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 10, backgroundColor: 'rgba(15,23,42,0.72)', alignItems: 'center', justifyContent: 'center' },
     pack: { backgroundColor: c.surfaceSecondary, borderRadius: r['2xl'], padding: s.md, marginBottom: s.sm },
     packTitle: { color: c.textPrimary, fontWeight: '800' },
     packMeta: { color: c.textSecondary, fontSize: 12, marginTop: 2 },
@@ -54,7 +55,13 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
-    setLoading(true); setError('');
+    const startLoading = () => {
+      if (!cancelled) {
+        setLoading(true);
+        setError('');
+      }
+    };
+    const timer = setTimeout(startLoading, 0);
     const stickerRequest = tab === 'recent'
       ? fetchRecentStickers()
       : tab === 'favorites'
@@ -69,7 +76,7 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
         if (!cancelled) setError(loadError.message || 'Could not load stickers.');
       })
       .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [visible, tab, selectedPackId]);
 
   const select = async (sticker) => {
@@ -82,6 +89,22 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
     onClose();
   };
 
+  const toggleFavorite = async (sticker, event) => {
+    event?.stopPropagation?.();
+
+    try {
+      const nextValue = !Boolean(sticker.favorite || sticker.isFavorite);
+      await favoriteSticker(sticker.id, nextValue);
+      setStickers((current) => current.map((item) => (
+        item.id === sticker.id
+          ? { ...item, favorite: nextValue, isFavorite: nextValue }
+          : item
+      )));
+    } catch (favoriteError) {
+      console.error('[StickerPicker] Failed to toggle favorite sticker:', favoriteError);
+    }
+  };
+
   return <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
     <Pressable style={styles.overlay} onPress={onClose}>
       <Pressable style={styles.sheet} onPress={(event) => event.stopPropagation()}>
@@ -89,7 +112,22 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
         <View style={styles.tabs}>{stickerTabs.map(([key, label]) => <Pressable key={key} onPress={() => { setSelectedPackId(''); setTab(key); }} style={[styles.tab, tab === key && styles.tabActive]}><Text style={[styles.tabText, tab === key && styles.tabTextActive]}>{label}</Text></Pressable>)}</View>
         {loading ? <ActivityIndicator color={colors.brand} /> : error ? <Text style={styles.error}>{error}</Text> : tab === 'packs' ? <FlatList data={packs} keyExtractor={(item) => item.id} renderItem={({ item }) => <Pressable onPress={() => { setSelectedPackId(item.id); setTab('pack'); }} style={styles.pack}><Text style={styles.packTitle}>{item.name}</Text><Text style={styles.packMeta}>{item.description || 'Sticker pack'}</Text></Pressable>} ListEmptyComponent={<Text style={styles.packMeta}>No sticker packs available yet.</Text>} /> : <>
           {tab === 'pack' ? <View style={styles.packHeader}><Pressable accessibilityLabel="Back to sticker packs" onPress={() => { setSelectedPackId(''); setTab('packs'); }} style={styles.packBack}><Ionicons name="chevron-back" size={20} color={colors.textPrimary} /></Pressable><Text style={styles.packTitle}>{packs.find((item) => item.id === selectedPackId)?.name || 'Sticker pack'}</Text></View> : null}
-          <FlatList key={`sticker-grid-${stickerColumns}`} data={stickers} numColumns={stickerColumns} columnWrapperStyle={styles.grid} keyExtractor={(item) => item.id} renderItem={({ item }) => <Pressable style={styles.sticker} onPress={() => select(item)} accessibilityLabel={`Send ${item.name}`}><Image source={{ uri: item.thumbnailUrl }} style={styles.image} /></Pressable>} ListEmptyComponent={<Text style={styles.packMeta}>{tab === 'mine' ? 'Your created stickers will appear here.' : 'No stickers here yet.'}</Text>} />
+          <FlatList key={`sticker-grid-${stickerColumns}`} data={stickers} numColumns={stickerColumns} columnWrapperStyle={styles.grid} keyExtractor={(item) => item.id} renderItem={({ item }) => (
+            <Pressable style={styles.sticker} onPress={() => select(item)} accessibilityLabel={`Send ${item.name}`}>
+              <Image source={{ uri: item.thumbnailUrl }} style={styles.image} />
+              <Pressable
+                accessibilityLabel={item.favorite || item.isFavorite ? `Remove ${item.name} from favorites` : `Add ${item.name} to favorites`}
+                onPress={(event) => toggleFavorite(item, event)}
+                style={styles.favoriteBadge}
+              >
+                <Ionicons
+                  name={item.favorite || item.isFavorite ? 'heart' : 'heart-outline'}
+                  size={12}
+                  color={item.favorite || item.isFavorite ? '#FF4D6D' : '#F8FAFC'}
+                />
+              </Pressable>
+            </Pressable>
+          )} ListEmptyComponent={<Text style={styles.packMeta}>{tab === 'mine' ? 'Your created stickers will appear here.' : 'No stickers here yet.'}</Text>} />
         </>}
         <Pressable style={styles.create} onPress={() => premium ? (onClose(), router.navigate('/stickers/create')) : router.navigate('/premium')}><Text style={styles.createText}>{premium ? '+ Create Sticker' : 'Create Sticker with Premium'}</Text></Pressable>
       </Pressable>
