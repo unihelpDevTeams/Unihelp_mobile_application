@@ -344,6 +344,28 @@ export async function toggleMessageReaction(groupId, messageId, emoji, uid) {
     });
   });
 }
+
+export async function toggleDirectMessageReaction(conversationId, messageId, emoji, uid) {
+  if (!conversationId || !messageId || !emoji || !uid) {
+    throw new Error('Missing information for this reaction.');
+  }
+
+  const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
+
+  await runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(messageRef);
+    if (!snap.exists()) throw new Error('This message no longer exists.');
+
+    const reactions = snap.data().reactions || {};
+    const current = Array.isArray(reactions[emoji]) ? reactions[emoji] : [];
+    const hasReacted = current.includes(uid);
+
+    transaction.update(messageRef, {
+      [`reactions.${emoji}`]: hasReacted ? arrayRemove(uid) : arrayUnion(uid),
+    });
+  });
+}
+
 export const sendGroupMessage = async (groupId, user, profile, payload) => {
   const summary = userSummary(user, profile);
   const groupSnap = await getDoc(doc(db, 'groups', groupId));
