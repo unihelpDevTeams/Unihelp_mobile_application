@@ -16,7 +16,6 @@ import ScreenShell from '../../src/shared/components/ScreenShell';
 import EvosAura from '../../src/shared/components/EvosAura';
 import ConfirmDialog from '../../src/shared/components/ConfirmDialog';
 import { PageLoader } from '../../src/shared/components/AILoaders';
-import { getUserProfile } from '../../services/firestoreSync';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { isPremiumActive } from '../../src/shared/services/premium';
@@ -33,6 +32,7 @@ import {
   sendFriendRequest,
   sendMessageRequest,
   unblockStudent,
+  getUserProfileById,
 } from '../../src/shared/services/friendships';
 
 export default function ViewUserProfile() {
@@ -57,7 +57,7 @@ export default function ViewUserProfile() {
     const load = async () => {
       if (!targetUid) return;
       try {
-        const data = await getUserProfile(targetUid);
+        const data = await getUserProfileById(targetUid);
         if (!cancelled) setProfile(data);
       } catch (error) {
         console.warn('Failed to load user profile', error);
