@@ -21,10 +21,7 @@ export const getResourceOwnerId = (item = {}) =>
 
 export const canUploadResource = ({ type, user, profile }) => {
   const uid = profile?.uid || user?.uid;
-  if (!uid) return false;
-  if (type === 'question') return isResourceAdmin(profile, user);
-  if (type === 'note') return true;
-  return true;
+  return Boolean(uid);
 };
 
 export const canManageResource = ({ type, item, user, profile }) => {

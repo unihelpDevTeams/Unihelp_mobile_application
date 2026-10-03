@@ -78,8 +78,8 @@ export default function ReportPage() {
         gap: s.xs,
       },
       categoryCardActive: {
-        borderColor: '#EF4444',
-        backgroundColor: c.brandLight,
+        borderColor: c.danger,
+        backgroundColor: c.redLight,
       },
       iconWrap: {
         width: 36,
@@ -87,7 +87,7 @@ export default function ReportPage() {
         borderRadius: r.md,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#FEF2F2',
+        backgroundColor: c.redLight,
         marginBottom: 2,
       },
       categoryTitle: {
@@ -163,8 +163,8 @@ export default function ReportPage() {
         backgroundColor: c.surface,
       },
       chipActive: {
-        backgroundColor: '#FEF2F2',
-        borderColor: '#FCA5A5',
+        backgroundColor: c.redLight,
+        borderColor: c.redBorder,
       },
       chipText: {
         fontSize: 12.5,
@@ -172,7 +172,7 @@ export default function ReportPage() {
         color: c.textSecondary,
       },
       chipTextActive: {
-        color: '#DC2626',
+        color: c.danger,
       },
 
       // Submit Button
@@ -181,7 +181,7 @@ export default function ReportPage() {
         borderRadius: r.xl,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#DC2626',
+        backgroundColor: c.danger,
         flexDirection: 'row',
         gap: s.xs,
         marginTop: s.xs,
@@ -191,10 +191,10 @@ export default function ReportPage() {
         opacity: 0.6,
       },
       submitButtonPressed: {
-        backgroundColor: '#B91C1C',
+        backgroundColor: c.rose,
       },
       submitText: {
-        color: '#FFFFFF',
+        color: c.onBrand,
         fontSize: 14,
         fontWeight: '800',
       },
@@ -209,21 +209,21 @@ export default function ReportPage() {
         borderWidth: 1,
       },
       successBox: {
-        backgroundColor: '#ECFDF5',
-        borderColor: '#A7F3D0',
+        backgroundColor: c.greenLight,
+        borderColor: c.green,
       },
       successText: {
-        color: '#047857',
+        color: c.green,
         fontSize: 13,
         fontWeight: '700',
         flex: 1,
       },
       errorBox: {
-        backgroundColor: '#FEF2F2',
-        borderColor: '#FECACA',
+        backgroundColor: c.dangerLight,
+        borderColor: c.dangerBorder,
       },
       errorText: {
-        color: '#DC2626',
+        color: c.danger,
         fontSize: 13,
         fontWeight: '700',
         flex: 1,
@@ -299,7 +299,7 @@ export default function ReportPage() {
                 onPress={() => setReportType(rt.value)}
               >
                 <View style={styles.iconWrap}>
-                  <Ionicons name={rt.icon} size={18} color="#DC2626" />
+                  <Ionicons name={rt.icon} size={18} color={colors.danger} />
                 </View>
                 <Text style={styles.categoryTitle}>{rt.label}</Text>
                 <Text style={styles.categoryText} numberOfLines={2}>
@@ -311,7 +311,7 @@ export default function ReportPage() {
         </View>
 
         <InfoCard
-          icon={<Ionicons name="shield-outline" size={24} color="#DC2626" />}
+          icon={<Ionicons name="shield-outline" size={24} color={colors.danger} />}
           title="Safe & Anonymous"
           text="Your report is kept strictly confidential. The reported user will not be notified of who submitted the flag."
         />
@@ -319,14 +319,14 @@ export default function ReportPage() {
         {/* FEEDBACK MESSAGES */}
         {success ? (
           <View style={[styles.alertBox, styles.successBox]}>
-            <Ionicons name="checkmark-circle" size={20} color="#047857" />
+            <Ionicons name="checkmark-circle" size={20} color={colors.green} />
             <Text style={styles.successText}>{success}</Text>
           </View>
         ) : null}
 
         {error ? (
           <View style={[styles.alertBox, styles.errorBox]}>
-            <Ionicons name="alert-circle" size={20} color="#DC2626" />
+            <Ionicons name="alert-circle" size={20} color={colors.danger} />
             <Text style={styles.errorText}>{error}</Text>
           </View>
         ) : null}
@@ -348,7 +348,7 @@ export default function ReportPage() {
                     <Ionicons
                       name={rt.icon}
                       size={14}
-                      color={active ? '#DC2626' : colors.textTertiary}
+                      color={active ? colors.danger : colors.textTertiary}
                     />
                     <Text style={[styles.chipText, active && styles.chipTextActive]}>
                       {rt.label}
@@ -401,10 +401,10 @@ export default function ReportPage() {
             disabled={!isFormValid || loading || !user}
           >
             {loading ? (
-              <ActivityIndicator color="#FFFFFF" size="small" />
+              <ActivityIndicator color={colors.onBrand} size="small" />
             ) : (
               <>
-                <Ionicons name="flag" size={16} color="#FFFFFF" />
+                <Ionicons name="flag" size={16} color={colors.onBrand} />
                 <Text style={styles.submitText}>Submit Report</Text>
               </>
             )}

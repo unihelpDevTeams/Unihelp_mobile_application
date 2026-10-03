@@ -5,13 +5,46 @@ import { getStoredFormulas, saveDownloadedFormulas } from '../src/shared/offline
 
 let cachedFormulas = null;
 
-const getFormulaId = (item = {}) => item.id ?? item._id ?? item.slug ?? item.title;
+const firstText = (...values) => {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return '';
+};
+
+const getFormulaId = (item = {}) =>
+  firstText(item.id, item._id, item.formulaId, item.slug, item.title);
 
 const getFormulaTitle = (item = {}) =>
-  item.title ?? item.name ?? item.formulaTitle ?? item.label ?? item.question ?? '';
+  firstText(
+    item.title,
+    item.name,
+    item.formulaTitle,
+    item.label,
+    item.question,
+    item.question?.text,
+    item.question?.prompt,
+    item.prompt
+  );
+
+const getFormulaExpression = (item = {}) =>
+  firstText(
+    item.formula,
+    item.formula?.expression,
+    item.formula?.equation,
+    item.formula?.latex,
+    item.formula?.value,
+    item.expression,
+    item.equation,
+    item.latex,
+    item.formulaExpression,
+    item.value,
+    item.answer
+  );
 
 const normalizeFormula = (item = {}) => {
-  const formulaValue = item.formula ?? item.expression ?? item.equation ?? item.latex ?? item.value ?? '';
+  const formulaValue = getFormulaExpression(item);
   const title = getFormulaTitle(item);
 
   return {
@@ -21,7 +54,7 @@ const normalizeFormula = (item = {}) => {
     title: title || 'Untitled Formula',
     subject: item.subject || 'General',
     category: item.category || 'Formula',
-    explanation: item.explanation || item.description || item.body || '',
+    explanation: firstText(item.explanation, item.description, item.body),
     variables: Array.isArray(item.variables) ? item.variables : [],
   };
 };
@@ -56,7 +89,17 @@ const mergeFormula = (cachedFormula, remoteFormula) => {
 };
 
 const unwrapFormulas = (data) => {
-  const list = Array.isArray(data) ? data : data?.formulas || data?.data || data?.items || [];
+  const list = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.formulas)
+      ? data.formulas
+      : Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data?.items)
+          ? data.items
+          : Array.isArray(data?.data?.formulas)
+            ? data.data.formulas
+            : [];
   return Array.isArray(list) ? list.map(normalizeFormula).filter((item) => item.id) : [];
 };
 
@@ -91,8 +134,8 @@ export const useFormulas = (refreshKey = 0) => {
       try {
         const localFormulas = await getStoredFormulas();
         if (localFormulas?.length && !cancelled) {
-          cachedFormulas = localFormulas;
-          setFormulas(localFormulas);
+          cachedFormulas = unwrapFormulas(localFormulas);
+          setFormulas(cachedFormulas);
         } else if (cachedFormulas && !refreshKey && !cancelled) {
           setFormulas(cachedFormulas);
         }

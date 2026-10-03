@@ -18,6 +18,7 @@ import { PageLoader } from '../../src/shared/components/AILoaders';
 import { getUserProfile } from '../../services/firestoreSync';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { isPremiumActive } from '../../src/shared/services/premium';
 import {
   RELATIONSHIP,
   acceptFriendRequest,
@@ -108,6 +109,7 @@ export default function ViewUserProfile() {
   const isSelf = user?.uid === targetUid;
   const isBlocked = relationship.state === RELATIONSHIP.BLOCKED;
   const blockedByMe = isBlocked && relationship.blockedByMe;
+  const premiumActive = isPremiumActive(profile);
 
   useEffect(() => {
     setAvatarFailed(false);
@@ -368,7 +370,17 @@ export default function ViewUserProfile() {
 
           {/* User Basic Info */}
           <View style={styles.profileMeta}>
-            <Text style={[styles.name, { color: colors.textPrimary }]}>{isBlocked ? 'Blocked student' : (profile?.username || 'Student')}</Text>
+            <View style={styles.nameRow}>
+              <Text style={[styles.name, { color: colors.textPrimary }]}>{isBlocked ? 'Blocked student' : (profile?.username || 'Student')}</Text>
+              {!isBlocked && premiumActive ? (
+                <Ionicons
+                  name="checkmark-circle"
+                  size={19}
+                  color={colors.brand}
+                  accessibilityLabel="Verified Premium student"
+                />
+              ) : null}
+            </View>
             {!isBlocked && profile?.email ? <Text style={[styles.email, { color: colors.textSecondary }]}>{profile.email}</Text> : null}
           </View>
 
@@ -713,6 +725,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     marginBottom: 16,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
   },
   name: {
     fontSize: 22,

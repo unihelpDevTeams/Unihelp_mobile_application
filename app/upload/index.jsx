@@ -1,5 +1,19 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Animated,
+  Easing,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as WebBrowser from 'expo-web-browser';
 import { Image } from 'expo-image';
@@ -32,6 +46,30 @@ import { COMMERCE_UPLOAD_LIMITS, isPremiumActive } from '../../src/shared/servic
 
 const SPACE = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 28 };
 const RADIUS = { sm: 10, md: 14, lg: 18, xl: 22, pill: 999 };
+const DESCRIPTION_MAX = 600;
+
+// Used only when the theme does not define a token.
+const FALLBACK_COLORS = {
+  brand: '#4F46E5',
+  brandLight: '#EEF2FF',
+  brandDark: '#3730A3',
+  surface: '#FFFFFF',
+  background: '#F8FAFC',
+  borderDefault: '#E5E7EB',
+  textPrimary: '#0F172A',
+  textSecondary: '#64748B',
+  textTertiary: '#94A3B8',
+  success: '#10B981',
+  greenLight: '#ECFDF5',
+  danger: '#DC2626',
+  dangerLight: '#FEF2F2',
+  dangerBorder: '#FECACA',
+  warning: '#B45309',
+  warningLight: '#FEF3C7',
+  blue: '#2563EB',
+  red: '#DC2626',
+  overlay: 'rgba(15,23,42,0.5)',
+};
 
 const QUESTION_TYPES = [
   'application/pdf',
@@ -156,8 +194,9 @@ const CONFIGS = {
     pickerTypes: QUESTION_TYPES,
     multiple: true,
     attachmentLabel: 'Selected files',
-    uploadHint: 'Images, PDF, DOC, DOCX supported',
-    dropHint: 'Drag & drop files or tap to upload',
+    uploadHint: 'PDF, DOC, DOCX or images',
+    dropHint: 'Tap to choose files',
+    formats: ['PDF', 'DOC', 'DOCX', 'Images'],
     fileKind: 'mixed',
     fields: [
       { key: 'school', label: 'School', placeholder: 'Search for your school...', icon: 'business-outline', type: 'school' },
@@ -183,8 +222,9 @@ const CONFIGS = {
     pickerTypes: PDF_TYPES,
     multiple: false,
     attachmentLabel: 'Selected PDF',
-    uploadHint: 'PDF only',
-    dropHint: 'Choose a PDF to upload',
+    uploadHint: 'One PDF per note',
+    dropHint: 'Tap to choose a PDF',
+    formats: ['PDF'],
     fileKind: 'pdf',
     fields: [
       { key: 'title', label: 'Lecture note title', placeholder: 'e.g. Data Structures — Week 4', icon: 'create-outline', type: 'text' },
@@ -208,9 +248,10 @@ const CONFIGS = {
     routeAfter: '/studentmarketplace',
     pickerTypes: IMAGE_TYPES,
     multiple: true,
-    attachmentLabel: 'Selected photos',
-    uploadHint: 'Images only',
-    dropHint: 'Choose listing photos',
+    attachmentLabel: 'Photos',
+    uploadHint: 'Clear photos sell faster. The first photo is your cover.',
+    dropHint: 'Tap to add photos',
+    formats: ['JPG', 'PNG', 'HEIC'],
     fileKind: 'images',
     fields: [
       { key: 'title', label: 'Title', placeholder: 'e.g. Mini fridge, barely used', icon: 'create-outline', type: 'text' },
@@ -218,9 +259,9 @@ const CONFIGS = {
       { key: 'condition', label: 'Condition', placeholder: 'Select condition...', icon: 'sparkles-outline', type: 'select', options: CONDITION_OPTIONS },
       { key: 'price', label: 'Price', placeholder: 'e.g. 25000', icon: 'cash-outline', type: 'text' },
       { key: 'location', label: 'Pickup location', placeholder: 'e.g. Main gate, Faculty of Science', icon: 'location-outline', type: 'text' },
-      { key: 'availability', label: 'Availability', placeholder: 'Select availability...', icon: 'checkmark-circle-outline', type: 'select', options: MARKETPLACE_AVAILABILITY_OPTIONS },
+      { key: 'availability', label: 'Availability (optional)', placeholder: 'Select availability...', icon: 'checkmark-circle-outline', type: 'select', options: MARKETPLACE_AVAILABILITY_OPTIONS },
       { key: 'phone', label: 'Phone', placeholder: 'e.g. 080XXXXXXXX', icon: 'call-outline', type: 'text' },
-      { key: 'description', label: 'Description', placeholder: 'Add condition, pickup location, etc.', icon: 'document-text-outline', multiline: true, type: 'text' },
+      { key: 'description', label: 'Description (optional)', placeholder: 'Add condition, pickup location, etc.', icon: 'document-text-outline', multiline: true, type: 'text' },
     ],
     defaultForm: { title: '', category: '', condition: '', price: '', location: '', availability: '', phone: '', description: '' },
   },
@@ -235,20 +276,21 @@ const CONFIGS = {
     routeAfter: '/hostelmarketplace',
     pickerTypes: IMAGE_TYPES,
     multiple: true,
-    attachmentLabel: 'Selected photos',
-    uploadHint: 'Images only',
-    dropHint: 'Choose hostel photos',
+    attachmentLabel: 'Photos',
+    uploadHint: 'Show the room, bathroom and compound. The first photo is your cover.',
+    dropHint: 'Tap to add photos',
+    formats: ['JPG', 'PNG', 'HEIC'],
     fileKind: 'images',
     fields: [
       { key: 'title', label: 'Title', placeholder: 'e.g. 2-bedroom self-contained', icon: 'create-outline', type: 'text' },
       { key: 'location', label: 'Location', placeholder: 'e.g. Behind Main Gate', icon: 'location-outline', type: 'text' },
       { key: 'roomType', label: 'Room type', placeholder: 'Select room type...', icon: 'bed-outline', type: 'select', options: ROOM_TYPE_OPTIONS },
-      { key: 'price', label: 'Price', placeholder: 'e.g. 350000', icon: 'cash-outline', type: 'text' },
-      { key: 'distance', label: 'Distance to campus', placeholder: 'e.g. 5 min walk, 10 min bike', icon: 'walk-outline', type: 'text' },
-      { key: 'amenities', label: 'Amenities', placeholder: 'Select amenities...', icon: 'grid-outline', type: 'chips', options: AMENITY_OPTIONS },
-      { key: 'availability', label: 'Availability', placeholder: 'Select availability...', icon: 'checkmark-circle-outline', type: 'select', options: HOSTEL_AVAILABILITY_OPTIONS },
+      { key: 'price', label: 'Price (per year)', placeholder: 'e.g. 350000', icon: 'cash-outline', type: 'text' },
+      { key: 'distance', label: 'Distance to campus (optional)', placeholder: 'e.g. 5 min walk, 10 min bike', icon: 'walk-outline', type: 'text' },
+      { key: 'amenities', label: 'Amenities (optional)', placeholder: 'Select amenities...', icon: 'grid-outline', type: 'chips', options: AMENITY_OPTIONS },
+      { key: 'availability', label: 'Availability (optional)', placeholder: 'Select availability...', icon: 'checkmark-circle-outline', type: 'select', options: HOSTEL_AVAILABILITY_OPTIONS },
       { key: 'phone', label: 'Phone', placeholder: 'e.g. 080XXXXXXXX', icon: 'call-outline', type: 'text' },
-      { key: 'description', label: 'Description', placeholder: 'Add amenities, distance to campus, etc.', icon: 'document-text-outline', multiline: true, type: 'text' },
+      { key: 'description', label: 'Description (optional)', placeholder: 'Add amenities, distance to campus, etc.', icon: 'document-text-outline', multiline: true, type: 'text' },
     ],
     defaultForm: { title: '', location: '', roomType: '', price: '', distance: '', amenities: '', availability: '', phone: '', description: '' },
   },
@@ -270,42 +312,187 @@ const isImageMime = (mimeType = '') => String(mimeType).startsWith('image/');
 const isPdfMime = (mimeType = '', name = '') =>
   String(mimeType) === 'application/pdf' || String(name).toLowerCase().endsWith('.pdf');
 
-// Takes `colors` as a parameter instead of reading it from module scope
-// (it only exists inside the component via useTheme()).
 const fileBadge = (mimeType, name, colors) => {
   if (isImageMime(mimeType)) return { icon: 'image-outline', color: colors.blue, label: 'Image' };
   if (isPdfMime(mimeType, name)) return { icon: 'document-text-outline', color: colors.red, label: 'PDF' };
   return { icon: 'document-outline', color: colors.textTertiary, label: 'Doc' };
 };
 
+const formatSize = (bytes = 0) => {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+};
+
+const makeId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
 /* ------------------------------------------------------------------ */
-/*  Small presentational helper — keeps every card header consistent.  */
-/*  Takes styles/colors as props instead of reading module-scope       */
-/*  values that only exist inside UploadPage.                          */
+/*  Presentational helpers                                            */
 /* ------------------------------------------------------------------ */
-function SectionHeader({ step, icon, title, subtitle, trailing, styles, colors }) {
+
+function ProgressHeader({ percent, steps, onStepPress, isEdit, styles, colors }) {
+  const anim = useRef(new Animated.Value(percent)).current;
+  useEffect(() => {
+    Animated.timing(anim, { toValue: percent, duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
+  }, [anim, percent]);
+
+  const width = anim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] });
+  const complete = percent >= 100;
+
   return (
-    <View style={styles.sectionHeaderWrap}>
-      <View style={styles.sectionHeaderRow}>
-        <View style={styles.sectionIconWrap}>
-          {step ? <Text style={styles.sectionStep}>{step}</Text> : <Ionicons name={icon} size={16} color={colors.brand} />}
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.cardTitle}>{title}</Text>
-          {subtitle ? <Text style={styles.cardSubtitle}>{subtitle}</Text> : null}
-        </View>
-        {trailing}
+    <View style={styles.progressCard}>
+      <View style={styles.progressTop}>
+        <Text style={styles.progressTitle}>
+          {complete ? (isEdit ? 'Ready to save' : 'Ready to publish') : isEdit ? 'Update your details' : 'Complete your upload'}
+        </Text>
+        <Text style={[styles.progressPercent, complete && { color: colors.success }]}>{Math.round(percent)}%</Text>
+      </View>
+      <View style={styles.progressBarTrack}>
+        <Animated.View style={[styles.progressBarFill, { width }, complete && { backgroundColor: colors.success }]} />
+      </View>
+      <View style={styles.stepRow}>
+        {steps.map((step, index) => (
+          <Pressable
+            key={step.key}
+            onPress={() => onStepPress(step.key)}
+            style={({ pressed }) => [styles.stepPill, step.done && styles.stepPillDone, pressed && { opacity: 0.8 }]}
+            accessibilityRole="button"
+            accessibilityLabel={`${step.label}${step.done ? ', done' : ''}`}
+          >
+            <View style={[styles.stepDot, step.done && styles.stepDotDone]}>
+              {step.done ? <Ionicons name="checkmark" size={11} color="#FFFFFF" /> : <Text style={styles.stepDotText}>{index + 1}</Text>}
+            </View>
+            <Text style={[styles.stepLabel, step.done && styles.stepLabelDone]} numberOfLines={1}>
+              {step.label}
+            </Text>
+          </Pressable>
+        ))}
       </View>
     </View>
   );
 }
 
+function SectionHeader({ step, done, icon, title, subtitle, trailing, styles, colors }) {
+  return (
+    <View style={styles.sectionHeaderRow}>
+      <View style={[styles.sectionIconWrap, done && styles.sectionIconDone]}>
+        {done ? (
+          <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+        ) : step ? (
+          <Text style={styles.sectionStep}>{step}</Text>
+        ) : (
+          <Ionicons name={icon} size={16} color={colors.brand} />
+        )}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.cardTitle}>{title}</Text>
+        {subtitle ? <Text style={styles.cardSubtitle}>{subtitle}</Text> : null}
+      </View>
+      {trailing}
+    </View>
+  );
+}
+
+function FieldWrap({ label, required, hint, error, counter, children, styles }) {
+  return (
+    <View style={styles.field}>
+      <View style={styles.labelRow}>
+        <Text style={styles.label}>
+          {label}
+          {required ? <Text style={styles.required}> *</Text> : null}
+        </Text>
+        {counter ? <Text style={styles.counter}>{counter}</Text> : null}
+      </View>
+      {children}
+      {error ? (
+        <View style={styles.fieldMessageRow}>
+          <Ionicons name="alert-circle" size={13} color={StyleSheet.flatten(styles.fieldErrorText).color} />
+          <Text style={styles.fieldErrorText}>{error}</Text>
+        </View>
+      ) : hint ? (
+        <Text style={styles.fieldHint}>{hint}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+function UsageMeter({ count, limit, premium, noun, styles, colors }) {
+  const full = count >= limit;
+  const ratio = Math.min(1, limit ? count / limit : 0);
+  return (
+    <View style={[styles.usageCard, full && styles.usageCardFull]}>
+      <View style={styles.usageTop}>
+        <View style={[styles.usageIcon, full && { backgroundColor: colors.dangerLight }]}>
+          <Ionicons name={full ? 'lock-closed-outline' : premium ? 'sparkles-outline' : 'layers-outline'} size={16} color={full ? colors.danger : colors.brand} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.usageTitle}>{full ? `You've reached your ${noun} limit` : premium ? 'Premium plan' : 'Free plan'}</Text>
+          <Text style={styles.usageText}>
+            {count} of {limit} {noun} used
+            {!premium ? ` · Premium raises this to ${COMMERCE_UPLOAD_LIMITS.premium}` : ''}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.usageTrack}>
+        <View style={[styles.usageFill, { width: `${ratio * 100}%` }, full && { backgroundColor: colors.danger }]} />
+      </View>
+    </View>
+  );
+}
+
+function ListingPreviewCard({ kind, image, title, price, location, chips, styles, colors }) {
+  return (
+    <View style={styles.listingPreview}>
+      <View style={styles.listingPreviewImageWrap}>
+        {image ? (
+          <Image source={{ uri: image }} style={styles.listingPreviewImage} contentFit="cover" cachePolicy="disk" />
+        ) : (
+          <View style={styles.listingPreviewEmpty}>
+            <Ionicons name={kind === 'hostel' ? 'home-outline' : 'image-outline'} size={28} color={colors.textTertiary} />
+          </View>
+        )}
+        <View style={styles.listingPreviewTag}>
+          <Text style={styles.listingPreviewTagText}>Preview</Text>
+        </View>
+      </View>
+      <View style={styles.listingPreviewBody}>
+        <Text style={styles.listingPreviewTitle} numberOfLines={2}>
+          {title || (kind === 'hostel' ? 'Your hostel title' : 'Your listing title')}
+        </Text>
+        <Text style={styles.listingPreviewPrice}>{price > 0 ? `₦${price.toLocaleString()}` : '₦ —'}</Text>
+        {location ? (
+          <View style={styles.listingPreviewRow}>
+            <Ionicons name="location-outline" size={13} color={colors.textSecondary} />
+            <Text style={styles.listingPreviewMeta} numberOfLines={1}>{location}</Text>
+          </View>
+        ) : null}
+        {chips.length ? (
+          <View style={styles.listingPreviewChips}>
+            {chips.slice(0, 3).map((chip) => (
+              <View key={chip} style={styles.listingPreviewChip}>
+                <Text style={styles.listingPreviewChipText} numberOfLines={1}>{chip}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Page                                                              */
+/* ------------------------------------------------------------------ */
+
 export default function UploadPage() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { user, profile } = useAuth();
-  const { colors } = useTheme();
+  const { colors: themeColors } = useTheme();
+  const colors = useMemo(() => ({ ...FALLBACK_COLORS, ...themeColors }), [themeColors]);
   const styles = useMemo(() => createStyles(colors), [colors]);
+
+  const scrollRef = useRef(null);
+  const sectionY = useRef({ details: 0, files: 0 });
 
   const uploadType = normalizeType(params.type);
   const config = CONFIGS[uploadType] || CONFIGS.question;
@@ -322,17 +509,13 @@ export default function UploadPage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [previewItem, setPreviewItem] = useState(null);
   const [focusedField, setFocusedField] = useState(null);
+  const [touched, setTouched] = useState({});
   const [limitInfo, setLimitInfo] = useState(null);
   const [editItem, setEditItem] = useState(null);
   const editId = params.editId ? String(params.editId) : '';
   const isEditMode = Boolean(editId);
 
-  // Derived values that effects below depend on — these must be declared
-  // before any useEffect that references them in its dependency array.
-  // (Referencing a `const` in a dependency array before its declaration
-  // line executes throws "Cannot access before initialization" — the
-  // dependency array is evaluated synchronously during render, unlike the
-  // effect body itself which only runs after render completes.)
+  // Derived values that effects depend on must be declared before those effects.
   const isLimitRestricted = uploadType === 'marketplace' || uploadType === 'hostel';
   const uploadOwnerId = profile?.uid || user?.uid;
   const premiumActive = isPremiumActive(profile);
@@ -348,6 +531,11 @@ export default function UploadPage() {
     user?.email ||
     '';
   const canCreateCurrentResource = canUploadResource({ type: uploadType, user, profile });
+  const screenTitle = isEditMode ? config.title.replace(/^Upload/, 'Edit') : config.title;
+  const submitLabel = isEditMode ? 'Save changes' : config.submitLabel;
+  const noun = uploadType === 'marketplace' ? 'products' : 'hostels';
+  // question/note files can be up to 50 MB; listing photos 10 MB.
+  const sizeLimit = uploadType === 'question' || uploadType === 'note' ? MAX_SIZE[uploadType] : MAX_SIZE.images;
 
   useEffect(() => {
     setForm({ ...config.defaultForm });
@@ -359,6 +547,7 @@ export default function UploadPage() {
     setPreviewItem(null);
     setLimitInfo(null);
     setEditItem(null);
+    setTouched({});
   }, [config.defaultForm, config.key]);
 
   useEffect(() => {
@@ -428,11 +617,12 @@ export default function UploadPage() {
     };
   }, [config.defaultForm, editId, uploadType]);
 
+  // Fields labelled "(optional)" are no longer treated as required for questions.
   const requiredFieldKeys = useMemo(() => {
     if (uploadType === 'note') return ['title', 'course', 'dept', 'school'];
     if (uploadType === 'marketplace') return ['title', 'category', 'condition', 'price', 'location', 'phone'];
     if (uploadType === 'hostel') return ['title', 'location', 'roomType', 'price', 'phone'];
-    return config.fields.map((f) => f.key);
+    return config.fields.filter((f) => !/\(optional\)/i.test(f.label)).map((f) => f.key);
   }, [config.fields, uploadType]);
 
   const existingImages = useMemo(() => {
@@ -446,21 +636,23 @@ export default function UploadPage() {
   );
   const canManageCurrentEdit = !isEditMode || !RESOURCE_UPLOAD_TYPES.includes(uploadType) || canManageResource({ type: uploadType, item: editItem, user, profile });
 
+  const missingFieldKeys = useMemo(() => requiredFieldKeys.filter((key) => !String(form[key] || '').trim()), [form, requiredFieldKeys]);
+  const hasExistingAssets = existingImages.length > 0 || existingResourceAssets.length > 0;
+  const filesMissing =
+    uploadType === 'note'
+      ? attachments.length !== 1 && !(isEditMode && hasExistingAssets)
+      : attachments.length === 0 && !(isEditMode && hasExistingAssets);
+
   const missingItems = useMemo(() => {
-    const items = [];
-    const emptyField = requiredFieldKeys.find((key) => !String(form[key] || '').trim());
-    if (emptyField) {
-      const field = config.fields.find((f) => f.key === emptyField);
-      items.push(`Fill in ${field ? field.label.replace(' (optional)', '').toLowerCase() : 'required fields'}`);
-    }
-    const hasExistingAssets = existingImages.length > 0 || existingResourceAssets.length > 0;
-    if (uploadType === 'note' && attachments.length !== 1 && !(isEditMode && hasExistingAssets)) {
-      items.push('Attach exactly one PDF');
-    } else if (uploadType !== 'note' && attachments.length === 0 && !(isEditMode && hasExistingAssets)) {
-      items.push(uploadType === 'question' ? 'Attach at least one file' : 'Attach at least one photo');
+    const items = missingFieldKeys.map((key) => {
+      const field = config.fields.find((f) => f.key === key);
+      return `Fill in ${field ? field.label.replace(/\s*\(.*?\)\s*/g, '').toLowerCase() : 'required fields'}`;
+    });
+    if (filesMissing) {
+      items.push(uploadType === 'note' ? 'Attach exactly one PDF' : uploadType === 'question' ? 'Attach at least one file' : 'Add at least one photo');
     }
     return items;
-  }, [attachments.length, config.fields, existingImages.length, existingResourceAssets.length, form, isEditMode, requiredFieldKeys, uploadType]);
+  }, [config.fields, filesMissing, missingFieldKeys, uploadType]);
 
   const validation = missingItems.length === 0;
   const normalizedPrice = Number(String(form.price || '').replace(/[^\d.]/g, ''));
@@ -471,20 +663,36 @@ export default function UploadPage() {
   const primaryAttachment = attachments[0] || null;
   const previewSource = previewItem || primaryAttachment;
   const isGridKind = config.fileKind === 'images';
-  const uploadedCount = attachments.filter((item) => (progress[item.name] || 0) >= 100).length;
+
+  const totalSteps = requiredFieldKeys.length + 1;
+  const doneSteps = requiredFieldKeys.length - missingFieldKeys.length + (filesMissing ? 0 : 1);
+  const completion = (doneSteps / totalSteps) * 100;
+  const detailsDone = missingFieldKeys.length === 0 && hasValidPrice && hasValidYear;
+  const filesDone = !filesMissing;
+
+  const overallPercent = attachments.length
+    ? Math.round(attachments.reduce((sum, item) => sum + (progress[item.id] || 0), 0) / attachments.length)
+    : 0;
+  const uploadedCount = attachments.filter((item) => (progress[item.id] || 0) >= 100).length;
+
+  const scrollToStep = (key) => {
+    if (key === 'publish') {
+      scrollRef.current?.scrollToEnd({ animated: true });
+      return;
+    }
+    scrollRef.current?.scrollTo({ y: Math.max(0, (sectionY.current[key] || 0) - 8), animated: true });
+  };
 
   const ensureValidFiles = (fileList) => {
-    const kind = config.fileKind;
-    const limit = MAX_SIZE[kind] || MAX_SIZE.images;
-
     for (const item of fileList) {
-      if (item.size > limit) {
-        throw new Error(`${item.name} is too large`);
+      if (item.size > sizeLimit) {
+        throw new Error(`${item.name} is larger than ${formatSize(sizeLimit)}. Choose a smaller file.`);
       }
     }
   };
 
   const normalizeAttachment = (asset) => ({
+    id: makeId(),
     uri: asset.uri,
     name: asset.name || 'file',
     mimeType: asset.mimeType || asset.type || 'application/octet-stream',
@@ -529,11 +737,12 @@ export default function UploadPage() {
     }
   };
 
-  const removeAttachment = (name) => {
-    setAttachments((current) => current.filter((item) => item.name !== name));
+  // Attachments are tracked by id, so two files with the same name no longer clash.
+  const removeAttachment = (id) => {
+    setAttachments((current) => current.filter((item) => item.id !== id));
     setProgress((current) => {
       const next = { ...current };
-      delete next[name];
+      delete next[id];
       return next;
     });
   };
@@ -564,22 +773,22 @@ export default function UploadPage() {
   };
 
   const uploadAttachment = async (file) => {
+    const onProgress = (percent) => {
+      setProgress((current) => ({ ...current, [file.id]: Math.round(percent) }));
+    };
+
     if (uploadType === 'hostel' || uploadType === 'marketplace') {
       return uploadFeatureMedia(file, {
         feature: uploadType === 'hostel' ? 'hostels' : 'marketplace',
         resourceType: 'image',
-        onProgress: (percent) => {
-          setProgress((current) => ({ ...current, [file.name]: Math.round(percent) }));
-        },
+        onProgress,
       });
     }
 
     return uploadFeatureMedia(file, {
       feature: 'resources',
       resourceType: 'auto',
-      onProgress: (percent) => {
-        setProgress((current) => ({ ...current, [file.name]: Math.round(percent) }));
-      },
+      onProgress,
     });
   };
 
@@ -594,6 +803,8 @@ export default function UploadPage() {
         level: form.level || '',
         lecturer: form.lecturer.trim(),
         description: form.description.trim(),
+        schoolId: form.schoolId || '',
+        departmentId: form.deptId || form.departmentId || '',
         postedBy,
       };
       if (uploaded) {
@@ -715,13 +926,13 @@ export default function UploadPage() {
   const handleUpload = async () => {
     Keyboard.dismiss();
 
-    if (!profile?.uid) {
+    if (!uploadOwnerId) {
       setError('Please login first.');
       return;
     }
 
     if (!canCreateCurrentResource) {
-      setError(uploadType === 'question' ? 'Only admins can upload past questions.' : 'You do not have permission to upload this resource.');
+      setError('Please sign in before uploading a resource.');
       return;
     }
 
@@ -748,8 +959,8 @@ export default function UploadPage() {
     if (isLimitRestricted && !isEditMode && !canUploadMore) {
       setError(
         premiumActive
-          ? `Premium users can upload up to ${uploadLimit} ${uploadType === 'marketplace' ? 'products' : 'hostels'}.`
-          : `Free users can upload up to ${uploadLimit} ${uploadType === 'marketplace' ? 'products' : 'hostels'}. Upgrade to Premium for up to ${COMMERCE_UPLOAD_LIMITS.premium}.`
+          ? `Premium users can upload up to ${uploadLimit} ${noun}.`
+          : `Free users can upload up to ${uploadLimit} ${noun}. Upgrade to Premium for up to ${COMMERCE_UPLOAD_LIMITS.premium}.`
       );
       return;
     }
@@ -761,6 +972,46 @@ export default function UploadPage() {
     const uploadedAttachments = [];
 
     try {
+      if (RESOURCE_UPLOAD_TYPES.includes(uploadType)) {
+        const duplicateCheck = await postJson('/api/resources/check-duplicate', {
+          type: uploadType,
+          details: uploadType === 'note'
+            ? {
+                title: form.title,
+                course: form.course,
+                school: form.school,
+                schoolId: form.schoolId,
+                department: form.dept,
+                departmentId: form.deptId,
+                level: form.level,
+              }
+            : {
+                courseCode: form.courseCode,
+                school: form.school,
+                schoolId: form.schoolId,
+                year: form.year,
+                examType: form.examType,
+                semester: form.semester,
+                department: form.department,
+                departmentId: form.departmentId,
+                level: form.level,
+              },
+          excludeId: isEditMode ? editId : undefined,
+        });
+
+        if (duplicateCheck.duplicate) {
+          const matched = duplicateCheck.match || {};
+          const matchedDetails = [
+            matched.school,
+            matched.year,
+          ].filter(Boolean).join(' · ');
+          setError(
+            `A matching ${uploadType === 'note' ? 'lecture note' : 'past question'} already exists${matched.title ? ` (“${matched.title}”)` : ''}${matchedDetails ? ` for ${matchedDetails}` : ''}. Check the Resources library before uploading another copy.`
+          );
+          return;
+        }
+      }
+
       for (const file of attachments) {
         const uploaded = await uploadAttachment(file);
         uploadedAttachments.push({
@@ -783,6 +1034,9 @@ export default function UploadPage() {
           courseTitle: payload.title || form.title?.trim() || '',
           department: form.department?.trim() || payload.department || '',
           institution: form.school?.trim() || payload.school || '',
+          institutionId: form.schoolId || '',
+          departmentId: form.departmentId || '',
+          level: form.level || '',
           session: form.semester?.trim() || payload.semester || '',
           year: form.year ? Number(String(form.year).trim()) : undefined,
           examType: form.examType?.trim() || payload.examType || 'Examination',
@@ -794,10 +1048,10 @@ export default function UploadPage() {
           },
           rawText: '',
           questions: [],
-          createdBy: profile.uid,
+          createdBy: uploadOwnerId,
           status: 'draft',
-          userId: profile.uid,
-          userEmail: profile.email || '',
+          userId: uploadOwnerId,
+          userEmail: profile?.email || user?.email || '',
         });
 
         const draft = processed?.draft || processed?.item || {};
@@ -812,9 +1066,9 @@ export default function UploadPage() {
       }
 
       if (uploadType === 'note') {
-        payload.uploadedBy = profile.uid;
-        payload.userId = profile.uid;
-        payload.userEmail = profile.email || '';
+        payload.uploadedBy = uploadOwnerId;
+        payload.userId = uploadOwnerId;
+        payload.userEmail = profile?.email || user?.email || '';
       }
 
       await submitToDatabase(payload);
@@ -899,12 +1153,38 @@ export default function UploadPage() {
     });
   };
 
+  const fieldValue = (field) => form[field.key];
+  const setTextValue = (key, value) => {
+    let next = value;
+    if (key === 'year') next = value.replace(/[^0-9]/g, '').slice(0, 4);
+    if (key === 'price') next = value.replace(/[^0-9.]/g, '');
+    if (key === 'phone') next = value.replace(/[^0-9+\s-]/g, '');
+    setForm((current) => ({ ...current, [key]: next }));
+  };
+
+  const fieldError = (field) => {
+    if (!touched[field.key]) return '';
+    const value = String(form[field.key] || '').trim();
+    if (field.key === 'price' && value && !(normalizedPrice > 0)) return 'Enter an amount greater than zero.';
+    if (field.key === 'year' && value && !/^\d{4}$/.test(value)) return 'Use four digits, for example 2024.';
+    if (requiredFieldKeys.includes(field.key) && !value && field.type === 'text') return 'This field is required.';
+    return '';
+  };
+
+  const fieldHint = (field) => {
+    if (field.key === 'price' && normalizedPrice > 0) return `Buyers will see ₦${normalizedPrice.toLocaleString()}`;
+    if (field.key === 'phone' && isLimitRestricted) return 'Shown to interested students so they can reach you.';
+    return '';
+  };
+
   const renderField = (field) => {
+    const required = requiredFieldKeys.includes(field.key);
+    const wrapProps = { label: field.label.replace(/\s*\(optional\)/i, ''), required, styles };
+
     if (field.type === 'school') {
       const schoolValue = form.schoolId || form.school || '';
       return (
-        <View key={field.key} style={styles.field}>
-          <Text style={styles.label}>{field.label}</Text>
+        <FieldWrap key={field.key} {...wrapProps}>
           <SearchableDropdown
             label=""
             placeholder={field.placeholder}
@@ -918,15 +1198,14 @@ export default function UploadPage() {
             icon={field.icon}
             renderItemLabel={(i) => i.shortName ? `${i.name} (${i.shortName})` : i.name}
           />
-        </View>
+        </FieldWrap>
       );
     }
 
     if (field.type === 'department') {
       const deptValue = form.departmentId || form.deptId || '';
       return (
-        <View key={field.key} style={styles.field}>
-          <Text style={styles.label}>{field.label}</Text>
+        <FieldWrap key={field.key} {...wrapProps}>
           <SearchableDropdown
             label=""
             placeholder={field.placeholder}
@@ -939,16 +1218,16 @@ export default function UploadPage() {
             icon={field.icon}
             renderItemLabel={(i) => `${i.name}${i.faculty ? ` (${i.faculty})` : ''}`}
           />
-        </View>
+        </FieldWrap>
       );
     }
 
     if (field.type === 'level') {
       const levelData = ACADEMIC_LEVELS.map((l, i) => ({ id: `level-${i}`, name: l.label, value: l.value }));
-      const levelValue = form.level ? `level-${ACADEMIC_LEVELS.findIndex((l) => l.value === form.level)}` : '';
+      const levelIndex = ACADEMIC_LEVELS.findIndex((l) => l.value === form.level);
+      const levelValue = levelIndex >= 0 ? `level-${levelIndex}` : '';
       return (
-        <View key={field.key} style={styles.field}>
-          <Text style={styles.label}>{field.label}</Text>
+        <FieldWrap key={field.key} {...wrapProps}>
           <SearchableDropdown
             label=""
             placeholder={field.placeholder}
@@ -958,7 +1237,7 @@ export default function UploadPage() {
             icon={field.icon}
             renderItemLabel={(i) => i.name}
           />
-        </View>
+        </FieldWrap>
       );
     }
 
@@ -967,8 +1246,7 @@ export default function UploadPage() {
       const currentIndex = field.options.indexOf(form[field.key]);
       const selectValue = currentIndex >= 0 ? `${field.key}-${currentIndex}` : '';
       return (
-        <View key={field.key} style={styles.field}>
-          <Text style={styles.label}>{field.label}</Text>
+        <FieldWrap key={field.key} {...wrapProps}>
           <SearchableDropdown
             label=""
             placeholder={field.placeholder}
@@ -978,7 +1256,7 @@ export default function UploadPage() {
             icon={field.icon}
             renderItemLabel={(i) => i.name}
           />
-        </View>
+        </FieldWrap>
       );
     }
 
@@ -988,11 +1266,7 @@ export default function UploadPage() {
         .map((v) => v.trim())
         .filter(Boolean);
       return (
-        <View key={field.key} style={styles.field}>
-          <View style={styles.chipsLabelRow}>
-            <Text style={styles.label}>{field.label}</Text>
-            {selected.length ? <Text style={styles.chipsCount}>{selected.length} selected</Text> : null}
-          </View>
+        <FieldWrap key={field.key} {...wrapProps} counter={selected.length ? `${selected.length} selected` : ''}>
           <View style={styles.chipsWrap}>
             {field.options.map((option) => {
               const isSelected = selected.includes(option);
@@ -1011,345 +1285,425 @@ export default function UploadPage() {
               );
             })}
           </View>
-        </View>
+        </FieldWrap>
       );
     }
 
+    const focused = focusedField === field.key;
+    const error = fieldError(field);
+    const isDescription = field.key === 'description';
+    const value = fieldValue(field) || '';
     return (
-      <View key={field.key} style={styles.field}>
-        <Text style={styles.label}>{field.label}</Text>
+      <FieldWrap
+        key={field.key}
+        {...wrapProps}
+        error={error}
+        hint={fieldHint(field)}
+        counter={isDescription ? `${value.length}/${DESCRIPTION_MAX}` : ''}
+      >
         <View
           style={[
             styles.inputWrap,
             field.multiline && styles.inputWrapMultiline,
-            focusedField === field.key && styles.inputWrapFocused,
+            focused && styles.inputWrapFocused,
+            Boolean(error) && styles.inputWrapError,
           ]}
         >
           {field.key === 'price' ? (
-            <Text style={[styles.currencyPrefix, focusedField === field.key && { color: colors.brand }]}>₦</Text>
+            <Text style={[styles.currencyPrefix, focused && { color: colors.brand }]}>₦</Text>
           ) : (
-            <Ionicons
-              name={field.icon}
-              size={17}
-              color={focusedField === field.key ? colors.brand : colors.textTertiary}
-            />
+            <Ionicons name={field.icon} size={17} color={error ? colors.danger : focused ? colors.brand : colors.textTertiary} />
           )}
           <TextInput
-            value={form[field.key]}
-            onChangeText={(value) => setForm((current) => ({ ...current, [field.key]: value }))}
+            value={value}
+            onChangeText={(next) => setTextValue(field.key, next)}
             onFocus={() => setFocusedField(field.key)}
-            onBlur={() => setFocusedField(null)}
+            onBlur={() => {
+              setFocusedField(null);
+              setTouched((current) => ({ ...current, [field.key]: true }));
+            }}
             placeholder={field.placeholder}
             placeholderTextColor={colors.textTertiary}
             style={[styles.input, field.multiline && styles.textArea]}
             multiline={Boolean(field.multiline)}
-            keyboardType={field.key === 'price' ? 'decimal-pad' : field.key === 'phone' || field.key === 'year' ? 'numeric' : 'default'}
+            maxLength={isDescription ? DESCRIPTION_MAX : field.key === 'phone' ? 16 : undefined}
+            keyboardType={field.key === 'price' ? 'decimal-pad' : field.key === 'phone' ? 'phone-pad' : field.key === 'year' ? 'number-pad' : 'default'}
             returnKeyType={field.multiline ? 'default' : 'next'}
+            accessibilityLabel={field.label}
           />
+          {value && !field.multiline ? (
+            <Pressable onPress={() => setTextValue(field.key, '')} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Clear ${field.label}`}>
+              <Ionicons name="close-circle" size={16} color={colors.textTertiary} />
+            </Pressable>
+          ) : null}
         </View>
-      </View>
+      </FieldWrap>
     );
   };
 
+  const previewImage = primaryAttachment?.uri || existingImages[0] || null;
+  const previewChips = [form.category, form.condition, form.roomType, form.availability].filter(Boolean);
+  const showListingPreview = isLimitRestricted && (form.title || normalizedPrice > 0 || previewImage || form.location);
+
+  const steps = [
+    { key: 'details', label: 'Details', done: detailsDone },
+    { key: 'files', label: uploadType === 'question' || uploadType === 'note' ? 'File' : 'Photos', done: filesDone },
+    { key: 'publish', label: isEditMode ? 'Save' : 'Publish', done: uploadReady },
+  ];
+
+  const bannerText = error || message;
+  const bannerIsError = Boolean(error);
+  const helperText = !canCreateCurrentResource
+    ? 'Sign in to upload resources'
+    : !canManageCurrentEdit
+      ? 'You do not have permission to edit this resource'
+      : !canUploadMore
+        ? 'You have reached your upload limit'
+        : missingItems[0]
+          ? `${missingItems[0]}${missingItems.length > 1 ? ` (+${missingItems.length - 1} more)` : ''}`
+          : !hasValidPrice
+            ? 'Enter a valid price greater than zero'
+            : !hasValidYear
+              ? 'Use a four-digit year'
+              : '';
+
   return (
-    <ScreenShell title={config.title} subtitle={config.subtitle} showBack scrollable={false}>
+    <ScreenShell title={screenTitle} subtitle={config.subtitle} showBack scrollable={false}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          {isLimitRestricted && !isEditMode && limitInfo ? (
-            <View style={styles.limitBanner}>
-              <View style={styles.limitBannerIcon}>
-                <Ionicons name={premiumActive ? 'sparkles-outline' : 'lock-open-outline'} size={16} color={colors.brand} />
-              </View>
-              <View style={styles.limitBannerCopy}>
-                <Text style={styles.limitBannerTitle}>{premiumActive ? 'Premium upload plan' : 'Free-user upload limit'}</Text>
-                <Text style={styles.limitBannerText}>
-                  {premiumActive
-                    ? `${limitInfo.count}/${uploadLimit} ${uploadType === 'marketplace' ? 'products' : 'hostels'} used on your Premium plan.`
-                    : `${limitInfo.count}/${uploadLimit} ${uploadType === 'marketplace' ? 'products' : 'hostels'} used. Premium raises this to ${COMMERCE_UPLOAD_LIMITS.premium}.`}
-                </Text>
-              </View>
+        <ScrollView
+          ref={scrollRef}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        >
+          <View style={styles.column}>
+            {isLimitRestricted && !isEditMode && limitInfo ? (
+              <UsageMeter count={limitInfo.count} limit={uploadLimit} premium={premiumActive} noun={noun} styles={styles} colors={colors} />
+            ) : null}
+
+            <ProgressHeader percent={completion} steps={steps} onStepPress={scrollToStep} isEdit={isEditMode} styles={styles} colors={colors} />
+
+            <View style={styles.card} onLayout={(e) => { sectionY.current.details = e.nativeEvent.layout.y; }}>
+              <SectionHeader step="1" done={detailsDone} icon={config.cardIcon} title={config.cardTitle} subtitle="Fields marked * are required" styles={styles} colors={colors} />
+              {config.fields.map((field) => renderField(field))}
             </View>
-          ) : null}
 
-          <View style={styles.hero}>
-            <View style={styles.heroIcon}>
-              <Ionicons name="cloud-upload-outline" size={24} color={colors.brand} />
-            </View>
-            <View style={styles.heroCopy}>
-              <Text style={styles.badge}>{isEditMode ? 'Edit' : 'Upload'}</Text>
-              <Text style={styles.heroTitle}>{config.title}</Text>
-              <Text style={styles.heroText}>{config.subtitle}</Text>
-            </View>
-          </View>
-
-          <View style={styles.card}>
-            <SectionHeader step="1" icon={config.cardIcon} title={config.cardTitle} styles={styles} colors={colors} />
-            {config.fields.map((field) => renderField(field))}
-          </View>
-
-          {isEditMode && existingImages.length > 0 ? (
-            <View style={styles.card}>
-              <SectionHeader
-                icon="images-outline"
-                title="Current photos"
-                subtitle="Already live on this listing"
-                styles={styles}
-                colors={colors}
-              />
-              <View style={styles.grid}>
-                {existingImages.map((url, index) => (
-                  <View key={`${url}-${index}`} style={styles.gridTile}>
-                    <Image source={{ uri: url }} style={styles.gridImage} contentFit="cover" cachePolicy="disk" />
-                  </View>
-                ))}
-              </View>
-            </View>
-          ) : null}
-
-          {isEditMode && existingResourceAssets.length > 0 ? (
-            <View style={styles.card}>
-              <SectionHeader
-                icon="document-attach-outline"
-                title="Current file"
-                subtitle="Upload a replacement only when you want to change the file"
-                styles={styles}
-                colors={colors}
-              />
-              <View style={styles.attachmentList}>
-                {existingResourceAssets.map((asset, index) => (
-                  <View key={`${assetIdentity(asset)}-${index}`} style={styles.attachmentItem}>
-                    <View style={styles.attachmentThumbPlaceholder}>
-                      <Ionicons name="document-text-outline" size={20} color={colors.brand} />
-                    </View>
-                    <View style={styles.attachmentMeta}>
-                      <Text style={styles.attachmentName} numberOfLines={1}>
-                        {asset.name || form.title || 'Attached resource'}
-                      </Text>
-                      <Text style={styles.attachmentSize} numberOfLines={1}>
-                        {asset.resourceType || 'raw'} file
-                      </Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            </View>
-          ) : null}
-
-          <View style={styles.card}>
-            <SectionHeader
-              step="2"
-              icon="images-outline"
-              title={isEditMode && (existingImages.length > 0 || existingResourceAssets.length > 0) ? 'Add replacement files (optional)' : config.attachmentLabel}
-              trailing={
-                attachments.length > 0 ? (
-                  <Pressable onPress={clearAll} hitSlop={10} accessibilityRole="button" accessibilityLabel="Clear all selected files">
-                    <Text style={styles.clearText}>Clear all</Text>
-                  </Pressable>
-                ) : null
-              }
-              styles={styles}
-              colors={colors}
-            />
-
-            {attachments.length === 0 ? (
-              <Pressable
-                onPress={() => setPickerOpen(true)}
-                style={styles.dropZone}
-                accessibilityRole="button"
-                accessibilityLabel={config.dropHint}
-              >
-                <View style={styles.dropIconWrap}>
-                  <Ionicons name="add" size={26} color={colors.brand} />
-                </View>
-                <Text style={styles.dropTitle}>{config.dropHint}</Text>
-                <Text style={styles.dropSubtitle}>{config.uploadHint}</Text>
-              </Pressable>
-            ) : isGridKind ? (
-              <View style={styles.grid}>
-                {attachments.map((item) => {
-                  const percent = progress[item.name] || 0;
-                  return (
-                    <Pressable
-                      key={`${item.name}-${item.size}`}
-                      style={styles.gridTile}
-                      onPress={() => openPreview(item)}
-                      accessibilityRole="imagebutton"
-                      accessibilityLabel={`Preview ${item.name}`}
-                    >
-                      <Image source={{ uri: item.uri }} style={styles.gridImage} contentFit="cover" cachePolicy="disk" />
-                      {uploading && percent > 0 && percent < 100 ? (
-                        <View style={styles.gridProgressOverlay}>
-                          <Text style={styles.gridProgressText}>{percent}%</Text>
-                        </View>
+            {isEditMode && existingImages.length > 0 ? (
+              <View style={styles.card}>
+                <SectionHeader icon="images-outline" title="Current photos" subtitle="Already live on this listing" styles={styles} colors={colors} />
+                <View style={styles.grid}>
+                  {existingImages.map((url, index) => (
+                    <View key={`${url}-${index}`} style={styles.gridTile}>
+                      <Image source={{ uri: url }} style={styles.gridImage} contentFit="cover" cachePolicy="disk" />
+                      {index === 0 ? (
+                        <View style={styles.coverBadge}><Text style={styles.coverBadgeText}>Cover</Text></View>
                       ) : null}
-                      <Pressable
-                        onPress={(e) => {
-                          e.stopPropagation?.();
-                          removeAttachment(item.name);
-                        }}
-                        hitSlop={8}
-                        style={styles.gridRemove}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Remove ${item.name}`}
-                      >
-                        <Ionicons name="close" size={13} color="#FFFFFF" />
-                      </Pressable>
-                    </Pressable>
-                  );
-                })}
-                {config.multiple ? (
-                  <Pressable
-                    onPress={() => setPickerOpen(true)}
-                    style={styles.gridAddTile}
-                    accessibilityRole="button"
-                    accessibilityLabel="Add more photos"
-                  >
-                    <Ionicons name="add" size={22} color={colors.brand} />
-                    <Text style={styles.gridAddText}>Add more</Text>
-                  </Pressable>
-                ) : null}
+                    </View>
+                  ))}
+                </View>
               </View>
-            ) : (
-              <View style={styles.attachmentList}>
-                {attachments.map((item) => {
-                  const percent = progress[item.name] || 0;
-                  const badge = fileBadge(item.mimeType, item.name, colors);
+            ) : null}
 
-                  return (
-                    <Pressable
-                      key={`${item.name}-${item.size}`}
-                      onPress={() => openPreview(item)}
-                      style={styles.attachmentItem}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Preview ${item.name}`}
-                    >
-                      <View style={[styles.attachmentThumbPlaceholder, { backgroundColor: `${badge.color}14` }]}>
-                        <Ionicons name={badge.icon} size={20} color={badge.color} />
+            {isEditMode && existingResourceAssets.length > 0 ? (
+              <View style={styles.card}>
+                <SectionHeader
+                  icon="document-attach-outline"
+                  title="Current file"
+                  subtitle="Upload a replacement only when you want to change the file"
+                  styles={styles}
+                  colors={colors}
+                />
+                <View style={styles.attachmentList}>
+                  {existingResourceAssets.map((asset, index) => (
+                    <View key={`${assetIdentity(asset)}-${index}`} style={styles.attachmentItem}>
+                      <View style={[styles.attachmentThumbPlaceholder, { backgroundColor: colors.brandLight }]}>
+                        <Ionicons name="document-text-outline" size={20} color={colors.brand} />
                       </View>
-
                       <View style={styles.attachmentMeta}>
-                        <Text style={styles.attachmentName} numberOfLines={1}>
-                          {item.name}
-                        </Text>
-                        <View style={styles.attachmentMetaRow}>
-                          <View style={[styles.typeChip, { backgroundColor: `${badge.color}14` }]}>
-                            <Text style={[styles.typeChipText, { color: badge.color }]}>{badge.label}</Text>
-                          </View>
-                          <Text style={styles.attachmentSize}>{(item.size / 1024).toFixed(1)} KB</Text>
-                        </View>
-                        {percent > 0 ? (
-                          <View style={styles.progressRow}>
-                            <View style={styles.progressTrack}>
-                              <View style={[styles.progressFill, { width: `${percent}%` }]} />
+                        <Text style={styles.attachmentName} numberOfLines={1}>{asset.name || form.title || 'Attached resource'}</Text>
+                        <Text style={styles.attachmentSize} numberOfLines={1}>{asset.resourceType || 'raw'} file</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+
+            <View style={styles.card} onLayout={(e) => { sectionY.current.files = e.nativeEvent.layout.y; }}>
+              <SectionHeader
+                step="2"
+                done={filesDone}
+                icon="images-outline"
+                title={isEditMode && hasExistingAssets ? 'Replacement files' : config.attachmentLabel}
+                subtitle={
+                  isEditMode && hasExistingAssets
+                    ? 'Optional. Add files only to replace the current ones'
+                    : attachments.length
+                      ? `${attachments.length} selected`
+                      : config.uploadHint
+                }
+                trailing={
+                  attachments.length > 0 && !uploading ? (
+                    <Pressable onPress={clearAll} hitSlop={10} accessibilityRole="button" accessibilityLabel="Clear all selected files">
+                      <Text style={styles.clearText}>Clear all</Text>
+                    </Pressable>
+                  ) : null
+                }
+                styles={styles}
+                colors={colors}
+              />
+
+              {attachments.length === 0 ? (
+                <Pressable
+                  onPress={() => setPickerOpen(true)}
+                  style={({ pressed }) => [styles.dropZone, pressed && styles.dropZonePressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={config.dropHint}
+                >
+                  <View style={styles.dropIconWrap}>
+                    <Ionicons name={isGridKind ? 'camera-outline' : 'cloud-upload-outline'} size={26} color={colors.brand} />
+                  </View>
+                  <Text style={styles.dropTitle}>{config.dropHint}</Text>
+                  <Text style={styles.dropSubtitle}>Up to {formatSize(sizeLimit)} each</Text>
+                  <View style={styles.formatRow}>
+                    {config.formats.map((format) => (
+                      <View key={format} style={styles.formatChip}>
+                        <Text style={styles.formatChipText}>{format}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </Pressable>
+              ) : isGridKind ? (
+                <View style={styles.grid}>
+                  {attachments.map((item, index) => {
+                    const percent = progress[item.id] || 0;
+                    const done = percent >= 100;
+                    return (
+                      <Pressable
+                        key={item.id}
+                        style={styles.gridTile}
+                        onPress={() => openPreview(item)}
+                        accessibilityRole="imagebutton"
+                        accessibilityLabel={`Preview ${item.name}`}
+                      >
+                        <Image source={{ uri: item.uri }} style={styles.gridImage} contentFit="cover" cachePolicy="disk" />
+                        {index === 0 ? (
+                          <View style={styles.coverBadge}><Text style={styles.coverBadgeText}>Cover</Text></View>
+                        ) : null}
+                        {uploading && percent > 0 && !done ? (
+                          <View style={styles.gridProgressOverlay}>
+                            <View style={styles.gridProgressTrack}>
+                              <View style={[styles.gridProgressFill, { width: `${percent}%` }]} />
                             </View>
-                            <Text style={styles.progressText}>{percent}%</Text>
+                            <Text style={styles.gridProgressText}>{percent}%</Text>
                           </View>
                         ) : null}
-                      </View>
-
-                      <Pressable
-                        onPress={() => removeAttachment(item.name)}
-                        hitSlop={10}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Remove ${item.name}`}
-                      >
-                        <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
+                        {done ? (
+                          <View style={styles.gridDone}><Ionicons name="checkmark" size={13} color="#FFFFFF" /></View>
+                        ) : null}
+                        {!uploading ? (
+                          <Pressable
+                            onPress={(e) => {
+                              e.stopPropagation?.();
+                              removeAttachment(item.id);
+                            }}
+                            hitSlop={8}
+                            style={styles.gridRemove}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Remove ${item.name}`}
+                          >
+                            <Ionicons name="close" size={13} color="#FFFFFF" />
+                          </Pressable>
+                        ) : null}
                       </Pressable>
+                    );
+                  })}
+                  {config.multiple && !uploading ? (
+                    <Pressable
+                      onPress={() => setPickerOpen(true)}
+                      style={styles.gridAddTile}
+                      accessibilityRole="button"
+                      accessibilityLabel="Add more photos"
+                    >
+                      <Ionicons name="add" size={22} color={colors.brand} />
+                      <Text style={styles.gridAddText}>Add more</Text>
                     </Pressable>
-                  );
-                })}
+                  ) : null}
+                </View>
+              ) : (
+                <View style={styles.attachmentList}>
+                  {attachments.map((item) => {
+                    const percent = progress[item.id] || 0;
+                    const badge = fileBadge(item.mimeType, item.name, colors);
+                    const done = percent >= 100;
 
-                {config.multiple ? (
-                  <Pressable
-                    onPress={() => setPickerOpen(true)}
-                    style={styles.addMoreRow}
-                    accessibilityRole="button"
-                    accessibilityLabel="Add another file"
-                  >
-                    <Ionicons name="add-circle-outline" size={18} color={colors.brand} />
-                    <Text style={styles.addMoreText}>Add another file</Text>
-                  </Pressable>
-                ) : null}
+                    return (
+                      <Pressable
+                        key={item.id}
+                        onPress={() => openPreview(item)}
+                        style={styles.attachmentItem}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Preview ${item.name}`}
+                      >
+                        <View style={[styles.attachmentThumbPlaceholder, { backgroundColor: `${badge.color}14` }]}>
+                          <Ionicons name={badge.icon} size={20} color={badge.color} />
+                        </View>
+
+                        <View style={styles.attachmentMeta}>
+                          <Text style={styles.attachmentName} numberOfLines={1}>{item.name}</Text>
+                          <View style={styles.attachmentMetaRow}>
+                            <View style={[styles.typeChip, { backgroundColor: `${badge.color}14` }]}>
+                              <Text style={[styles.typeChipText, { color: badge.color }]}>{badge.label}</Text>
+                            </View>
+                            <Text style={styles.attachmentSize}>{formatSize(item.size)}</Text>
+                          </View>
+                          {percent > 0 ? (
+                            <View style={styles.progressRow}>
+                              <View style={styles.progressTrack}>
+                                <View style={[styles.progressFill, { width: `${percent}%` }]} />
+                              </View>
+                              <Text style={styles.progressText}>{percent}%</Text>
+                            </View>
+                          ) : null}
+                        </View>
+
+                        {done ? (
+                          <Ionicons name="checkmark-circle" size={22} color={colors.success} />
+                        ) : !uploading ? (
+                          <Pressable
+                            onPress={() => removeAttachment(item.id)}
+                            hitSlop={10}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Remove ${item.name}`}
+                          >
+                            <Ionicons name="close-circle" size={22} color={colors.textTertiary} />
+                          </Pressable>
+                        ) : null}
+                      </Pressable>
+                    );
+                  })}
+
+                  {config.multiple && !uploading ? (
+                    <Pressable
+                      onPress={() => setPickerOpen(true)}
+                      style={styles.addMoreRow}
+                      accessibilityRole="button"
+                      accessibilityLabel="Add another file"
+                    >
+                      <Ionicons name="add-circle-outline" size={18} color={colors.brand} />
+                      <Text style={styles.addMoreText}>Add another file</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              )}
+            </View>
+
+            {showListingPreview ? (
+              <View style={styles.card}>
+                <SectionHeader icon="eye-outline" title="How it will look" subtitle="A quick preview of your listing card" styles={styles} colors={colors} />
+                <ListingPreviewCard
+                  kind={uploadType}
+                  image={previewImage}
+                  title={form.title.trim()}
+                  price={normalizedPrice > 0 ? normalizedPrice : 0}
+                  location={form.location.trim()}
+                  chips={previewChips}
+                  styles={styles}
+                  colors={colors}
+                />
               </View>
-            )}
+            ) : null}
+
+            {previewSource && !isGridKind ? (
+              <View style={styles.card}>
+                <SectionHeader icon="eye-outline" title="Preview" subtitle="Review before you publish" styles={styles} colors={colors} />
+                <Pressable
+                  onPress={() => setPreviewItem(previewSource)}
+                  style={styles.previewFallback}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open larger preview"
+                >
+                  <Ionicons name="document-text-outline" size={28} color={colors.brand} />
+                  <Text style={styles.previewFallbackTitle} numberOfLines={2}>{previewSource.name}</Text>
+                  <Text style={styles.previewFallbackText}>Tap to open a larger preview</Text>
+                </Pressable>
+              </View>
+            ) : null}
           </View>
-
-          {previewSource && !isGridKind ? (
-            <View style={styles.card}>
-              <SectionHeader icon="eye-outline" title="Preview" subtitle="Review before you publish" styles={styles} colors={colors} />
-              <Pressable
-                onPress={() => setPreviewItem(previewSource)}
-                style={styles.previewFallback}
-                accessibilityRole="button"
-                accessibilityLabel="Open larger preview"
-              >
-                <Ionicons name="document-text-outline" size={28} color={colors.brand} />
-                <Text style={styles.previewFallbackTitle}>{previewSource.name}</Text>
-                <Text style={styles.previewFallbackText}>Tap to open a larger preview</Text>
-              </Pressable>
-            </View>
-          ) : null}
-
-          {message ? (
-            <View style={styles.successBox}>
-              <Ionicons name="checkmark-circle" size={18} color={colors.success} />
-              <Text style={styles.successText}>{message}</Text>
-            </View>
-          ) : null}
-
-          {error ? (
-            <View style={styles.errorBox}>
-              <Ionicons name="alert-circle" size={18} color={colors.danger} />
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          ) : null}
         </ScrollView>
 
         <View style={styles.footer}>
-          {(!uploadReady && !uploading) ? (
-            <View style={styles.helperRow}>
-              <Ionicons name="information-circle-outline" size={14} color={colors.textSecondary} />
-              <Text style={styles.helperText}>
-                {!canCreateCurrentResource
-                  ? 'Only admins can upload past questions'
-                  : !canManageCurrentEdit
-                    ? 'You do not have permission to edit this resource'
-                    : missingItems[0] || (!hasValidPrice ? 'Enter a valid price greater than zero' : !hasValidYear ? 'Use a four-digit year' : 'Upgrade to publish more items')}
-              </Text>
-            </View>
-          ) : null}
-          {uploading && attachments.length > 1 ? (
-            <View style={styles.helperRow}>
-              <Text style={styles.helperText}>Uploading file {Math.min(uploadedCount + 1, attachments.length)} of {attachments.length}…</Text>
-            </View>
-          ) : null}
-          <Pressable
-            onPress={handleUpload}
-            disabled={uploading || !uploadReady}
-            style={({ pressed }) => [
-              styles.submitButton,
-              (uploading || !uploadReady) && styles.submitButtonDisabled,
-              pressed && !uploading && uploadReady && styles.submitButtonPressed,
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel={config.submitLabel}
-          >
+          <View style={styles.footerInner}>
+            {bannerText ? (
+              <View style={[styles.banner, bannerIsError ? styles.bannerError : styles.bannerSuccess]} accessibilityLiveRegion="polite">
+                <Ionicons name={bannerIsError ? 'alert-circle' : 'checkmark-circle'} size={18} color={bannerIsError ? colors.danger : colors.success} />
+                <Text style={[styles.bannerText, { color: bannerIsError ? colors.danger : colors.success }]}>{bannerText}</Text>
+                {bannerIsError ? (
+                  <Pressable onPress={() => setError('')} hitSlop={10} accessibilityRole="button" accessibilityLabel="Dismiss error">
+                    <Ionicons name="close" size={16} color={colors.danger} />
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
+
             {uploading ? (
-              <>
-                <ActivityIndicator color="#FFFFFF" />
-                <Text style={styles.submitText}>Uploading…</Text>
-              </>
-            ) : (
-              <>
-                <Ionicons name="cloud-upload-outline" size={18} color="#FFFFFF" />
-                <Text style={styles.submitText}>{config.submitLabel}</Text>
-              </>
-            )}
-          </Pressable>
+              <View style={styles.uploadStatus}>
+                <View style={styles.uploadStatusTop}>
+                  <Text style={styles.helperText}>
+                    {overallPercent >= 100
+                      ? 'Finishing up…'
+                      : attachments.length > 1
+                        ? `Uploading file ${Math.min(uploadedCount + 1, attachments.length)} of ${attachments.length}`
+                        : 'Uploading'}
+                  </Text>
+                  <Text style={styles.helperText}>{overallPercent}%</Text>
+                </View>
+                <View style={styles.progressTrack}>
+                  <View style={[styles.progressFill, { width: `${overallPercent}%` }]} />
+                </View>
+              </View>
+            ) : !uploadReady && helperText ? (
+              <Pressable
+                style={styles.helperRow}
+                onPress={() => scrollToStep(filesMissing && missingFieldKeys.length === 0 ? 'files' : 'details')}
+                accessibilityRole="button"
+                accessibilityLabel={`${helperText}. Tap to go there`}
+              >
+                <Ionicons name="information-circle-outline" size={15} color={colors.textSecondary} />
+                <Text style={styles.helperText}>{helperText}</Text>
+              </Pressable>
+            ) : null}
+
+            <Pressable
+              onPress={handleUpload}
+              disabled={uploading || !uploadReady}
+              style={({ pressed }) => [
+                styles.submitButton,
+                (uploading || !uploadReady) && styles.submitButtonDisabled,
+                pressed && !uploading && uploadReady && styles.submitButtonPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: uploading || !uploadReady, busy: uploading }}
+              accessibilityLabel={submitLabel}
+            >
+              {uploading ? (
+                <>
+                  <ActivityIndicator color="#FFFFFF" />
+                  <Text style={styles.submitText}>{isEditMode ? 'Saving…' : 'Uploading…'}</Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons name={isEditMode ? 'checkmark-circle-outline' : 'cloud-upload-outline'} size={18} color="#FFFFFF" />
+                  <Text style={styles.submitText}>{submitLabel}</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
         </View>
       </KeyboardAvoidingView>
 
@@ -1359,8 +1713,10 @@ export default function UploadPage() {
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHeader}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.sheetTitle}>{config.title}</Text>
-                <Text style={styles.sheetSubtitle}>{config.dropHint}</Text>
+                <Text style={styles.sheetTitle}>{config.attachmentLabel}</Text>
+                <Text style={styles.sheetSubtitle}>
+                  {config.formats.join(', ')} · up to {formatSize(sizeLimit)} each
+                </Text>
               </View>
               <Pressable onPress={() => setPickerOpen(false)} hitSlop={10} style={styles.sheetClose} accessibilityRole="button" accessibilityLabel="Close">
                 <Ionicons name="close" size={16} color={colors.textPrimary} />
@@ -1369,7 +1725,7 @@ export default function UploadPage() {
 
             <Pressable style={styles.sheetButton} onPress={pickAttachments} accessibilityRole="button" accessibilityLabel="Choose files">
               <Ionicons name="folder-open-outline" size={18} color={colors.brand} />
-              <Text style={styles.sheetButtonText}>Choose files</Text>
+              <Text style={styles.sheetButtonText}>{config.multiple ? 'Choose files' : 'Choose a file'}</Text>
             </Pressable>
 
             <Pressable style={styles.sheetButtonSecondary} onPress={() => setPickerOpen(false)} accessibilityRole="button" accessibilityLabel="Cancel">
@@ -1385,11 +1741,9 @@ export default function UploadPage() {
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHeader}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.sheetTitle} numberOfLines={1}>
-                  {previewItem?.name || 'Preview'}
-                </Text>
+                <Text style={styles.sheetTitle} numberOfLines={1}>{previewItem?.name || 'Preview'}</Text>
                 <Text style={styles.sheetSubtitle}>
-                  {previewItem?.mimeType || 'Selected file'} · {((previewItem?.size || 0) / 1024).toFixed(1)} KB
+                  {previewItem?.mimeType || 'Selected file'} · {formatSize(previewItem?.size || 0)}
                 </Text>
               </View>
               <Pressable onPress={() => setPreviewItem(null)} hitSlop={10} style={styles.sheetClose} accessibilityRole="button" accessibilityLabel="Close preview">
@@ -1398,12 +1752,12 @@ export default function UploadPage() {
             </View>
 
             {previewItem && isImageMime(previewItem.mimeType) ? (
-              <Image source={{ uri: previewItem.uri }} style={styles.previewModalImage} contentFit="cover" cachePolicy="disk" />
+              <Image source={{ uri: previewItem.uri }} style={styles.previewModalImage} contentFit="contain" cachePolicy="disk" />
             ) : previewItem?.uri ? (
               <View style={styles.previewFallback}>
                 <Ionicons name="document-text-outline" size={30} color={colors.brand} />
                 <Text style={styles.previewFallbackTitle}>{previewItem.name}</Text>
-                <Text style={styles.previewFallbackText}>Preview the file details here and publish when ready.</Text>
+                <Text style={styles.previewFallbackText}>Your file is ready. Publish when the details look right.</Text>
               </View>
             ) : null}
 
@@ -1420,6 +1774,21 @@ export default function UploadPage() {
                 <Text style={styles.sheetButtonText}>Open file</Text>
               </Pressable>
             ) : null}
+
+            {previewItem && !uploading ? (
+              <Pressable
+                style={styles.sheetButtonDanger}
+                onPress={() => {
+                  removeAttachment(previewItem.id);
+                  setPreviewItem(null);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Remove this file"
+              >
+                <Ionicons name="trash-outline" size={17} color={colors.danger} />
+                <Text style={styles.sheetButtonDangerText}>Remove file</Text>
+              </Pressable>
+            ) : null}
           </Pressable>
         </Pressable>
       </Modal>
@@ -1431,150 +1800,101 @@ const createStyles = (colors) => StyleSheet.create({
   content: {
     paddingHorizontal: SPACE.lg,
     paddingTop: SPACE.lg,
-    paddingBottom: SPACE.xxl + 84,
+    paddingBottom: SPACE.xxl + 40,
+  },
+  column: {
+    width: '100%',
+    maxWidth: 720,
+    alignSelf: 'center',
     gap: SPACE.lg,
   },
-  limitBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+
+  /* Usage meter */
+  usageCard: {
     backgroundColor: colors.brandLight,
     borderWidth: 1,
     borderColor: colors.borderDefault,
     borderRadius: RADIUS.xl,
     padding: SPACE.md,
-    marginBottom: SPACE.md,
-  },
-  limitBannerIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: RADIUS.md,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  limitBannerCopy: {
-    flex: 1,
-  },
-  limitBannerTitle: {
-    fontSize: 12.5,
-    fontWeight: '800',
-    color: colors.brandDark,
-  },
-  limitBannerText: {
-    marginTop: 2,
-    fontSize: 12,
-    color: colors.textSecondary,
-    lineHeight: 16,
-  },
-  hero: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: SPACE.md,
-    borderRadius: RADIUS.xl,
+  },
+  usageCardFull: { backgroundColor: colors.dangerLight, borderColor: colors.dangerBorder },
+  usageTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  usageIcon: { width: 34, height: 34, borderRadius: RADIUS.md, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  usageTitle: { fontSize: 13, fontWeight: '800', color: colors.textPrimary },
+  usageText: { marginTop: 2, fontSize: 12, color: colors.textSecondary, lineHeight: 16 },
+  usageTrack: { height: 6, borderRadius: RADIUS.pill, backgroundColor: colors.surface, overflow: 'hidden' },
+  usageFill: { height: '100%', borderRadius: RADIUS.pill, backgroundColor: colors.brand },
+
+  /* Progress header */
+  progressCard: {
     backgroundColor: colors.surface,
+    borderRadius: RADIUS.xl,
     borderWidth: 1,
     borderColor: colors.borderDefault,
     padding: SPACE.lg,
+    gap: SPACE.md,
   },
-  heroIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: RADIUS.lg,
+  progressTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  progressTitle: { fontSize: 16, fontWeight: '800', color: colors.textPrimary },
+  progressPercent: { fontSize: 14, fontWeight: '800', color: colors.brand },
+  progressBarTrack: { height: 8, borderRadius: RADIUS.pill, backgroundColor: colors.brandLight, overflow: 'hidden' },
+  progressBarFill: { height: '100%', borderRadius: RADIUS.pill, backgroundColor: colors.brand },
+  stepRow: { flexDirection: 'row', gap: SPACE.sm },
+  stepPill: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.brandLight,
-  },
-  heroCopy: { flex: 1 },
-  badge: {
-    alignSelf: 'flex-start',
-    color: colors.brand,
-    backgroundColor: colors.brandLight,
+    gap: 6,
+    paddingVertical: 9,
+    paddingHorizontal: 8,
     borderRadius: RADIUS.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    overflow: 'hidden',
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.borderDefault,
   },
-  heroTitle: {
-    marginTop: 6,
-    color: colors.textPrimary,
-    fontSize: 19,
-    fontWeight: '800',
-    lineHeight: 24,
-  },
-  heroText: {
-    marginTop: 3,
-    color: colors.textSecondary,
-    fontSize: 12.5,
-    lineHeight: 17,
-  },
+  stepPillDone: { backgroundColor: colors.greenLight, borderColor: colors.success },
+  stepDot: { width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.borderDefault },
+  stepDotDone: { backgroundColor: colors.success },
+  stepDotText: { fontSize: 10.5, fontWeight: '800', color: colors.textSecondary },
+  stepLabel: { fontSize: 12.5, fontWeight: '700', color: colors.textSecondary },
+  stepLabelDone: { color: colors.success },
+
+  /* Cards & sections */
   card: {
     backgroundColor: colors.surface,
     borderRadius: RADIUS.xl,
     borderWidth: 1,
     borderColor: colors.borderDefault,
     padding: SPACE.lg,
-    gap: SPACE.md,
+    gap: SPACE.lg,
   },
-  sectionHeaderWrap: { marginBottom: SPACE.xs },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACE.sm,
-  },
+  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE.md },
   sectionIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: RADIUS.sm,
+    width: 30,
+    height: 30,
+    borderRadius: RADIUS.pill,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.brandLight,
   },
-  sectionStep: {
-    fontSize: 12,
-    fontWeight: '900',
-    color: colors.brand,
-  },
-  cardTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  cardSubtitle: {
-    marginTop: 1,
-    fontSize: 11.5,
-    color: colors.textSecondary,
-  },
-  clearText: {
-    color: colors.danger,
-    fontSize: 12,
-    fontWeight: '700',
-  },
+  sectionIconDone: { backgroundColor: colors.success },
+  sectionStep: { fontSize: 13, fontWeight: '900', color: colors.brand },
+  cardTitle: { fontSize: 16, fontWeight: '800', color: colors.textPrimary },
+  cardSubtitle: { marginTop: 1, fontSize: 12, color: colors.textSecondary, lineHeight: 16 },
+  clearText: { color: colors.danger, fontSize: 12.5, fontWeight: '700' },
+
+  /* Fields */
   field: { gap: 6 },
-  label: {
-    fontSize: 12.5,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  chipsLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  chipsCount: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.brand,
-  },
-  chipsWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
+  labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  label: { fontSize: 13, fontWeight: '700', color: colors.textPrimary },
+  required: { color: colors.danger, fontWeight: '800' },
+  counter: { fontSize: 11.5, fontWeight: '700', color: colors.textTertiary },
+  fieldHint: { fontSize: 12, color: colors.textSecondary, lineHeight: 16 },
+  fieldMessageRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  fieldErrorText: { fontSize: 12, fontWeight: '600', color: colors.danger },
+  chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1585,23 +1905,10 @@ const createStyles = (colors) => StyleSheet.create({
     borderColor: colors.borderDefault,
     backgroundColor: colors.background,
   },
-  chipSelected: {
-    borderColor: colors.brand,
-    backgroundColor: colors.brand,
-  },
-  chipText: {
-    fontSize: 12.5,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  chipTextSelected: {
-    color: '#FFFFFF',
-  },
-  currencyPrefix: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: colors.textTertiary,
-  },
+  chipSelected: { borderColor: colors.brand, backgroundColor: colors.brand },
+  chipText: { fontSize: 12.5, fontWeight: '700', color: colors.textSecondary },
+  chipTextSelected: { color: '#FFFFFF' },
+  currencyPrefix: { fontSize: 15, fontWeight: '800', color: colors.textTertiary },
   inputWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1611,75 +1918,75 @@ const createStyles = (colors) => StyleSheet.create({
     borderRadius: RADIUS.md,
     backgroundColor: colors.background,
     paddingHorizontal: SPACE.md,
-    height: 50,
+    minHeight: 50,
   },
-  inputWrapMultiline: {
-    height: undefined,
-    alignItems: 'flex-start',
-    paddingVertical: SPACE.md,
-  },
-  inputWrapFocused: {
-    borderColor: colors.brand,
-    backgroundColor: colors.surface,
-  },
-  input: {
-    flex: 1,
-    fontSize: 14,
-    color: colors.textPrimary,
-  },
-  textArea: {
-    minHeight: 76,
-    textAlignVertical: 'top',
-    paddingTop: 2,
-  },
+  inputWrapMultiline: { alignItems: 'flex-start', paddingVertical: SPACE.md },
+  inputWrapFocused: { borderColor: colors.brand, backgroundColor: colors.surface },
+  inputWrapError: { borderColor: colors.danger, backgroundColor: colors.dangerLight },
+  input: { flex: 1, fontSize: 14.5, color: colors.textPrimary, paddingVertical: 10 },
+  textArea: { minHeight: 84, textAlignVertical: 'top', paddingTop: 2, paddingVertical: 0 },
+
+  /* Drop zone */
   dropZone: {
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    borderColor: colors.borderDefault,
+    borderColor: colors.brand,
     borderRadius: RADIUS.lg,
-    backgroundColor: colors.background,
-    paddingVertical: SPACE.xl,
+    backgroundColor: colors.brandLight,
+    paddingVertical: SPACE.xxl,
+    paddingHorizontal: SPACE.lg,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
   },
+  dropZonePressed: { opacity: 0.85 },
   dropIconWrap: {
-    width: 44,
-    height: 44,
+    width: 56,
+    height: 56,
     borderRadius: RADIUS.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.brandLight,
-    marginBottom: 4,
+    backgroundColor: colors.surface,
+    marginBottom: 6,
   },
-  dropTitle: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: colors.textPrimary,
-    textAlign: 'center',
-  },
-  dropSubtitle: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    textAlign: 'center',
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACE.sm,
-  },
+  dropTitle: { fontSize: 15, fontWeight: '800', color: colors.textPrimary, textAlign: 'center' },
+  dropSubtitle: { color: colors.textSecondary, fontSize: 12.5, textAlign: 'center' },
+  formatRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6, marginTop: 10 },
+  formatChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: RADIUS.pill, backgroundColor: colors.surface },
+  formatChipText: { fontSize: 11, fontWeight: '800', color: colors.brand },
+
+  /* Photo grid */
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACE.sm },
   gridTile: {
-    width: '31%',
+    width: '31.5%',
     aspectRatio: 1,
     borderRadius: RADIUS.md,
     overflow: 'hidden',
     backgroundColor: colors.background,
   },
-  gridImage: {
-    width: '100%',
-    height: '100%',
+  gridImage: { width: '100%', height: '100%' },
+  coverBadge: {
+    position: 'absolute',
+    left: 6,
+    bottom: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: RADIUS.pill,
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
   },
+  coverBadgeText: { color: '#FFFFFF', fontSize: 10.5, fontWeight: '800' },
   gridRemove: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 24,
+    height: 24,
+    borderRadius: RADIUS.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+  },
+  gridDone: {
     position: 'absolute',
     top: 6,
     right: 6,
@@ -1688,39 +1995,36 @@ const createStyles = (colors) => StyleSheet.create({
     borderRadius: RADIUS.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    backgroundColor: colors.success,
   },
   gridProgressOverlay: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    paddingVertical: 4,
+    padding: 6,
+    gap: 4,
     alignItems: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
   },
-  gridProgressText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '800',
-  },
+  gridProgressTrack: { width: '100%', height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.3)', overflow: 'hidden' },
+  gridProgressFill: { height: '100%', backgroundColor: '#FFFFFF' },
+  gridProgressText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
   gridAddTile: {
-    width: '31%',
+    width: '31.5%',
     aspectRatio: 1,
     borderRadius: RADIUS.md,
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    borderColor: colors.borderDefault,
+    borderColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
-    backgroundColor: colors.background,
+    backgroundColor: colors.brandLight,
   },
-  gridAddText: {
-    fontSize: 10.5,
-    fontWeight: '700',
-    color: colors.brand,
-  },
+  gridAddText: { fontSize: 11, fontWeight: '700', color: colors.brand },
+
+  /* File list */
   attachmentList: { gap: SPACE.sm },
   attachmentItem: {
     flexDirection: 'row',
@@ -1732,73 +2036,31 @@ const createStyles = (colors) => StyleSheet.create({
     backgroundColor: colors.background,
     padding: SPACE.md,
   },
-  attachmentThumbPlaceholder: {
-    width: 46,
-    height: 46,
-    borderRadius: RADIUS.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  attachmentThumbPlaceholder: { width: 46, height: 46, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center' },
   attachmentMeta: { flex: 1, gap: 5 },
-  attachmentName: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  attachmentMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  typeChip: {
-    borderRadius: RADIUS.pill,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  typeChipText: {
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  attachmentSize: {
-    fontSize: 11,
-    color: colors.textSecondary,
-  },
-  progressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  progressTrack: {
-    flex: 1,
-    height: 6,
-    borderRadius: RADIUS.pill,
-    backgroundColor: colors.borderDefault,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: RADIUS.pill,
-    backgroundColor: colors.success,
-  },
-  progressText: {
-    color: colors.textSecondary,
-    fontSize: 10.5,
-    fontWeight: '700',
-    minWidth: 30,
-    textAlign: 'right',
-  },
+  attachmentName: { fontSize: 13.5, fontWeight: '700', color: colors.textPrimary },
+  attachmentMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  typeChip: { borderRadius: RADIUS.pill, paddingHorizontal: 8, paddingVertical: 2 },
+  typeChipText: { fontSize: 10.5, fontWeight: '800' },
+  attachmentSize: { fontSize: 11.5, color: colors.textSecondary },
+  progressRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  progressTrack: { flex: 1, height: 6, borderRadius: RADIUS.pill, backgroundColor: colors.borderDefault, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: RADIUS.pill, backgroundColor: colors.success },
+  progressText: { color: colors.textSecondary, fontSize: 11, fontWeight: '700', minWidth: 32, textAlign: 'right' },
   addMoreRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: SPACE.sm,
+    paddingVertical: SPACE.md,
+    borderRadius: RADIUS.md,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: colors.borderDefault,
   },
-  addMoreText: {
-    color: colors.brand,
-    fontSize: 13,
-    fontWeight: '700',
-  },
+  addMoreText: { color: colors.brand, fontSize: 13, fontWeight: '700' },
+
+  /* Previews */
   previewFallback: {
     minHeight: 120,
     alignItems: 'center',
@@ -1810,49 +2072,38 @@ const createStyles = (colors) => StyleSheet.create({
     padding: SPACE.lg,
     gap: 6,
   },
-  previewFallbackTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: colors.textPrimary,
-    textAlign: 'center',
-  },
-  previewFallbackText: {
-    fontSize: 11.5,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
-  successBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACE.sm,
-    borderRadius: RADIUS.md,
+  previewFallbackTitle: { fontSize: 13.5, fontWeight: '800', color: colors.textPrimary, textAlign: 'center' },
+  previewFallbackText: { fontSize: 12, color: colors.textSecondary, textAlign: 'center' },
+  listingPreview: {
+    borderRadius: RADIUS.lg,
+    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: colors.greenLight,
-    backgroundColor: colors.greenLight,
-    padding: SPACE.md,
+    borderColor: colors.borderDefault,
+    backgroundColor: colors.background,
   },
-  successText: {
-    flex: 1,
-    color: colors.success,
-    fontSize: 13,
-    fontWeight: '700',
+  listingPreviewImageWrap: { width: '100%', aspectRatio: 16 / 10, backgroundColor: colors.brandLight },
+  listingPreviewImage: { width: '100%', height: '100%' },
+  listingPreviewEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  listingPreviewTag: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: RADIUS.pill,
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
   },
-  errorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACE.sm,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: colors.dangerBorder,
-    backgroundColor: colors.dangerLight,
-    padding: SPACE.md,
-  },
-  errorText: {
-    flex: 1,
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: '700',
-  },
+  listingPreviewTagText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
+  listingPreviewBody: { padding: SPACE.md, gap: 4 },
+  listingPreviewTitle: { fontSize: 15, fontWeight: '800', color: colors.textPrimary },
+  listingPreviewPrice: { fontSize: 17, fontWeight: '900', color: colors.brand },
+  listingPreviewRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  listingPreviewMeta: { flex: 1, fontSize: 12.5, color: colors.textSecondary },
+  listingPreviewChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
+  listingPreviewChip: { maxWidth: '100%', paddingHorizontal: 9, paddingVertical: 4, borderRadius: RADIUS.pill, backgroundColor: colors.brandLight },
+  listingPreviewChipText: { fontSize: 11, fontWeight: '700', color: colors.brand },
+
+  /* Footer */
   footer: {
     backgroundColor: colors.surface,
     borderTopWidth: 1,
@@ -1860,79 +2111,52 @@ const createStyles = (colors) => StyleSheet.create({
     paddingHorizontal: SPACE.lg,
     paddingTop: SPACE.md,
     paddingBottom: SPACE.lg,
-    gap: SPACE.sm,
   },
-  helperRow: {
+  footerInner: { width: '100%', maxWidth: 720, alignSelf: 'center', gap: SPACE.sm },
+  banner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    justifyContent: 'center',
+    gap: SPACE.sm,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    padding: SPACE.md,
   },
-  helperText: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    fontWeight: '600',
-  },
+  bannerError: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerLight },
+  bannerSuccess: { borderColor: colors.success, backgroundColor: colors.greenLight },
+  bannerText: { flex: 1, fontSize: 13, fontWeight: '700', lineHeight: 18 },
+  uploadStatus: { gap: 6 },
+  uploadStatusTop: { flexDirection: 'row', justifyContent: 'space-between' },
+  helperRow: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center', paddingVertical: 2 },
+  helperText: { fontSize: 12.5, color: colors.textSecondary, fontWeight: '600' },
   submitButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    minHeight: 52,
+    minHeight: 54,
     borderRadius: RADIUS.lg,
     backgroundColor: colors.brand,
   },
   submitButtonPressed: { backgroundColor: colors.brandDark },
   submitButtonDisabled: { backgroundColor: colors.textTertiary },
-  submitText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: colors.overlay,
-    justifyContent: 'flex-end',
-    padding: SPACE.md,
-  },
+  submitText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
+
+  /* Modals */
+  modalBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end', padding: SPACE.md },
   sheet: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
     borderRadius: RADIUS.xl,
     backgroundColor: colors.surface,
     padding: SPACE.lg,
     gap: SPACE.md,
   },
-  sheetHandle: {
-    alignSelf: 'center',
-    width: 36,
-    height: 4,
-    borderRadius: RADIUS.pill,
-    backgroundColor: colors.borderDefault,
-    marginBottom: 2,
-  },
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: SPACE.md,
-  },
-  sheetTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  sheetSubtitle: {
-    marginTop: 2,
-    fontSize: 12,
-    color: colors.textSecondary,
-  },
-  sheetClose: {
-    width: 28,
-    height: 28,
-    borderRadius: RADIUS.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.background,
-  },
+  sheetHandle: { alignSelf: 'center', width: 36, height: 4, borderRadius: RADIUS.pill, backgroundColor: colors.borderDefault, marginBottom: 2 },
+  sheetHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: SPACE.md },
+  sheetTitle: { fontSize: 16, fontWeight: '800', color: colors.textPrimary },
+  sheetSubtitle: { marginTop: 2, fontSize: 12.5, color: colors.textSecondary },
+  sheetClose: { width: 30, height: 30, borderRadius: RADIUS.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
   sheetButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1942,34 +2166,28 @@ const createStyles = (colors) => StyleSheet.create({
     borderRadius: RADIUS.md,
     backgroundColor: colors.brandLight,
   },
-  sheetButtonText: {
-    color: colors.brand,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  sheetButtonSecondary: {
+  sheetButtonText: { color: colors.brand, fontSize: 14, fontWeight: '800' },
+  sheetButtonSecondary: { alignItems: 'center', justifyContent: 'center', minHeight: 50, borderRadius: RADIUS.md, backgroundColor: colors.background },
+  sheetButtonSecondaryText: { color: colors.textPrimary, fontSize: 14, fontWeight: '800' },
+  sheetButtonDanger: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 50,
+    gap: 8,
+    minHeight: 48,
     borderRadius: RADIUS.md,
-    backgroundColor: colors.background,
+    backgroundColor: colors.dangerLight,
   },
-  sheetButtonSecondaryText: {
-    color: colors.textPrimary,
-    fontSize: 13,
-    fontWeight: '800',
-  },
+  sheetButtonDangerText: { color: colors.danger, fontSize: 14, fontWeight: '800' },
   previewModal: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
     borderRadius: RADIUS.xl,
     backgroundColor: colors.surface,
     padding: SPACE.lg,
     gap: SPACE.md,
     maxHeight: '90%',
   },
-  previewModalImage: {
-    minHeight: 260,
-    width: '100%',
-    borderRadius: RADIUS.lg,
-    backgroundColor: colors.background,
-  },
+  previewModalImage: { height: 320, width: '100%', borderRadius: RADIUS.lg, backgroundColor: colors.background },
 });

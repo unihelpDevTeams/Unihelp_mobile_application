@@ -293,6 +293,7 @@ export default function ProfileScreen() {
       borderWidth: 2, borderColor: c.canvasLight,
     },
     identityTextWrap: { alignItems: 'center', marginBottom: s.sm },
+    identityNameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: s.xs, maxWidth: '100%' },
     identityName: { fontSize: 19, fontWeight: '800', color: c.ink, maxWidth: '85%', textAlign: 'center' },
     identityEmail: { marginTop: s.xs, fontSize: 13, color: c.grey, maxWidth: '85%', textAlign: 'center' },
 
@@ -1108,7 +1109,17 @@ export default function ProfileScreen() {
           </Pressable>
 
           <View style={styles.identityTextWrap}>
-            <Text style={styles.identityName} numberOfLines={1}>{form.username || 'Student profile'}</Text>
+            <View style={styles.identityNameRow}>
+              <Text style={styles.identityName} numberOfLines={1}>{form.username || 'Student profile'}</Text>
+              {premiumActive ? (
+                <Ionicons
+                  name="checkmark-circle"
+                  size={18}
+                  color={colors.brand}
+                  accessibilityLabel="Verified Premium student"
+                />
+              ) : null}
+            </View>
             <Text style={styles.identityEmail} numberOfLines={1}>{user?.email || 'No email available'}</Text>
           </View>
 

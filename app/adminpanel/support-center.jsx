@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
-  StyleSheet,
   Text,
   TextInput,
   View,
@@ -20,6 +19,8 @@ import {
   fetchSuggestions,
 } from '../../src/shared/services/support';
 import { COLLECTIONS } from '../../src/shared/firestoreSchema';
+import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { useThemeStyles } from '../../src/shared/theme/createStyles';
 
 const TABS = [
   { key: 'contact', label: 'Contact', icon: 'mail-outline' },
@@ -35,13 +36,6 @@ const STATUS_OPTIONS = [
   { label: 'Closed', value: 'closed' },
 ];
 
-const STATUS_COLORS = {
-  pending: { bg: '#FEF3C7', text: '#92400E' },
-  in_progress: { bg: '#DBEAFE', text: '#1E40AF' },
-  resolved: { bg: '#D1FAE5', text: '#065F46' },
-  closed: { bg: '#F3F4F6', text: '#4B5563' },
-};
-
 const formatStatus = (status) => {
   return (status || '')
     .replace(/_/g, ' ')
@@ -51,6 +45,8 @@ const formatStatus = (status) => {
 export default function AdminSupportCenter() {
   const router = useRouter();
   const { profile, user } = useAuth();
+  const { colors } = useTheme();
+  const styles = useThemeStyles((themeColors) => createStyles(themeColors));
   const [activeTab, setActiveTab] = useState('contact');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -215,7 +211,13 @@ export default function AdminSupportCenter() {
   };
 
   const getStatusColor = (status) => {
-    return STATUS_COLORS[status] || { bg: '#F3F4F6', text: '#4B5563' };
+    const statusColors = {
+      pending: { bg: colors.amberLight, text: colors.amber },
+      in_progress: { bg: colors.blueLight, text: colors.blue },
+      resolved: { bg: colors.greenLight, text: colors.green },
+      closed: { bg: colors.surfaceSecondary, text: colors.textSecondary },
+    };
+    return statusColors[status] || statusColors.closed;
   };
 
   const formatDate = (timestamp) => {
@@ -247,7 +249,7 @@ export default function AdminSupportCenter() {
     return (
       <ScreenShell scrollable={false} title="Support Center" subtitle="Admin-only operations." showBack>
         <View style={styles.restricted}>
-          <Ionicons name="shield-checkmark-outline" size={48} color="#64748B" />
+          <Ionicons name="shield-checkmark-outline" size={48} color={colors.grey} />
           <Text style={styles.restrictedTitle}>Access Restricted</Text>
           <Text style={styles.restrictedText}>
             You need admin privileges to access the Support Center.
@@ -296,7 +298,7 @@ export default function AdminSupportCenter() {
       ) : null}
       <View style={styles.itemFooter}>
         <Text style={styles.itemDate}>{formatDate(item.createdAt)}</Text>
-        <Ionicons name="chevron-forward" size={16} color="#94A3B8" />
+        <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
       </View>
     </Pressable>
   );
@@ -305,7 +307,7 @@ export default function AdminSupportCenter() {
     if (loading) return null;
     return (
       <View style={styles.emptyContainer}>
-        <Ionicons name="folder-open-outline" size={40} color="#94A3B8" />
+        <Ionicons name="folder-open-outline" size={40} color={colors.greyLight} />
         <Text style={styles.emptyTitle}>No items found</Text>
         <Text style={styles.emptyText}>
           {searchQuery
@@ -320,7 +322,7 @@ export default function AdminSupportCenter() {
     if (!loadingMore) return null;
     return (
       <View style={styles.footerLoader}>
-        <ActivityIndicator size="small" color="#6366F1" />
+        <ActivityIndicator size="small" color={colors.brand} />
       </View>
     );
   };
@@ -342,7 +344,7 @@ export default function AdminSupportCenter() {
             <Ionicons
               name={tab.icon}
               size={16}
-              color={activeTab === tab.key ? '#4338CA' : '#64748B'}
+              color={activeTab === tab.key ? colors.brandText : colors.grey}
             />
             <Text
               style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}
@@ -355,17 +357,17 @@ export default function AdminSupportCenter() {
 
       {/* Search Bar */}
       <View style={styles.searchContainer}>
-        <Ionicons name="search" size={18} color="#94A3B8" style={styles.searchIcon} />
+        <Ionicons name="search" size={18} color={colors.greyLight} style={styles.searchIcon} />
         <TextInput
           placeholder="Search..."
-          placeholderTextColor="#94A3B8"
+          placeholderTextColor={colors.placeholder}
           style={styles.searchInput}
           value={searchQuery}
           onChangeText={handleSearch}
         />
         {searchQuery ? (
           <Pressable onPress={() => handleSearch('')}>
-            <Ionicons name="close-circle" size={18} color="#94A3B8" />
+            <Ionicons name="close-circle" size={18} color={colors.greyLight} />
           </Pressable>
         ) : null}
       </View>
@@ -393,7 +395,7 @@ export default function AdminSupportCenter() {
       {/* Error State */}
       {error && !loading ? (
         <View style={styles.errorContainer}>
-          <Ionicons name="alert-circle-outline" size={32} color="#DC2626" />
+          <Ionicons name="alert-circle-outline" size={32} color={colors.error} />
           <Text style={styles.errorText}>{error}</Text>
           <Pressable style={styles.retryButton} onPress={() => fetchData()}>
             <Text style={styles.retryText}>Retry</Text>
@@ -424,7 +426,7 @@ export default function AdminSupportCenter() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => ({
   restricted: {
     flex: 1,
     alignItems: 'center',
@@ -436,21 +438,21 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 18,
     fontWeight: '800',
-    color: '#0F172A',
+    color: colors.textPrimary,
   },
   restrictedText: {
     marginTop: 8,
     fontSize: 14,
-    color: '#64748B',
+    color: colors.textSecondary,
     textAlign: 'center',
     lineHeight: 20,
   },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.borderDefault,
     marginBottom: 12,
     overflow: 'hidden',
   },
@@ -463,23 +465,23 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   tabActive: {
-    backgroundColor: '#EEF2FF',
+    backgroundColor: colors.brandLight,
   },
   tabText: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#64748B',
+    color: colors.textSecondary,
   },
   tabTextActive: {
-    color: '#4338CA',
+    color: colors.brandText,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.inputBackground,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.borderDefault,
     paddingHorizontal: 12,
     marginBottom: 10,
     height: 44,
@@ -490,7 +492,7 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 14,
-    color: '#0F172A',
+    color: colors.textPrimary,
     paddingVertical: 0,
   },
   filterRow: {
@@ -501,23 +503,23 @@ const styles = StyleSheet.create({
   },
   filterChip: {
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.borderDefault,
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
   },
   filterChipActive: {
-    backgroundColor: '#EEF2FF',
-    borderColor: '#A5B4FC',
+    backgroundColor: colors.brandLight,
+    borderColor: colors.brandBorder,
   },
   filterChipText: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#64748B',
+    color: colors.textSecondary,
   },
   filterChipTextActive: {
-    color: '#4338CA',
+    color: colors.brandText,
   },
   loadingContainer: {
     paddingVertical: 60,
@@ -526,7 +528,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 14,
-    color: '#64748B',
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   errorContainer: {
@@ -536,24 +538,24 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 14,
-    color: '#DC2626',
+    color: colors.error,
     fontWeight: '600',
     textAlign: 'center',
     paddingHorizontal: 20,
   },
   retryButton: {
-    backgroundColor: '#FEF2F2',
+    backgroundColor: colors.dangerLight,
     borderRadius: 14,
     paddingVertical: 8,
     paddingHorizontal: 20,
     borderWidth: 1,
-    borderColor: '#FECACA',
+    borderColor: colors.dangerBorder,
     marginTop: 4,
   },
   retryText: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#B91C1C',
+    color: colors.danger,
   },
   emptyContainer: {
     paddingVertical: 60,
@@ -563,11 +565,11 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#0F172A',
+    color: colors.textPrimary,
   },
   emptyText: {
     fontSize: 13,
-    color: '#64748B',
+    color: colors.textSecondary,
     textAlign: 'center',
     paddingHorizontal: 40,
     lineHeight: 18,
@@ -577,14 +579,14 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   itemCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.card,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.borderDefault,
     padding: 14,
   },
   itemCardPressed: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.canvasLight,
   },
   itemHeader: {
     marginBottom: 8,
@@ -599,18 +601,18 @@ const styles = StyleSheet.create({
   itemTitle: {
     fontSize: 14,
     fontWeight: '800',
-    color: '#0F172A',
+    color: colors.textPrimary,
     flex: 1,
   },
   itemSubtitle: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#475569',
+    color: colors.inkMuted,
     marginBottom: 2,
   },
   itemEmail: {
     fontSize: 11,
-    color: '#64748B',
+    color: colors.textSecondary,
   },
   statusBadge: {
     borderRadius: 999,
@@ -624,7 +626,7 @@ const styles = StyleSheet.create({
   },
   itemPreview: {
     fontSize: 12,
-    color: '#64748B',
+    color: colors.textSecondary,
     lineHeight: 17,
     marginBottom: 8,
   },
@@ -635,7 +637,7 @@ const styles = StyleSheet.create({
   },
   itemDate: {
     fontSize: 11,
-    color: '#94A3B8',
+    color: colors.textTertiary,
     fontWeight: '600',
   },
   footerLoader: {

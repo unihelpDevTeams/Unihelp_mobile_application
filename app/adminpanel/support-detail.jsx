@@ -3,8 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
-  ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   View,
@@ -15,6 +13,8 @@ import ScreenShell from '../../src/shared/components/ScreenShell';
 import { PageLoader } from '../../src/shared/components/AILoaders';
 import { useAuth } from '../../context/AuthContext';
 import { isResourceAdmin } from '../../src/shared/auth/resourcePermissions';
+import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import {
   fetchSupportItem,
   updateSupportItemStatus,
@@ -28,13 +28,6 @@ const STATUS_OPTIONS = [
   { label: 'Resolved', value: 'resolved', icon: 'checkmark-circle-outline' },
   { label: 'Closed', value: 'closed', icon: 'lock-closed-outline' },
 ];
-
-const STATUS_COLORS = {
-  pending: { bg: '#FEF3C7', text: '#92400E', dot: '#D97706' },
-  in_progress: { bg: '#DBEAFE', text: '#1E40AF', dot: '#2563EB' },
-  resolved: { bg: '#D1FAE5', text: '#065F46', dot: '#059669' },
-  closed: { bg: '#F3F4F6', text: '#4B5563', dot: '#6B7280' },
-};
 
 const formatStatus = (status) => {
   return (status || '')
@@ -57,8 +50,10 @@ const formatDate = (timestamp) => {
 
 export default function SupportDetailPage() {
   const { profile, user } = useAuth();
+  const { colors } = useTheme();
+  const styles = useThemeStyles((themeColors) => createStyles(themeColors));
   const params = useLocalSearchParams();
-  const { collection, id, tab } = params;
+  const { collection, id } = params;
 
   const [item, setItem] = useState(null);
   const [notes, setNotes] = useState([]);
@@ -123,7 +118,7 @@ export default function SupportDetailPage() {
     return (
       <ScreenShell title="Access Restricted" showBack>
         <View style={styles.restricted}>
-          <Ionicons name="shield-checkmark-outline" size={48} color="#64748B" />
+          <Ionicons name="shield-checkmark-outline" size={48} color={colors.grey} />
           <Text style={styles.restrictedTitle}>Access Restricted</Text>
           <Text style={styles.restrictedText}>
             You need admin privileges to view this page.
@@ -147,7 +142,7 @@ export default function SupportDetailPage() {
     return (
       <ScreenShell title="Error" showBack>
         <View style={styles.errorContainer}>
-          <Ionicons name="alert-circle-outline" size={40} color="#DC2626" />
+          <Ionicons name="alert-circle-outline" size={40} color={colors.danger} />
           <Text style={styles.errorText}>{error || 'Item not found.'}</Text>
           <Pressable style={styles.retryButton} onPress={loadData}>
             <Text style={styles.retryText}>Retry</Text>
@@ -157,7 +152,16 @@ export default function SupportDetailPage() {
     );
   }
 
-  const statusColors = STATUS_COLORS[item.status] || STATUS_COLORS.pending;
+  const getStatusColor = (status) => {
+    const statusColors = {
+      pending: { bg: colors.amberLight, text: colors.amber, dot: colors.orange },
+      in_progress: { bg: colors.blueLight, text: colors.blue, dot: colors.blue },
+      resolved: { bg: colors.greenLight, text: colors.green, dot: colors.green },
+      closed: { bg: colors.surfaceSecondary, text: colors.textSecondary, dot: colors.textTertiary },
+    };
+    return statusColors[status] || statusColors.pending;
+  };
+  const statusColors = getStatusColor(item.status);
 
   return (
     <ScreenShell title="Support Detail" subtitle={item.subject || item.title || 'Viewing item'} showBack scrollable>
@@ -172,18 +176,18 @@ export default function SupportDetailPage() {
                 {formatStatus(item.status)}
               </Text>
             </View>
-            {updatingStatus && <ActivityIndicator size="small" color="#6366F1" />}
+            {updatingStatus && <ActivityIndicator size="small" color={colors.brand} />}
           </View>
           <View style={styles.statusOptions}>
             {STATUS_OPTIONS.map((option) => {
               const active = item.status === option.value;
-              const colors = STATUS_COLORS[option.value];
+              const optionColors = getStatusColor(option.value);
               return (
                 <Pressable
                   key={option.value}
                   style={[
                     styles.statusOption,
-                    active && { backgroundColor: colors.bg, borderColor: colors.dot },
+                    active && { backgroundColor: optionColors.bg, borderColor: optionColors.dot },
                   ]}
                   onPress={() => handleStatusChange(option.value)}
                   disabled={active || updatingStatus}
@@ -191,12 +195,12 @@ export default function SupportDetailPage() {
                   <Ionicons
                     name={option.icon}
                     size={16}
-                    color={active ? colors.text : '#64748B'}
+                    color={active ? optionColors.text : colors.grey}
                   />
                   <Text
                     style={[
                       styles.statusOptionText,
-                      active && { color: colors.text, fontWeight: '800' },
+                      active && { color: optionColors.text, fontWeight: '800' },
                     ]}
                   >
                     {option.label}
@@ -212,40 +216,42 @@ export default function SupportDetailPage() {
           <Text style={styles.sectionTitle}>Details</Text>
           <View style={styles.detailsCard}>
             {item.name ? (
-              <DetailRow label="Name" value={item.name} />
+              <DetailRow label="Name" value={item.name} styles={styles} />
             ) : null}
             {item.email ? (
-              <DetailRow label="Email" value={item.email} />
+              <DetailRow label="Email" value={item.email} styles={styles} />
             ) : null}
             {item.phone ? (
-              <DetailRow label="Phone" value={item.phone} />
+              <DetailRow label="Phone" value={item.phone} styles={styles} />
             ) : null}
             {item.displayName ? (
-              <DetailRow label="Display Name" value={item.displayName} />
+              <DetailRow label="Display Name" value={item.displayName} styles={styles} />
             ) : null}
             {item.userId ? (
-              <DetailRow label="User ID" value={item.userId} mono />
+              <DetailRow label="User ID" value={item.userId} mono styles={styles} />
             ) : null}
             {item.reportType ? (
               <DetailRow
                 label="Report Type"
                 value={item.reportType.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                styles={styles}
               />
             ) : null}
             {item.category ? (
               <DetailRow
                 label="Category"
                 value={item.category.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                styles={styles}
               />
             ) : null}
             {item.subject ? (
-              <DetailRow label="Subject" value={item.subject} />
+              <DetailRow label="Subject" value={item.subject} styles={styles} />
             ) : null}
             {item.title ? (
-              <DetailRow label="Title" value={item.title} />
+              <DetailRow label="Title" value={item.title} styles={styles} />
             ) : null}
-            <DetailRow label="Submitted" value={formatDate(item.createdAt)} />
-            <DetailRow label="Last Updated" value={formatDate(item.updatedAt)} />
+            <DetailRow label="Submitted" value={formatDate(item.createdAt)} styles={styles} />
+            <DetailRow label="Last Updated" value={formatDate(item.updatedAt)} styles={styles} />
           </View>
         </View>
 
@@ -286,7 +292,7 @@ export default function SupportDetailPage() {
           <View style={styles.addNoteRow}>
             <TextInput
               placeholder="Add an internal note..."
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={colors.placeholder}
               style={styles.noteInput}
               value={noteText}
               onChangeText={setNoteText}
@@ -303,9 +309,9 @@ export default function SupportDetailPage() {
               disabled={!noteText.trim() || submittingNote}
             >
               {submittingNote ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
+                <ActivityIndicator size="small" color={colors.onBrand} />
               ) : (
-                <Ionicons name="send" size={18} color="#FFFFFF" />
+                <Ionicons name="send" size={18} color={colors.onBrand} />
               )}
             </Pressable>
           </View>
@@ -315,7 +321,7 @@ export default function SupportDetailPage() {
   );
 }
 
-function DetailRow({ label, value, mono = false }) {
+function DetailRow({ label, value, mono = false, styles }) {
   return (
     <View style={styles.detailRow}>
       <Text style={styles.detailLabel}>{label}</Text>
@@ -330,7 +336,7 @@ function DetailRow({ label, value, mono = false }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => ({
   restricted: {
     flex: 1,
     alignItems: 'center',
@@ -342,12 +348,12 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 18,
     fontWeight: '800',
-    color: '#0F172A',
+    color: colors.textPrimary,
   },
   restrictedText: {
     marginTop: 8,
     fontSize: 14,
-    color: '#64748B',
+    color: colors.textSecondary,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -365,22 +371,22 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 14,
-    color: '#DC2626',
+    color: colors.danger,
     fontWeight: '600',
     textAlign: 'center',
   },
   retryButton: {
-    backgroundColor: '#FEF2F2',
+    backgroundColor: colors.dangerLight,
     borderRadius: 14,
     paddingVertical: 8,
     paddingHorizontal: 20,
     borderWidth: 1,
-    borderColor: '#FECACA',
+    borderColor: colors.dangerBorder,
   },
   retryText: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#B91C1C',
+    color: colors.danger,
   },
   content: {
     gap: 16,
@@ -392,7 +398,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 13,
     fontWeight: '800',
-    color: '#334155',
+    color: colors.textPrimary,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -430,22 +436,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.borderDefault,
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
   },
   statusOptionText: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#475569',
+    color: colors.textSecondary,
   },
   detailsCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.card,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.borderDefault,
     padding: 14,
     gap: 0,
   },
@@ -453,18 +459,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    borderBottomColor: colors.borderLight,
   },
   detailLabel: {
     width: 100,
     fontSize: 12,
     fontWeight: '700',
-    color: '#64748B',
+    color: colors.textSecondary,
   },
   detailValue: {
     flex: 1,
     fontSize: 13,
-    color: '#0F172A',
+    color: colors.textPrimary,
     fontWeight: '600',
   },
   detailValueMono: {
@@ -472,35 +478,35 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   messageCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.card,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.borderDefault,
     padding: 14,
   },
   messageText: {
     fontSize: 14,
-    color: '#0F172A',
+    color: colors.textPrimary,
     lineHeight: 22,
   },
   notesCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.card,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.borderDefault,
     padding: 14,
     gap: 12,
   },
   noNotes: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: colors.textTertiary,
     fontStyle: 'italic',
     textAlign: 'center',
     paddingVertical: 8,
   },
   noteItem: {
     borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    borderBottomColor: colors.borderLight,
     paddingBottom: 10,
   },
   noteHeader: {
@@ -512,16 +518,16 @@ const styles = StyleSheet.create({
   noteAuthor: {
     fontSize: 12,
     fontWeight: '800',
-    color: '#4338CA',
+    color: colors.brandText,
   },
   noteDate: {
     fontSize: 10,
-    color: '#94A3B8',
+    color: colors.textTertiary,
     fontWeight: '600',
   },
   noteText: {
     fontSize: 13,
-    color: '#334155',
+    color: colors.textPrimary,
     lineHeight: 19,
   },
   addNoteRow: {
@@ -532,13 +538,13 @@ const styles = StyleSheet.create({
   noteInput: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#CBD5E1',
+    borderColor: colors.inputBorder,
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 13,
-    color: '#0F172A',
-    backgroundColor: '#FFFFFF',
+    color: colors.textPrimary,
+    backgroundColor: colors.inputBackground,
     minHeight: 44,
     maxHeight: 100,
   },
@@ -546,15 +552,15 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: '#4338CA',
+    backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
   },
   addNoteButtonDisabled: {
-    backgroundColor: '#A5B4FC',
+    backgroundColor: colors.brandGlow,
     opacity: 0.7,
   },
   addNoteButtonPressed: {
-    backgroundColor: '#3730A3',
+    backgroundColor: colors.brandDark,
   },
 });

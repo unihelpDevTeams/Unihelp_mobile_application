@@ -838,28 +838,13 @@ export async function createNote(payload) {
 
 export async function createQuestion(payload) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
-  if (!(await currentUserIsResourceAdmin())) throw new Error('Only admins can upload past questions.');
-  const ref = await addDoc(collection(db, COLLECTIONS.questions), {
+  const result = await postJson('/api/past-questions', {
     ...payload,
-    files: Array.isArray(payload.files)
-      ? payload.files
-      : payload.fileUrl || payload.downloadUrl || payload.url
-        ? [
-            {
-              name: payload.fileName || payload.name || payload.title || 'document.pdf',
-              url: payload.downloadUrl || payload.fileUrl || payload.url || '',
-              publicId: payload.cloudinaryPublicId || '',
-              resourceType: payload.cloudinaryResourceType || 'image',
-              size: payload.fileSize || payload.size || 0,
-              type: payload.fileType || 'application/pdf',
-            },
-          ]
-        : [],
     ownerId: auth.currentUser.uid,
     userId: auth.currentUser.uid,
-    createdAt: serverTimestamp(),
+    createdBy: auth.currentUser.uid,
   });
-  return { id: ref.id };
+  return { id: result.item?.id || result.item?.firestoreId };
 }
 
 export async function updateNote(id, payload) {

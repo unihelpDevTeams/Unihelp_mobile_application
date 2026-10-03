@@ -383,12 +383,12 @@ export default function FlashCardsPage() {
         backgroundColor: c.background,
       },
       filterScroll: {
-        paddingHorizontal: s.md,
+        paddingHorizontal: s.lg,
         paddingBottom: s.md,
-        maxHeight: 50,
+        maxHeight: 52,
       },
       filterPill: {
-        paddingHorizontal: s.lg,
+        paddingHorizontal: s.md,
         paddingVertical: s.sm,
         borderRadius: borderRadius.full,
         backgroundColor: c.surfaceSecondary,
@@ -421,23 +421,37 @@ export default function FlashCardsPage() {
         flex: 1,
         marginRight: s.md,
       },
+      progressHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: s.xs,
+      },
+      progressEyebrow: {
+        ...typography.xs,
+        ...typography.semibold,
+        color: c.textTertiary,
+        letterSpacing: 0.4,
+      },
       progressText: {
         ...typography.sm,
         ...typography.bold,
-        color: c.textSecondary,
+        color: c.textPrimary,
       },
       searchCard: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: s.sm,
         paddingHorizontal: s.md,
-        paddingVertical: s.sm,
+        paddingVertical: s.xs,
+        minHeight: 50,
         borderRadius: borderRadius.xl,
         backgroundColor: c.surfacePrimary,
         borderWidth: 1,
         borderColor: c.borderDefault,
         marginHorizontal: s.lg,
         marginBottom: s.md,
+        ...shadows.sm,
       },
       searchInput: {
         flex: 1,
@@ -446,11 +460,10 @@ export default function FlashCardsPage() {
         paddingVertical: s.sm,
       },
       progressTrack: {
-        height: 6,
+        height: 7,
         borderRadius: borderRadius.full,
         backgroundColor: c.surfaceSecondary,
         overflow: 'hidden',
-        marginTop: s.sm,
         borderWidth: 1,
         borderColor: c.borderDefault,
       },
@@ -481,7 +494,7 @@ export default function FlashCardsPage() {
       },
       // Deck wrapper: holds the peeking "next card" plus the interactive card on top of it.
       cardDeck: {
-        width: width - s.lg * 2,
+        width: Math.min(width - s.lg * 2, 560),
         height: cardHeight,
         alignSelf: 'center',
       },
@@ -507,16 +520,48 @@ export default function FlashCardsPage() {
         borderRadius: borderRadius['3xl'],
         ...shadows.lg,
         padding: s['2xl'],
+        paddingTop: s.xl,
         backfaceVisibility: 'hidden',
         justifyContent: 'space-between',
         alignItems: 'center',
         borderColor: c.borderDefault,
         borderWidth: 1,
         overflow: 'hidden',
+        height: cardHeight,
+      },
+      cardAccent: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 4,
+        backgroundColor: c.brand,
+      },
+      cardSubtleText: {
+        ...typography.xs,
+        ...typography.medium,
+        color: c.textTertiary,
+        marginTop: s.xs,
+        textAlign: 'center',
       },
       cardBack: {
         backgroundColor: c.brandLight,
         borderColor: c.brandBorder,
+        justifyContent: 'center',
+        paddingTop: s['2xl'],
+        paddingBottom: s['2xl'],
+      },
+      cardBackTopRow: {
+        position: 'absolute',
+        top: s['2xl'],
+        left: s['2xl'],
+        right: s['2xl'],
+        width: 'auto',
+      },
+      cardBackHintRow: {
+        position: 'absolute',
+        bottom: s['2xl'],
+        alignSelf: 'center',
       },
       cardLabel: {
         ...typography.xs,
@@ -562,17 +607,20 @@ export default function FlashCardsPage() {
         ...typography.bold,
         color: c.textPrimary,
         textAlign: 'center',
-        lineHeight: 30,
+        lineHeight: 34,
+        letterSpacing: -0.5,
       },
       formulaSubject: {
         ...typography.sm,
         ...typography.semibold,
         color: c.brandText,
-        marginTop: s.md,
+        marginTop: s.lg,
         paddingHorizontal: s.md,
         paddingVertical: s.xs,
         borderRadius: borderRadius.full,
         backgroundColor: c.brandLight,
+        borderWidth: 1,
+        borderColor: c.brandBorder,
         overflow: 'hidden',
       },
       explanation: {
@@ -618,13 +666,13 @@ export default function FlashCardsPage() {
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
-        marginTop: s.xl,
+        marginTop: s.lg,
         gap: s.md,
       },
       navButton: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
+        width: 52,
+        height: 52,
+        borderRadius: 26,
         backgroundColor: c.surfacePrimary,
         justifyContent: 'center',
         alignItems: 'center',
@@ -646,7 +694,8 @@ export default function FlashCardsPage() {
         flexDirection: 'row',
         alignItems: 'center',
         ...shadows.brandLight,
-        minWidth: 148,
+        minWidth: 156,
+        minHeight: 52,
         justifyContent: 'center',
       },
       flipButtonPressed: {
@@ -689,9 +738,11 @@ export default function FlashCardsPage() {
       },
       retryButton: {
         backgroundColor: c.danger,
-        borderRadius: borderRadius.md,
+        borderRadius: borderRadius.full,
         paddingHorizontal: s.md,
         paddingVertical: s.sm,
+        minHeight: 36,
+        justifyContent: 'center',
       },
       retryText: {
         ...typography.xs,
@@ -703,9 +754,10 @@ export default function FlashCardsPage() {
         marginTop: s.md,
       },
       formulaWrap: {
-        minHeight: 84,
+        height: 120,
         width: '100%',
         justifyContent: 'center',
+        alignItems: 'center',
         borderRadius: borderRadius.xl,
         backgroundColor: c.surfacePrimary,
         borderWidth: 1,
@@ -830,9 +882,12 @@ export default function FlashCardsPage() {
           <View style={styles.cardStage}>
             <View style={styles.controlsRow}>
               <View style={styles.progressGroup}>
-                <Text style={styles.progressText}>
-                  {currentIndex + 1} of {total}
-                </Text>
+                <View style={styles.progressHeader}>
+                  <Text style={styles.progressEyebrow}>YOUR PROGRESS</Text>
+                  <Text style={styles.progressText}>
+                    {currentIndex + 1} / {total}
+                  </Text>
+                </View>
                 <View style={styles.progressTrack}>
                   <Animated.View style={[styles.progressFill, { width: progressWidth }]} />
                 </View>
@@ -857,6 +912,7 @@ export default function FlashCardsPage() {
               <Animated.View {...panResponder.panHandlers} style={[styles.cardContainer, cardMotionStyle]}>
                 {/* Front side */}
                 <Animated.View pointerEvents={isFlipped ? 'none' : 'auto'} style={[styles.card, frontAnimatedStyle]}>
+                  <View style={styles.cardAccent} />
                   <View style={styles.cardTopRow}>
                     <View style={styles.cardBadge}>
                       <Ionicons name="help-circle-outline" size={15} color={colors.brand} />
@@ -876,6 +932,7 @@ export default function FlashCardsPage() {
                       {currentFormula?.title || 'Untitled Formula'}
                     </Text>
                     <Text style={styles.formulaSubject}>{currentFormula?.subject || 'General'}</Text>
+                    <Text style={styles.cardSubtleText}>Think of the answer before revealing it</Text>
                   </Pressable>
                   <View style={styles.hintRow}>
                     <Ionicons name="finger-print-outline" size={14} color={colors.textSecondary} />
@@ -888,7 +945,8 @@ export default function FlashCardsPage() {
                   pointerEvents={isFlipped ? 'auto' : 'none'}
                   style={[styles.card, styles.cardBack, backAnimatedStyle]}
                 >
-                  <View style={styles.cardTopRow}>
+                  <View style={styles.cardAccent} />
+                  <View style={[styles.cardTopRow, styles.cardBackTopRow]}>
                     <View style={[styles.cardBadge, styles.cardBadgeBack]}>
                       <Ionicons name="checkmark-circle-outline" size={15} color={colors.brand} />
                       <Text style={styles.cardLabel}>Answer</Text>
@@ -921,7 +979,7 @@ export default function FlashCardsPage() {
                       </Text>
                     ) : null}
                   </Pressable>
-                  <View style={styles.hintRow}>
+                  <View style={[styles.hintRow, styles.cardBackHintRow]}>
                     <Ionicons name="refresh-outline" size={14} color={colors.textSecondary} />
                     <Text style={styles.hintText}>Tap card to return</Text>
                   </View>
@@ -978,7 +1036,8 @@ export default function FlashCardsPage() {
         ) : (
           <View style={styles.emptyState}>
             <Ionicons name="albums-outline" size={48} color={colors.borderDefault} />
-            <Text style={styles.emptyText}>No formulas found.</Text>
+            <Text style={styles.emptyText}>No formulas found</Text>
+            <Text style={styles.cardSubtleText}>Try another subject or search term.</Text>
           </View>
         )}
       </ScreenShell>
