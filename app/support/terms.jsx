@@ -9,9 +9,9 @@ import { useTheme } from "../../src/shared/theme/ThemeContext";
 import { useThemeStyles } from "../../src/shared/theme/createStyles";
 
 // Enable LayoutAnimation for Android
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+// if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+//   UIManager.setLayoutAnimationEnabledExperimental(true);
+// }
 
 const TERMS_SECTIONS = [
   {

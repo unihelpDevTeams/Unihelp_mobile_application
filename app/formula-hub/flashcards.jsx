@@ -27,9 +27,9 @@ import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { typography, borderRadius, shadows } from '../../src/shared/theme';
 
 // Smooth cross-fade / resize whenever a layout-affecting state flips (Android needs opt-in).
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+// if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+//   UIManager.setLayoutAnimationEnabledExperimental(true);
+// }
 
 const SWIPE_OUT_DURATION = 220;
 const SEARCH_DEBOUNCE_MS = 250;

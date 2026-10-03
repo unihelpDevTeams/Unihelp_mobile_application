@@ -18,9 +18,9 @@ import { spacing, borderRadius } from '../../shared/theme';
 import { useTheme } from '../../shared/theme/ThemeContext';
 import { useThemeStyles } from '../../shared/theme/createStyles';
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+// if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+//   UIManager.setLayoutAnimationEnabledExperimental(true);
+// }
 
 const FALLBACK_ICON = 'radio-button-off-outline';
 

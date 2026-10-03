@@ -24,9 +24,9 @@ import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { buildShareUrl, shareContent } from '../../utils/share';
 import { useAuth } from '../../context/AuthContext';
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+// if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+//   UIManager.setLayoutAnimationEnabledExperimental(true);
+// }
 
 const animateNext = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 const JOIN_ERROR_AUTO_DISMISS_MS = 4000;

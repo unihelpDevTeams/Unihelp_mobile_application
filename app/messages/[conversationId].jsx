@@ -428,6 +428,8 @@ const MessageRow = React.memo(function MessageRow({
       </View>
     );
   } else {
+    const hasAttachments = Array.isArray(message.attachments) && message.attachments.length > 0;
+    const hasText = Boolean(message.text || message.body || message.caption);
     body = (
       <Pressable
         onLongPress={handleLongPress}
@@ -441,9 +443,24 @@ const MessageRow = React.memo(function MessageRow({
         ]}
       >
         {replyBlock}
-        <Text style={[styles.text, mine && styles.mineText]}>
-          {renderLinkedMessageText(message.text || message.body || message.caption || 'Attachment', mine, colors)}
-        </Text>
+        {hasAttachments && message.attachments.map((att, i) => {
+          if (att.type === 'image' && att.url) {
+            return (
+              <Image 
+                key={i} 
+                source={{ uri: att.url }} 
+                style={[styles.attachmentImage, { width: 200, height: 200, borderRadius: 8, marginBottom: hasText ? 8 : 0 }]} 
+                contentFit="cover" 
+              />
+            );
+          }
+          return null;
+        })}
+        {hasText && (
+          <Text style={[styles.text, mine && styles.mineText]}>
+            {renderLinkedMessageText(message.text || message.body || message.caption, mine, colors)}
+          </Text>
+        )}
         {footer}
       </Pressable>
     );

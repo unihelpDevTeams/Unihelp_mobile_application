@@ -30,9 +30,9 @@ import EmptyState from "../../src/shared/components/EmptyState";
 import { Image } from "expo-image";
 import GpaCalculatorPanel from "../../src/features/academic/GpaCalculatorPanel";
 
-if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+// if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+//   UIManager.setLayoutAnimationEnabledExperimental(true);
+// }
 
 const emptySemester = { name: "", units: "", gpa: "" };
 
