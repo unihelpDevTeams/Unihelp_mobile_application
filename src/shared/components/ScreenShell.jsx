@@ -73,6 +73,10 @@ export default function ScreenShell({
   const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
   const [uploadCounts, setUploadCounts] = useState({ hostels: 0, listings: 0, stories: 0 });
   const uid = profile?.uid || user?.uid;
+  
+  const clampedScrollY = useMemo(() => {
+    return headerScrollY ? Animated.diffClamp(headerScrollY, 0, 60) : null;
+  }, [headerScrollY]);
 
   const styles = useThemeStyles((c, s, r) => ({
     screen: { flex: 1, backgroundColor: c.background },
@@ -407,13 +411,13 @@ export default function ScreenShell({
           <Animated.View
             style={headerScrollY ? {
               transform: [{
-                translateY: headerScrollY.interpolate({
+                translateY: clampedScrollY.interpolate({
                   inputRange: [0, 60],
                   outputRange: [0, -60],
                   extrapolate: 'clamp'
                 })
               }],
-              marginTop: headerScrollY.interpolate({
+              marginTop: clampedScrollY.interpolate({
                 inputRange: [0, 60],
                 outputRange: [0, -60],
                 extrapolate: 'clamp'
