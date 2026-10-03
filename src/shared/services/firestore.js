@@ -110,6 +110,10 @@ const normalizeUserProfile = (profile = {}, uid = null) => {
     photo,
     photoURL: profile.photoURL || photo,
     photoThumb: profile.photoThumb || '',
+    cover: profile.cover || profile.coverPhoto || profile.coverUrl || profile.cover_url || '',
+    coverPhoto: profile.coverPhoto || profile.cover || profile.coverUrl || profile.cover_url || '',
+    coverUrl: profile.coverUrl || profile.cover_url || profile.coverPhoto || profile.cover || '',
+    coverAsset: profile.coverAsset || profile.cover_asset || null,
     totalPoints: profile.totalPoints ?? profile.total_points ?? 0,
     rankName: profile.rankName || profile.rank_name || '',
   };
@@ -156,6 +160,12 @@ const toUserApiPayload = (profile = {}) => ({
   bio: profile.bio || '',
   total_points: profile.totalPoints ?? profile.total_points,
   rank_name: profile.rankName || profile.rank_name,
+  ...(('cover' in profile || 'coverPhoto' in profile || 'coverUrl' in profile || 'cover_url' in profile)
+    ? { cover_url: profile.coverPhoto || profile.coverUrl || profile.cover || profile.cover_url || '' }
+    : {}),
+  ...(('coverAsset' in profile || 'cover_asset' in profile)
+    ? { cover_asset: profile.coverAsset || profile.cover_asset || null }
+    : {}),
 });
 
 const readFirestoreUserProfile = async (uid = auth.currentUser?.uid) => {
