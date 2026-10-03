@@ -894,7 +894,11 @@ export default function NewsFeedPage() {
         : post));
     };
     applyLike(!alreadyLiked, delta);
-    postJson(`/api/feed/posts/${item.id}/like`, {})
+    const request = alreadyLiked 
+      ? deleteJson(`/api/feed/posts/${item.id}/like`) 
+      : postJson(`/api/feed/posts/${item.id}/like`, {});
+    
+    request
       .catch((error) => {
         applyLike(alreadyLiked, -delta);
         Alert.alert('Could not update like', error.message || 'Please try again.');
@@ -973,6 +977,32 @@ export default function NewsFeedPage() {
     if (!commentsPost || !commentsHasMore || !commentsCursor || commentsLoading || commentsLoadingMore) return;
     fetchComments(commentsPost, commentsCursor);
   };
+
+  const toggleCommentLike = useCallback((comment) => {
+    const alreadyLiked = comment.liked;
+    const delta = alreadyLiked ? -1 : 1;
+    
+    // Optimistic UI update
+    setComments((current) => current.map((c) => 
+      c.id === comment.id 
+        ? { ...c, liked: !alreadyLiked, likesCount: Math.max(0, (c.likesCount || 0) + delta) }
+        : c
+    ));
+    
+    const request = alreadyLiked 
+      ? deleteJson(`/api/feed/comments/${comment.id}/like`) 
+      : postJson(`/api/feed/comments/${comment.id}/like`, {});
+      
+    request.catch((error) => {
+      // Revert on error
+      setComments((current) => current.map((c) => 
+        c.id === comment.id 
+          ? { ...c, liked: alreadyLiked, likesCount: Math.max(0, (c.likesCount || 0) - delta) }
+          : c
+      ));
+      Alert.alert('Could not update like', error.message || 'Please try again.');
+    });
+  }, []);
 
   const addComment = async () => {
     const post = commentsPost;
@@ -1549,11 +1579,21 @@ export default function NewsFeedPage() {
           keyboardDismissMode="interactive"
           renderItem={({ item }) => (
             <View style={styles.commentItem}>
-              {item.authorAvatar ? <Image source={{ uri: item.authorAvatar }} style={styles.commentAvatar} contentFit="cover" /> : <View style={styles.commentAvatar} />}
+              <Pressable onPress={() => { closeComments(); router.push(`/view-user-profile/${item.authorId}`); }}>
+                {item.authorAvatar ? <Image source={{ uri: item.authorAvatar }} style={styles.commentAvatar} contentFit="cover" /> : <View style={styles.commentAvatar} />}
+              </Pressable>
               <View style={styles.commentCopy}>
-                <Text style={styles.commentAuthor}>{item.authorName || 'UniHelp student'}</Text>
+                <Pressable onPress={() => { closeComments(); router.push(`/view-user-profile/${item.authorId}`); }}>
+                  <Text style={styles.commentAuthor}>{item.authorName || 'UniHelp student'}</Text>
+                </Pressable>
                 <Text style={styles.commentBody}>{item.content}</Text>
-                <Text style={styles.commentDate}>{timeAgo(item.createdAt)}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 12 }}>
+                  <Text style={styles.commentDate}>{timeAgo(item.createdAt)}</Text>
+                  <Pressable onPress={() => toggleCommentLike(item)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Ionicons name={item.liked ? "heart" : "heart-outline"} size={14} color={item.liked ? colors.error : colors.textMuted} />
+                    {item.likesCount > 0 && <Text style={[styles.commentDate, { color: item.liked ? colors.error : colors.textMuted }]}>{item.likesCount}</Text>}
+                  </Pressable>
+                </View>
               </View>
             </View>
           )}

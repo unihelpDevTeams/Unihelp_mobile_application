@@ -611,9 +611,10 @@ export default function RecordViewPage() {
         profile || {}
       );
       const conversationRef = { id: conversationId, memberIds: [user.uid, ownerId] };
+      const messageAttachments = mediaItems?.[0] ? [{ type: 'image', url: mediaItems[0] }] : [];
       await sendDirectMessage(conversationRef, user, profile || {}, {
         text: `Hi, I'm interested in "${title}" - is it still available?`,
-        attachments: [],
+        attachments: messageAttachments,
         replyTo: null,
       });
       setContactSheetVisible(false);
