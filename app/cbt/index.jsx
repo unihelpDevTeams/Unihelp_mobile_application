@@ -433,9 +433,20 @@ export default function CBTPracticeScreen() {
         const selected = shuffled.slice(0, limit);
 
         const formatted = selected.map((q, index) => {
-          const rawOpts = [q.a, q.b, q.c, q.d, q.e].filter(Boolean);
-          const correctKey = q.correct?.toLowerCase();
-          const correctAnswer = correctKey && q[correctKey] ? q[correctKey] : rawOpts[0] || '';
+          const rawOpts = Array.isArray(q.options) ? q.options : [q.a, q.b, q.c, q.d, q.e].filter(Boolean);
+          
+          let correctAnswer = '';
+          if (q.answer) {
+            // New API format: answer is "A", "B", "C", "D"
+            const answerIndex = q.answer.toUpperCase().charCodeAt(0) - 65; // 'A' -> 0, 'B' -> 1
+            if (answerIndex >= 0 && answerIndex < rawOpts.length) {
+              correctAnswer = rawOpts[answerIndex];
+            }
+          } else {
+            // Old API format fallback
+            const correctKey = q.correct?.toLowerCase();
+            correctAnswer = correctKey && q[correctKey] ? q[correctKey] : rawOpts[0] || '';
+          }
 
           return {
             id: `Q-${index + 1}-${Math.random().toString(36).substring(7)}`,

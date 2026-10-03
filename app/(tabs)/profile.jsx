@@ -21,6 +21,7 @@ import { spacing } from '../../src/shared/theme';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import ScreenShell from '../../src/shared/components/ScreenShell';
+import EvosAura from '../../src/shared/components/EvosAura';
 import Footer from '../../components/Footer';
 import DailyStreakBanner from '../../src/shared/components/DailyStreakBanner';
 import ConfirmDialog from '../../src/shared/components/ConfirmDialog';
@@ -1091,18 +1092,20 @@ export default function ProfileScreen() {
             accessibilityRole="button"
             accessibilityLabel="Change profile photo"
           >
-            <View style={styles.avatar}>
-              {profilePhoto ? (
-                <Image source={{ uri: profilePhotoThumb }} style={styles.avatarImage} contentFit="cover" />
-              ) : (
-                <Text style={styles.avatarText}>{initials}</Text>
-              )}
-              {photoUploading ? (
-                <View style={styles.avatarSpinnerOverlay}>
-                  <ActivityIndicator color={colors.onBrand} />
-                </View>
-              ) : null}
-            </View>
+            <EvosAura size={AVATAR_SIZE} active={premiumActive || profile?.role === 'admin'}>
+              <View style={styles.avatar}>
+                {profilePhoto ? (
+                  <Image source={{ uri: profilePhotoThumb }} style={styles.avatarImage} contentFit="cover" />
+                ) : (
+                  <Text style={styles.avatarText}>{initials}</Text>
+                )}
+                {photoUploading ? (
+                  <View style={styles.avatarSpinnerOverlay}>
+                    <ActivityIndicator color={colors.onBrand} />
+                  </View>
+                ) : null}
+              </View>
+            </EvosAura>
             <View style={styles.avatarBadge}>
               <Ionicons name="camera-outline" size={13} color={colors.onBrand} />
             </View>

@@ -13,6 +13,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
+import EvosAura from '../../src/shared/components/EvosAura';
 import ConfirmDialog from '../../src/shared/components/ConfirmDialog';
 import { PageLoader } from '../../src/shared/components/AILoaders';
 import { getUserProfile } from '../../services/firestoreSync';
@@ -347,24 +348,26 @@ export default function ViewUserProfile() {
               <View style={styles.coverScrim} />
             </View>
             <View style={styles.avatarWrapper}>
-              <View style={[styles.avatarBorder, { backgroundColor: colors.surfacePrimary, shadowColor: colors.shadow }]}>
-                {avatarThumbUrl && !avatarFailed && !isBlocked ? (
-                  <Image
-                    source={{ uri: avatarThumbUrl }}
-                    style={styles.avatarImage}
-                    contentFit="cover"
-                    onError={() => setAvatarFailed(true)}
-                  />
-                ) : (
-                  <View style={[styles.avatarFallback, { backgroundColor: isBlocked ? colors.dangerLight : colors.brand }]}>
-                    {isBlocked ? (
-                      <Ionicons name="ban-outline" size={34} color={colors.error} />
-                    ) : (
-                      <Text style={[styles.avatarText, { color: colors.onBrand }]}>{initials}</Text>
-                    )}
-                  </View>
-                )}
-              </View>
+              <EvosAura size={104} active={premiumActive || profile?.role === 'admin'}>
+                <View style={[styles.avatarBorder, { backgroundColor: colors.surfacePrimary, shadowColor: colors.shadow }]}>
+                  {avatarThumbUrl && !avatarFailed && !isBlocked ? (
+                    <Image
+                      source={{ uri: avatarThumbUrl }}
+                      style={styles.avatarImage}
+                      contentFit="cover"
+                      onError={() => setAvatarFailed(true)}
+                    />
+                  ) : (
+                    <View style={[styles.avatarFallback, { backgroundColor: isBlocked ? colors.dangerLight : colors.brand }]}>
+                      {isBlocked ? (
+                        <Ionicons name="ban-outline" size={34} color={colors.error} />
+                      ) : (
+                        <Text style={[styles.avatarText, { color: colors.onBrand }]}>{initials}</Text>
+                      )}
+                    </View>
+                  )}
+                </View>
+              </EvosAura>
             </View>
           </View>
 

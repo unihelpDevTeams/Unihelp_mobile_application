@@ -22,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ScreenShell from '../../src/shared/components/ScreenShell';
+import EvosAura from '../../src/shared/components/EvosAura';
 import EmptyState from '../../src/shared/components/EmptyState';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
@@ -151,7 +152,9 @@ const PostCard = React.memo(function PostCard({
     <View style={styles.card}>
       <View style={styles.postHeader}>
         <Pressable onPress={() => onOpenProfile(item)} accessibilityRole="button" accessibilityLabel={`Open ${item.authorName || 'student'} profile`}>
-          {item.authorAvatar ? <Image source={{ uri: item.authorAvatar }} style={styles.avatar} contentFit="cover" /> : <View style={styles.avatar} />}
+          <EvosAura size={40} active={item.authorPremium}>
+            {item.authorAvatar ? <Image source={{ uri: item.authorAvatar }} style={styles.avatar} contentFit="cover" /> : <View style={styles.avatar} />}
+          </EvosAura>
         </Pressable>
         <View style={styles.authorCol}>
           <View style={styles.authorRow}>
