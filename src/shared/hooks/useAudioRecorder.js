@@ -140,7 +140,7 @@ export function useAudioRecorder({ conversationId, isPremium }) {
 
   const startRecording = useCallback(async () => {
     if (!isPremium) {
-      setError('Voice messages are available for Premium members only.');
+      setError('Recording voice messages is available for Premium members only.');
       return;
     }
 

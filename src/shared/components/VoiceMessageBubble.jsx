@@ -1,10 +1,7 @@
 import React, { memo, useCallback, useRef, useEffect, useState } from 'react';
 import { View, Text, Pressable, ActivityIndicator, StyleSheet, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 import { useAudioPlayback } from '../hooks/useAudioPlayback';
-import { useAuth } from '../../../context/AuthContext';
-import { isPremiumActive } from '../services/premium';
 
 const COLORS = {
   indigo: '#6366F1',
@@ -22,14 +19,10 @@ const WAVE_BARS = 4;
 /**
  * Voice message bubble component with waveform visualization.
  * Shows play/pause controls, animated waveform, progress bar, and remaining time.
- * Only premium users can play.
  */
 const VoiceMessageBubble = memo(({ message, isMine, onLongPress }) => {
-  const router = useRouter();
-  const { profile } = useAuth();
-  const isPremium = isPremiumActive(profile);
   const { isPlaying, isLoading, progress, remaining, duration, error, formatTime, play, pause, resume } =
-    useAudioPlayback({ isPremium });
+    useAudioPlayback();
 
   const [isPaused, setIsPaused] = useState(false);
   const waveAnims = useRef(
@@ -85,7 +78,7 @@ const VoiceMessageBubble = memo(({ message, isMine, onLongPress }) => {
   }, [duration, isLoading, isPlaying, progress]);
 
   const handlePlayPause = useCallback(() => {
-    if (!isPremium || !message?.audioUrl) return;
+    if (!message?.audioUrl) return;
 
     if (isPlaying) {
       pause();
@@ -98,40 +91,12 @@ const VoiceMessageBubble = memo(({ message, isMine, onLongPress }) => {
       setIsPaused(false);
       play(message.audioUrl, (message.duration || 0) * 1000);
     }
-  }, [isPremium, message, isPlaying, isPaused, duration, pause, resume, play]);
-
-  const handleUpgrade = useCallback(() => {
-    router.navigate('/premium');
-  }, [router]);
+  }, [message, isPlaying, isPaused, duration, pause, resume, play]);
 
   const totalDurationMs = (message.duration || 0) * 1000;
   const displayTime = isPlaying || isPaused || remaining > 0
     ? formatTime(remaining)
     : formatTime(totalDurationMs);
-
-  // If not premium, show upgrade prompt
-  if (!isPremium) {
-    return (
-      <Pressable
-        onPress={handleUpgrade}
-        style={({ pressed }) => [
-          styles.container,
-          isMine ? styles.mine : styles.theirs,
-          pressed && styles.pressed,
-        ]}
-      >
-        <View style={styles.lockedRow}>
-          <View style={styles.lockedIcon}>
-            <Ionicons name="lock-closed" size={14} color={COLORS.inkSoft} />
-          </View>
-          <View style={styles.lockedTextContainer}>
-            <Text style={styles.lockedText}>Voice messages are available for Premium members only.</Text>
-            <Text style={styles.upgradeText}>Tap to upgrade →</Text>
-          </View>
-        </View>
-      </Pressable>
-    );
-  }
 
   return (
     <Pressable
@@ -361,33 +326,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#EF4444',
     flex: 1,
-  },
-  lockedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  lockedIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#F1F5F9',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  lockedTextContainer: {
-    flex: 1,
-  },
-  lockedText: {
-    fontSize: 12,
-    color: COLORS.inkSoft,
-    lineHeight: 16,
-  },
-  upgradeText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: COLORS.indigo,
-    marginTop: 2,
   },
 });
 

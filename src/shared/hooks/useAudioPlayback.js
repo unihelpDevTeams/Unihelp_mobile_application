@@ -8,11 +8,9 @@ const POLL_INTERVAL = 200;
  * Lazy initializes - only creates player when first play is called.
  * Disposes resources after playback completes.
  *
- * @param {Object} options
- * @param {boolean} options.isPremium - Whether the user is premium
  * @returns {Object} Playback controls and state
  */
-export function useAudioPlayback({ isPremium }) {
+export function useAudioPlayback() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [position, setPosition] = useState(0);
@@ -40,11 +38,6 @@ export function useAudioPlayback({ isPremium }) {
   }, [status.currentTime, status.didJustFinish, status.duration, status.isLoaded, status.playing]);
 
   const play = useCallback(async (audioUrl, messageDuration) => {
-    if (!isPremium) {
-      setError('Voice messages are available for Premium members only.');
-      return;
-    }
-
     if (!audioUrl) {
       setError('No audio URL provided.');
       return;
@@ -77,7 +70,7 @@ export function useAudioPlayback({ isPremium }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isPremium, player]);
+  }, [player]);
 
   const pause = useCallback(async () => {
     if (!isLoaded) return;

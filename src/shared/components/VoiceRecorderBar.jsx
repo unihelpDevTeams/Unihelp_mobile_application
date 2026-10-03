@@ -25,7 +25,7 @@ const WAVE_BARS = 5;
 /**
  * Voice recorder bar that appears in the composer area.
  * Hold to record, release to send, swipe left to cancel.
- * Only renders for premium users. Shows upgrade prompt for free users.
+ * Recording is a premium feature; existing voice messages can be played by everyone.
  */
 const VoiceRecorderBar = memo(({ conversationId, onVoiceSent }) => {
   const router = useRouter();
@@ -170,18 +170,44 @@ const VoiceRecorderBar = memo(({ conversationId, onVoiceSent }) => {
   const maxReached = durationMs >= maxDurationMs;
   const seconds = Math.floor(durationMs / 1000);
 
+  const upgradeModal = (
+    <Modal visible={showUpgrade} transparent animationType="fade" onRequestClose={() => setShowUpgrade(false)}>
+      <Pressable style={styles.modalBackdrop} onPress={() => setShowUpgrade(false)} />
+      <View style={styles.modalSheet}>
+        <View style={styles.modalHandle} />
+        <View style={styles.modalIconWrap}>
+          <Ionicons name="lock-closed" size={24} color="#B45309" />
+        </View>
+        <Text style={styles.modalTitle}>Premium Feature</Text>
+        <Text style={styles.modalText}>
+          Recording voice messages is available to Premium members. Upgrade to record and send your own voice notes.
+        </Text>
+        <Pressable style={styles.modalButton} onPress={handleUpgrade}>
+          <Ionicons name="sparkles" size={16} color="#FFFFFF" />
+          <Text style={styles.modalButtonText}>Upgrade to Premium</Text>
+        </Pressable>
+        <Pressable style={styles.modalCancel} onPress={() => setShowUpgrade(false)}>
+          <Text style={styles.modalCancelText}>Maybe later</Text>
+        </Pressable>
+      </View>
+    </Modal>
+  );
+
   // If not premium, show a button that triggers upgrade prompt
   if (!isPremium) {
     return (
-      <Pressable
-        onPress={() => setShowUpgrade(true)}
-        style={({ pressed }) => [
-          styles.micButton,
-          pressed && styles.micButtonPressed,
-        ]}
-      >
-        <Ionicons name="mic-outline" size={20} color={COLORS.inkSoft} />
-      </Pressable>
+      <>
+        <Pressable
+          onPress={() => setShowUpgrade(true)}
+          style={({ pressed }) => [
+            styles.micButton,
+            pressed && styles.micButtonPressed,
+          ]}
+        >
+          <Ionicons name="mic-outline" size={20} color={COLORS.inkSoft} />
+        </Pressable>
+        {upgradeModal}
+      </>
     );
   }
 
@@ -297,26 +323,7 @@ const VoiceRecorderBar = memo(({ conversationId, onVoiceSent }) => {
         </View>
       ) : null}
 
-      <Modal visible={showUpgrade} transparent animationType="fade" onRequestClose={() => setShowUpgrade(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setShowUpgrade(false)} />
-        <View style={styles.modalSheet}>
-          <View style={styles.modalHandle} />
-          <View style={styles.modalIconWrap}>
-            <Ionicons name="lock-closed" size={24} color="#B45309" />
-          </View>
-          <Text style={styles.modalTitle}>Premium Feature</Text>
-          <Text style={styles.modalText}>
-            Voice messages are available for Premium members only. Upgrade to send and receive voice messages.
-          </Text>
-          <Pressable style={styles.modalButton} onPress={handleUpgrade}>
-            <Ionicons name="sparkles" size={16} color="#FFFFFF" />
-            <Text style={styles.modalButtonText}>Upgrade to Premium</Text>
-          </Pressable>
-          <Pressable style={styles.modalCancel} onPress={() => setShowUpgrade(false)}>
-            <Text style={styles.modalCancelText}>Maybe later</Text>
-          </Pressable>
-        </View>
-      </Modal>
+      {upgradeModal}
     </View>
   );
 });

@@ -41,7 +41,7 @@ import { getCloudinaryThumbnailUrl, toCloudinaryAsset, uploadToCloudinary } from
 import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 import { isPremiumActive } from '../../src/shared/services/premium';
 import { fetchFriendStats } from '../../src/shared/services/friendships';
-import { getJson } from '../../src/shared/services/backend';
+import { deleteProfileMedia, getJson, uploadFeatureMedia } from '../../src/shared/services/backend';
 
 const BIO_MAX_LENGTH = 160;
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
@@ -88,10 +88,11 @@ const updateProfilePhoto = async ({ kind = 'photo', uri }) => {
 
   const extension = String(uri).toLowerCase().endsWith('.png') ? 'png' : 'jpg';
   const filename = `${kind}-${Date.now()}.${extension}`;
-  const uploaded = await uploadToCloudinary(
-    { uri, name: filename, type: 'image/jpeg', size: fileInfo.size },
-    { resourceType: 'image', validationKind: 'image' }
-  );
+  const mimeType = extension === 'png' ? 'image/png' : 'image/jpeg';
+  const uploadFile = { uri, name: filename, type: mimeType, mimeType, size: fileInfo.size };
+  const uploaded = kind === 'cover'
+    ? await uploadFeatureMedia(uploadFile, { feature: 'profile', resourceType: 'image' })
+    : await uploadToCloudinary(uploadFile, { resourceType: 'image', validationKind: 'image' });
 
   const secureUrl = uploaded?.secure_url || uploaded?.url || '';
   if (!secureUrl) {
@@ -109,11 +110,20 @@ const updateProfilePhoto = async ({ kind = 'photo', uri }) => {
     return photoAsset;
   }
 
-  const coverAsset = toCloudinaryAsset(uploaded, { url: secureUrl, resourceType: 'image' });
+  const coverAsset = {
+    url: secureUrl,
+    publicId: uploaded?.publicId || uploaded?.key || '',
+    resourceType: uploaded?.resourceType || 'image',
+    storageProvider: 'r2',
+  };
   try {
     await saveUserProfile({ cover: secureUrl, coverPhoto: secureUrl, coverAsset });
   } catch (saveError) {
-    await deleteCloudinaryAssets({ assets: [coverAsset] }).catch(() => {});
+    if (coverAsset.publicId) {
+      await deleteProfileMedia(coverAsset.publicId).catch((cleanupError) => {
+        console.warn('[Profile] Failed to clean up unsaved R2 cover image.', cleanupError);
+      });
+    }
     throw saveError;
   }
   return coverAsset;
@@ -624,7 +634,9 @@ export default function ProfileScreen() {
       await updateProfilePhoto({ kind: 'photo', uri: asset.uri });
       await refreshProfile();
       if (previousAsset?.publicId || previousAsset?.url) {
-        await deleteCloudinaryAssets({ assets: [previousAsset] }).catch(() => {});
+        await deleteCloudinaryAssets({ assets: [previousAsset] }).catch((error) => {
+          console.warn('[Profile] Failed to delete replaced Cloudinary profile photo.', error);
+        });
       }
       if (isMountedRef.current) showStatus({ type: 'success', text: 'Profile photo updated.' });
     } catch (error) {
@@ -661,8 +673,14 @@ export default function ProfileScreen() {
       const previousAsset = profile?.coverAsset || (profileCover ? { url: profileCover, resourceType: 'image' } : null);
       await updateProfilePhoto({ kind: 'cover', uri: asset.uri });
       await refreshProfile();
-      if (previousAsset?.publicId || previousAsset?.url) {
-        await deleteCloudinaryAssets({ assets: [previousAsset] }).catch(() => {});
+      if (previousAsset?.storageProvider === 'r2' && previousAsset?.publicId) {
+        await deleteProfileMedia(previousAsset.publicId).catch((error) => {
+          console.warn('[Profile] Failed to delete replaced R2 cover image.', error);
+        });
+      } else if (previousAsset?.url?.includes('res.cloudinary.com')) {
+        await deleteCloudinaryAssets({ assets: [previousAsset] }).catch((error) => {
+          console.warn('[Profile] Failed to delete replaced Cloudinary cover image.', error);
+        });
       }
       if (isMountedRef.current) showStatus({ type: 'success', text: 'Cover photo updated.' });
     } catch (error) {

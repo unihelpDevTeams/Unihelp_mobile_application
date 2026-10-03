@@ -241,6 +241,14 @@ export async function uploadFeatureMedia(file, { feature = 'stories', resourceTy
   return data;
 }
 
+export async function deleteProfileMedia(key) {
+  if (typeof key !== 'string' || !key.startsWith('unihelp/profile/')) {
+    throw new Error('Invalid profile media key.');
+  }
+
+  return requestJson('/api/uploads', { method: 'DELETE', payload: { key } });
+}
+
 export async function uploadStickerMedia(file, { onProgress, rotation = 0 } = {}) {
   const normalizedFile = file && (String(file?.type || file?.mimeType || '').startsWith('image/') || file?.uri)
     ? await compressImageForUpload(file, { maxWidth: 1400, maxHeight: 1400, quality: 0.75 })
