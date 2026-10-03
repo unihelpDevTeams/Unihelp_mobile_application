@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Animated, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNetInfo } from '@react-native-community/netinfo';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FullScreenLoader } from './AILoaders';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -487,6 +488,31 @@ function OfflineNotice({ visible, colors, styles }) {
 }
 
 function PremiumExpiryNotice({ status, onPress, colors, styles }) {
+  const [isVisible, setIsVisible] = useState(false);
+  const DISMISS_KEY = 'premium_expiry_dismissed_at';
+
+  useEffect(() => {
+    AsyncStorage.getItem(DISMISS_KEY).then((dismissedAt) => {
+      if (dismissedAt) {
+        const dismissedTime = parseInt(dismissedAt, 10);
+        const hoursSinceDismissed = (Date.now() - dismissedTime) / (1000 * 60 * 60);
+        if (hoursSinceDismissed < 24) {
+          setIsVisible(false);
+          return;
+        }
+      }
+      setIsVisible(true);
+    });
+  }, []);
+
+  if (!isVisible) return null;
+
+  const handleDismiss = async (e) => {
+    e.stopPropagation();
+    setIsVisible(false);
+    await AsyncStorage.setItem(DISMISS_KEY, Date.now().toString());
+  };
+
   const dayCopy = status.daysLeft === 0
     ? 'today'
     : `in ${status.daysLeft} ${status.daysLeft === 1 ? 'day' : 'days'}`;
@@ -494,22 +520,21 @@ function PremiumExpiryNotice({ status, onPress, colors, styles }) {
 
   return (
     <Pressable
-      style={({ pressed }) => [styles.premiumExpiryBanner, pressed && { opacity: 0.9 }]}
+      style={({ pressed }) => [styles.premiumExpiryBanner, pressed && { opacity: 0.9 }, { flexDirection: 'row', alignItems: 'center' }]}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`${accessCopy} expires ${dayCopy}. View Premium plan.`}
     >
       <Ionicons name="time-outline" size={18} color={colors.gold || colors.brand} />
-      <View style={styles.premiumExpiryText}>
+      <View style={[styles.premiumExpiryText, { flex: 1 }]}>
         <Text style={styles.premiumExpiryTitle}>{accessCopy} expires {dayCopy}</Text>
         <Text style={styles.premiumExpirySubtitle}>
           Access remains active until {status.expiryLabel}. Tap to review your plan.
         </Text>
       </View>
-      <View style={styles.premiumExpiryAction}>
-        <Text style={styles.premiumExpiryActionText}>View</Text>
-        <Ionicons name="chevron-forward" size={12} color={colors.brand} />
-      </View>
+      <Pressable onPress={handleDismiss} hitSlop={15} style={{ padding: 4, marginLeft: 8 }}>
+        <Ionicons name="close" size={18} color={colors.textTertiary || colors.brand} />
+      </Pressable>
     </Pressable>
   );
 }
