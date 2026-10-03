@@ -1,6 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
-import { db } from '../../../firebase/config';
 import { COMMON_DEPARTMENTS } from '../../admin/commonDepartments';
 
 const commonDepartments = COMMON_DEPARTMENTS.map((d, i) => ({ id: `common-dept-${i}`, ...d }));
@@ -19,8 +17,8 @@ const mergeDepartments = (primary = []) => {
 };
 
 /**
- * Fetch departments for a selected university from Firestore with search.
- * Falls back to a common departments list when Firestore is empty or on error.
+ * Fetch departments for a selected university.
+ * Now exclusively uses the common departments list to save Firebase reads.
  */
 export function useDepartments() {
   const [departments, setDepartments] = useState([]);
@@ -28,8 +26,7 @@ export function useDepartments() {
   const [error, setError] = useState(null);
   const [selectedUniversityId, setSelectedUniversityId] = useState(null);
   const [searchText, setSearchText] = useState('');
-  const cachedRef = useRef({});
-  const fallbackShownRef = useRef(false);
+  const fallbackShownRef = useRef(true);
 
   const filterDepts = (list, search) => {
     if (!search.trim()) return list;
@@ -43,40 +40,16 @@ export function useDepartments() {
   };
 
   const fetchDepartments = useCallback(async (universityId, search = '') => {
-    if (!universityId) {
-      setDepartments(filterDepts(commonDepartments, search));
-      return;
-    }
-
-    const cacheKey = `${universityId}`;
-    if (cachedRef.current[cacheKey] && !search.trim()) {
-      setDepartments(cachedRef.current[cacheKey]);
-      return;
-    }
-
     try {
       setLoading(true);
       setError(null);
-
-      const constraints = [where('universityId', '==', universityId), orderBy('name'), limit(200)];
-      const q = query(collection(db, 'departments'), ...constraints);
-      const snapshot = await getDocs(q);
-      const items = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-      if (items.length > 0) {
-        // Firestore has data — use it with client-side search filter
-        const merged = mergeDepartments(items);
-        const filtered = filterDepts(merged, search);
-        if (!cachedRef.current[cacheKey]) cachedRef.current[cacheKey] = merged;
-        setDepartments(filtered);
-        fallbackShownRef.current = false;
-      } else {
-        // Firestore is empty — fall back to common departments list
-        setDepartments(filterDepts(commonDepartments, search));
-        fallbackShownRef.current = true;
-      }
+      
+      // Simulate network request for UI consistency
+      await new Promise((r) => setTimeout(r, 150));
+      
+      setDepartments(filterDepts(commonDepartments, search));
+      fallbackShownRef.current = true;
     } catch (_err) {
-      // Network error — show fallback
       setDepartments(filterDepts(commonDepartments, search));
       fallbackShownRef.current = true;
     } finally {

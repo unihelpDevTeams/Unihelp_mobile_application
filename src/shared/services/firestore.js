@@ -467,11 +467,7 @@ export async function removeMarketplaceSponsorship(listingId) {
   return deleteJson(`/api/marketplace/${encodeURIComponent(listingId)}/sponsor`);
 }
 
-export async function fetchTasks(uid = auth.currentUser?.uid) {
-  if (!uid) return [];
-  const snapshot = await getDocs(query(collection(db, 'tasks'), where('userId', '==', uid), orderBy('createdAt', 'desc')));
-  return mapDocs(snapshot);
-}
+
 
 export async function fetchGpaRecords(uid = auth.currentUser?.uid) {
   if (!uid) return [];

@@ -19,7 +19,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
 import { COLLECTIONS } from '../firestoreSchema';
-import { getJson, sendAppNotification } from './backend';
+import { getJson, postJson, deleteJson, sendAppNotification } from './backend';
 
 export const FRIEND_PAGE_SIZE = 20;
 export const REQUEST_PAGE_SIZE = 20;
@@ -211,149 +211,36 @@ export const listenRelationship = (currentUid, otherUid, callback) => {
 };
 
 export const sendFriendRequest = async ({ currentUid, targetUid, currentProfile = {}, targetProfile = {} }) => {
-  await runTransaction(db, async (transaction) => {
-    await assertCanInteract(transaction, currentUid, targetUid);
-    const limitInfo = await checkDailyLimit(transaction, currentUid, 'friendRequests', DAILY_FRIEND_REQUEST_LIMIT);
-
-    const friendshipRef = doc(db, COLLECTIONS.friends, pairId(currentUid, targetUid));
-    const requestRef = doc(db, COLLECTIONS.friendRequests, pairId(currentUid, targetUid));
-    const [friendshipSnap, requestSnap] = await Promise.all([
-      transaction.get(friendshipRef),
-      transaction.get(requestRef),
-    ]);
-
-    if (friendshipSnap.exists()) throw new Error('You are already friends.');
-    if (requestSnap.exists() && requestSnap.data()?.status === 'pending') {
-      throw new Error('A pending friend request already exists.');
-    }
-
-    transaction.set(requestRef, {
-      from: currentUid,
-      to: targetUid,
-      status: 'pending',
-      fromProfile: profileSummary(currentUid, currentProfile),
-      toProfile: profileSummary(targetUid, targetProfile),
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    incrementDailyLimit(transaction, limitInfo);
-  });
-
-  await notifyUser(targetUid, {
-    type: 'friend_request_received',
-    title: 'New friend request',
-    body: `${userName(currentProfile)} wants to connect with you.`,
-    route: '/friends',
-    data: { from: currentUid },
-  });
+  await postJson(`/api/friendships/requests/${encodeURIComponent(targetUid)}`);
 };
 
 export const acceptFriendRequest = async ({ request, currentUid, currentProfile = {} }) => {
   if (!request?.id) throw new Error('Missing friend request.');
-  if (request.to !== currentUid) throw new Error('Only the receiver can accept this request.');
-  const senderProfile = request.fromProfile || await getUserProfileById(request.from) || {};
-
-  await runTransaction(db, async (transaction) => {
-    const requestRef = doc(db, COLLECTIONS.friendRequests, request.id);
-    const snap = await transaction.get(requestRef);
-    if (!snap.exists() || snap.data()?.status !== 'pending') throw new Error('This request is no longer pending.');
-    await assertCanInteract(transaction, request.from, currentUid);
-
-    const batchLike = {
-      set: (...args) => transaction.set(...args),
-      update: (...args) => transaction.update(...args),
-    };
-    createFriendshipBatch(batchLike, request.from, currentUid, senderProfile, currentProfile);
-    transaction.update(requestRef, {
-      status: 'accepted',
-      updatedAt: serverTimestamp(),
-      respondedAt: serverTimestamp(),
-      respondedBy: currentUid,
-    });
-  });
-
-  await notifyUser(request.from, {
-    type: 'friend_request_accepted',
-    title: 'Friend request accepted',
-    body: `${userName(currentProfile)} accepted your friend request.`,
-    route: `/view-user-profile/${currentUid}`,
-    data: { friendId: currentUid },
-  });
+  await postJson(`/api/friendships/requests/${encodeURIComponent(request.id)}/accept`);
 };
 
 export const declineFriendRequest = async ({ request, currentUid, currentProfile = {} }) => {
   if (!request?.id) throw new Error('Missing friend request.');
-  if (request.to !== currentUid) throw new Error('Only the receiver can decline this request.');
-  await updateDoc(doc(db, COLLECTIONS.friendRequests, request.id), {
-    status: 'declined',
-    updatedAt: serverTimestamp(),
-    respondedAt: serverTimestamp(),
-    respondedBy: currentUid,
-  });
-  await notifyUser(request.from, {
-    type: 'friend_request_declined',
-    title: 'Friend request declined',
-    body: `${userName(currentProfile)} declined your friend request.`,
-    route: '/friends',
-    data: { friendId: currentUid },
-  });
+  await postJson(`/api/friendships/requests/${encodeURIComponent(request.id)}/decline`);
 };
 
 export const cancelFriendRequest = async ({ requestId, currentUid }) => {
-  const ref = doc(db, COLLECTIONS.friendRequests, requestId);
-  await runTransaction(db, async (transaction) => {
-    const snap = await transaction.get(ref);
-    if (!snap.exists()) return;
-    const data = snap.data();
-    if (data.from !== currentUid) throw new Error('Only the sender can cancel this request.');
-    if (data.status !== 'pending') throw new Error('This request is no longer pending.');
-    transaction.delete(ref);
-  });
+  if (!requestId) return;
+  await deleteJson(`/api/friendships/requests/${encodeURIComponent(requestId)}`);
 };
 
 export const removeFriend = async ({ currentUid, friendUid, currentProfile = {} }) => {
   if (!currentUid || !friendUid) throw new Error('Missing friendship details.');
-  await notifyUser(friendUid, {
-    type: 'friend_removed',
-    title: 'Friend removed',
-    body: `${userName(currentProfile)} removed the friendship connection.`,
-    route: '/friends',
-    data: { friendId: currentUid },
-  });
-  await deleteDoc(doc(db, COLLECTIONS.friends, pairId(currentUid, friendUid)));
+  await deleteJson(`/api/friendships/friends/${encodeURIComponent(friendUid)}`);
 };
 
 export const blockStudent = async ({ currentUid, targetUid, currentProfile = {}, targetProfile = {} }) => {
   if (!currentUid || !targetUid || currentUid === targetUid) throw new Error('You cannot block this student.');
-  const batch = writeBatch(db);
-  batch.set(doc(db, COLLECTIONS.blockedUsers, directedId(currentUid, targetUid)), {
-    blockerId: currentUid,
-    blockedId: targetUid,
-    blockerProfile: profileSummary(currentUid, currentProfile),
-    blockedProfile: profileSummary(targetUid, targetProfile),
-    createdAt: serverTimestamp(),
-  }, { merge: true });
-  batch.delete(doc(db, COLLECTIONS.friends, pairId(currentUid, targetUid)));
-  batch.delete(doc(db, COLLECTIONS.friendRequests, pairId(currentUid, targetUid)));
-  await batch.commit();
-  await notifyUser(currentUid, {
-    type: 'user_blocked',
-    title: 'User blocked',
-    body: 'This student can no longer interact with you.',
-    route: '/friends',
-    data: { blockedId: targetUid },
-  });
+  await postJson(`/api/friendships/block/${encodeURIComponent(targetUid)}`);
 };
 
 export const unblockStudent = async ({ currentUid, targetUid }) => {
-  await deleteDoc(doc(db, COLLECTIONS.blockedUsers, directedId(currentUid, targetUid)));
-  await notifyUser(currentUid, {
-    type: 'user_unblocked',
-    title: 'User unblocked',
-    body: 'This student can send requests again.',
-    route: '/friends',
-    data: { unblockedId: targetUid },
-  });
+  await deleteJson(`/api/friendships/block/${encodeURIComponent(targetUid)}`);
 };
 
 export const createOrOpenFriendConversation = async ({ currentUser, otherUser, currentProfile = {}, otherProfile = {} }) => {
@@ -540,20 +427,50 @@ export const declineMessageRequest = async ({ request, currentUid, currentProfil
 
 export const listenFriends = (uid, callback, pageSize = FRIEND_PAGE_SIZE) => {
   if (!uid) return () => {};
-  const q = query(collection(db, COLLECTIONS.friends), where('users', 'array-contains', uid), orderBy('createdAt', 'desc'), limit(pageSize));
-  return onSnapshot(q, (snap) => callback(mapDocs(snap)));
+  let interval;
+  const poll = async () => {
+    try {
+      const data = await getJson('/api/friendships/friends');
+      callback(data || []);
+    } catch (e) {
+      console.warn('Friend sync failed', e);
+    }
+  };
+  poll();
+  interval = setInterval(poll, 10000);
+  return () => clearInterval(interval);
 };
 
 export const listenIncomingFriendRequests = (uid, callback) => {
   if (!uid) return () => {};
-  const q = query(collection(db, COLLECTIONS.friendRequests), where('to', '==', uid), where('status', '==', 'pending'), orderBy('createdAt', 'desc'), limit(REQUEST_PAGE_SIZE));
-  return onSnapshot(q, (snap) => callback(mapDocs(snap)));
+  let interval;
+  const poll = async () => {
+    try {
+      const data = await getJson('/api/friendships/requests/incoming');
+      callback(data || []);
+    } catch (e) {
+      console.warn('Incoming request sync failed', e);
+    }
+  };
+  poll();
+  interval = setInterval(poll, 10000);
+  return () => clearInterval(interval);
 };
 
 export const listenOutgoingFriendRequests = (uid, callback) => {
   if (!uid) return () => {};
-  const q = query(collection(db, COLLECTIONS.friendRequests), where('from', '==', uid), where('status', '==', 'pending'), orderBy('createdAt', 'desc'), limit(REQUEST_PAGE_SIZE));
-  return onSnapshot(q, (snap) => callback(mapDocs(snap)));
+  let interval;
+  const poll = async () => {
+    try {
+      const data = await getJson('/api/friendships/requests/outgoing');
+      callback(data || []);
+    } catch (e) {
+      console.warn('Outgoing request sync failed', e);
+    }
+  };
+  poll();
+  interval = setInterval(poll, 10000);
+  return () => clearInterval(interval);
 };
 
 export const listenIncomingMessageRequests = (uid, callback) => {
@@ -564,65 +481,32 @@ export const listenIncomingMessageRequests = (uid, callback) => {
 
 export const listenBlockedUsers = (uid, callback) => {
   if (!uid) return () => {};
-  const q = query(collection(db, COLLECTIONS.blockedUsers), where('blockerId', '==', uid));
-  return onSnapshot(q, (snap) => {
-    const rows = mapDocs(snap)
-      .sort((left, right) => toMillis(right.createdAt) - toMillis(left.createdAt))
-      .slice(0, FRIEND_PAGE_SIZE);
-    callback(rows);
-  }, (error) => {
-    console.warn('Failed to listen for blocked users:', error?.message || error);
-    callback([]);
-  });
+  let interval;
+  const poll = async () => {
+    try {
+      const data = await getJson('/api/friendships/blocked');
+      callback(data || []);
+    } catch (e) {
+      console.warn('Failed to listen for blocked users:', e?.message || e);
+      callback([]);
+    }
+  };
+  poll();
+  interval = setInterval(poll, 10000);
+  return () => clearInterval(interval);
 };
 
 export const loadMoreFriends = async (uid, cursor, pageSize = FRIEND_PAGE_SIZE) => {
-  if (!uid || !cursor) return { items: [], cursor: null, hasMore: false };
-  const snap = await getDocs(query(
-    collection(db, COLLECTIONS.friends),
-    where('users', 'array-contains', uid),
-    orderBy('createdAt', 'desc'),
-    startAfter(cursor),
-    limit(pageSize)
-  ));
-  return { items: mapDocs(snap), cursor: snap.docs[snap.docs.length - 1] || null, hasMore: snap.size === pageSize };
+  if (!uid) return { items: [], cursor: null, hasMore: false };
+  // With polling this is simpler, but to keep the signature:
+  const items = await getJson('/api/friendships/friends') || [];
+  return { items, cursor: null, hasMore: false };
 };
 
 export const listSuggestedFriends = async ({ uid, profile = {}, pageSize = 20 } = {}) => {
   if (!uid) return [];
-  const usersSnap = await getDocs(query(collection(db, COLLECTIONS.users), limit(120)));
-  const [friendsSnap, outgoingSnap, incomingSnap, blockedSnap] = await Promise.all([
-    getDocs(query(collection(db, COLLECTIONS.friends), where('users', 'array-contains', uid))),
-    getDocs(query(collection(db, COLLECTIONS.friendRequests), where('from', '==', uid), where('status', '==', 'pending'))),
-    getDocs(query(collection(db, COLLECTIONS.friendRequests), where('to', '==', uid), where('status', '==', 'pending'))),
-    getDocs(query(collection(db, COLLECTIONS.blockedUsers), where('blockerId', '==', uid))),
-  ]);
-  const excluded = new Set([uid]);
-  friendsSnap.docs.forEach((friendDoc) => friendDoc.data()?.users?.forEach?.((id) => id !== uid && excluded.add(id)));
-  outgoingSnap.docs.forEach((requestDoc) => excluded.add(requestDoc.data()?.to));
-  incomingSnap.docs.forEach((requestDoc) => excluded.add(requestDoc.data()?.from));
-  blockedSnap.docs.forEach((blockDoc) => excluded.add(blockDoc.data()?.blockedId));
-
-  const currentInterests = new Set(Array.isArray(profile.interests) ? profile.interests.map((item) => String(item).toLowerCase()) : []);
-  return mapDocs(usersSnap)
-    .filter((student) => !excluded.has(student.id || student.uid))
-    .map((student) => {
-      const interests = Array.isArray(student.interests) ? student.interests : [];
-      const sharedInterests = interests.filter((item) => currentInterests.has(String(item).toLowerCase())).length;
-      let score = 0;
-      if ((student.school || student.university) && (student.school || student.university) === (profile.school || profile.university)) score += 35;
-      if (student.faculty && student.faculty === profile.faculty) score += 20;
-      if (student.department && student.department === profile.department) score += 25;
-      if (student.level && student.level === profile.level) score += 12;
-      score += Math.min(sharedInterests * 8, 24);
-      if (student.verifiedTutor) score += 10;
-      if (student.lastActiveAt) score += 4;
-      const cappedScore = Math.min(score, 100);
-      return { ...student, score: cappedScore, matchPercentage: cappedScore };
-    })
-    .filter((student) => student.score > 0)
-    .sort((left, right) => right.score - left.score)
-    .slice(0, pageSize);
+  const suggestions = await getJson('/api/friendships/suggestions');
+  return suggestions || [];
 };
 
 export const updatePrivacySettings = async (uid, privacy) => {

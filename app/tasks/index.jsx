@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { addDoc, collection, deleteDoc, doc, getDocs, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
-import { db } from '../../firebase/config';
+import api from '../../src/shared/api';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
 import ConfirmDialog from '../../src/shared/components/ConfirmDialog';
@@ -356,8 +355,8 @@ export default function TasksPage() {
       return;
     }
     try {
-      const snap = await getDocs(query(collection(db, 'tasks'), where('userId', '==', profile.uid), orderBy('createdAt', 'desc')));
-      if (isMounted.current) setTasks(snap.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+      const data = await api.get('/api/tasks');
+      if (isMounted.current) setTasks(data || []);
     } finally {
       if (isMounted.current) setLoading(false);
     }
@@ -389,17 +388,14 @@ export default function TasksPage() {
     setTitleError(false);
     setSaving(true);
     try {
-      await addDoc(collection(db, 'tasks'), {
-        ...form,
+      let isoDate = null;
+      if (form.dueDate) {
+        isoDate = new Date(form.dueDate).toISOString();
+      }
+      await api.post('/api/tasks', {
         title: form.title.trim(),
         description: form.description.trim(),
-        dueDate: form.dueDate,
-        reminderTime: form.reminderTime || '09:00',
-        completed: false,
-        notified: false,
-        userId: profile.uid,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+        due_date: isoDate
       });
       if (!isMounted.current) return;
       setForm(emptyTask);
@@ -417,7 +413,7 @@ export default function TasksPage() {
     if (pendingIds.has(task.id)) return;
     setPending(task.id, true);
     try {
-      await updateDoc(doc(db, 'tasks', task.id), { completed: !task.completed, updatedAt: serverTimestamp() });
+      await api.put(`/api/tasks/${task.id}`, { completed: !task.completed });
       await load();
     } catch (error) {
       Alert.alert('Could not update task', error?.message || 'Please try again.');
@@ -430,7 +426,7 @@ export default function TasksPage() {
     if (pendingIds.has(task.id)) return;
     setPending(task.id, true);
     try {
-      await deleteDoc(doc(db, 'tasks', task.id));
+      await api.delete(`/api/tasks/${task.id}`);
       await load();
     } catch (error) {
       Alert.alert('Could not delete task', error?.message || 'Please try again.');

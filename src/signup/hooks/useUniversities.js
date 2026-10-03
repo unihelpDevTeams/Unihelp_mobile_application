@@ -1,6 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { collection, getDocs, query, orderBy, limit, startAfter } from 'firebase/firestore';
-import { db } from '../../../firebase/config';
 import { NIGERIA_UNIVERSITIES } from '../../admin/nigeriaUniversities';
 
 const PS = 50;
@@ -8,7 +6,6 @@ const PS = 50;
 function filterBySearch(list, text) {
   if (!text.trim()) return list;
   const q = text.toLowerCase();
-  // Filter matches against full name, abbreviation, or alternate spellings (aliases)
   return list.filter((u) => 
     u.name?.toLowerCase().includes(q) || 
     u.shortName?.toLowerCase().includes(q) ||
@@ -27,52 +24,35 @@ export function useUniversities() {
   const [error, setError] = useState(null);
   const [searchText, setSearchText] = useState('');
   const [schoolType, setSchoolType] = useState('all');
-  const lastRef = useRef(null);
-  const hasMoreRef = useRef(true);
-  const loadingRef = useRef(false);
-  const fallbackRef = useRef(false);
+  const fallbackRef = useRef(true);
 
   useEffect(() => {
     let cancelled = false;
     const fetchData = async () => {
       try {
-        loadingRef.current = true; setLoading(true); setError(null);
-        const snap = await getDocs(query(collection(db, 'universities'), orderBy('name'), limit(PS)));
-        const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setLoading(true); setError(null);
+        // Simulate a small delay for realistic UI loading behavior
+        await new Promise((r) => setTimeout(r, 200));
         if (cancelled) return;
-        if (items.length > 0) {
-          setUniversities(filterByType(filterBySearch(items, searchText), schoolType));
-          lastRef.current = snap.docs[snap.docs.length - 1] || null;
-          hasMoreRef.current = snap.docs.length === PS;
-          fallbackRef.current = false;
-        } else {
-          const fb = NIGERIA_UNIVERSITIES.map((u, i) => ({ id: `fb-${i}`, ...u }));
-          setUniversities(filterByType(filterBySearch(fb, searchText), schoolType));
-          lastRef.current = null; hasMoreRef.current = false; fallbackRef.current = true;
-        }
-      } catch {
+        
+        const fb = NIGERIA_UNIVERSITIES.map((u, i) => ({ id: `fb-${i}`, ...u }));
+        setUniversities(filterByType(filterBySearch(fb, searchText), schoolType));
+        fallbackRef.current = true;
+      } catch (err) {
         if (!cancelled) {
-          const fb = NIGERIA_UNIVERSITIES.map((u, i) => ({ id: `fb-${i}`, ...u }));
-          setUniversities(filterByType(filterBySearch(fb, searchText), schoolType));
-          hasMoreRef.current = false; fallbackRef.current = true;
+          setError(err.message || 'Failed to load universities');
         }
-      } finally { if (!cancelled) { setLoading(false); loadingRef.current = false; } }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     };
     fetchData();
     return () => { cancelled = true; };
   }, [searchText, schoolType]);
 
   const loadMore = useCallback(async () => {
-    if (!hasMoreRef.current || loadingRef.current || searchText.trim() || schoolType !== 'all' || fallbackRef.current) return;
-    try {
-      loadingRef.current = true; setLoading(true);
-      const snap = await getDocs(query(collection(db, 'universities'), orderBy('name'), startAfter(lastRef.current), limit(PS)));
-      const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setUniversities((prev) => [...prev, ...items]);
-      lastRef.current = snap.docs[snap.docs.length - 1] || null;
-      hasMoreRef.current = snap.docs.length === PS;
-    } catch {} finally { setLoading(false); loadingRef.current = false; }
-  }, [searchText, schoolType]);
+    // Pagination is not needed for local data since everything is loaded instantly
+  }, []);
 
-  return { universities, loading, error, hasMore: hasMoreRef.current, searchText, setSearchText, schoolType, setSchoolType, loadMore };
+  return { universities, loading, error, hasMore: false, searchText, setSearchText, schoolType, setSchoolType, loadMore };
 }
