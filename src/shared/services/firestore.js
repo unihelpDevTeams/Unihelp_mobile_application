@@ -167,11 +167,8 @@ const readFirestoreUserProfile = async (uid = auth.currentUser?.uid) => {
 export async function getCurrentUserProfile(uid = auth.currentUser?.uid) {
   if (!uid) return null;
   try {
-    const [firestoreProfile, apiProfile] = await Promise.all([
-      readFirestoreUserProfile(uid).catch(() => null),
-      getJson('/api/users').then((res) => normalizeUserProfile(res.data, uid)).catch(() => null),
-    ]);
-    return normalizeUserProfile({ ...(apiProfile || {}), ...(firestoreProfile || {}) }, uid);
+    const apiProfile = await getJson('/api/users').then((res) => normalizeUserProfile(res.data, uid)).catch(() => null);
+    return normalizeUserProfile(apiProfile || {}, uid);
   } catch (error) {
     console.error('Failed to get user profile', error);
     return null;
@@ -182,19 +179,8 @@ export async function syncCurrentUserProfile(payload = {}) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
   try {
     const uid = auth.currentUser.uid;
-    const currentFirestore = await readFirestoreUserProfile(uid).catch(() => null);
-    const nextProfile = normalizeProfilePayload({
-      ...(currentFirestore || {}),
-      ...payload,
-      uid,
-      email: payload.email || currentFirestore?.email || auth.currentUser.email || '',
-      updatedAt: serverTimestamp(),
-    });
-
-    await setDoc(doc(db, COLLECTIONS.users, uid), nextProfile, { merge: true });
-    const res = await putJson('/api/users', toUserApiPayload(nextProfile)).catch(() => null);
-    const apiProfile = normalizeUserProfile(res?.data, uid);
-    return normalizeUserProfile({ ...(apiProfile || {}), ...nextProfile }, uid);
+    const res = await putJson('/api/users', toUserApiPayload(payload)).catch(() => null);
+    return normalizeUserProfile(res?.data || payload, uid);
   } catch (error) {
     console.error('Failed to sync user profile', error);
     throw error;
@@ -209,19 +195,12 @@ export async function ensureCurrentUserProfile(overrides = {}) {
   
   try {
     const uid = auth.currentUser.uid;
-    const [firestoreProfile, existingRes] = await Promise.all([
-      readFirestoreUserProfile(uid).catch(() => null),
-      getJson('/api/users').catch(() => null),
-    ]);
-    const apiProfile = normalizeUserProfile(existingRes?.data, uid);
-    const hasExistingProfile = Boolean(apiProfile || firestoreProfile);
-    const existingData = hasExistingProfile
-      ? normalizeUserProfile({ ...(apiProfile || {}), ...(firestoreProfile || {}) }, uid)
-      : null;
+    const existingRes = await getJson('/api/users').catch(() => null);
+    const existingData = normalizeUserProfile(existingRes?.data, uid);
+    const hasExistingProfile = Boolean(existingData && Object.keys(existingData).length > 0);
     
     if (!hasExistingProfile) {
       const defaultProfile = normalizeProfilePayload(profileDefaults(auth.currentUser, overrides));
-      await setDoc(doc(db, COLLECTIONS.users, uid), defaultProfile, { merge: true });
       const res = await putJson('/api/users', toUserApiPayload(defaultProfile)).catch(() => null);
       profileCacheRef = normalizeUserProfile({ ...(normalizeUserProfile(res?.data, uid) || {}), ...defaultProfile }, uid);
       return profileCacheRef;
@@ -255,7 +234,6 @@ export async function ensureCurrentUserProfile(overrides = {}) {
     );
 
     if (hasRealChanges) {
-      await setDoc(doc(db, COLLECTIONS.users, uid), { ...mergedProfile, updatedAt: serverTimestamp() }, { merge: true });
       const res = await putJson('/api/users', toUserApiPayload(mergedProfile)).catch(() => null);
       profileCacheRef = normalizeUserProfile({ ...(normalizeUserProfile(res?.data, uid) || {}), ...mergedProfile }, uid);
       return profileCacheRef;
