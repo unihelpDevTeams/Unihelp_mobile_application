@@ -310,6 +310,7 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
     }
     return (
       <FlatList
+        key="sticker-packs-list"
         data={packs}
         keyExtractor={(item) => String(item.id)}
         showsVerticalScrollIndicator={false}
@@ -360,6 +361,7 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
 
     return (
       <FlatList
+        key={`sticker-grid-${COLUMNS}`}
         data={stickers}
         numColumns={COLUMNS}
         columnWrapperStyle={styles.gridRow}
