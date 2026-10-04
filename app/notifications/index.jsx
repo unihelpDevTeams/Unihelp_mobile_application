@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, SectionList, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,6 +10,11 @@ import ConfirmDialog from '../../src/shared/components/ConfirmDialog';
 import { deleteNotification, fetchNotificationsPage, markNotificationRead } from '../../services/firestoreSync';
 
 const PAGE_SIZE = 30;
+const BANNER_DURATION_MS = 5000;
+
+/* -------------------------------------------------------------------------- */
+/* Helpers                                                                    */
+/* -------------------------------------------------------------------------- */
 
 const getTypeMeta = (colors) => ({
   message: { icon: 'chatbubble', color: colors.blue, soft: colors.cardElevated },
@@ -25,7 +30,8 @@ const getTypeMeta = (colors) => ({
   message_request_declined: { icon: 'mail-open', color: colors.grey, soft: colors.canvasLight },
   user_blocked: { icon: 'ban', color: colors.red, soft: colors.redLight },
   user_unblocked: { icon: 'lock-open', color: colors.green, soft: colors.greenLight },
-  mention: { icon: 'at', color: colors.orange, soft: '#FEF3E1' },
+  // Falls back to a theme token so dark mode doesn't get a hardcoded light colour.
+  mention: { icon: 'at', color: colors.orange, soft: colors.orangeLight || colors.cardElevated },
   system: { icon: 'megaphone', color: colors.brand, soft: colors.brandLight },
   reminder: { icon: 'alarm', color: colors.green, soft: colors.greenLight },
   alert: { icon: 'alert-circle', color: colors.red, soft: colors.redLight },
@@ -33,22 +39,31 @@ const getTypeMeta = (colors) => ({
   default: { icon: 'notifications', color: colors.brand, soft: colors.brandLight },
 });
 
+// Handles Date, ISO string, epoch number, Firestore Timestamp and { seconds } objects.
 const toDate = (value) => {
   if (!value) return null;
-  const date = typeof value === 'string' ? new Date(value) : value?.toDate ? value.toDate() : value;
-  return Number.isNaN(date?.getTime?.()) ? null : date;
+  let date = null;
+  if (value instanceof Date) date = value;
+  else if (typeof value?.toDate === 'function') date = value.toDate();
+  else if (typeof value?.seconds === 'number') date = new Date(value.seconds * 1000);
+  else if (typeof value === 'string' || typeof value === 'number') date = new Date(value);
+  return date && !Number.isNaN(date.getTime()) ? date : null;
 };
 
 const formatRelativeTime = (value) => {
   const date = toDate(value);
   if (!date) return '';
-  const diffMs = Date.now() - date.getTime();
-  const diffMinutes = Math.round(diffMs / 60000);
+  const diffMinutes = Math.floor((Date.now() - date.getTime()) / 60000);
   if (diffMinutes < 1) return 'Just now';
   if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  const diffHours = Math.round(diffMinutes / 60);
+  const diffHours = Math.floor(diffMinutes / 60);
   if (diffHours < 24) return `${diffHours}h ago`;
-  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return date.toLocaleDateString([], sameYear
+    ? { month: 'short', day: 'numeric' }
+    : { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
 const getDateGroup = (value) => {
@@ -69,97 +84,205 @@ const getDateGroup = (value) => {
 
 const GROUP_ORDER = ['Today', 'Yesterday', 'This week', 'Earlier'];
 
+// Returns a route string, or null when there is nowhere sensible to go.
 const resolveNotificationRoute = (item) => {
+  const type = String(item.type || '');
   const conversationId = item.conversationId || item.data?.conversationId;
   if (conversationId) return `/messages/${conversationId}`;
-  if (item.route && item.route !== '/notifications') {
-    if (item.route.startsWith('/messages?conversationId=')) {
-      const convId = item.route.split('=')[1];
-      if (convId) return `/messages/${convId}`;
-    }
-    return item.route;
+
+  const route = typeof item.route === 'string' ? item.route : '';
+  if (route && route !== '/notifications') {
+    // Handles /messages?conversationId=abc and /messages?foo=1&conversationId=abc
+    const match = route.match(/^\/messages\?(?:[^#]*&)?conversationId=([^&#]+)/);
+    if (match) return `/messages/${match[1]}`;
+    return route;
   }
-  if (item.type === 'direct_message' || item.type === 'message') return '/messages';
-  if (String(item.type || '').includes('friend') || String(item.type || '').includes('request') || String(item.type || '').includes('blocked') || String(item.type || '').includes('unblocked')) return '/friends';
-  if (item.type === 'group' || item.type === 'group_created' || item.type === 'group_message') return '/community';
-  if (item.type === 'premium') return '/premium';
-  return '/notifications';
+
+  // Group types are checked first so "group_join_request" doesn't fall into the friends bucket.
+  if (type.startsWith('group')) return '/community';
+  if (type === 'direct_message' || type === 'message') return '/messages';
+  if (type.includes('friend') || type.includes('request') || type.includes('blocked')) return '/friends';
+  if (type === 'premium') return '/premium';
+  return null;
 };
+
+/* -------------------------------------------------------------------------- */
+/* Row                                                                        */
+/* -------------------------------------------------------------------------- */
+
+const NotificationRow = memo(function NotificationRow({ item, meta, styles, colors, onOpen, onRequestDelete }) {
+  const title = item.title || 'Notification';
+  const body = item.body || item.message || 'No message';
+  const time = formatRelativeTime(item.createdAt);
+
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.row, !item.read && styles.rowUnread, pressed && styles.rowPressed]}
+      onPress={() => onOpen(item)}
+      onLongPress={() => onRequestDelete(item)}
+      delayLongPress={300}
+      accessibilityRole="button"
+      accessibilityLabel={`${item.read ? '' : 'Unread. '}${title}. ${body}. ${time}`}
+      accessibilityHint="Opens the notification. Long press to delete."
+    >
+      <View style={[styles.iconWrap, { backgroundColor: meta.soft }]}>
+        <Ionicons name={meta.icon} size={18} color={meta.color} />
+      </View>
+
+      <View style={styles.rowBody}>
+        <View style={styles.rowTopLine}>
+          <Text style={[styles.rowTitle, !item.read && styles.rowTitleUnread]} numberOfLines={1}>
+            {title}
+          </Text>
+          {!item.read ? <View style={styles.unreadBadgeDot} /> : null}
+        </View>
+
+        <Text style={styles.rowText} numberOfLines={2}>
+          {body}
+        </Text>
+
+        <View style={styles.rowFooter}>
+          <Text style={styles.rowTime}>{time}</Text>
+          <Pressable
+            onPress={() => onRequestDelete(item)}
+            hitSlop={10}
+            style={({ pressed }) => [styles.deleteButton, pressed && styles.deleteButtonPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Delete notification"
+          >
+            <Ionicons name="trash-outline" size={15} color={colors.greyLight} />
+          </Pressable>
+        </View>
+      </View>
+    </Pressable>
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* Screen                                                                     */
+/* -------------------------------------------------------------------------- */
 
 export default function NotificationsPage() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const styles = useThemeStyles(createStyles);
+  const typeMeta = useMemo(() => getTypeMeta(colors), [colors]);
+
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
-  const [cursor, setCursor] = useState(null);
   const [hasMore, setHasMore] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(false);
+  const [filter, setFilter] = useState('all'); // 'all' | 'unread'
   const [pendingDelete, setPendingDelete] = useState(null);
-  const [deletingId, setDeletingId] = useState(null);
-  const [deleteError, setDeleteError] = useState('');
-  const { colors } = useTheme();
-  const styles = useThemeStyles(createStyles);
-  const typeMeta = useMemo(() => getTypeMeta(colors), [colors]);
+  const [deleting, setDeleting] = useState(false);
+  const [banner, setBanner] = useState('');
 
-  const load = useCallback(async ({ reset = false } = {}) => {
-    if (reset) {
-      setLoading(true);
-    } else {
-      if (loadingMore || !hasMore) return;
+  // Refs keep pagination state fresh inside callbacks without re-creating them.
+  const cursorRef = useRef(null);
+  const hasMoreRef = useRef(false);
+  const loadingMoreRef = useRef(false);
+  const requestIdRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  // Auto-dismiss the error banner.
+  useEffect(() => {
+    if (!banner) return undefined;
+    const timer = setTimeout(() => setBanner(''), BANNER_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, [banner]);
+
+  /**
+   * mode: 'initial' (full-screen loader), 'refresh' (pull-to-refresh, keeps list visible), 'more' (pagination)
+   * A reset (initial/refresh) invalidates any in-flight request so stale pages never overwrite fresh data.
+   */
+  const fetchPage = useCallback(async (mode) => {
+    const isMore = mode === 'more';
+    if (isMore && (loadingMoreRef.current || !hasMoreRef.current)) return;
+
+    let requestId;
+    if (isMore) {
+      requestId = requestIdRef.current;
+      loadingMoreRef.current = true;
       setLoadingMore(true);
+      setLoadMoreError(false);
+    } else {
+      requestId = ++requestIdRef.current;
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+      setLoadMoreError(false);
+      setLoadError(false);
+      if (mode === 'initial') setLoading(true);
     }
 
     try {
       const page = await fetchNotificationsPage({
         pageSize: PAGE_SIZE,
-        cursor: reset ? null : cursor,
+        cursor: isMore ? cursorRef.current : null,
       });
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
 
+      const nextItems = page?.items || [];
       setItems((current) => {
-        const nextItems = page.items || [];
-        if (reset) return nextItems;
-        const seen = new Set(current.map((item) => item.id));
-        return [...current, ...nextItems.filter((item) => !seen.has(item.id))];
+        if (!isMore) return nextItems;
+        const seen = new Set(current.map((entry) => entry.id));
+        return [...current, ...nextItems.filter((entry) => !seen.has(entry.id))];
       });
-      setCursor(page.cursor);
-      setHasMore(page.hasMore);
+      cursorRef.current = page?.cursor ?? null;
+      hasMoreRef.current = Boolean(page?.hasMore);
+      setHasMore(hasMoreRef.current);
+    } catch {
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
+      if (isMore) setLoadMoreError(true);
+      else if (mode === 'refresh') setBanner("Couldn't refresh notifications. Pull down to try again.");
+      else setLoadError(true);
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (mountedRef.current && requestId === requestIdRef.current) {
+        if (isMore) {
+          loadingMoreRef.current = false;
+          setLoadingMore(false);
+        } else {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
     }
-  }, [cursor, hasMore, loadingMore]);
-
-  useEffect(() => {
-    let mounted = true;
-    setLoading(true);
-    fetchNotificationsPage({ pageSize: PAGE_SIZE })
-      .then((page) => {
-        if (!mounted) return;
-        setItems(page.items || []);
-        setCursor(page.cursor);
-        setHasMore(page.hasMore);
-      })
-      .finally(() => {
-        if (mounted) setLoading(false);
-      });
-    return () => { mounted = false; };
   }, []);
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    try {
-      await load({ reset: true });
-    } finally {
-      setRefreshing(false);
-    }
-  };
+  useEffect(() => {
+    fetchPage('initial');
+  }, [fetchPage]);
 
-  const unreadCount = items.filter((item) => !item.read).length;
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchPage('refresh');
+  }, [fetchPage]);
+
+  const loadMore = useCallback(() => {
+    fetchPage('more');
+  }, [fetchPage]);
+
+  const unreadCount = useMemo(() => items.filter((item) => !item.read).length, [items]);
+
+  // If the "Unread" tab is empty but more pages exist, keep fetching until something shows up.
+  useEffect(() => {
+    if (filter === 'unread' && !loading && unreadCount === 0 && hasMore && !loadingMore && !loadMoreError) {
+      fetchPage('more');
+    }
+  }, [filter, loading, unreadCount, hasMore, loadingMore, loadMoreError, fetchPage]);
 
   const sections = useMemo(() => {
+    const visible = filter === 'unread' ? items.filter((item) => !item.read) : items;
     const groups = {};
-    items.forEach((item) => {
+    visible.forEach((item) => {
       const group = getDateGroup(item.createdAt);
       if (!groups[group]) groups[group] = [];
       groups[group].push(item);
@@ -168,76 +291,162 @@ export default function NotificationsPage() {
       title: label,
       data: groups[label],
     }));
-  }, [items]);
+  }, [items, filter]);
 
-  const markOneRead = (item) => {
+  const markOneRead = useCallback((item) => {
     if (item.read) return;
     setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, read: true } : entry)));
     markNotificationRead(item.id).catch(() => {
       setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, read: false } : entry)));
     });
-  };
+  }, []);
 
-  const handleDeleteNotification = async () => {
-    if (!pendingDelete) return;
-
-    const deletingItem = pendingDelete;
-    setDeletingId(deletingItem.id);
-    setDeleteError('');
-    setPendingDelete(null);
-    setItems((current) => current.filter((entry) => entry.id !== deletingItem.id));
-
-    try {
-      await deleteNotification(deletingItem.id);
-    } catch (error) {
-      setItems((current) => {
-        if (current.some((entry) => entry.id === deletingItem.id)) return current;
-        return [deletingItem, ...current];
-      });
-      setDeleteError(error?.message || 'Could not delete this notification. Please try again.');
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  const openNotification = (item) => {
+  const openNotification = useCallback((item) => {
     markOneRead(item);
     const route = resolveNotificationRoute(item);
-    router.navigate(route);
-  };
+    if (route) router.navigate(route);
+  }, [markOneRead, router]);
 
-  const markAllRead = async () => {
+  const requestDelete = useCallback((item) => setPendingDelete(item), []);
+
+  const markAllRead = useCallback(async () => {
     const unread = items.filter((item) => !item.read);
-    if (!unread.length) return;
+    if (!unread.length || markingAll) return;
+
     setMarkingAll(true);
-    setItems((current) => current.map((entry) => ({ ...entry, read: true })));
-    try {
-      await Promise.all(unread.map((item) => markNotificationRead(item.id)));
-    } catch {
-      // best-effort; pull-to-refresh will resync
-    } finally {
-      setMarkingAll(false);
+    setItems((current) => current.map((entry) => (entry.read ? entry : { ...entry, read: true })));
+
+    const results = await Promise.allSettled(unread.map((item) => markNotificationRead(item.id)));
+    if (!mountedRef.current) return;
+
+    const failedIds = new Set(
+      unread.filter((_, index) => results[index].status === 'rejected').map((item) => item.id),
+    );
+    if (failedIds.size) {
+      // Roll back only the ones that actually failed.
+      setItems((current) => current.map((entry) => (failedIds.has(entry.id) ? { ...entry, read: false } : entry)));
+      setBanner(
+        failedIds.size === unread.length
+          ? "Couldn't mark notifications as read. Please try again."
+          : `${failedIds.size} notification${failedIds.size > 1 ? 's' : ''} couldn't be marked as read.`,
+      );
     }
-  };
+    setMarkingAll(false);
+  }, [items, markingAll]);
+
+  const confirmDelete = useCallback(async () => {
+    if (!pendingDelete || deleting) return;
+    const target = pendingDelete;
+    setDeleting(true);
+    try {
+      await deleteNotification(target.id);
+      if (!mountedRef.current) return;
+      setItems((current) => current.filter((entry) => entry.id !== target.id));
+    } catch (error) {
+      if (mountedRef.current) {
+        setBanner(error?.message || 'Could not delete this notification. Please try again.');
+      }
+    } finally {
+      if (mountedRef.current) {
+        setDeleting(false);
+        setPendingDelete(null);
+      }
+    }
+  }, [pendingDelete, deleting]);
+
+  const renderItem = useCallback(({ item }) => (
+    <NotificationRow
+      item={item}
+      meta={typeMeta[item.type] || typeMeta.default}
+      styles={styles}
+      colors={colors}
+      onOpen={openNotification}
+      onRequestDelete={requestDelete}
+    />
+  ), [typeMeta, styles, colors, openNotification, requestDelete]);
+
+  const renderSectionHeader = useCallback(({ section }) => (
+    <View style={styles.sectionHeaderRow}>
+      <Text style={styles.sectionHeader}>{section.title.toUpperCase()}</Text>
+      <View style={styles.sectionHeaderLine} />
+    </View>
+  ), [styles]);
+
+  const listFooter = useMemo(() => {
+    if (loadMoreError) {
+      return (
+        <Pressable style={styles.footerLoader} onPress={loadMore} accessibilityRole="button">
+          <Text style={styles.footerRetryText}>Couldn't load more. Tap to retry</Text>
+        </Pressable>
+      );
+    }
+    if (hasMore) {
+      return (
+        <View style={styles.footerLoader}>
+          {loadingMore ? <ActivityIndicator size="small" color={colors.brand} /> : null}
+        </View>
+      );
+    }
+    return null;
+  }, [loadMoreError, hasMore, loadingMore, loadMore, styles, colors.brand]);
+
+  const listEmpty = useMemo(() => {
+    if (hasMore || loadingMore) {
+      return (
+        <View style={styles.footerLoader}>
+          <ActivityIndicator size="small" color={colors.brand} />
+        </View>
+      );
+    }
+    return (
+      <View style={styles.inlineEmpty}>
+        <EmptyState title="No unread notifications" description="You're all caught up." />
+      </View>
+    );
+  }, [hasMore, loadingMore, styles, colors.brand]);
+
+  const showError = loadError && !items.length;
+  const showEmpty = !loading && !showError && !items.length;
+  const showList = !showError && items.length > 0;
 
   return (
     <ScreenShell title="Notifications" subtitle="Stay updated with your activity" showBack loading={loading} scrollable={false}>
-      {deleteError ? <Text style={styles.deleteError}>{deleteError}</Text> : null}
-      {items.length ? (
+      {banner ? (
+        <Pressable onPress={() => setBanner('')} accessibilityRole="alert" accessibilityHint="Tap to dismiss">
+          <Text style={styles.banner}>{banner}</Text>
+        </Pressable>
+      ) : null}
+
+      {showList ? (
         <>
-          {/* Header Bar */}
           <View style={styles.topBar}>
-            <View style={styles.unreadBadge}>
-              <View style={[styles.unreadDot, unreadCount === 0 && styles.unreadDotZero]} />
-              <Text style={styles.unreadLabel}>
-                {unreadCount ? `${unreadCount} unread` : 'All caught up'}
-              </Text>
+            <View style={styles.filterRow}>
+              {[
+                { key: 'all', label: 'All' },
+                { key: 'unread', label: unreadCount ? `Unread (${unreadCount})` : 'Unread' },
+              ].map((tab) => {
+                const active = filter === tab.key;
+                return (
+                  <Pressable
+                    key={tab.key}
+                    onPress={() => setFilter(tab.key)}
+                    style={[styles.filterTab, active && styles.filterTabActive]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                  >
+                    <Text style={[styles.filterTabText, active && styles.filterTabTextActive]}>{tab.label}</Text>
+                  </Pressable>
+                );
+              })}
             </View>
+
             {unreadCount ? (
               <Pressable
                 style={({ pressed }) => [styles.markAllButton, pressed && styles.markAllButtonPressed]}
                 onPress={markAllRead}
                 disabled={markingAll}
+                accessibilityRole="button"
+                accessibilityLabel="Mark all notifications as read"
               >
                 {markingAll ? (
                   <ActivityIndicator size="small" color={colors.brand} />
@@ -245,138 +454,124 @@ export default function NotificationsPage() {
                   <Text style={styles.markAllText}>Mark all read</Text>
                 )}
               </Pressable>
-            ) : null}
+            ) : (
+              <View style={styles.caughtUp}>
+                <Ionicons name="checkmark-circle" size={14} color={colors.green} />
+                <Text style={styles.caughtUpText}>All caught up</Text>
+              </View>
+            )}
           </View>
 
-          {/* Notification List */}
           <SectionList
             sections={sections}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item) => String(item.id)}
+            renderItem={renderItem}
+            renderSectionHeader={renderSectionHeader}
             stickySectionHeadersEnabled={false}
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
-            onEndReached={() => {
-              if (hasMore && !loadingMore) {
-                load().catch(() => {});
-              }
-            }}
+            initialNumToRender={12}
+            windowSize={9}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} colors={[colors.brand]} />}
+            onEndReached={loadMore}
             onEndReachedThreshold={0.4}
-            ListFooterComponent={
-              hasMore ? (
-                <View style={styles.footerLoader}>
-                  {loadingMore ? <ActivityIndicator size="small" color={colors.brand} /> : null}
-                  <Text style={styles.footerLoaderText}>
-                    {loadingMore ? 'Loading more notifications...' : 'Scroll for more'}
-                  </Text>
-                </View>
-              ) : null
-            }
-            renderSectionHeader={({ section }) => (
-              <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionHeader}>{section.title.toUpperCase()}</Text>
-                <View style={styles.sectionHeaderLine} />
-              </View>
-            )}
-            renderItem={({ item }) => {
-              const meta = typeMeta[item.type] || typeMeta.default;
-              return (
-                <Pressable
-                  style={({ pressed }) => [styles.row, !item.read && styles.rowUnread, pressed && styles.rowPressed]}
-                  onPress={() => openNotification(item)}
-                  onLongPress={() => setPendingDelete(item)}
-                  delayLongPress={300}
-                >
-                  <View style={[styles.iconWrap, { backgroundColor: meta.soft }]}>
-                    <Ionicons name={meta.icon} size={17} color={meta.color} />
-                    {!item.read && <View style={styles.iconDot} />}
-                  </View>
-                  <View style={styles.rowBody}>
-                    <View style={styles.rowTopLine}>
-                      <Text style={[styles.rowTitle, !item.read && styles.rowTitleUnread]} numberOfLines={1}>
-                        {item.title || 'Notification'}
-                      </Text>
-                      {!item.read ? <View style={styles.unreadBadgeDot} /> : null}
-                    </View>
-                    <Text style={styles.rowText} numberOfLines={2}>
-                      {item.body || item.message || 'No message'}
-                    </Text>
-                    <View style={styles.rowFooter}>
-                      <Text style={styles.rowTime}>{formatRelativeTime(item.createdAt)}</Text>
-                      <Ionicons name="chevron-forward" size={14} color={colors.greyLight} />
-                    </View>
-                  </View>
-                </Pressable>
-              );
-            }}
+            ListEmptyComponent={listEmpty}
+            ListFooterComponent={listFooter}
           />
         </>
-      ) : (
-        !loading && (
-          <View style={styles.emptyWrapper}>
-            <View style={styles.emptyIconWrap}>
-              <Ionicons name="notifications-off-outline" size={40} color={colors.greyLight} />
-            </View>
-            <EmptyState
-              title="You are all caught up"
-              description="New notifications will show up here."
-            />
+      ) : null}
+
+      {showError ? (
+        <View style={styles.emptyWrapper}>
+          <View style={styles.emptyIconWrap}>
+            <Ionicons name="cloud-offline-outline" size={40} color={colors.greyLight} />
           </View>
-        )
-      )}
+          <EmptyState title="Couldn't load notifications" description="Check your connection and try again." />
+          <Pressable
+            style={({ pressed }) => [styles.retryButton, pressed && styles.markAllButtonPressed]}
+            onPress={() => fetchPage('initial')}
+            accessibilityRole="button"
+          >
+            <Text style={styles.markAllText}>Try again</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {showEmpty ? (
+        <View style={styles.emptyWrapper}>
+          <View style={styles.emptyIconWrap}>
+            <Ionicons name="notifications-off-outline" size={40} color={colors.greyLight} />
+          </View>
+          <EmptyState title="You are all caught up" description="New notifications will show up here." />
+        </View>
+      ) : null}
 
       <ConfirmDialog
         visible={Boolean(pendingDelete)}
         title="Delete notification?"
         message="This notification will be removed from your inbox."
-        confirmLabel={deletingId ? 'Deleting...' : 'Delete'}
+        confirmLabel={deleting ? 'Deleting...' : 'Delete'}
         cancelLabel="Keep"
         variant="destructive"
         icon="trash-outline"
-        loading={deletingId === pendingDelete?.id}
-        onCancel={() => setPendingDelete(null)}
-        onConfirm={handleDeleteNotification}
+        loading={deleting}
+        onCancel={() => { if (!deleting) setPendingDelete(null); }}
+        onConfirm={confirmDelete}
       />
     </ScreenShell>
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/* Styles                                                                     */
+/* -------------------------------------------------------------------------- */
+
 const createStyles = (colors, spacing, borderRadius) => ({
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-    paddingHorizontal: spacing.xs,
-  },
-  deleteError: {
+  banner: {
     color: colors.danger,
     backgroundColor: colors.dangerLight,
     borderRadius: borderRadius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     marginBottom: spacing.md,
+    fontSize: 13,
+    fontWeight: '600',
+    overflow: 'hidden',
   },
-  unreadBadge: {
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.xs,
+  },
+  filterRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: spacing.xs,
   },
-  unreadDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: colors.brand,
+  filterTab: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
-  unreadDotZero: {
-    backgroundColor: colors.green,
+  filterTabActive: {
+    backgroundColor: colors.brandLight,
+    borderColor: colors.brandBorder,
   },
-  unreadLabel: {
+  filterTabText: {
     fontSize: 13,
     fontWeight: '700',
     color: colors.grey,
   },
+  filterTabTextActive: {
+    color: colors.brandText,
+  },
   markAllButton: {
+    minHeight: 30,
+    justifyContent: 'center',
     backgroundColor: colors.brandLight,
     borderRadius: borderRadius.full,
     paddingHorizontal: spacing.md,
@@ -389,6 +584,16 @@ const createStyles = (colors, spacing, borderRadius) => ({
     fontSize: 12,
     fontWeight: '800',
     color: colors.brandText,
+  },
+  caughtUp: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  caughtUpText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.grey,
   },
   row: {
     flexDirection: 'row',
@@ -405,10 +610,11 @@ const createStyles = (colors, spacing, borderRadius) => ({
   },
   rowUnread: {
     backgroundColor: colors.brandLight,
-    borderColor: colors.brand,
+    borderColor: colors.brandBorder,
   },
   listContent: {
     paddingBottom: spacing['3xl'],
+    flexGrow: 1,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -434,18 +640,6 @@ const createStyles = (colors, spacing, borderRadius) => ({
     borderRadius: borderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
-  },
-  iconDot: {
-    position: 'absolute',
-    top: -2,
-    right: -2,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: colors.brand,
-    borderWidth: 2,
-    borderColor: colors.surface,
   },
   rowBody: {
     flex: 1,
@@ -487,6 +681,16 @@ const createStyles = (colors, spacing, borderRadius) => ({
     fontSize: 11,
     fontWeight: '600',
   },
+  deleteButton: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteButtonPressed: {
+    backgroundColor: colors.canvasLight,
+  },
   emptyWrapper: {
     flex: 1,
     alignItems: 'center',
@@ -502,14 +706,26 @@ const createStyles = (colors, spacing, borderRadius) => ({
     justifyContent: 'center',
     marginBottom: spacing.lg,
   },
+  inlineEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: spacing['3xl'],
+  },
+  retryButton: {
+    marginTop: spacing.md,
+    backgroundColor: colors.brandLight,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
   footerLoader: {
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
     paddingVertical: spacing.lg,
   },
-  footerLoaderText: {
-    color: colors.grey,
+  footerRetryText: {
+    color: colors.brandText,
     fontSize: 12,
     fontWeight: '700',
   },

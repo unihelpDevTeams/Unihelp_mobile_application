@@ -7,7 +7,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { PageLoader } from '../../src/shared/components/AILoaders';
@@ -20,6 +20,8 @@ import {
   updateSupportItemStatus,
   addAdminNote,
   fetchAdminNotes,
+  takeReportAction,
+  deleteSupportItem,
 } from '../../src/shared/services/support';
 
 const STATUS_OPTIONS = [
@@ -49,6 +51,7 @@ const formatDate = (timestamp) => {
 };
 
 export default function SupportDetailPage() {
+  const router = useRouter();
   const { profile, user } = useAuth();
   const { colors } = useTheme();
   const styles = useThemeStyles((themeColors) => createStyles(themeColors));
@@ -61,6 +64,8 @@ export default function SupportDetailPage() {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [submittingNote, setSubmittingNote] = useState(false);
+  const [reportActionBusy, setReportActionBusy] = useState(false);
+  const [deletingReport, setDeletingReport] = useState(false);
   const [error, setError] = useState('');
 
   const isAdmin = isResourceAdmin(profile, user);
@@ -114,6 +119,61 @@ export default function SupportDetailPage() {
     }
   };
 
+  const handleReportAction = (action) => {
+    if (!id || reportActionBusy) return;
+    const isDelete = action === 'delete_reported_item';
+    Alert.alert(
+      isDelete ? 'Delete reported item?' : 'Dismiss report?',
+      isDelete
+        ? 'This will permanently remove the reported feed post.'
+        : 'This will mark the report as resolved without deleting the reported item.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: isDelete ? 'Delete item' : 'Dismiss report',
+          style: isDelete ? 'destructive' : 'default',
+          onPress: async () => {
+            try {
+              setReportActionBusy(true);
+              const result = await takeReportAction(id, action);
+              setItem((current) => (current ? { ...current, ...(result.data || {}) } : current));
+              const message = result.assetCleanup?.success === false
+                ? `${result.message || 'The report action was completed.'}. The post was removed, but its image cleanup failed.`
+                : result.message || 'The report action was completed.';
+              Alert.alert('Report updated', message);
+            } catch (actionError) {
+              Alert.alert('Could not update report', actionError?.message || 'Please try again.');
+            } finally {
+              setReportActionBusy(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDeleteReport = () => {
+    if (!id || deletingReport) return;
+    Alert.alert('Delete report?', 'This permanently removes the report record.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete report',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            setDeletingReport(true);
+            await deleteSupportItem(collection, id);
+            router.back();
+          } catch (deleteError) {
+            Alert.alert('Could not delete report', deleteError?.message || 'Please try again.');
+          } finally {
+            setDeletingReport(false);
+          }
+        },
+      },
+    ]);
+  };
+
   if (!isAdmin) {
     return (
       <ScreenShell title="Access Restricted" showBack>
@@ -162,6 +222,10 @@ export default function SupportDetailPage() {
     return statusColors[status] || statusColors.pending;
   };
   const statusColors = getStatusColor(item.status);
+  const isReport = collection === 'reports' || collection === 'report';
+  const legacyFeedPostId = item.title?.match(/^Feed post report:\s*([0-9a-f-]{36})$/i)?.[1];
+  const reportTargetType = item.targetType || item.target_type || (legacyFeedPostId ? 'feed_post' : null);
+  const reportTargetId = item.targetId || item.target_id || legacyFeedPostId;
 
   return (
     <ScreenShell title="Support Detail" subtitle={item.subject || item.title || 'Viewing item'} showBack scrollable>
@@ -210,6 +274,59 @@ export default function SupportDetailPage() {
             })}
           </View>
         </View>
+
+        {isReport ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Report actions</Text>
+            <Text style={styles.detailValue}>
+              This report is automatically deleted 3 days after an admin first views it.
+            </Text>
+            {reportTargetType === 'feed_post' && reportTargetId ? (
+              <Pressable
+                style={[styles.statusOption, { borderColor: colors.danger, alignSelf: 'flex-start' }]}
+                onPress={() => handleReportAction('delete_reported_item')}
+                disabled={reportActionBusy || ['reported_item_deleted', 'reported_item_already_missing'].includes(item.action_taken)}
+              >
+                {reportActionBusy ? (
+                  <ActivityIndicator size="small" color={colors.danger} />
+                ) : (
+                  <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                )}
+                <Text style={[styles.statusOptionText, { color: colors.danger }]}>
+                  {item.action_taken === 'reported_item_deleted'
+                    ? 'Reported post deleted'
+                    : item.action_taken === 'reported_item_already_missing'
+                      ? 'Reported post is already deleted'
+                      : 'Delete reported feed post'}
+                </Text>
+              </Pressable>
+            ) : null}
+            <View style={styles.statusOptions}>
+              <Pressable
+                style={[styles.statusOption, { borderColor: colors.amber }]}
+                onPress={() => handleReportAction('dismiss')}
+                disabled={reportActionBusy || item.action_taken === 'dismissed'}
+              >
+                <Ionicons name="checkmark-circle-outline" size={16} color={colors.amber} />
+                <Text style={styles.statusOptionText}>
+                  {item.action_taken === 'dismissed' ? 'Report dismissed' : 'Dismiss report'}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.statusOption, { borderColor: colors.danger }]}
+                onPress={handleDeleteReport}
+                disabled={deletingReport}
+              >
+                {deletingReport ? (
+                  <ActivityIndicator size="small" color={colors.danger} />
+                ) : (
+                  <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                )}
+                <Text style={[styles.statusOptionText, { color: colors.danger }]}>Delete report now</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
 
         {/* Details Section */}
         <View style={styles.section}>

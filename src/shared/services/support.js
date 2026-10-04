@@ -142,6 +142,10 @@ export async function updateSupportItemStatus(collectionName, itemId, newStatus)
   return patchJson(`/api/${route}/${itemId}/status`, { status: newStatus });
 }
 
+export async function takeReportAction(reportId, action) {
+  return postJson(`/api/reports/${encodeURIComponent(reportId)}/action`, { action });
+}
+
 export async function addAdminNote(collectionName, itemId, note) {
   const route = supportRouteFor(collectionName);
 

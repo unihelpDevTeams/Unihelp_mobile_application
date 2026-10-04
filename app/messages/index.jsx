@@ -212,6 +212,7 @@ const ConversationItem = React.memo(function ConversationItem({
       </View>
       {unread > 0 ? (
         <View style={styles.unreadBadge}>
+          <Text style={styles.unreadLabel}>UNREAD</Text>
           <Text style={styles.unreadText}>{unread > 99 ? '99+' : unread}</Text>
         </View>
       ) : null}
@@ -324,7 +325,8 @@ export default function MessagesPage() {
     relationshipPillWarning: { backgroundColor: c.dangerLight },
     relationshipPillText: { color: c.brandText, fontSize: 11, fontWeight: '800' },
     relationshipPillTextWarning: { color: c.error },
-    unreadBadge: { marginLeft: 12, minWidth: 24, paddingHorizontal: 7, backgroundColor: c.brand, borderRadius: 999, alignItems: 'center', justifyContent: 'center', height: 24 },
+    unreadBadge: { marginLeft: 12, paddingHorizontal: 8, backgroundColor: c.brand, borderRadius: 999, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5, height: 24 },
+    unreadLabel: { color: c.onBrand, fontWeight: '900', fontSize: 9, letterSpacing: 0.4 },
     unreadText: { color: c.onBrand, fontWeight: '800', fontSize: 11 },
 
     fab: {

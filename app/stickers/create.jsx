@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { useNavigation, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
-import { createSticker, removeStickerBackground, uploadStickerMedia } from '../../src/shared/services/stickers';
+import { createSticker, fetchOwnedSticker, removeStickerBackground, updateSticker, uploadStickerMedia } from '../../src/shared/services/stickers';
 
 const EMOJIS = ['😂', '😭', '🔥', '❤️', '💀', '🙏', '😎', '🥹', '😤', '🤯', '👀', '💯'];
 const IMAGE_MEDIA_TYPE = 'images';
@@ -61,8 +61,11 @@ function CaptionText({ text, color, size, outline }) {
 export default function CreateStickerScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const { stickerId } = useLocalSearchParams();
   const { colors } = useTheme();
 
+  const editingId = Array.isArray(stickerId) ? stickerId[0] : stickerId;
+  const [loadingSticker, setLoadingSticker] = useState(Boolean(editingId));
   const [media, setMedia] = useState(null);
   const [name, setName] = useState('');
   const [overlayText, setOverlayText] = useState('');
@@ -83,10 +86,48 @@ export default function CreateStickerScreen() {
   const uploadRef = useRef(null);
   const dirtyRef = useRef(false);
 
+  useEffect(() => {
+    if (!editingId) {
+      return undefined;
+    }
+    let active = true;
+    fetchOwnedSticker(editingId)
+      .then((sticker) => {
+        if (!active) return;
+        setMedia({
+          uri: sticker.originalAssetUrl || sticker.assetUrl,
+          type: sticker.isAnimated ? 'video' : 'image',
+          width: sticker.width || 1,
+          height: sticker.height || 1,
+          duration: Number(sticker.duration || 0) * 1000,
+        });
+        setName(sticker.name || '');
+        setOverlayText(sticker.editor?.text || '');
+        setEmoji(sticker.editor?.emoji || '');
+        setOutline(sticker.editor?.outline !== false);
+        setTextColor(sticker.editor?.textColor || '#FFFFFF');
+        setTextSize(sticker.editor?.textSize || 'medium');
+      })
+      .catch((error) => {
+        console.error('[CreateSticker] Failed to load owned sticker for editing:', error);
+        if (active) {
+          Alert.alert('Could not load sticker', error?.message || 'Please try again.', [
+            { text: 'OK', onPress: () => router.back() },
+          ]);
+        }
+      })
+      .finally(() => {
+        if (active) setLoadingSticker(false);
+      });
+    return () => { active = false; };
+  }, [editingId, router]);
+
   const mediaIsVideo = isVideoAsset(media);
   const hasImage = !!media && !mediaIsVideo;
   const cropAspect = (CROPS.find((c) => c.key === cropKey) || CROPS[0]).aspect;
-  dirtyRef.current = !!media || !!overlayText.trim() || !!name.trim();
+  useEffect(() => {
+    dirtyRef.current = !!media || !!overlayText.trim() || !!name.trim();
+  }, [media, name, overlayText]);
 
   const styles = useThemeStyles((c, s, r) => ({
     preview: { width: '100%', aspectRatio: 1, borderRadius: r['2xl'], backgroundColor: c.surfaceSecondary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: 1, borderColor: c.borderDefault },
@@ -168,7 +209,7 @@ export default function CreateStickerScreen() {
       setMedia(asset);
       setRotation(0);
       if (!isImage) setRemoveBackground(false);
-    } catch (error) {
+    } catch (_error) {
       Alert.alert('Could not open your library', 'Allow photo and video access in Settings, then try again.');
     }
   };
@@ -216,21 +257,26 @@ export default function CreateStickerScreen() {
     let sticker;
     try {
       // Reuse a finished upload when retrying after a failed create, so we never upload twice.
-      const uploadKey = `${media.uri}|${rotation}`;
-      if (uploadRef.current?.key !== uploadKey) {
-        const uploaded = await uploadStickerMedia(media, (value) => setProgress(Number(value) || 0), { rotation });
-        uploadRef.current = { key: uploadKey, uploaded };
+      if (editingId) {
+        sticker = await updateSticker(editingId, { name: finalName, editor });
+      } else {
+        // Reuse a finished upload when retrying after a failed create, so we never upload twice.
+        const uploadKey = `${media.uri}|${rotation}`;
+        if (uploadRef.current?.key !== uploadKey) {
+          const uploaded = await uploadStickerMedia(media, (value) => setProgress(Number(value) || 0), { rotation });
+          uploadRef.current = { key: uploadKey, uploaded };
+        }
+        const { uploaded } = uploadRef.current;
+        // Same content => same key (retries never duplicate). Edited content => new key.
+        sticker = await createSticker({
+          uploadId: uploaded.uploadId,
+          name: finalName,
+          idempotencyKey: `create-${uploaded.uploadId}-${hashString(JSON.stringify({ finalName, editor }))}`,
+          editor,
+        });
       }
-      const { uploaded } = uploadRef.current;
-      // Same content => same key (retries never duplicate). Edited content => new key.
-      sticker = await createSticker({
-        uploadId: uploaded.uploadId,
-        name: finalName,
-        idempotencyKey: `create-${uploaded.uploadId}-${hashString(JSON.stringify({ finalName, editor }))}`,
-        editor,
-      });
     } catch (error) {
-      Alert.alert('Could not create sticker', error?.message || 'Please try again.');
+      Alert.alert(editingId ? 'Could not update sticker' : 'Could not create sticker', error?.message || 'Please try again.');
       savingRef.current = false;
       setSaving(false);
       setProgress(0);
@@ -241,7 +287,7 @@ export default function CreateStickerScreen() {
     if (removeBackground && !video) {
       try {
         await removeStickerBackground(sticker.id);
-      } catch (error) {
+      } catch (_error) {
         backgroundFailed = true;
       }
     }
@@ -251,14 +297,16 @@ export default function CreateStickerScreen() {
     setSaving(false);
     setProgress(0);
     Alert.alert(
-      'Sticker saved',
+      editingId ? 'Sticker updated' : 'Sticker saved',
       backgroundFailed
         ? 'Your sticker is saved, but the background could not be removed. Try Cut out again from your sticker library.'
-        : 'Your sticker is ready to send.',
-      [
-        { text: 'Make another', onPress: reset },
-        { text: 'Open chat', onPress: () => router.back() },
-      ],
+        : editingId ? 'Your sticker changes are saved.' : 'Your sticker is ready to send.',
+      editingId
+        ? [{ text: 'Done', onPress: () => router.back() }]
+        : [
+            { text: 'Make another', onPress: reset },
+            { text: 'Open chat', onPress: () => router.back() },
+          ],
       { cancelable: false },
     );
     return sticker;
@@ -400,8 +448,16 @@ export default function CreateStickerScreen() {
     );
   };
 
+  if (loadingSticker) {
+    return (
+      <ScreenShell title="Edit Sticker" showBack>
+        <ActivityIndicator color={colors.brand} />
+      </ScreenShell>
+    );
+  }
+
   return (
-    <ScreenShell title="Create Sticker" subtitle="Make it yours, WhatsApp-style" showBack>
+    <ScreenShell title={editingId ? 'Edit Sticker' : 'Create Sticker'} subtitle="Make it yours, WhatsApp-style" showBack>
       <View style={styles.preview} onLayout={(e) => setBox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
         {!media ? (
           <Pressable accessibilityRole="button" accessibilityLabel="Choose a photo" style={styles.emptyWrap} onPress={() => pickMedia('image')}>
@@ -428,7 +484,7 @@ export default function CreateStickerScreen() {
             </View>
           </View>
         ) : null}
-        {media ? (
+        {media && !editingId ? (
           <Pressable accessibilityRole="button" accessibilityLabel="Remove selected media" hitSlop={8} style={styles.removeMedia} onPress={clearMedia}>
             <Ionicons name="close" size={20} color="#FFFFFF" />
           </Pressable>
@@ -444,7 +500,7 @@ export default function CreateStickerScreen() {
         ))}
       </View>
 
-      <View style={styles.sourceRow}>
+      {!editingId ? <View style={styles.sourceRow}>
         <Pressable accessibilityRole="button" disabled={saving} style={[styles.source, hasImage && styles.sourceActive]} onPress={() => pickMedia('image')}>
           <Ionicons name="image-outline" size={19} color={colors.brand} />
           <Text style={styles.sourceText}>{hasImage ? 'Change photo' : 'Photo'}</Text>
@@ -453,7 +509,7 @@ export default function CreateStickerScreen() {
           <Ionicons name="videocam-outline" size={19} color={colors.brand} />
           <Text style={styles.sourceText}>{mediaIsVideo ? 'Change video' : 'Video'}</Text>
         </Pressable>
-      </View>
+      </View> : null}
 
       <View style={styles.tabs}>
         {TABS.map((tab) => {
@@ -484,7 +540,7 @@ export default function CreateStickerScreen() {
 
       <Pressable accessibilityRole="button" accessibilityState={{ disabled: !canSave }} style={[styles.save, !canSave && styles.saveDisabled]} onPress={save} disabled={!canSave}>
         {saving ? <ActivityIndicator color={colors.onBrand} /> : <Ionicons name="checkmark-circle-outline" size={20} color={colors.onBrand} />}
-        <Text style={styles.saveText}>{saving ? 'Saving…' : media ? 'Save sticker' : 'Choose a photo or video first'}</Text>
+        <Text style={styles.saveText}>{saving ? 'Saving…' : editingId ? 'Save changes' : media ? 'Save sticker' : 'Choose a photo or video first'}</Text>
       </Pressable>
     </ScreenShell>
   );

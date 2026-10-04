@@ -8,9 +8,11 @@ export const fetchStickers = async (options = {}) => {
 };
 export const fetchRecentStickers = async () => (await getJson('/api/stickers/recent')).data || [];
 export const fetchFavoriteStickers = async () => (await getJson('/api/stickers/favorites')).data || [];
+export const fetchOwnedSticker = async (stickerId) => (await getJson(`/api/stickers/${encodeURIComponent(stickerId)}`)).data;
 export const recordStickerUse = async (stickerId) => (await postJson(`/api/stickers/${encodeURIComponent(stickerId)}/use`, {})).data;
 export const favoriteSticker = async (stickerId, favorite = true) => (await postJson(`/api/stickers/${encodeURIComponent(stickerId)}/favorite`, { favorite })).data;
 export const deleteSticker = async (stickerId) => (await deleteJson(`/api/stickers/${encodeURIComponent(stickerId)}`)).data;
+export const updateSticker = async (stickerId, payload) => (await patchJson(`/api/stickers/${encodeURIComponent(stickerId)}`, payload)).data;
 export const uploadStickerMedia = async (file, onProgress, options = {}) => uploadStickerAsset(file, { onProgress, ...options });
 export const createSticker = async (payload) => (await postJson('/api/stickers', payload)).data;
 export const createStickerPack = async (payload) => (await postJson('/api/stickers/packs', payload)).data;

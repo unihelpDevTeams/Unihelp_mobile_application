@@ -522,7 +522,7 @@ export async function fetchNotificationsPage({ uid = auth.currentUser?.uid, page
 
   if (!firestoreDone) {
     try {
-      const cutoff = Timestamp.fromMillis(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const cutoff = Timestamp.fromMillis(Date.now() - 24 * 60 * 60 * 1000);
       const constraints = [
         where('createdAt', '>=', cutoff),
         orderBy('createdAt', 'desc'),
@@ -594,7 +594,7 @@ export function listenUnreadGroupMessageCount(uid = auth.currentUser?.uid, callb
   if (!uid || typeof callback !== 'function') return () => {};
 
   const notificationsRef = collection(db, COLLECTIONS.notifications, uid, 'items');
-  const unreadQuery = query(notificationsRef, where('read', '==', false), limit(200));
+  const unreadQuery = query(notificationsRef, where('read', '==', false));
 
   return onSnapshot(
     unreadQuery,
