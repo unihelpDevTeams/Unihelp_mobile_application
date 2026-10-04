@@ -57,6 +57,7 @@ export default function ScreenShell({
   showFooter = false,
   footerProps = {},
   onProfilePress,
+  onBack,
   menuFooterNote,
   showPremiumExpiryWarning = true,
   showHeader = true,
@@ -429,7 +430,7 @@ export default function ScreenShell({
               title={title}
               subtitle={subtitle}
               showBack={showBack}
-              onBack={() => router.back()}
+              onBack={onBack || (() => router.back())}
               showSearch={showUniversityIcons || Boolean(onSearch)}
               onSearch={onSearch ? onSearch : () => router.navigate('/search')}
               showNotifications={shouldShowNotifications}

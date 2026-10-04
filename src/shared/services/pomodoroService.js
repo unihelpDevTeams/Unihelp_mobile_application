@@ -81,7 +81,10 @@ const configurePomodoroChannel = async (Notifications, settings) => {
 
 const getNotificationPermission = async (Notifications) => {
   const current = await Notifications.getPermissionsAsync();
-  return current.status === 'granted';
+  if (current.status === 'granted') return true;
+
+  const requested = await Notifications.requestPermissionsAsync();
+  return requested.status === 'granted';
 };
 
 const notificationCopy = (mode) => {

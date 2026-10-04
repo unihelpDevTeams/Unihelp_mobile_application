@@ -12,7 +12,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
@@ -22,7 +22,7 @@ import { PageLoader } from '../../src/shared/components/AILoaders';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { isPremiumActive } from '../../src/shared/services/premium';
-import { GENDER_OPTIONS } from '../../src/signup/validation';
+import { GENDER_OPTIONS, parseDateOfBirth } from '../../src/signup/validation';
 import {
   RELATIONSHIP,
   acceptFriendRequest,
@@ -106,22 +106,23 @@ export default function ViewUserProfile() {
     return listenRelationship(user.uid, targetUid, setRelationship);
   }, [targetUid, user?.uid]);
 
-  // Depends on targetUid only — it used to refetch whenever profile.friendCount changed.
-  useEffect(() => {
-    let cancelled = false;
-    if (!targetUid) return undefined;
-    fetchFriendStats(targetUid)
-      .then((stats) => {
-        if (!cancelled) setFriendStats(stats);
-      })
-      .catch((error) => {
-        console.warn('Failed to load friend stats', error);
-        if (!cancelled) setFriendStats({ friendCount: null, mutualCount: 0 });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [targetUid]);
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      if (!targetUid) return undefined;
+      fetchFriendStats(targetUid)
+        .then((stats) => {
+          if (!cancelled) setFriendStats(stats);
+        })
+        .catch((error) => {
+          console.warn('Failed to load friend stats', error);
+          if (!cancelled) setFriendStats({ friendCount: null, mutualCount: 0 });
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [targetUid])
+  );
 
   const friendCount = Number(friendStats?.friendCount ?? profile?.friendCount ?? 0) || 0;
   const mutualCount = Number(friendStats?.mutualCount ?? 0) || 0;
@@ -168,10 +169,7 @@ export default function ViewUserProfile() {
   ].filter((item) => String(item.value || '').trim());
 
   const rawDateOfBirth = profile?.dateOfBirth || profile?.date_of_birth || '';
-  const birthDateParts = typeof rawDateOfBirth === 'string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(rawDateOfBirth);
-  const parsedBirthDate = birthDateParts
-    ? new Date(Number(birthDateParts[1]), Number(birthDateParts[2]) - 1, Number(birthDateParts[3]))
-    : null;
+  const parsedBirthDate = parseDateOfBirth(rawDateOfBirth);
   const personalItems = isSelf
     ? [
         {

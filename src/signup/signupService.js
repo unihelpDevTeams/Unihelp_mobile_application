@@ -166,7 +166,10 @@ export async function createCompleteAccount(formData) {
       date_of_birth: dateOfBirth || '',
     });
   } catch (error) {
-    console.warn('Could not sync the new profile with the notification service:', error?.message || error);
+    console.warn(
+      '[Signup] Firebase profile was created, but PostgreSQL profile sync failed. A later authenticated profile refresh can retry from the saved Firebase profile:',
+      { status: error?.status || null, message: error?.message || String(error) }
+    );
   }
 
   return credential;

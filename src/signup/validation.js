@@ -60,8 +60,19 @@ export const GENDER_OPTIONS = [
 ];
 
 export function parseDateOfBirth(value) {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const [year, month, day] = value.split('-').map(Number);
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  if (typeof value !== 'string') return null;
+
+  const trimmedValue = value.trim();
+  if (!trimmedValue) return null;
+
+  const dateString = trimmedValue.includes('T') ? trimmedValue.split('T')[0] : trimmedValue;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString)) return null;
+
+  const [year, month, day] = dateString.split('-').map(Number);
   const date = new Date(year, month - 1, day);
   if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
   return date;
@@ -76,8 +87,8 @@ export function formatDateOfBirth(date) {
 }
 
 export function isValidDateOfBirth(value, now = new Date()) {
-  const date = parseDateOfBirth(value);
-  if (!date) return false;
+  const date = value instanceof Date ? value : parseDateOfBirth(value);
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return false;
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const earliest = new Date(1900, 0, 1);
   return date >= earliest && date <= today;

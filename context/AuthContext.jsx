@@ -252,12 +252,25 @@ export function AuthProvider({ children }) {
     }
     try {
       const profileData = await ensureCurrentUserProfile();
-      setProfile(profileData);
-      persistProfileCache(profileData);
-      return profileData;
+      if (profileData) {
+        setProfile(profileData);
+        persistProfileCache(profileData);
+        return profileData;
+      }
+
+      if (profile) {
+        persistProfileCache(profile);
+        return profile;
+      }
+
+      return null;
     } catch (err) {
       console.log("[AuthContext] refreshProfile failed (offline?):", err?.message);
-      return profile; // return cached
+      if (profile) {
+        persistProfileCache(profile);
+        return profile;
+      }
+      return null;
     }
   };
 

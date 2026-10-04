@@ -3,6 +3,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocFromCache,
   getDocs,
   increment,
   limit,
@@ -78,7 +79,21 @@ const profileSummary = (uid, profile = {}) => ({
 
 export const getUserProfileById = async (uid) => {
   if (!uid) return null;
-  const snap = await getDoc(doc(db, COLLECTIONS.users, uid));
+  const userRef = doc(db, COLLECTIONS.users, uid);
+  let snap;
+  try {
+    snap = await getDoc(userRef);
+  } catch (error) {
+    try {
+      snap = await getDocFromCache(userRef);
+      if (snap.exists()) {
+        console.warn('Using cached user profile after the server fetch failed:', error?.message || error);
+      }
+    } catch (cacheError) {
+      console.warn('Could not load user profile from Firestore cache:', cacheError?.message || cacheError);
+      throw error;
+    }
+  }
   return snap.exists() ? { id: snap.id, uid: snap.id, ...snap.data() } : null;
 };
 

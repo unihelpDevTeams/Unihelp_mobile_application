@@ -152,6 +152,53 @@ const normalizeProfilePayload = (payload = {}) => {
   return next;
 };
 
+const hasMeaningfulUserProfile = (profile = null) => {
+  if (!profile || typeof profile !== 'object') return false;
+
+  const meaningfulKeys = [
+    'username',
+    'displayName',
+    'email',
+    'school',
+    'universityName',
+    'department',
+    'departmentName',
+    'level',
+    'bio',
+    'gender',
+    'dateOfBirth',
+    'photo',
+    'photoURL',
+    'role',
+  ];
+
+  return meaningfulKeys.some((key) => String(profile[key] ?? '').trim().length > 0);
+};
+
+const buildDefaultUserProfile = (overrides = {}) => {
+  const user = auth.currentUser || {
+    uid: overrides.uid || '',
+    email: overrides.email || '',
+    displayName: overrides.displayName || '',
+    photoURL: overrides.photoURL || overrides.photo || '',
+  };
+
+  const rawUsername = (
+    overrides.username
+    || user.displayName
+    || user.email?.split('@')[0]
+    || 'Student'
+  )?.trim?.() || 'Student';
+
+  return normalizeProfilePayload(profileDefaults(user, {
+    ...overrides,
+    username: rawUsername,
+    email: overrides.email || user.email || '',
+    photo: overrides.photo || user.photoURL || '',
+    photoURL: overrides.photoURL || user.photoURL || '',
+  }));
+};
+
 const toUserApiPayload = (profile = {}) => ({
   display_name: profile.displayName || profile.username || profile.display_name || '',
   email: profile.email || auth.currentUser?.email || '',
@@ -180,14 +227,82 @@ const readFirestoreUserProfile = async (uid = auth.currentUser?.uid) => {
   return snapshot.exists() ? normalizeUserProfile({ id: snapshot.id, ...snapshot.data() }, uid) : null;
 };
 
+const isEmptyProfileValue = (value) =>
+  value === null || value === undefined || (typeof value === 'string' && !value.trim());
+
+const mergePostgresAndFirestoreProfiles = (postgresRow, postgresProfile, firestoreProfile, uid) => {
+  if (!firestoreProfile) return postgresProfile;
+
+  const merged = { ...firestoreProfile, ...postgresProfile };
+  const fallbackFields = [
+    ['email', 'email'],
+    ['school', 'university'],
+    ['universityName', 'university'],
+    ['department', 'department'],
+    ['departmentName', 'department'],
+    ['level', 'level'],
+    ['bio', 'bio'],
+    ['gender', 'gender'],
+    ['dateOfBirth', 'date_of_birth'],
+    ['photo', 'avatar'],
+    ['photoURL', 'avatar'],
+    ['photoThumb', 'avatar'],
+    ['cover', 'cover_url'],
+    ['coverPhoto', 'cover_url'],
+    ['coverUrl', 'cover_url'],
+    ['coverAsset', 'cover_asset'],
+    ['totalPoints', 'total_points'],
+    ['rankName', 'rank_name'],
+  ];
+
+  for (const [profileField, postgresField] of fallbackFields) {
+    if (isEmptyProfileValue(postgresRow?.[postgresField]) && !isEmptyProfileValue(firestoreProfile[profileField])) {
+      merged[profileField] = firestoreProfile[profileField];
+    }
+  }
+
+  if (!isEmptyProfileValue(firestoreProfile.username)) {
+    merged.username = firestoreProfile.username;
+    merged.usernameLower = firestoreProfile.usernameLower || firestoreProfile.username.trim().toLowerCase();
+  }
+  for (const field of [
+    'role',
+    'schoolId',
+    'universityId',
+    'departmentId',
+    'faculty',
+    'studentType',
+    'firstName',
+    'lastName',
+    'interests',
+    'heardFrom',
+    'heardFromOther',
+    'photoAsset',
+    'premium',
+    'premiumExpiresAt',
+    'subscriptionExpiresAt',
+    'subscriptionStatus',
+  ]) {
+    if (!isEmptyProfileValue(firestoreProfile[field])) merged[field] = firestoreProfile[field];
+  }
+
+  return normalizeUserProfile(merged, uid);
+};
+
 export async function getCurrentUserProfile(uid = auth.currentUser?.uid) {
   if (!uid) return null;
   try {
-    const apiProfile = await getJson('/api/users').then((res) => normalizeUserProfile(res.data, uid)).catch(() => null);
-    return normalizeUserProfile(apiProfile || {}, uid);
+    const response = await getJson('/api/users');
+    if (!response?.data || typeof response.data !== 'object' || Array.isArray(response.data)) {
+      throw new Error('User profile API returned an invalid response.');
+    }
+    return normalizeUserProfile(response.data, uid);
   } catch (error) {
+    if (error?.status === 404 && error?.responseData?.error === 'User not found') {
+      return null;
+    }
     console.error('Failed to get user profile', error);
-    return null;
+    throw error;
   }
 }
 
@@ -195,8 +310,11 @@ export async function syncCurrentUserProfile(payload = {}) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
   try {
     const uid = auth.currentUser.uid;
-    const res = await putJson('/api/users', toUserApiPayload(payload)).catch(() => null);
-    return normalizeUserProfile(res?.data || payload, uid);
+    const res = await putJson('/api/users', toUserApiPayload(payload));
+    if (!res?.data || typeof res.data !== 'object' || Array.isArray(res.data)) {
+      throw new Error('User profile sync returned an invalid response.');
+    }
+    return normalizeUserProfile({ ...payload, ...res.data }, uid);
   } catch (error) {
     console.error('Failed to sync user profile', error);
     throw error;
@@ -208,20 +326,73 @@ let profileCacheRef = null;
 
 export async function ensureCurrentUserProfile(overrides = {}) {
   if (!auth.currentUser) return null;
-  
+
   try {
     const uid = auth.currentUser.uid;
-    const existingRes = await getJson('/api/users').catch(() => null);
-    const existingData = normalizeUserProfile(existingRes?.data, uid);
-    const hasExistingProfile = Boolean(existingData && Object.keys(existingData).length > 0);
-    
+    let existingData = null;
+    let existingRow = null;
+    try {
+      const existingRes = await getJson('/api/users');
+      if (!existingRes?.data || typeof existingRes.data !== 'object' || Array.isArray(existingRes.data)) {
+        throw new Error('User profile API returned an invalid response.');
+      }
+      existingRow = existingRes.data;
+      existingData = normalizeUserProfile(existingRes.data, uid);
+    } catch (error) {
+      const isMissingPostgresProfile =
+        error?.status === 404 && error?.responseData?.error === 'User not found';
+      if (!isMissingPostgresProfile) throw error;
+    }
+
+    const hasExistingProfile = hasMeaningfulUserProfile(existingData);
+
     if (!hasExistingProfile) {
-      const defaultProfile = normalizeProfilePayload(profileDefaults(auth.currentUser, overrides));
-      const res = await putJson('/api/users', toUserApiPayload(defaultProfile)).catch(() => null);
-      profileCacheRef = normalizeUserProfile({ ...(normalizeUserProfile(res?.data, uid) || {}), ...defaultProfile }, uid);
+      const authDefaults = buildDefaultUserProfile({
+        uid,
+        email: auth.currentUser.email || '',
+        displayName: auth.currentUser.displayName || '',
+        photoURL: auth.currentUser.photoURL || '',
+        ...overrides,
+      });
+      const firestoreProfile = await readFirestoreUserProfile(uid);
+      if (
+        !hasMeaningfulUserProfile(firestoreProfile)
+        && !overrides.username
+        && !overrides.displayName
+        && !overrides.email
+      ) {
+        return null;
+      }
+      const fallbackSource = hasMeaningfulUserProfile(firestoreProfile)
+        ? { ...authDefaults, ...firestoreProfile }
+        : authDefaults;
+
+      const defaultProfile = normalizeProfilePayload({
+        ...fallbackSource,
+        uid,
+        id: fallbackSource.id || uid,
+        email: fallbackSource.email || auth.currentUser.email || '',
+        ...overrides,
+      });
+
+      const res = await putJson('/api/users', toUserApiPayload(defaultProfile));
+      if (!res?.data || typeof res.data !== 'object' || Array.isArray(res.data)) {
+        throw new Error('User profile sync returned an invalid response.');
+      }
+      const savedProfile = normalizeUserProfile(res.data, uid);
+      profileCacheRef = normalizeUserProfile({
+        ...defaultProfile,
+        ...savedProfile,
+        ...(firestoreProfile?.username
+          ? {
+              username: firestoreProfile.username,
+              usernameLower: firestoreProfile.usernameLower || firestoreProfile.username.trim().toLowerCase(),
+            }
+          : {}),
+      }, uid);
       return profileCacheRef;
     }
-    
+
     const nextProfile = normalizeProfilePayload({ ...overrides });
 
     if (typeof nextProfile.username === 'string' && nextProfile.username.trim()) {
@@ -250,12 +421,21 @@ export async function ensureCurrentUserProfile(overrides = {}) {
     );
 
     if (hasRealChanges) {
-      const res = await putJson('/api/users', toUserApiPayload(mergedProfile)).catch(() => null);
-      profileCacheRef = normalizeUserProfile({ ...(normalizeUserProfile(res?.data, uid) || {}), ...mergedProfile }, uid);
+      const res = await putJson('/api/users', toUserApiPayload(mergedProfile));
+      if (!res?.data || typeof res.data !== 'object' || Array.isArray(res.data)) {
+        throw new Error('User profile sync returned an invalid response.');
+      }
+      profileCacheRef = normalizeUserProfile({ ...mergedProfile, ...normalizeUserProfile(res.data, uid) }, uid);
       return profileCacheRef;
     }
 
-    profileCacheRef = normalizeUserProfile(existingData, uid);
+    let firestoreProfile = null;
+    try {
+      firestoreProfile = await readFirestoreUserProfile(uid);
+    } catch (error) {
+      console.warn('Could not supplement the PostgreSQL profile from Firebase:', error?.message || error);
+    }
+    profileCacheRef = mergePostgresAndFirestoreProfiles(existingRow, existingData, firestoreProfile, uid);
     return profileCacheRef;
   } catch (error) {
     console.error('Failed to ensure user profile', error);

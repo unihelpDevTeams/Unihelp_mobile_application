@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -10,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import ScreenShell from '../../src/shared/components/ScreenShell';
@@ -27,10 +28,7 @@ const MODE_DETAILS = {
   [POMODORO_MODES.LONG_BREAK]: { label: 'Long break', icon: 'leaf-outline', colorKey: 'info' },
 };
 
-const DEFAULT_TASKS = [
-  { id: '1', title: 'Review Physics Past Questions', completed: false },
-  { id: '2', title: 'Complete Mathematics Practice Test', completed: true },
-];
+const STUDY_GOALS_KEY = 'pomodoro:study-goals:v1';
 
 const formatTime = (seconds) => {
   const total = Math.max(0, Math.floor(seconds));
@@ -40,6 +38,68 @@ const formatTime = (seconds) => {
   if (hours) return `${hours}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
   return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
 };
+
+// Keeps only well-formed goals so corrupted storage can never crash the screen.
+const sanitizeGoals = (value) => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item) => item && typeof item.id === 'string' && typeof item.title === 'string' && item.title.trim())
+    .map((item) => ({ id: item.id, title: item.title.trim(), completed: item.completed === true }));
+};
+
+/**
+ * Study goals saved on the device (AsyncStorage → localStorage on web).
+ * Starts empty; only goals the user types in are ever stored.
+ */
+function useStudyGoals() {
+  const [goals, setGoals] = useState([]);
+  const [hydrated, setHydrated] = useState(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(STUDY_GOALS_KEY);
+        const saved = raw ? sanitizeGoals(JSON.parse(raw)) : [];
+        // Merge, in case the user added a goal before the saved list finished loading.
+        if (mounted.current) setGoals((current) => [...saved, ...current]);
+      } catch (error) {
+        console.warn('[Pomodoro] Could not load study goals.', error);
+      } finally {
+        if (mounted.current) setHydrated(true);
+      }
+    })();
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  // Persist after every change, but never before the initial load (it would wipe saved goals).
+  useEffect(() => {
+    if (!hydrated) return;
+    AsyncStorage.setItem(STUDY_GOALS_KEY, JSON.stringify(goals)).catch((error) => {
+      console.warn('[Pomodoro] Could not save study goals.', error);
+    });
+  }, [goals, hydrated]);
+
+  const addGoal = useCallback((title) => {
+    const clean = title.trim();
+    if (!clean) return false;
+    setGoals((current) => [...current, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, title: clean, completed: false }]);
+    return true;
+  }, []);
+
+  const toggleGoal = useCallback((id) => {
+    setGoals((current) => current.map((item) => (item.id === id ? { ...item, completed: !item.completed } : item)));
+  }, []);
+
+  const removeGoal = useCallback((id) => {
+    setGoals((current) => current.filter((item) => item.id !== id));
+  }, []);
+
+  return { goals, hydrated, addGoal, toggleGoal, removeGoal };
+}
 
 function SettingNumber({ label, value, min, max, onChangeText, styles, colors }) {
   return (
@@ -100,7 +160,7 @@ export default function PomodoroScreen() {
   const [settingsDraft, setSettingsDraft] = useState(DEFAULT_POMODORO_SETTINGS);
   const [settingsError, setSettingsError] = useState('');
   const [taskName, setTaskName] = useState('');
-  const [taskList, setTaskList] = useState(DEFAULT_TASKS);
+  const { goals: taskList, hydrated: goalsReady, addGoal, toggleGoal, removeGoal } = useStudyGoals();
 
   const styles = useThemeStyles((c, s, r) => ({
     screen: { flex: 1, backgroundColor: c.background },
@@ -169,6 +229,9 @@ export default function PomodoroScreen() {
     taskTitle: { flex: 1, color: c.textPrimary, fontSize: 13, fontWeight: '600' },
     taskCompleted: { color: c.textTertiary, textDecorationLine: 'line-through' },
     deleteTaskButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+    emptyGoals: { alignItems: 'center', paddingVertical: s.xl, gap: s.xs },
+    emptyGoalsTitle: { color: c.textPrimary, fontSize: 13.5, fontWeight: '800' },
+    emptyGoalsText: { color: c.textTertiary, fontSize: 12, textAlign: 'center', lineHeight: 18 },
     modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: c.overlay },
     modalCard: { backgroundColor: c.modalBackground, borderTopLeftRadius: r['3xl'], borderTopRightRadius: r['3xl'], paddingHorizontal: s.lg, paddingTop: s.lg, paddingBottom: s['3xl'], maxHeight: '92%' },
     modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: s.md },
@@ -241,16 +304,7 @@ export default function PomodoroScreen() {
   };
 
   const addTask = () => {
-    const title = taskName.trim();
-    if (!title) return;
-    setTaskList((current) => [...current, { id: `${Date.now()}-${Math.random()}`, title, completed: false }]);
-    setTaskName('');
-  };
-
-  const toggleTask = (id) => {
-    setTaskList((current) => current.map((item) => (
-      item.id === id ? { ...item, completed: !item.completed } : item
-    )));
+    if (addGoal(taskName)) setTaskName('');
   };
 
   const sessionCaption = useMemo(() => {
@@ -267,7 +321,7 @@ export default function PomodoroScreen() {
           <Text style={{ color: colors.textSecondary, marginTop: 12, fontSize: 13 }}>Restoring your timer…</Text>
         </View>
       ) : (
-        <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={styles.intro}>
             <Text style={styles.eyebrow}>Study with intention</Text>
             <Text style={styles.introText}>Focused sessions, well-earned breaks, and steady progress.</Text>
@@ -405,38 +459,50 @@ export default function PomodoroScreen() {
                 onChangeText={setTaskName}
                 onSubmitEditing={addTask}
                 returnKeyType="done"
+                blurOnSubmit={false}
                 maxLength={120}
               />
               <Pressable onPress={addTask} accessibilityRole="button" accessibilityLabel="Add study goal" style={styles.addTaskButton}>
                 <Ionicons name="add" size={22} color={colors.onBrand} />
               </Pressable>
             </View>
-            {taskList.map((task) => (
-              <View key={task.id} style={styles.taskRow}>
-                <Pressable
-                  onPress={() => toggleTask(task.id)}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: task.completed }}
-                  accessibilityLabel={task.title}
-                  style={styles.taskToggle}
-                >
-                  <Ionicons
-                    name={task.completed ? 'checkmark-circle' : 'ellipse-outline'}
-                    size={21}
-                    color={task.completed ? colors.success : colors.textTertiary}
-                  />
-                  <Text style={[styles.taskTitle, task.completed && styles.taskCompleted]}>{task.title}</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setTaskList((current) => current.filter((item) => item.id !== task.id))}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Delete goal ${task.title}`}
-                  style={styles.deleteTaskButton}
-                >
-                  <Ionicons name="trash-outline" size={18} color={colors.textTertiary} />
-                </Pressable>
+
+            {!goalsReady ? (
+              <ActivityIndicator color={colors.brand} style={{ marginVertical: 16 }} />
+            ) : taskList.length === 0 ? (
+              <View style={styles.emptyGoals}>
+                <Ionicons name="flag-outline" size={26} color={colors.textTertiary} />
+                <Text style={styles.emptyGoalsTitle}>No goals yet</Text>
+                <Text style={styles.emptyGoalsText}>Add what you want to finish this session. Your goals are saved on this device.</Text>
               </View>
-            ))}
+            ) : (
+              taskList.map((task) => (
+                <View key={task.id} style={styles.taskRow}>
+                  <Pressable
+                    onPress={() => toggleGoal(task.id)}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: task.completed }}
+                    accessibilityLabel={task.title}
+                    style={styles.taskToggle}
+                  >
+                    <Ionicons
+                      name={task.completed ? 'checkmark-circle' : 'ellipse-outline'}
+                      size={21}
+                      color={task.completed ? colors.success : colors.textTertiary}
+                    />
+                    <Text style={[styles.taskTitle, task.completed && styles.taskCompleted]}>{task.title}</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => removeGoal(task.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete goal ${task.title}`}
+                    style={styles.deleteTaskButton}
+                  >
+                    <Ionicons name="trash-outline" size={18} color={colors.textTertiary} />
+                  </Pressable>
+                </View>
+              ))
+            )}
           </View>
         </ScrollView>
       )}

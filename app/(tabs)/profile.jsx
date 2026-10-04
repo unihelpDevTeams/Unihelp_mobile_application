@@ -12,12 +12,11 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { spacing } from '../../src/shared/theme';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
@@ -52,7 +51,7 @@ import { deleteProfileMedia, getJson, uploadFeatureMedia } from '../../src/share
 
 const BIO_MAX_LENGTH = 160;
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
-const AVATAR_SIZE = 88;
+const AVATAR_SIZE = 92;
 
 const PROFILE_FOOTER_SECTIONS = [
   {
@@ -78,6 +77,227 @@ const PROFILE_SOCIAL_LINKS = [
   { label: 'Instagram', icon: 'logo-instagram', url: 'https://instagram.com/unihelp' },
   { label: 'LinkedIn', icon: 'logo-linkedin', url: 'https://linkedin.com/company/unihelp' },
 ];
+
+/* -------------------------------------------------------------------------- */
+/*  Date of birth picker — custom wheels, identical on iOS / Android / Web     */
+/*  No native date-picker dependency, so nothing to crash or render oddly.     */
+/* -------------------------------------------------------------------------- */
+
+const ITEM_H = 46;
+const VISIBLE_ROWS = 5;
+const WHEEL_PAD = ITEM_H * Math.floor(VISIBLE_ROWS / 2);
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+const daysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
+
+const calcAge = (date) => {
+  const now = new Date();
+  let age = now.getFullYear() - date.getFullYear();
+  const beforeBirthday =
+    now.getMonth() < date.getMonth() || (now.getMonth() === date.getMonth() && now.getDate() < date.getDate());
+  if (beforeBirthday) age -= 1;
+  return Math.max(age, 0);
+};
+
+function WheelColumn({ data, selectedIndex, onSelect, flex = 1, label, styles }) {
+  const ref = useRef(null);
+  const firstRun = useRef(true);
+  const debounce = useRef(null);
+
+  // Keep the wheel aligned with the selected index (initial mount is instant, later changes animate).
+  useEffect(() => {
+    const id = setTimeout(() => {
+      ref.current?.scrollTo({ y: selectedIndex * ITEM_H, animated: !firstRun.current });
+      firstRun.current = false;
+    }, 0);
+    return () => clearTimeout(id);
+  }, [selectedIndex, data.length]);
+
+  useEffect(() => () => debounce.current && clearTimeout(debounce.current), []);
+
+  const settle = (y) => {
+    const idx = Math.max(0, Math.min(data.length - 1, Math.round(y / ITEM_H)));
+    if (idx !== selectedIndex) onSelect(idx);
+    else if (Math.abs(y - idx * ITEM_H) > 1) ref.current?.scrollTo({ y: idx * ITEM_H, animated: true });
+  };
+
+  return (
+    <View style={[styles.wheelCol, { flex }]} accessible accessibilityLabel={label} accessibilityRole="adjustable">
+      <ScrollView
+        ref={ref}
+        nestedScrollEnabled
+        showsVerticalScrollIndicator={false}
+        snapToInterval={ITEM_H}
+        decelerationRate="fast"
+        scrollEventThrottle={16}
+        contentContainerStyle={{ paddingVertical: WHEEL_PAD }}
+        onMomentumScrollEnd={(e) => settle(e.nativeEvent.contentOffset.y)}
+        onScrollEndDrag={(e) => {
+          if (Platform.OS !== 'web') settle(e.nativeEvent.contentOffset.y);
+        }}
+        onScroll={
+          Platform.OS === 'web'
+            ? (e) => {
+                const y = e.nativeEvent.contentOffset.y;
+                if (debounce.current) clearTimeout(debounce.current);
+                debounce.current = setTimeout(() => settle(y), 140);
+              }
+            : undefined
+        }
+      >
+        {data.map((item, i) => {
+          const distance = Math.abs(i - selectedIndex);
+          return (
+            <Pressable
+              key={String(item)}
+              onPress={() => onSelect(i)}
+              style={styles.wheelItem}
+              accessibilityRole="button"
+              accessibilityLabel={`${label} ${item}`}
+              accessibilityState={{ selected: distance === 0 }}
+            >
+              <Text
+                style={[
+                  styles.wheelText,
+                  distance === 0 && styles.wheelTextActive,
+                  { opacity: distance === 0 ? 1 : distance === 1 ? 0.55 : 0.28 },
+                ]}
+                numberOfLines={1}
+              >
+                {item}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
+function DateOfBirthPicker({ value, onConfirm, onClear, onCancel }) {
+  const styles = useThemeStyles((c, s, r) => ({
+    previewCard: {
+      alignItems: 'center', paddingVertical: s.md, paddingHorizontal: s.lg, borderRadius: r.xl,
+      backgroundColor: c.brandLight, marginBottom: s.md,
+    },
+    previewDate: { fontSize: 20, fontWeight: '900', color: c.brandText, textAlign: 'center' },
+    agePill: {
+      marginTop: s.xs, flexDirection: 'row', alignItems: 'center', gap: 5,
+      backgroundColor: c.surface, borderRadius: r.full, paddingHorizontal: s.sm, paddingVertical: 3,
+    },
+    agePillText: { fontSize: 11.5, fontWeight: '800', color: c.brandText },
+    wheelWrap: { height: ITEM_H * VISIBLE_ROWS, flexDirection: 'row', marginBottom: s.md, overflow: 'hidden' },
+    wheelBand: {
+      position: 'absolute', left: 0, right: 0, top: WHEEL_PAD, height: ITEM_H, borderRadius: r.lg,
+      backgroundColor: c.canvasLight, borderWidth: 1, borderColor: c.brand,
+    },
+    wheelCol: { height: ITEM_H * VISIBLE_ROWS },
+    wheelItem: { height: ITEM_H, alignItems: 'center', justifyContent: 'center' },
+    wheelText: { fontSize: 16, fontWeight: '600', color: c.ink },
+    wheelTextActive: { fontSize: 18, fontWeight: '900', color: c.brandText },
+    primaryBtn: {
+      flexDirection: 'row', gap: s.sm, backgroundColor: c.brand, paddingVertical: 15,
+      borderRadius: r.lg, alignItems: 'center', justifyContent: 'center',
+    },
+    primaryBtnDisabled: { backgroundColor: c.brandGlow },
+    primaryBtnText: { color: '#fff', fontWeight: '800', fontSize: 14.5 },
+    footerRow: { flexDirection: 'row', gap: s.sm, marginTop: s.sm },
+    ghostBtn: { flex: 1, paddingVertical: 13, borderRadius: r.lg, alignItems: 'center', backgroundColor: c.canvasLight },
+    ghostBtnText: { color: c.ink, fontWeight: '700', fontSize: 13.5 },
+    ghostBtnDanger: { color: c.red },
+  }));
+
+  const { colors } = useTheme();
+  const today = useMemo(() => new Date(), []);
+  const maxYear = today.getFullYear();
+  const minYear = maxYear - 90;
+
+  const [parts, setParts] = useState(() => {
+    const seed = parseDateOfBirth(value) || new Date(maxYear - 20, 0, 1);
+    return { y: seed.getFullYear(), m: seed.getMonth(), d: seed.getDate() };
+  });
+
+  const years = useMemo(() => Array.from({ length: maxYear - minYear + 1 }, (_, i) => maxYear - i), [maxYear, minYear]);
+  const dayCount = daysInMonth(parts.y, parts.m);
+  const days = useMemo(() => Array.from({ length: dayCount }, (_, i) => i + 1), [dayCount]);
+
+  // Single entry point: clamps the day to the month's length and never allows a future date.
+  const update = (patch) => {
+    setParts((current) => {
+      const next = { ...current, ...patch };
+      next.d = Math.min(next.d, daysInMonth(next.y, next.m));
+      if (new Date(next.y, next.m, next.d) > today) {
+        return { y: today.getFullYear(), m: today.getMonth(), d: today.getDate() };
+      }
+      return next;
+    });
+  };
+
+  const selected = new Date(parts.y, parts.m, parts.d);
+  const formatted = formatDateOfBirth(selected);
+  const valid = isValidDateOfBirth(formatted);
+  const age = calcAge(selected);
+
+  return (
+    <View>
+      <View style={styles.previewCard} accessibilityLiveRegion="polite">
+        <Text style={styles.previewDate}>
+          {selected.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}
+        </Text>
+        <View style={styles.agePill}>
+          <Ionicons name="gift-outline" size={12} color={colors.brandText} />
+          <Text style={styles.agePillText}>{age} year{age === 1 ? '' : 's'} old</Text>
+        </View>
+      </View>
+
+      <View style={styles.wheelWrap}>
+        <View style={styles.wheelBand} pointerEvents="none" />
+        <WheelColumn
+          label="Day" data={days} flex={0.8} styles={styles}
+          selectedIndex={Math.min(parts.d, dayCount) - 1}
+          onSelect={(i) => update({ d: i + 1 })}
+        />
+        <WheelColumn
+          label="Month" data={MONTHS} flex={1.5} styles={styles}
+          selectedIndex={parts.m}
+          onSelect={(i) => update({ m: i })}
+        />
+        <WheelColumn
+          label="Year" data={years} flex={1} styles={styles}
+          selectedIndex={maxYear - parts.y}
+          onSelect={(i) => update({ y: maxYear - i })}
+        />
+      </View>
+
+      <Pressable
+        disabled={!valid}
+        onPress={() => onConfirm(formatted)}
+        style={[styles.primaryBtn, !valid && styles.primaryBtnDisabled]}
+        accessibilityRole="button"
+        accessibilityLabel="Set date of birth"
+        accessibilityState={{ disabled: !valid }}
+      >
+        <Ionicons name="checkmark-outline" size={17} color="#fff" />
+        <Text style={styles.primaryBtnText}>Set date of birth</Text>
+      </Pressable>
+
+      <View style={styles.footerRow}>
+        <Pressable onPress={onCancel} style={styles.ghostBtn} accessibilityRole="button" accessibilityLabel="Cancel">
+          <Text style={styles.ghostBtnText}>Cancel</Text>
+        </Pressable>
+        {value ? (
+          <Pressable onPress={onClear} style={styles.ghostBtn} accessibilityRole="button" accessibilityLabel="Remove date of birth">
+            <Text style={[styles.ghostBtnText, styles.ghostBtnDanger]}>Remove</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Media upload                                                              */
+/* -------------------------------------------------------------------------- */
 
 const updateProfilePhoto = async ({ kind = 'photo', uri }) => {
   if (!uri) {
@@ -154,6 +374,8 @@ const THEME_OPTIONS = [
   { key: 'system', label: 'System', icon: 'phone-portrait-outline' },
 ];
 
+const POST_PRESET_COLORS = { indigo: '#4F46E5', violet: '#7C3AED', blue: '#0284C7', green: '#15803D', orange: '#EA580C', pink: '#DB2777', red: '#DC2626', dark: '#111827' };
+
 const emptyForm = {
   username: '', school: '', schoolId: '', department: '', departmentId: '', faculty: '', level: '', location: '', bio: '', gender: '', dateOfBirth: '', role: 'university',
 };
@@ -170,6 +392,16 @@ const SHEET = {
   APPEARANCE: 'appearance',
 };
 
+const formatShortDate = (value) => {
+  const date = parseDateOfBirth(value);
+  return date ? date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+};
+
+const formatPostDate = (value) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
+};
+
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, profile, refreshProfile, logout } = useAuth();
@@ -178,12 +410,12 @@ export default function ProfileScreen() {
   const [status, setStatus] = useState(null);
   const [sheet, setSheet] = useState(SHEET.NONE);
   const [editingKey, setEditingKey] = useState(null);
-  const [datePickerVisible, setDatePickerVisible] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const { universities, loading: ul, searchText: us, setSearchText: sus, loadMore: lmu, schoolType, setSchoolType } = useUniversities();
   const { departments, loading: dl, searchText: ds, setSearchText: sds, selectUniversity } = useDepartments();
   const [initialForm, setInitialForm] = useState(emptyForm);
   const [photoUploading, setPhotoUploading] = useState(false);
+  const [coverUploading, setCoverUploading] = useState(false);
   const [stats, setStats] = useState({ listings: 0, hostelListings: 0, groups: 0, stories: 0 });
   const [friendCount, setFriendCount] = useState(0);
   const [statsLoading, setStatsLoading] = useState(true);
@@ -202,11 +434,25 @@ export default function ProfileScreen() {
   const statusTimerRef = useRef(null);
   const adminTapCountRef = useRef(0);
   const adminTapTimerRef = useRef(null);
+  const initialFormRef = useRef(emptyForm);
+  const profileRef = useRef(profile);
+  const refreshProfileRef = useRef(refreshProfile);
+
+  initialFormRef.current = initialForm;
+  profileRef.current = profile;
+  refreshProfileRef.current = refreshProfile;
+
+  // FIX: `isDirty` was read by an effect declared above its `const` (temporal dead zone → ReferenceError on render).
+  // It now lives here, before anything that depends on it.
+  const isDirty = useMemo(
+    () => Object.keys(form).some((key) => form[key] !== initialForm[key]),
+    [form, initialForm]
+  );
 
   const handleAdminBadgePress = () => {
     adminTapCountRef.current += 1;
     if (adminTapTimerRef.current) clearTimeout(adminTapTimerRef.current);
-    
+
     if (adminTapCountRef.current >= 3) {
       adminTapCountRef.current = 0;
       router.push('/adminLogs');
@@ -222,22 +468,24 @@ export default function ProfileScreen() {
     return () => {
       isMountedRef.current = false;
       if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+      if (adminTapTimerRef.current) clearTimeout(adminTapTimerRef.current);
     };
   }, []);
 
   const loadProfilePosts = useCallback(async () => {
-    if (!profile?.uid) return;
+    const uid = profile?.uid || user?.uid;
+    if (!uid) return;
     setProfilePostsLoading(true);
     try {
-      const response = await getJson(`/api/feed/users/${encodeURIComponent(profile.uid)}/posts?limit=20`);
-      setProfilePosts(Array.isArray(response?.items) ? response.items : []);
+      const response = await getJson(`/api/feed/users/${encodeURIComponent(uid)}/posts?limit=20`);
+      if (isMountedRef.current) setProfilePosts(Array.isArray(response?.items) ? response.items : []);
     } catch (error) {
       console.error('[Profile] Failed to load user posts', error);
-      setProfilePosts([]);
+      if (isMountedRef.current) setProfilePosts([]);
     } finally {
-      setProfilePostsLoading(false);
+      if (isMountedRef.current) setProfilePostsLoading(false);
     }
-  }, [profile?.uid]);
+  }, [profile?.uid, user?.uid]);
 
   useEffect(() => {
     if (profileView === 'posts') loadProfilePosts();
@@ -245,10 +493,10 @@ export default function ProfileScreen() {
 
   const styles = useThemeStyles((c, s, r) => ({
     scrollContent: { paddingBottom: 32 },
-    profileTabs: { flexDirection: 'row', gap: 8, marginBottom: s.lg, padding: 4, borderRadius: r.xl, backgroundColor: c.surfaceSecondary, borderWidth: 1, borderColor: c.borderDefault },
+    profileTabs: { flexDirection: 'row', gap: 6, marginBottom: s.lg, padding: 4, borderRadius: r.xl, backgroundColor: c.surfaceSecondary, borderWidth: 1, borderColor: c.borderDefault },
     profileTab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: r.lg },
     profileTabActive: { backgroundColor: c.brand },
-    profileTabText: { color: c.textSecondary, fontSize: 12, fontWeight: '800' },
+    profileTabText: { color: c.textSecondary, fontSize: 12.5, fontWeight: '800' },
     profileTabTextActive: { color: c.onBrand },
     postsState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40, gap: 8 },
     postsStateText: { color: c.textSecondary, fontSize: 13, textAlign: 'center' },
@@ -265,60 +513,59 @@ export default function ProfileScreen() {
     // Header bar with the overflow (⋮) trigger
     topBar: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: spacing.xs, marginBottom: spacing.xs },
     moreButton: {
-      width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
+      width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center',
       backgroundColor: c.surface, borderWidth: 1, borderColor: c.borderLight,
     },
     moreButtonPressed: { backgroundColor: c.canvasLight },
 
-    // Identity header: cover photo sits in normal flow, avatar overlaps its
-    // bottom edge by exactly half its own height (classic profile layout).
+    // Identity header: cover in normal flow, avatar overlaps its bottom edge by half its height.
     identity: { alignItems: 'center', marginBottom: s.md },
-    coverWrap: {
-      width: '100%',
-      height: 140,
-      borderRadius: r['2xl'],
-      overflow: 'hidden',
-    },
+    coverWrap: { width: '100%', height: 150, borderRadius: r['2xl'], overflow: 'hidden' },
     coverImage: { width: '100%', height: '100%' },
-    coverPlaceholder: { width: '100%', height: '100%', backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
+    coverScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15, 23, 42, 0.14)' },
+    coverPlaceholder: { width: '100%', height: '100%', backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center', gap: 6 },
+    coverPlaceholderText: { fontSize: 12, fontWeight: '700', color: c.brandText },
     coverBadge: {
       position: 'absolute', right: s.sm, bottom: s.sm, width: 34, height: 34, borderRadius: 17,
-      backgroundColor: 'rgba(15, 23, 42, 0.5)', alignItems: 'center', justifyContent: 'center',
+      backgroundColor: 'rgba(15, 23, 42, 0.55)', alignItems: 'center', justifyContent: 'center',
       borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)',
     },
-    avatarWrap: {
-      position: 'relative',
-      marginTop: -(AVATAR_SIZE / 2),
-      marginBottom: s.md,
-      zIndex: 2,
-    },
+    coverSpinner: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15, 23, 42, 0.45)', alignItems: 'center', justifyContent: 'center' },
+    avatarWrap: { position: 'relative', marginTop: -(AVATAR_SIZE / 2), marginBottom: s.md, zIndex: 2 },
     avatar: {
       width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2, backgroundColor: c.brand,
       alignItems: 'center', justifyContent: 'center',
-      borderWidth: 3, borderColor: c.canvasLight,
+      borderWidth: 4, borderColor: c.canvasLight,
       ...Platform.select({
         ios: { shadowColor: c.brandText, shadowOpacity: 0.3, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
         android: { elevation: 4 },
       }),
     },
     avatarText: { color: c.onBrand, fontSize: 30, fontWeight: '800' },
-    avatarImage: { width: '100%', height: '100%', borderRadius: (AVATAR_SIZE - 6) / 2 },
+    avatarImage: { width: '100%', height: '100%', borderRadius: (AVATAR_SIZE - 8) / 2 },
     avatarSpinnerOverlay: {
-      ...StyleSheet.absoluteFillObject, borderRadius: (AVATAR_SIZE - 6) / 2,
-      backgroundColor: 'rgba(15, 23, 42, 0.45)',
-      alignItems: 'center', justifyContent: 'center',
+      ...StyleSheet.absoluteFillObject, borderRadius: (AVATAR_SIZE - 8) / 2,
+      backgroundColor: 'rgba(15, 23, 42, 0.45)', alignItems: 'center', justifyContent: 'center',
     },
     avatarBadge: {
-      position: 'absolute', right: -2, bottom: -2, width: 28, height: 28, borderRadius: 14,
+      position: 'absolute', right: -2, bottom: -2, width: 30, height: 30, borderRadius: 15,
       backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center',
-      borderWidth: 2, borderColor: c.canvasLight,
+      borderWidth: 3, borderColor: c.canvasLight,
     },
     identityTextWrap: { alignItems: 'center', marginBottom: s.sm },
     identityNameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: s.xs, maxWidth: '100%' },
-    identityName: { fontSize: 19, fontWeight: '800', color: c.ink, maxWidth: '85%', textAlign: 'center' },
+    identityName: { fontSize: 21, fontWeight: '900', color: c.ink, maxWidth: '85%', textAlign: 'center', letterSpacing: -0.2 },
     identityEmail: { marginTop: s.xs, fontSize: 13, color: c.grey, maxWidth: '85%', textAlign: 'center' },
 
-    // Plan / rank pills under the email
+    // Info chips (school, level, location)
+    chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: s.xs, justifyContent: 'center', marginTop: s.sm, paddingHorizontal: s.sm },
+    infoChip: {
+      flexDirection: 'row', alignItems: 'center', gap: 5, maxWidth: '100%',
+      backgroundColor: c.surface, borderRadius: r.full, borderWidth: 1, borderColor: c.borderLight,
+      paddingHorizontal: s.sm, paddingVertical: 5,
+    },
+    infoChipText: { fontSize: 11.5, fontWeight: '700', color: c.grey, flexShrink: 1 },
+
     pillsRow: { flexDirection: 'row', gap: s.sm, marginTop: s.sm, flexWrap: 'wrap', justifyContent: 'center' },
     pill: {
       flexDirection: 'row', alignItems: 'center', gap: s.xs,
@@ -330,31 +577,41 @@ export default function ProfileScreen() {
     pillText: { fontSize: 11, fontWeight: '800', color: c.brandText },
     pillTextGold: { color: c.gold },
     pillTextMuted: { color: c.grey },
-    friendsStat: {
-      flexDirection: 'row', alignItems: 'center', width: '100%',
+
+    // Quick stats strip
+    statsStrip: {
+      flexDirection: 'row', alignItems: 'stretch', backgroundColor: c.surface, borderRadius: r.xl,
+      borderWidth: 1, borderColor: c.borderLight, marginTop: s.xs, marginBottom: s.sm, overflow: 'hidden',
+    },
+    statCell: { flex: 1, alignItems: 'center', paddingVertical: s.md, gap: 2 },
+    statValue: { fontSize: 19, fontWeight: '900', color: c.ink },
+    statLabel: { fontSize: 11.5, fontWeight: '700', color: c.grey },
+    statDivider: { width: 1, backgroundColor: c.skeleton, marginVertical: s.sm },
+
+    // Profile completion
+    completionCard: {
       backgroundColor: c.surface, borderRadius: r.xl, borderWidth: 1, borderColor: c.borderLight,
-      paddingHorizontal: s.md, paddingVertical: s.sm, marginTop: s.sm,
+      padding: s.md, marginBottom: s.sm,
     },
-    friendsStatIcon: {
-      width: 38, height: 38, borderRadius: 12, backgroundColor: c.brandLight,
-      alignItems: 'center', justifyContent: 'center', marginRight: s.sm,
-    },
-    friendsStatCopy: { flex: 1 },
-    friendsStatValue: { fontSize: 18, fontWeight: '900', color: c.ink },
-    friendsStatLabel: { marginTop: 1, fontSize: 12, fontWeight: '600', color: c.grey },
-    friendsStatAction: { fontSize: 12, fontWeight: '800', color: c.brandText, marginRight: s.xs },
+    completionTop: { flexDirection: 'row', alignItems: 'center', marginBottom: s.sm },
+    completionTitle: { flex: 1, fontSize: 13.5, fontWeight: '800', color: c.ink },
+    completionAction: { fontSize: 12, fontWeight: '800', color: c.brandText },
+    progressTrack: { height: 7, borderRadius: 4, backgroundColor: c.skeleton, overflow: 'hidden' },
+    progressFill: { height: '100%', borderRadius: 4, backgroundColor: c.brand },
+    completionHint: { marginTop: s.sm, fontSize: 12, color: c.grey },
+
     bioCard: {
       backgroundColor: c.surface, borderRadius: r.xl, borderWidth: 1, borderColor: c.borderLight,
-      padding: s.md, marginTop: s.sm,
+      padding: s.md, marginBottom: s.sm,
     },
     bioHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: s.xs },
-    bioTitle: { flex: 1, fontSize: 12, fontWeight: '900', color: c.ink, textTransform: 'uppercase', letterSpacing: 0.5 },
+    bioTitle: { flex: 1, fontSize: 13, fontWeight: '800', color: c.ink },
     bioEdit: { fontSize: 12, fontWeight: '800', color: c.brandText },
     bioText: { color: c.grey, fontSize: 13.5, lineHeight: 20 },
 
     toast: {
       flexDirection: 'row', alignItems: 'center', gap: s.sm, borderRadius: r.md, borderWidth: 1,
-      paddingHorizontal: s.md, paddingVertical: s.sm, marginBottom: s.lg,
+      paddingHorizontal: s.md, paddingVertical: s.sm, marginBottom: s.md,
     },
     toastSuccess: { backgroundColor: c.greenLight, borderColor: c.greenLight },
     toastError: { backgroundColor: c.redLight, borderColor: c.redBorder },
@@ -362,10 +619,7 @@ export default function ProfileScreen() {
     toastTextSuccess: { color: c.teal },
     toastTextError: { color: c.rose },
 
-    groupLabel: {
-      fontSize: 11.5, fontWeight: '800', color: c.greyLight, letterSpacing: 0.6,
-      marginBottom: s.sm, marginTop: 6, marginLeft: s.xs,
-    },
+    groupLabel: { fontSize: 13, fontWeight: '800', color: c.grey, marginBottom: s.sm, marginTop: 6, marginLeft: s.xs },
     groupCard: {
       backgroundColor: c.surface, borderRadius: r.xl, borderWidth: 1, borderColor: c.borderLight,
       marginBottom: s.lg, overflow: 'hidden',
@@ -373,29 +627,23 @@ export default function ProfileScreen() {
     rowDivider: { borderBottomWidth: 1, borderBottomColor: c.skeleton },
     rowPressed: { backgroundColor: c.canvasLight },
 
-    // Primary list row (matches the reference screenshot's row rhythm)
-    listRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: s.md, paddingHorizontal: s.lg, gap: s.md, minHeight: 58 },
-    rowIconSm: { width: 34, height: 34, borderRadius: 10, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
+    listRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: s.md, paddingHorizontal: s.lg, gap: s.md, minHeight: 60 },
+    rowIconSm: { width: 36, height: 36, borderRadius: 11, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
     rowIconDanger: { backgroundColor: c.redLight },
     rowTextWrap: { flex: 1 },
     rowTitle: { fontSize: 14.5, fontWeight: '700', color: c.ink },
     rowSubtitle: { marginTop: 2, fontSize: 12, color: c.grey },
     rowTrailingText: { fontSize: 13, fontWeight: '700', color: c.brandText, marginRight: 2 },
-    rowBadge: {
-      backgroundColor: c.orangeLight, borderRadius: r.full, paddingHorizontal: 8, paddingVertical: 3, marginRight: 2,
-    },
+    rowBadge: { backgroundColor: c.orangeLight, borderRadius: r.full, paddingHorizontal: 8, paddingVertical: 3, marginRight: 2 },
     rowBadgeText: { fontSize: 11, fontWeight: '800', color: c.orange },
 
-    // Overflow / sheet content rows (used inside DraggableBottomSheet)
     sheetRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, gap: s.md },
-    sheetRowDanger: {},
     sheetRowTitle: { fontSize: 14.5, fontWeight: '700', color: c.ink },
     sheetRowTitleDanger: { color: c.red },
     sheetDivider: { height: 1, backgroundColor: c.skeleton, marginVertical: 2 },
     sheetIconWrap: { width: 30, height: 30, borderRadius: 9, backgroundColor: c.canvasLight, alignItems: 'center', justifyContent: 'center' },
     sheetIconWrapDanger: { backgroundColor: c.redLight },
 
-    // Popup stat grid (Progress / Uploads sheets)
     popupStatsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: s.md },
     popupStatCard: { flexBasis: '47%', flexGrow: 1, alignItems: 'center', paddingVertical: 14, borderRadius: r.xl, gap: 4 },
     popupStatValue: { fontSize: 18, fontWeight: '900' },
@@ -407,8 +655,8 @@ export default function ProfileScreen() {
       paddingVertical: 12, borderRadius: r.lg, backgroundColor: c.brandLight, marginTop: 2,
     },
     popupLinkText: { fontSize: 13.5, fontWeight: '800', color: c.brandText },
+    planCopy: { color: c.grey, fontSize: 13, lineHeight: 19, marginBottom: 14 },
 
-    // Appearance segmented control
     segmentRow: { flexDirection: 'row', gap: s.sm },
     segmentOption: {
       flex: 1, alignItems: 'center', gap: 6, paddingVertical: 14, borderRadius: r.lg,
@@ -418,23 +666,22 @@ export default function ProfileScreen() {
     segmentLabel: { fontSize: 12, fontWeight: '700', color: c.grey },
     segmentLabelActive: { color: c.brandText },
 
-    // Field editor (inside Edit Profile sheet)
-    editFieldRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: s.md, gap: s.md, minHeight: 54 },
+    // Field editor
+    editFieldRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: s.md, gap: s.md, minHeight: 56 },
     fieldLabel: { fontSize: 11.5, fontWeight: '700', color: c.greyLight, marginBottom: s.xs },
     fieldValue: { fontSize: 14.5, color: c.ink, fontWeight: '600' },
     fieldValueEmpty: { color: c.greyLight, fontWeight: '400' },
-    fieldInput: { fontSize: 14.5, color: c.ink, fontWeight: '600', padding: 0, margin: 0 },
-    fieldInputArea: { minHeight: 40, textAlignVertical: 'top' },
+    inputWrap: {
+      borderWidth: 1.5, borderColor: c.brand, borderRadius: r.lg, backgroundColor: c.surfacePrimary,
+      paddingHorizontal: s.md, paddingVertical: Platform.OS === 'ios' ? 12 : 8,
+    },
+    fieldInput: { fontSize: 15, color: c.ink, fontWeight: '600', padding: 0, margin: 0 },
+    fieldInputArea: { minHeight: 84, textAlignVertical: 'top' },
     genderOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: s.sm },
     genderOption: { borderWidth: 1, borderColor: c.borderDefault, borderRadius: r.full, paddingHorizontal: s.md, paddingVertical: s.sm, backgroundColor: c.surfacePrimary },
     genderOptionSelected: { backgroundColor: c.brandLight, borderColor: c.brand },
-    genderOptionText: { color: c.textSecondary, fontSize: 12, fontWeight: '600' },
+    genderOptionText: { color: c.textSecondary, fontSize: 12.5, fontWeight: '600' },
     genderOptionTextSelected: { color: c.brandText, fontWeight: '800' },
-    dateButton: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: s.md, borderWidth: 1, borderColor: c.borderDefault, borderRadius: r.lg, paddingHorizontal: s.md, backgroundColor: c.surfacePrimary },
-    dateButtonText: { flex: 1, color: c.textPrimary, fontSize: 14, fontWeight: '600' },
-    datePlaceholder: { color: c.textTertiary, fontWeight: '400' },
-    clearDateButton: { alignSelf: 'flex-start', paddingVertical: s.xs },
-    clearDateText: { color: c.brandText, fontSize: 12, fontWeight: '700' },
     charCount: { fontSize: 11, color: c.greyLight, textAlign: 'right', marginTop: s.xs },
 
     saveButton: {
@@ -451,10 +698,12 @@ export default function ProfileScreen() {
     secondaryButtonText: { color: c.ink, fontWeight: '700', fontSize: 14 },
   }));
 
+  // FIX: run once on mount. Depending on `refreshProfile` could loop if its identity changes when profile updates.
   useEffect(() => {
-    refreshProfile().catch(() => {});
-  }, [refreshProfile]);
+    Promise.resolve(refreshProfileRef.current?.()).catch(() => {});
+  }, []);
 
+  // Sync the form from the server profile whenever no sheet is open and there are no pending edits.
   useEffect(() => {
     if (sheet !== SHEET.NONE || isDirty) return;
     const next = {
@@ -481,7 +730,7 @@ export default function ProfileScreen() {
   }, []);
 
   useEffect(() => {
-    if (!status) return;
+    if (!status) return undefined;
     fadeAnim.setValue(0);
     Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
     statusTimerRef.current = setTimeout(() => {
@@ -525,12 +774,13 @@ export default function ProfileScreen() {
     }
   }, [user?.uid]);
 
+  // FIX: previously depended on the whole `profile` object, refetching on every profile refresh.
   const loadStreakAndChallenge = useCallback(async () => {
     if (!user?.uid) return;
     try {
       const [streakData, challenge] = await Promise.all([
         fetchDailyStreak(),
-        fetchChallengeStats(profile || {}),
+        fetchChallengeStats(profileRef.current || {}),
       ]);
       if (!isMountedRef.current) return;
       setStreakCount(streakData?.streakCount || 0);
@@ -539,23 +789,28 @@ export default function ProfileScreen() {
     } catch {
       /* silent — non-critical */
     }
-  }, [user?.uid, profile]);
+  }, [user?.uid]);
 
   useEffect(() => {
     setStatsLoading(true);
     loadStats();
-    loadFriendCount();
-  }, [loadFriendCount, loadStats]);
+  }, [loadStats]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadFriendCount();
+    }, [loadFriendCount])
+  );
 
   useEffect(() => {
     loadStreakAndChallenge();
-  }, [loadStreakAndChallenge]);
+  }, [loadStreakAndChallenge, profile?.uid]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       await Promise.all([
-        refreshProfile().catch(() => {}),
+        Promise.resolve(refreshProfileRef.current?.()).catch(() => {}),
         loadStats(),
         loadFriendCount(),
         loadStreakAndChallenge(),
@@ -564,12 +819,7 @@ export default function ProfileScreen() {
     } finally {
       if (isMountedRef.current) setRefreshing(false);
     }
-  }, [refreshProfile, loadFriendCount, loadStats, loadStreakAndChallenge, loadProfilePosts, profileView]);
-
-  const isDirty = useMemo(
-    () => Object.keys(form).some((key) => form[key] !== initialForm[key]),
-    [form, initialForm]
-  );
+  }, [loadFriendCount, loadStats, loadStreakAndChallenge, loadProfilePosts, profileView]);
 
   const initials = useMemo(() => {
     const source = form.username || user?.email || 'S';
@@ -584,17 +834,45 @@ export default function ProfileScreen() {
     user?.email?.trim().toLowerCase() === 'iadejuwon77@gmail.com';
   const totalUploads = stats.listings + stats.hostelListings + stats.stories;
 
+  // Profile completeness meter
+  const completion = useMemo(() => {
+    const checks = [
+      { done: !!profilePhoto, hint: 'Add a profile photo — tap your avatar.' },
+      { done: !!profileCover, hint: 'Add a cover photo to make your profile yours.' },
+      { done: !!form.username.trim(), hint: 'Add your name.' },
+      { done: !!form.bio.trim(), hint: 'Write a short About so people know you.' },
+      { done: !!form.school, hint: 'Add your school.' },
+      { done: !!form.department, hint: 'Add your department.' },
+      { done: !!form.level, hint: 'Add your level.' },
+      { done: !!form.location, hint: 'Add your city or campus.' },
+      { done: !!form.gender, hint: 'Add your gender.' },
+      { done: !!form.dateOfBirth, hint: 'Add your date of birth.' },
+    ];
+    const doneCount = checks.filter((c) => c.done).length;
+    return {
+      pct: Math.round((doneCount / checks.length) * 100),
+      hint: checks.find((c) => !c.done)?.hint || '',
+    };
+  }, [form, profilePhoto, profileCover]);
+
+  const infoChips = [
+    form.school && { icon: 'school-outline', text: form.school },
+    form.department && { icon: 'library-outline', text: form.department },
+    form.level && { icon: 'ribbon-outline', text: form.level },
+    form.location && { icon: 'location-outline', text: form.location },
+  ].filter(Boolean);
+
   const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }));
 
-  const closeSheet = () => {
+  // FIX: closing the sheet now discards unsaved edits (they used to leak into the header and stay "dirty").
+  const closeSheet = useCallback((discard = true) => {
+    if (discard) setForm(initialFormRef.current);
     setSheet(SHEET.NONE);
     setEditingKey(null);
-    setDatePickerVisible(false);
-  };
+  }, []);
 
   const openFieldEditor = (key) => {
     setEditingKey(key);
-    if (key === 'dateOfBirth') setDatePickerVisible(true);
     setSheet(SHEET.EDIT_FIELD);
     if (key === 'department' && form.schoolId) {
       selectUniversity(form.schoolId);
@@ -603,24 +881,29 @@ export default function ProfileScreen() {
 
   const backToEditProfile = () => {
     setEditingKey(null);
-    setDatePickerVisible(false);
     setSheet(SHEET.EDIT_PROFILE);
   };
 
   const handleSchoolSelect = (item) => {
-    setField('school', item.name);
-    setField('schoolId', item.id);
-    setField('department', '');
-    setField('departmentId', '');
-    setField('faculty', '');
+    setForm((current) => ({
+      ...current,
+      school: item.name,
+      schoolId: item.id,
+      department: '',
+      departmentId: '',
+      faculty: '',
+    }));
     selectUniversity(item.id);
     backToEditProfile();
   };
 
   const handleDepartmentSelect = (item) => {
-    setField('department', item.name);
-    setField('departmentId', item.id || '');
-    setField('faculty', item.faculty || '');
+    setForm((current) => ({
+      ...current,
+      department: item.name,
+      departmentId: item.id || '',
+      faculty: item.faculty || '',
+    }));
     backToEditProfile();
   };
 
@@ -631,17 +914,22 @@ export default function ProfileScreen() {
 
   const editingField = fields.find((f) => f.key === editingKey);
 
-  const pickPhoto = async () => {
+  // Shared picker for profile photo + cover photo.
+  const pickImage = async (kind) => {
+    const isCover = kind === 'cover';
+    if (photoUploading || coverUploading) return;
+    const setBusy = isCover ? setCoverUploading : setPhotoUploading;
+    const noun = isCover ? 'cover photo' : 'profile photo';
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        showStatus({ type: 'error', text: 'Photo library access is needed to change your profile photo. You can enable it in Settings.' });
+        showStatus({ type: 'error', text: `Photo library access is needed to change your ${noun}. You can enable it in Settings.` });
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
-        aspect: [1, 1],
+        aspect: isCover ? [16, 9] : [1, 1],
         quality: 0.5,
       });
 
@@ -653,63 +941,30 @@ export default function ProfileScreen() {
         return;
       }
 
-      setPhotoUploading(true);
+      setBusy(true);
       setStatus(null);
-      const previousAsset = profile?.photoAsset || (profilePhoto ? { url: profilePhoto, resourceType: 'image' } : null);
-      await updateProfilePhoto({ kind: 'photo', uri: asset.uri });
-      await refreshProfile();
-      if (previousAsset?.publicId || previousAsset?.url) {
-        await deleteCloudinaryAssets({ assets: [previousAsset] }).catch((error) => {
-          console.warn('[Profile] Failed to delete replaced Cloudinary profile photo.', error);
-        });
+      const previousAsset = isCover
+        ? profile?.coverAsset || (profileCover ? { url: profileCover, resourceType: 'image' } : null)
+        : profile?.photoAsset || (profilePhoto ? { url: profilePhoto, resourceType: 'image' } : null);
+
+      await updateProfilePhoto({ kind, uri: asset.uri });
+      await refreshProfileRef.current?.();
+
+      // Best-effort cleanup of the replaced asset; never blocks the success message.
+      if (isCover) {
+        if (previousAsset?.storageProvider === 'r2' && previousAsset?.publicId) {
+          await deleteProfileMedia(previousAsset.publicId).catch((error) => console.warn('[Profile] Failed to delete replaced R2 cover image.', error));
+        } else if (previousAsset?.url?.includes('res.cloudinary.com')) {
+          await deleteCloudinaryAssets({ assets: [previousAsset] }).catch((error) => console.warn('[Profile] Failed to delete replaced Cloudinary cover image.', error));
+        }
+      } else if (previousAsset?.publicId || previousAsset?.url) {
+        await deleteCloudinaryAssets({ assets: [previousAsset] }).catch((error) => console.warn('[Profile] Failed to delete replaced Cloudinary profile photo.', error));
       }
-      if (isMountedRef.current) showStatus({ type: 'success', text: 'Profile photo updated.' });
+      if (isMountedRef.current) showStatus({ type: 'success', text: isCover ? 'Cover photo updated.' : 'Profile photo updated.' });
     } catch (error) {
-      if (isMountedRef.current) showStatus({ type: 'error', text: error?.message || 'Unable to update your profile photo. Please try again.' });
+      if (isMountedRef.current) showStatus({ type: 'error', text: error?.message || `Unable to update your ${noun}. Please try again.` });
     } finally {
-      if (isMountedRef.current) setPhotoUploading(false);
-    }
-  };
-
-  const pickCoverPhoto = async () => {
-    try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        showStatus({ type: 'error', text: 'Photo library access is needed to change your cover photo. You can enable it in Settings.' });
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [16, 9],
-        quality: 0.5,
-      });
-
-      if (result.canceled || !result.assets?.[0]?.uri) return;
-
-      const asset = result.assets[0];
-      if (asset.fileSize && asset.fileSize > MAX_IMAGE_BYTES) {
-        showStatus({ type: 'error', text: 'Cover photo is too large. Please upload an image smaller than 30MB.' });
-        return;
-      }
-
-      setStatus(null);
-      const previousAsset = profile?.coverAsset || (profileCover ? { url: profileCover, resourceType: 'image' } : null);
-      await updateProfilePhoto({ kind: 'cover', uri: asset.uri });
-      await refreshProfile();
-      if (previousAsset?.storageProvider === 'r2' && previousAsset?.publicId) {
-        await deleteProfileMedia(previousAsset.publicId).catch((error) => {
-          console.warn('[Profile] Failed to delete replaced R2 cover image.', error);
-        });
-      } else if (previousAsset?.url?.includes('res.cloudinary.com')) {
-        await deleteCloudinaryAssets({ assets: [previousAsset] }).catch((error) => {
-          console.warn('[Profile] Failed to delete replaced Cloudinary cover image.', error);
-        });
-      }
-      if (isMountedRef.current) showStatus({ type: 'success', text: 'Cover photo updated.' });
-    } catch (error) {
-      if (isMountedRef.current) showStatus({ type: 'error', text: error?.message || 'Unable to update your cover photo. Please try again.' });
+      if (isMountedRef.current) setBusy(false);
     }
   };
 
@@ -737,10 +992,11 @@ export default function ProfileScreen() {
         departmentId: form.departmentId || '', departmentName: form.department.trim(), faculty: form.faculty || '',
         gender: form.gender || '', dateOfBirth: form.dateOfBirth || '',
       });
+      initialFormRef.current = form;
       setInitialForm(form);
-      await refreshProfile();
+      await refreshProfileRef.current?.();
       if (!isMountedRef.current) return;
-      closeSheet();
+      closeSheet(false);
       showStatus({ type: 'success', text: 'Profile updated successfully.' });
     } catch (error) {
       if (isMountedRef.current) showStatus({ type: 'error', text: error?.message || 'Unable to update your profile. Please try again.' });
@@ -758,7 +1014,7 @@ export default function ProfileScreen() {
     closeSheet();
     try {
       await Share.share({
-        message: `Join me on UniHelp — the all-in-one app for CGPA tracking, JAMB/CBT practice and campus life. Get it at unihelp.ng`,
+        message: 'Join me on UniHelp — the all-in-one app for CGPA tracking, JAMB/CBT practice and campus life. Get it at unihelp.ng',
       });
     } catch {
       /* user cancelled — nothing to do */
@@ -861,7 +1117,7 @@ export default function ProfileScreen() {
           <Text style={styles.popupStatLabel}>Current Plan</Text>
         </View>
       </View>
-      <Text style={{ color: colors.grey, fontSize: 13, lineHeight: 19, marginBottom: 14 }}>
+      <Text style={styles.planCopy}>
         {premiumActive
           ? 'You have full access to AI tutoring, unlimited CBT mock exams and ad-free browsing.'
           : 'Upgrade to Premium for unlimited AI tutoring sessions, full-length JAMB mock exams and an ad-free experience.'}
@@ -929,6 +1185,12 @@ export default function ProfileScreen() {
     </View>
   );
 
+  const doneButton = (
+    <Pressable onPress={backToEditProfile} style={({ pressed }) => [styles.secondaryButton, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="Done">
+      <Text style={styles.secondaryButtonText}>Done</Text>
+    </Pressable>
+  );
+
   const renderFieldEditor = () => {
     if (editingKey === 'school') {
       return (
@@ -951,7 +1213,7 @@ export default function ProfileScreen() {
       );
     }
     if (editingKey === 'department') {
-      const deptValue = form.department ? departments.find((d) => d.name === form.department)?.id || '' : '';
+      const deptValue = form.departmentId || (form.department ? departments.find((d) => d.name === form.department)?.id || '' : '');
       return (
         <SearchableDropdown
           label="Department"
@@ -969,13 +1231,13 @@ export default function ProfileScreen() {
     }
     if (editingKey === 'level') {
       const levelData = ACADEMIC_LEVELS.map((l, i) => ({ id: `level-${i}`, name: l.label, value: l.value }));
-      const levelValue = form.level ? `level-${ACADEMIC_LEVELS.findIndex((l) => l.value === form.level)}` : '';
+      const levelIndex = ACADEMIC_LEVELS.findIndex((l) => l.value === form.level);
       return (
         <SearchableDropdown
           label="Level"
           placeholder="Select your level..."
           data={levelData}
-          value={levelValue}
+          value={levelIndex >= 0 ? `level-${levelIndex}` : ''}
           onSelect={(item) => handleLevelSelect({ value: item.value })}
           icon="ribbon-outline"
           renderItemLabel={(i) => i.name}
@@ -1002,105 +1264,51 @@ export default function ProfileScreen() {
               );
             })}
           </View>
-          <Pressable onPress={backToEditProfile} style={({ pressed }) => [styles.secondaryButton, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="Done">
-            <Text style={styles.secondaryButtonText}>Done</Text>
-          </Pressable>
+          {doneButton}
         </View>
       );
     }
     if (editingKey === 'dateOfBirth') {
-      const birthDate = parseDateOfBirth(form.dateOfBirth) || new Date(2000, 0, 1);
       return (
-        <View style={{ gap: 8 }}>
-          <Text style={styles.fieldLabel}>Date of birth</Text>
-          {Platform.OS === 'web' ? (
-            <TextInput
-              value={form.dateOfBirth || ''}
-              onChangeText={(value) => setField('dateOfBirth', value)}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor={colors.greyLight}
-              style={styles.fieldInput}
-              maxLength={10}
-              accessibilityLabel="Date of birth in year-month-day format"
-            />
-          ) : null}
-          {Platform.OS === 'android' ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Choose date of birth"
-              onPress={() => setDatePickerVisible(true)}
-              style={({ pressed }) => [styles.dateButton, pressed && styles.rowPressed]}
-            >
-              <Ionicons name="calendar-outline" size={18} color={colors.brandText} />
-              <Text style={[styles.dateButtonText, !form.dateOfBirth && styles.datePlaceholder]}>
-                {form.dateOfBirth ? birthDate.toLocaleDateString() : 'Select your date of birth'}
-              </Text>
-              {form.dateOfBirth ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Clear date of birth"
-                  onPress={() => {
-                    setField('dateOfBirth', '');
-                    setDatePickerVisible(false);
-                  }}
-                  hitSlop={8}
-                >
-                  <Ionicons name="close-circle" size={19} color={colors.greyLight} />
-                </Pressable>
-              ) : null}
-            </Pressable>
-          ) : null}
-          {datePickerVisible && Platform.OS !== 'web' ? (
-            <DateTimePicker
-              value={birthDate}
-              mode="date"
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              maximumDate={new Date()}
-              minimumDate={new Date(1900, 0, 1)}
-              onChange={(event, selectedDate) => {
-                if (event.type === 'set' && selectedDate) {
-                  setField('dateOfBirth', formatDateOfBirth(selectedDate));
-                  if (Platform.OS !== 'ios') setDatePickerVisible(false);
-                } else if (event.type === 'dismissed') {
-                  setDatePickerVisible(false);
-                }
-              }}
-            />
-          ) : null}
-          {Platform.OS !== 'android' && form.dateOfBirth ? (
-            <Pressable onPress={() => setField('dateOfBirth', '')} style={styles.clearDateButton}>
-              <Text style={styles.clearDateText}>Clear date</Text>
-            </Pressable>
-          ) : null}
-          <Pressable onPress={backToEditProfile} style={({ pressed }) => [styles.secondaryButton, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="Done">
-            <Text style={styles.secondaryButtonText}>Done</Text>
-          </Pressable>
-        </View>
+        <DateOfBirthPicker
+          value={form.dateOfBirth}
+          onConfirm={(next) => {
+            setField('dateOfBirth', next);
+            backToEditProfile();
+          }}
+          onClear={() => {
+            setField('dateOfBirth', '');
+            backToEditProfile();
+          }}
+          onCancel={backToEditProfile}
+        />
       );
     }
+    // FIX: removed `onBlur={backToEditProfile}` — it fired when the sheet was dragged closed (re-opening the
+    // Edit Profile sheet) and double-fired alongside the Done button.
     return (
       <View style={{ gap: 6 }}>
         <Text style={styles.fieldLabel}>{editingField?.label}</Text>
-        <TextInput
-          autoFocus
-          value={form[editingKey]}
-          onChangeText={(v) => setField(editingKey, v)}
-          placeholder={editingField?.placeholder}
-          placeholderTextColor={colors.greyLight}
-          style={[styles.fieldInput, editingField?.multiline && styles.fieldInputArea]}
-          multiline={editingField?.multiline}
-          maxLength={editingField?.maxLength}
-          accessibilityLabel={editingField?.label}
-          onBlur={editingField?.multiline ? undefined : backToEditProfile}
-          returnKeyType={editingField?.multiline ? 'default' : 'done'}
-          onSubmitEditing={editingField?.multiline ? undefined : backToEditProfile}
-        />
+        <View style={styles.inputWrap}>
+          <TextInput
+            autoFocus
+            value={form[editingKey] || ''}
+            onChangeText={(v) => setField(editingKey, v)}
+            placeholder={editingField?.placeholder}
+            placeholderTextColor={colors.greyLight}
+            style={[styles.fieldInput, editingField?.multiline && styles.fieldInputArea]}
+            multiline={editingField?.multiline}
+            maxLength={editingField?.maxLength}
+            accessibilityLabel={editingField?.label}
+            returnKeyType={editingField?.multiline ? 'default' : 'done'}
+            blurOnSubmit={!editingField?.multiline}
+            onSubmitEditing={editingField?.multiline ? undefined : backToEditProfile}
+          />
+        </View>
         {editingField?.maxLength ? (
           <Text style={styles.charCount}>{(form[editingKey]?.length || 0)}/{editingField.maxLength}</Text>
         ) : null}
-        <Pressable onPress={backToEditProfile} style={({ pressed }) => [styles.secondaryButton, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="Done">
-          <Text style={styles.secondaryButtonText}>Done</Text>
-        </Pressable>
+        {doneButton}
       </View>
     );
   };
@@ -1112,13 +1320,13 @@ export default function ProfileScreen() {
         const displayValue = field.key === 'gender'
           ? GENDER_OPTIONS.find((option) => option.value === form.gender)?.label || ''
           : field.key === 'dateOfBirth'
-            ? parseDateOfBirth(form.dateOfBirth)?.toLocaleDateString() || ''
+            ? formatShortDate(form.dateOfBirth)
             : form[field.key];
         return (
           <Pressable
             key={field.key}
             onPress={() => openFieldEditor(field.key)}
-            style={({ pressed }) => [styles.editFieldRow, idx !== fields.length - 1 && styles.sheetDivider, pressed && styles.rowPressed]}
+            style={({ pressed }) => [styles.editFieldRow, idx !== fields.length - 1 && styles.rowDivider, pressed && styles.rowPressed]}
             accessibilityRole="button"
             accessibilityLabel={`Edit ${field.label}`}
             accessibilityValue={{ text: hasValue ? displayValue : 'Not set' }}
@@ -1161,13 +1369,12 @@ export default function ProfileScreen() {
     [SHEET.PROGRESS]: { title: 'My Progress', subtitle: 'Challenge stats & streak' },
     [SHEET.UPLOADS]: { title: 'My Uploads', subtitle: `${totalUploads} item${totalUploads === 1 ? '' : 's'} across UniHelp` },
     [SHEET.EDIT_PROFILE]: { title: 'Edit Profile', subtitle: 'Tap a field to update it' },
-    [SHEET.EDIT_FIELD]: { title: editingField?.label || 'Edit', subtitle: null },
+    [SHEET.EDIT_FIELD]: { title: editingField?.label || 'Edit', subtitle: editingKey === 'dateOfBirth' ? 'Scroll each wheel to choose' : null },
   };
 
   const activeMeta = sheetMeta[sheet] || {};
 
   const renderProfilePosts = () => {
-    const presetColors = { indigo: '#4F46E5', violet: '#7C3AED', blue: '#0284C7', green: '#15803D', orange: '#EA580C', pink: '#DB2777', red: '#DC2626', dark: '#111827' };
     if (profilePostsLoading) {
       return <View style={styles.postsState}><ActivityIndicator color={colors.brand} /><Text style={styles.postsStateText}>Loading your posts...</Text></View>;
     }
@@ -1177,14 +1384,14 @@ export default function ProfileScreen() {
     return profilePosts.map((post) => (
       <View key={post.id} style={styles.postCard}>
         {post.type === 'colored' ? (
-          <View style={[styles.postColored, { backgroundColor: presetColors[post.backgroundPreset] || presetColors.indigo }]}>
+          <View style={[styles.postColored, { backgroundColor: POST_PRESET_COLORS[post.backgroundPreset] || POST_PRESET_COLORS.indigo }]}>
             <Text style={styles.postColoredText}>{post.content}</Text>
           </View>
         ) : null}
         {post.type === 'image' && post.imageUrl ? <Image source={{ uri: post.imageUrl }} style={styles.postImage} contentFit="cover" /> : null}
         <View style={styles.postBody}>
           {post.type !== 'colored' && post.content ? <Text style={styles.postText}>{post.content}</Text> : null}
-          <Text style={styles.timeText}>{new Date(post.createdAt).toLocaleString()}</Text>
+          <Text style={styles.timeText}>{formatPostDate(post.createdAt)}</Text>
           <View style={styles.postMeta}>
             <Text style={styles.postMetaText}>Likes {post.likesCount || 0}</Text>
             <Text style={styles.postMetaText}>Comments {post.commentsCount || 0}</Text>
@@ -1202,7 +1409,6 @@ export default function ProfileScreen() {
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
       >
-        {/* TOP BAR — overflow menu replaces the old always-visible theme toggle */}
         <View style={styles.topBar}>
           <Pressable
             onPress={() => setSheet(SHEET.MORE)}
@@ -1214,29 +1420,37 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
 
-        {/* IDENTITY HEADER — cover photo in normal flow, avatar overlaps its
-            bottom edge by exactly half its own height. */}
+        {/* IDENTITY HEADER */}
         <Animated.View style={[styles.identity, { opacity: headerFade }]}>
           <Pressable
             style={styles.coverWrap}
-            onPress={pickCoverPhoto}
+            onPress={() => pickImage('cover')}
+            disabled={coverUploading}
             accessibilityRole="button"
-            accessibilityLabel="Change cover photo">
+            accessibilityLabel="Change cover photo"
+          >
             {profileCover ? (
-              <Image source={{ uri: profileCover }} style={styles.coverImage} contentFit="cover" />
+              <>
+                <Image source={{ uri: profileCover }} style={styles.coverImage} contentFit="cover" />
+                <View style={styles.coverScrim} pointerEvents="none" />
+              </>
             ) : (
               <View style={styles.coverPlaceholder}>
                 <Ionicons name="image-outline" size={26} color={colors.brandText} />
+                <Text style={styles.coverPlaceholderText}>Add a cover photo</Text>
               </View>
             )}
             <View style={styles.coverBadge}>
               <Ionicons name="camera-outline" size={16} color={colors.onBrand} />
             </View>
+            {coverUploading ? (
+              <View style={styles.coverSpinner}><ActivityIndicator color={colors.onBrand} /></View>
+            ) : null}
           </Pressable>
 
           <Pressable
             disabled={photoUploading}
-            onPress={pickPhoto}
+            onPress={() => pickImage('photo')}
             style={styles.avatarWrap}
             accessibilityRole="button"
             accessibilityLabel="Change profile photo"
@@ -1264,12 +1478,7 @@ export default function ProfileScreen() {
             <View style={styles.identityNameRow}>
               <Text style={styles.identityName} numberOfLines={1}>{form.username || 'Student profile'}</Text>
               {premiumActive ? (
-                <Ionicons
-                  name="checkmark-circle"
-                  size={18}
-                  color={colors.brand}
-                  accessibilityLabel="Verified Premium student"
-                />
+                <Ionicons name="checkmark-circle" size={18} color={colors.brand} accessibilityLabel="Verified Premium student" />
               ) : null}
             </View>
             <Text style={styles.identityEmail} numberOfLines={1}>{user?.email || 'No email available'}</Text>
@@ -1295,7 +1504,26 @@ export default function ProfileScreen() {
               </Pressable>
             ) : null}
           </View>
+
+          {infoChips.length ? (
+            <View style={styles.chipsRow}>
+              {infoChips.map((chip) => (
+                <View key={chip.icon} style={styles.infoChip}>
+                  <Ionicons name={chip.icon} size={12} color={colors.grey} />
+                  <Text style={styles.infoChipText} numberOfLines={1}>{chip.text}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
         </Animated.View>
+
+        {/* FIX: toast moved above the tabs so errors (e.g. photo upload) are visible in both views. */}
+        {status ? (
+          <Animated.View style={[styles.toast, status.type === 'error' ? styles.toastError : styles.toastSuccess, { opacity: fadeAnim }]} accessibilityRole="alert">
+            <Ionicons name={status.type === 'error' ? 'alert-circle' : 'checkmark-circle'} size={16} color={status.type === 'error' ? colors.rose : colors.teal} />
+            <Text style={[styles.toastText, status.type === 'error' ? styles.toastTextError : styles.toastTextSuccess]}>{status.text}</Text>
+          </Animated.View>
+        ) : null}
 
         <View style={styles.profileTabs}>
           <Pressable
@@ -1318,116 +1546,142 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
 
-        {profileView === 'posts' ? renderProfilePosts() : <>
-
-        <Pressable
-          onPress={() => router.navigate('/friends')}
-          style={({ pressed }) => [styles.friendsStat, pressed && styles.rowPressed]}
-          accessibilityRole="button"
-          accessibilityLabel={`${friendCount} friends, open friends list`}
-        >
-          <View style={styles.friendsStatIcon}>
-            <Ionicons name="people-outline" size={19} color={colors.brand} />
-          </View>
-          <View style={styles.friendsStatCopy}>
-            <Text style={styles.friendsStatValue}>{friendCount}</Text>
-            <Text style={styles.friendsStatLabel}>Friends</Text>
-          </View>
-          <Text style={styles.friendsStatAction}>View list</Text>
-          <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
-        </Pressable>
-
-        {form.bio.trim() ? (
-          <View style={styles.bioCard}>
-            <View style={styles.bioHeader}>
-              <Text style={styles.bioTitle}>About</Text>
-              <Pressable onPress={() => openFieldEditor('bio')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Edit About">
-                <Text style={styles.bioEdit}>Edit</Text>
+        {profileView === 'posts' ? renderProfilePosts() : (
+          <>
+            <View style={styles.statsStrip}>
+              <Pressable
+                style={({ pressed }) => [styles.statCell, pressed && styles.rowPressed]}
+                onPress={() => router.navigate('/friends')}
+                accessibilityRole="button"
+                accessibilityLabel={`${friendCount} friends, open friends list`}
+              >
+                <Text style={styles.statValue}>{friendCount}</Text>
+                <Text style={styles.statLabel}>Friends</Text>
+              </Pressable>
+              <View style={styles.statDivider} />
+              <Pressable
+                style={({ pressed }) => [styles.statCell, pressed && styles.rowPressed]}
+                onPress={() => router.navigate('/streak')}
+                accessibilityRole="button"
+                accessibilityLabel={`${streakCount} day streak`}
+              >
+                <Text style={styles.statValue}>{streakCount}</Text>
+                <Text style={styles.statLabel}>Day streak</Text>
+              </Pressable>
+              <View style={styles.statDivider} />
+              <Pressable
+                style={({ pressed }) => [styles.statCell, pressed && styles.rowPressed]}
+                onPress={() => setSheet(SHEET.PROGRESS)}
+                accessibilityRole="button"
+                accessibilityLabel="View progress"
+              >
+                <Text style={styles.statValue}>{(challengeStats?.xp || 0).toLocaleString()}</Text>
+                <Text style={styles.statLabel}>XP</Text>
               </Pressable>
             </View>
-            <Text style={styles.bioText}>{form.bio.trim()}</Text>
-          </View>
-        ) : null}
 
-        <DailyStreakBanner
-          streakCount={streakCount}
-          streakDates={streakDates}
-          onPress={() => router.navigate('/streak')}
-          onStudyNow={() => router.navigate('/streak')}
-        />
-
-        {status ? (
-          <Animated.View style={[styles.toast, status.type === 'error' ? styles.toastError : styles.toastSuccess, { opacity: fadeAnim }]} accessibilityRole="alert">
-            <Ionicons name={status.type === 'error' ? 'alert-circle' : 'checkmark-circle'} size={16} color={status.type === 'error' ? colors.rose : colors.teal} />
-            <Text style={[styles.toastText, status.type === 'error' ? styles.toastTextError : styles.toastTextSuccess]}>{status.text}</Text>
-          </Animated.View>
-        ) : null}
-
-        {/* MAIN LIST — mirrors the reference screenshot's rhythm */}
-        <Text style={styles.groupLabel}>ACCOUNT</Text>
-        <View style={styles.groupCard}>
-          <Pressable onPress={() => setSheet(SHEET.EDIT_PROFILE)} style={({ pressed }) => [styles.listRow, styles.rowDivider, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="Edit profile">
-            <View style={styles.rowIconSm}><Ionicons name="create-outline" size={16} color={colors.brand} /></View>
-            <View style={styles.rowTextWrap}>
-              <Text style={styles.rowTitle}>Edit Profile</Text>
-              <Text style={styles.rowSubtitle} numberOfLines={1}>{form.school || form.department || 'Add your details'}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
-          </Pressable>
-
-          <Pressable onPress={() => setSheet(SHEET.PLAN)} style={({ pressed }) => [styles.listRow, styles.rowDivider, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="My plan">
-            <View style={styles.rowIconSm}><Ionicons name="star-outline" size={16} color={colors.brand} /></View>
-            <Text style={[styles.rowTitle, { flex: 1 }]}>My Plan</Text>
-            <Text style={styles.rowTrailingText}>{premiumActive ? 'Premium' : 'Standard'}</Text>
-            <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
-          </Pressable>
-
-          <Pressable onPress={() => setSheet(SHEET.PROGRESS)} style={({ pressed }) => [styles.listRow, styles.rowDivider, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="My progress">
-            <View style={styles.rowIconSm}><Ionicons name="flash-outline" size={16} color={colors.brand} /></View>
-            <View style={styles.rowTextWrap}>
-              <Text style={styles.rowTitle}>My Progress</Text>
-              <Text style={styles.rowSubtitle}>{streakCount > 0 ? `${streakCount} day streak` : 'XP, streak & accuracy'}</Text>
-            </View>
-            {streakCount > 0 ? (
-              <View style={styles.rowBadge}><Text style={styles.rowBadgeText}>{streakCount}🔥</Text></View>
+            {completion.pct < 100 ? (
+              <Pressable
+                onPress={() => setSheet(SHEET.EDIT_PROFILE)}
+                style={({ pressed }) => [styles.completionCard, pressed && styles.rowPressed]}
+                accessibilityRole="button"
+                accessibilityLabel={`Profile ${completion.pct} percent complete. Open edit profile`}
+              >
+                <View style={styles.completionTop}>
+                  <Text style={styles.completionTitle}>Profile {completion.pct}% complete</Text>
+                  <Text style={styles.completionAction}>Finish up</Text>
+                </View>
+                <View style={styles.progressTrack}>
+                  <View style={[styles.progressFill, { width: `${completion.pct}%` }]} />
+                </View>
+                <Text style={styles.completionHint}>{completion.hint}</Text>
+              </Pressable>
             ) : null}
-            <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
-          </Pressable>
 
-          <Pressable onPress={() => setSheet(SHEET.UPLOADS)} style={({ pressed }) => [styles.listRow, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="My uploads">
-            <View style={styles.rowIconSm}><Ionicons name="cloud-upload-outline" size={16} color={colors.brand} /></View>
-            <Text style={[styles.rowTitle, { flex: 1 }]}>My Uploads</Text>
-            {!statsLoading ? <Text style={styles.rowTrailingText}>{totalUploads}</Text> : <ActivityIndicator size="small" color={colors.brand} style={{ marginRight: 4 }} />}
-            <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
-          </Pressable>
-        </View>
+            {form.bio.trim() ? (
+              <View style={styles.bioCard}>
+                <View style={styles.bioHeader}>
+                  <Text style={styles.bioTitle}>About</Text>
+                  <Pressable onPress={() => { setSheet(SHEET.EDIT_PROFILE); openFieldEditor('bio'); }} hitSlop={8} accessibilityRole="button" accessibilityLabel="Edit About">
+                    <Text style={styles.bioEdit}>Edit</Text>
+                  </Pressable>
+                </View>
+                <Text style={styles.bioText}>{form.bio.trim()}</Text>
+              </View>
+            ) : null}
 
-        <Text style={styles.groupLabel}>DANGER ZONE</Text>
-        <View style={styles.groupCard}>
-          <Pressable onPress={() => router.navigate('/profile/danger')} style={({ pressed }) => [styles.listRow, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="Open danger zone">
-            <View style={[styles.rowIconSm, styles.rowIconDanger]}><Ionicons name="person-remove-outline" size={16} color={colors.red} /></View>
-            <View style={styles.rowTextWrap}>
-              <Text style={[styles.rowTitle, { color: colors.red }]}>Delete Account</Text>
-              <Text style={styles.rowSubtitle}>Delete account and activity history</Text>
+            <DailyStreakBanner
+              streakCount={streakCount}
+              streakDates={streakDates}
+              onPress={() => router.navigate('/streak')}
+              onStudyNow={() => router.navigate('/streak')}
+            />
+
+            <Text style={styles.groupLabel}>Account</Text>
+            <View style={styles.groupCard}>
+              <Pressable onPress={() => setSheet(SHEET.EDIT_PROFILE)} style={({ pressed }) => [styles.listRow, styles.rowDivider, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="Edit profile">
+                <View style={styles.rowIconSm}><Ionicons name="create-outline" size={17} color={colors.brand} /></View>
+                <View style={styles.rowTextWrap}>
+                  <Text style={styles.rowTitle}>Edit Profile</Text>
+                  <Text style={styles.rowSubtitle} numberOfLines={1}>{form.school || form.department || 'Add your details'}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
+              </Pressable>
+
+              <Pressable onPress={() => setSheet(SHEET.PLAN)} style={({ pressed }) => [styles.listRow, styles.rowDivider, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="My plan">
+                <View style={[styles.rowIconSm, { backgroundColor: colors.goldLight }]}><Ionicons name="star-outline" size={17} color={colors.gold} /></View>
+                <Text style={[styles.rowTitle, { flex: 1 }]}>My Plan</Text>
+                <Text style={styles.rowTrailingText}>{premiumActive ? 'Premium' : 'Standard'}</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
+              </Pressable>
+
+              <Pressable onPress={() => setSheet(SHEET.PROGRESS)} style={({ pressed }) => [styles.listRow, styles.rowDivider, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="My progress">
+                <View style={[styles.rowIconSm, { backgroundColor: colors.orangeLight }]}><Ionicons name="flash-outline" size={17} color={colors.orange} /></View>
+                <View style={styles.rowTextWrap}>
+                  <Text style={styles.rowTitle}>My Progress</Text>
+                  <Text style={styles.rowSubtitle}>{streakCount > 0 ? `${streakCount} day streak` : 'XP, streak & accuracy'}</Text>
+                </View>
+                {streakCount > 0 ? (
+                  <View style={styles.rowBadge}><Text style={styles.rowBadgeText}>{streakCount}🔥</Text></View>
+                ) : null}
+                <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
+              </Pressable>
+
+              <Pressable onPress={() => setSheet(SHEET.UPLOADS)} style={({ pressed }) => [styles.listRow, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="My uploads">
+                <View style={[styles.rowIconSm, { backgroundColor: colors.blueLight }]}><Ionicons name="cloud-upload-outline" size={17} color={colors.blue} /></View>
+                <Text style={[styles.rowTitle, { flex: 1 }]}>My Uploads</Text>
+                {!statsLoading ? <Text style={styles.rowTrailingText}>{totalUploads}</Text> : <ActivityIndicator size="small" color={colors.brand} style={{ marginRight: 4 }} />}
+                <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
+              </Pressable>
             </View>
-            <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
-          </Pressable>
-        </View>
 
-        <Footer
-          title="Unihelp"
-          tagline="Study made simple"
-          sections={PROFILE_FOOTER_SECTIONS}
-          socialLinks={PROFILE_SOCIAL_LINKS}
-          version="v1.0.2"
-        />
-        </>}
+            <Text style={styles.groupLabel}>Danger zone</Text>
+            <View style={styles.groupCard}>
+              <Pressable onPress={() => router.navigate('/profile/danger')} style={({ pressed }) => [styles.listRow, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="Open danger zone">
+                <View style={[styles.rowIconSm, styles.rowIconDanger]}><Ionicons name="person-remove-outline" size={17} color={colors.red} /></View>
+                <View style={styles.rowTextWrap}>
+                  <Text style={[styles.rowTitle, { color: colors.red }]}>Delete Account</Text>
+                  <Text style={styles.rowSubtitle}>Delete account and activity history</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />
+              </Pressable>
+            </View>
+
+            <Footer
+              title="Unihelp"
+              tagline="Study made simple"
+              sections={PROFILE_FOOTER_SECTIONS}
+              socialLinks={PROFILE_SOCIAL_LINKS}
+              version="v1.0.2"
+            />
+          </>
+        )}
       </ScrollView>
 
       {/* SINGLE SHARED SHEET — content swaps based on `sheet` */}
       <DraggableBottomSheet
         visible={sheet !== SHEET.NONE}
-        onClose={closeSheet}
+        onClose={() => closeSheet()}
         title={activeMeta.title}
         subtitle={activeMeta.subtitle}
         onBack={sheet === SHEET.EDIT_FIELD ? backToEditProfile : undefined}

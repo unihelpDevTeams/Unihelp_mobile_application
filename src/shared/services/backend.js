@@ -72,7 +72,11 @@ async function requestJson(path, { method = 'GET', payload, extraHeaders = {}, u
       console.warn('[API auth] Received 401; refreshing Firebase token and retrying once.', { path });
       return requestJson(path, { method, payload, extraHeaders, useFormData, forceRefresh: true });
     }
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    error.responseData = data;
+    error.path = path;
+    throw error;
   }
 
   return data;

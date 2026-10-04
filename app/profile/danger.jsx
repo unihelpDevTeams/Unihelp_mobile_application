@@ -11,7 +11,6 @@ import {
   deleteCurrentUserActivities,
   requiresPasswordForAccountDeletion,
 } from '../../src/shared/services/account';
-import { clearLastLocation } from '../../src/shared/navigation/navigationPersistence';
 
 const CONFIRM_TEXT = 'DELETE';
 
@@ -153,11 +152,6 @@ export default function ProfileDangerScreen() {
               setBusyAction('account');
               setMessage(null);
               await deleteCurrentUserAccount({ password });
-              try {
-                if (user?.uid) await clearLastLocation(user.uid);
-              } catch (error) {
-                console.warn('Could not clear saved navigation for the deleted account:', error?.message || error);
-              }
               router.replace('/(auth)/login');
             } catch (error) {
               showError(error);

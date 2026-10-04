@@ -10,7 +10,6 @@ import {
   registerPushNotificationsForCurrentUser,
 } from '../services/pushNotifications';
 import { handleNotificationAction } from '../src/shared/services/notificationActions';
-import { markExplicitNavigationIntent } from '../src/shared/navigation/navigationPersistence';
 
 const getRouteTarget = (data = {}) => {
   if (data?.type === 'pomodoro_completion') {
@@ -69,7 +68,6 @@ export function PushNotificationBootstrap() {
 
   const handleNotificationResponse = useCallback(async (response, clearStoredResponse = false) => {
     if (!response) return;
-    markExplicitNavigationIntent();
     if (loading) {
       pendingResponseRef.current = { response, clearStoredResponse };
       return;
