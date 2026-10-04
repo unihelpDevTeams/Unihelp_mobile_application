@@ -1,4 +1,4 @@
-﻿import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -43,6 +43,8 @@ async function persistProfileCache(profile) {
         faculty: profile.faculty,
         level: profile.level,
         studentType: profile.studentType,
+        gender: profile.gender,
+        dateOfBirth: profile.dateOfBirth,
         bio: profile.bio,
         location: profile.location,
         interests: profile.interests,

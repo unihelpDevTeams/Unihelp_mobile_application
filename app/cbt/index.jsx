@@ -6,16 +6,39 @@ import {
   TouchableOpacity,
   Pressable,
   ScrollView,
+  FlatList,
   Animated,
   BackHandler,
   Modal,
+  Platform,
+  StyleSheet,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Haptics from 'expo-haptics';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { PageLoader } from '../../src/shared/components/AILoaders';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
+
+/* -------------------------------------------------------------------------- */
+/*                                  Constants                                 */
+/* -------------------------------------------------------------------------- */
+
+const COURSES_URL = 'https://taired-cbt.puter.site/api/v1/courses.json';
+const FETCH_TIMEOUT_MS = 15000;
+const PASS_MARK = 50;
+const MAX_MINUTES = 300;
+const MAX_HISTORY = 50;
+const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
+const FONT_LEVELS = [-2, 0, 2, 4];
+const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });
+
+const USER_KEY = 'cbt_username';
+const HISTORY_KEY = 'cbt_history_v2';
+const SESSION_KEY = 'cbt_session_v1';
+const COURSES_KEY = 'cbt_courses_cache_v1';
 
 const STATUS = {
   NOT_VISITED: 'not-visited',
@@ -25,142 +48,475 @@ const STATUS = {
   ANSWERED_MARKED: 'answered-marked',
 };
 
+// Question banks stay in memory for the session: retaking a paper costs no network.
+const BANK_CACHE = new Map();
+
+/* -------------------------------------------------------------------------- */
+/*                                   Helpers                                  */
+/* -------------------------------------------------------------------------- */
+
 function formatClock(totalSeconds) {
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-  if (h > 0) {
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  }
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  const t = Math.max(0, Math.floor(totalSeconds || 0));
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const sec = t % 60;
+  const mm = String(m).padStart(2, '0');
+  const ss = String(sec).padStart(2, '0');
+  return h > 0 ? `${String(h).padStart(2, '0')}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-// ---------------------------------------------------------------------------
-// THEME
-// ---------------------------------------------------------------------------
-// This screen previously styled itself with NativeWind `dark:` classes,
-// which follow the *device's* system color scheme rather than this app's
-// in-app theme toggle (ThemeContext). Everything below is resolved from
-// `isDark` (sourced from useTheme() inside the component, never at module
-// scope) so the screen always matches the app's own theme switch.
-//
-// Tokens marked "confirmed" are pulled straight from `colors` because
-// they're already used the same way elsewhere in the app. Tokens marked
-// "fallback" aren't guaranteed to exist on your `colors` object yet — they
-// fall back to a hand-picked hex so nothing breaks, but if your theme.js
-// already defines equivalents, swap them in here (this is the only place
-// they're defined, so it's a one-line change per token).
+const digitsOnly = (text) => String(text || '').replace(/[^0-9]/g, '').slice(0, 4);
+
+// Fisher-Yates: the old `sort(() => 0.5 - Math.random())` is biased.
+function shuffle(list) {
+  const out = [...list];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+async function fetchJson(url, { timeout = FETCH_TIMEOUT_MS, signal } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  const onAbort = () => controller.abort();
+  signal?.addEventListener?.('abort', onAbort);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener?.('abort', onAbort);
+  }
+}
+
+const suggestMinutes = (qty) => Math.max(5, Math.round((qty * 0.75) / 5) * 5);
+
+const pctOf = (score, total) => (total ? Math.round((score / total) * 100) : 0);
+
+// Turns a raw API question into a normalised one. Correct answers are stored as an INDEX
+// (not option text) so two options with identical text can never both be "correct".
+// Returns null for unusable questions so they are skipped instead of silently marking option A.
+function normalizeQuestion(q, index, courseTitle) {
+  if (!q || !String(q.question || '').trim()) return null;
+  const fromArray = Array.isArray(q.options);
+  const options = (fromArray ? q.options : [q.a, q.b, q.c, q.d, q.e].filter(Boolean)).map((o) => String(o).trim());
+  if (options.length < 2 || options.length > LETTERS.length) return null;
+
+  let correctIndex = -1;
+  const ans = q.answer ?? q.correct;
+  if (typeof ans === 'string') {
+    const t = ans.trim();
+    if (/^[A-Fa-f]$/.test(t)) {
+      if (fromArray) correctIndex = t.toUpperCase().charCodeAt(0) - 65;
+      else {
+        const v = q[t.toLowerCase()];
+        correctIndex = v != null ? options.indexOf(String(v).trim()) : -1;
+      }
+    } else {
+      correctIndex = options.findIndex((o) => o.toLowerCase() === t.toLowerCase());
+    }
+  }
+  if (correctIndex < 0 || correctIndex >= options.length) return null;
+
+  return {
+    id: `Q-${index}-${Math.random().toString(36).slice(2, 8)}`,
+    courseTitle,
+    question: String(q.question).trim(),
+    options,
+    correctIndex,
+    explanation: q.explanation ? String(q.explanation).trim() : '',
+  };
+}
+
+// Tiny safe expression parser for the calculator (replaces `Function(...)` eval).
+function evaluateExpression(input) {
+  const src = input.replace(/×/g, '*').replace(/÷/g, '/').replace(/−/g, '-').replace(/\s+/g, '');
+  let pos = 0;
+  const fail = () => {
+    throw new Error('bad expression');
+  };
+  const parseNumber = () => {
+    const m = /^(\d+\.?\d*|\.\d+)/.exec(src.slice(pos));
+    if (!m) fail();
+    pos += m[0].length;
+    return parseFloat(m[0]);
+  };
+  const parseFactor = () => {
+    if (src[pos] === '-') {
+      pos += 1;
+      return -parseFactor();
+    }
+    if (src[pos] === '+') {
+      pos += 1;
+      return parseFactor();
+    }
+    let v;
+    if (src[pos] === '(') {
+      pos += 1;
+      v = parseExpr();
+      if (src[pos] !== ')') fail();
+      pos += 1;
+    } else {
+      v = parseNumber();
+    }
+    while (src[pos] === '%') {
+      pos += 1;
+      v /= 100;
+    }
+    return v;
+  };
+  const parseTerm = () => {
+    let v = parseFactor();
+    while (src[pos] === '*' || src[pos] === '/') {
+      const op = src[pos];
+      pos += 1;
+      const r = parseFactor();
+      if (op === '/' && r === 0) fail();
+      v = op === '*' ? v * r : v / r;
+    }
+    return v;
+  };
+  function parseExpr() {
+    let v = parseTerm();
+    while (src[pos] === '+' || src[pos] === '-') {
+      const op = src[pos];
+      pos += 1;
+      const r = parseTerm();
+      v = op === '+' ? v + r : v - r;
+    }
+    return v;
+  }
+  const result = parseExpr();
+  if (pos !== src.length || !Number.isFinite(result)) fail();
+  return result;
+}
+
+const formatNumber = (n) => String(Number(n.toPrecision(12)));
+
+const CALC_ROWS = [
+  ['C', '⌫', '(', ')'],
+  ['7', '8', '9', '÷'],
+  ['4', '5', '6', '×'],
+  ['1', '2', '3', '-'],
+  ['0', '.', '%', '+'],
+];
+const CALC_OPS = /^[+\-×÷]$/;
+
+/* -------------------------------------------------------------------------- */
+/*                                    Theme                                   */
+/* -------------------------------------------------------------------------- */
+// Resolved from the app's own ThemeContext (`isDark`), not the device colour scheme.
+// Tokens marked "fallback" fall back to hand-picked hex values if your theme lacks them.
 function useCbtTheme(colors, isDark) {
   return useMemo(() => {
     const c = colors || {};
     return {
-      // confirmed tokens
       textPrimary: c.textPrimary ?? (isDark ? '#F8FAFC' : '#0F172A'),
       textSecondary: c.textSecondary ?? (isDark ? '#CBD5E1' : '#475569'),
-      textMuted: c.inkMuted ?? (isDark ? '#94A3B8' : '#94A3B8'),
-      border: c.borderDefault ?? (isDark ? '#1E293B' : '#F1F5F9'),
-      surface: c.surfaceSecondary ?? (isDark ? '#0F172A' : '#FFFFFF'),
+      textMuted: c.inkMuted ?? '#94A3B8',
+      border: c.borderDefault ?? (isDark ? '#1E293B' : '#E2E8F0'),
       greenTint: c.greenLight ?? (isDark ? 'rgba(16,185,129,0.16)' : 'rgba(16,185,129,0.10)'),
       dangerTint: c.dangerLight ?? (isDark ? 'rgba(244,63,94,0.16)' : 'rgba(244,63,94,0.10)'),
 
-      // fallback tokens (verify against your theme.js)
       bg: c.background ?? (isDark ? '#020617' : '#F8FAFC'),
       card: c.surfacePrimary ?? c.surfaceSecondary ?? (isDark ? '#0F172A' : '#FFFFFF'),
       input: c.surfaceInput ?? (isDark ? '#1E293B' : '#F8FAFC'),
       chip: c.surfaceChip ?? (isDark ? '#1E293B' : '#F1F5F9'),
-      overlay: 'rgba(0,0,0,0.6)',
+      overlay: 'rgba(2,6,23,0.62)',
 
-      // semantic accent colors — deliberately kept constant across themes,
-      // only their *tint* (badge/pill background) shifts with isDark
       indigo: '#4F46E5',
       indigoTint: isDark ? 'rgba(99,102,241,0.18)' : 'rgba(99,102,241,0.10)',
       green: '#10B981',
       rose: '#F43F5E',
       amber: '#F59E0B',
-      amberTint: isDark ? 'rgba(245,158,11,0.16)' : 'rgba(245,158,11,0.10)',
+      amberTint: isDark ? 'rgba(245,158,11,0.16)' : 'rgba(245,158,11,0.12)',
       slate: '#64748B',
       white: '#FFFFFF',
+
+      // exam "terminal" chrome stays dark in both themes (it is the CBT look)
+      terminal: '#0B1220',
+      terminalSoft: '#1A2438',
+      terminalMuted: '#94A3B8',
     };
   }, [colors, isDark]);
 }
 
 const STATUS_META = (T) => ({
-  [STATUS.NOT_VISITED]: { label: 'Unvisited', color: T.white, bg: T.slate },
-  [STATUS.NOT_ANSWERED]: { label: 'Unanswered', color: T.white, bg: T.rose },
-  [STATUS.ANSWERED]: { label: 'Answered', color: T.white, bg: T.green },
-  [STATUS.MARKED]: { label: 'Review Later', color: T.white, bg: T.amber },
-  [STATUS.ANSWERED_MARKED]: { label: 'Ans & Flagged', color: T.white, bg: T.indigo },
+  [STATUS.NOT_VISITED]: { label: 'Unvisited', bg: T.slate },
+  [STATUS.NOT_ANSWERED]: { label: 'Unanswered', bg: T.rose },
+  [STATUS.ANSWERED]: { label: 'Answered', bg: T.green },
+  [STATUS.MARKED]: { label: 'Flagged', bg: T.amber },
+  [STATUS.ANSWERED_MARKED]: { label: 'Answered + flagged', bg: T.indigo },
 });
 
-// ---------------------------------------------------------------------------
-// In-app confirmation / notice modal — replaces every Alert.alert() in this
-// screen so prompts match the app's own rounded-card, indigo-accent look in
-// both light and dark mode instead of the OS-default alert box.
-//
-// Usage: setDialog({ icon, iconColor, iconBg, title, message, actions: [...] })
-// where each action is { key, label, variant: 'primary' | 'secondary' | 'destructive', onPress }.
-// Tapping the backdrop always behaves like a safe "cancel" (just closes the
-// modal) — it never triggers a destructive action on its own.
-// ---------------------------------------------------------------------------
-function ConfirmDialogModal({ dialog, onClose, T }) {
-  const visible = !!dialog;
+/* -------------------------------------------------------------------------- */
+/*                                   Styles                                   */
+/* -------------------------------------------------------------------------- */
+
+const makeStyles = (T) =>
+  StyleSheet.create({
+    flex: { flex: 1 },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
+    centerTitle: { fontSize: 20, fontWeight: '800', color: T.textPrimary, marginTop: 16, textAlign: 'center' },
+    centerText: { textAlign: 'center', color: T.textMuted, marginTop: 8, lineHeight: 20 },
+    screenPad: { paddingHorizontal: 16, paddingTop: 12 },
+
+    primaryBtn: { backgroundColor: T.indigo, paddingVertical: 15, borderRadius: 16, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8, shadowColor: T.indigo, shadowOpacity: 0.28, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 3 },
+    primaryBtnText: { color: T.white, fontWeight: '800', fontSize: 15 },
+    secondaryBtn: { backgroundColor: T.chip, paddingVertical: 14, borderRadius: 16, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 },
+    secondaryBtnText: { color: T.textSecondary, fontWeight: '700', fontSize: 14 },
+    btnDisabled: { backgroundColor: T.chip, shadowOpacity: 0, elevation: 0 },
+    btnDisabledText: { color: T.textMuted },
+
+    card: { backgroundColor: T.card, borderRadius: 22, borderWidth: 1, borderColor: T.border, padding: 20 },
+
+    /* Browse */
+    hero: { backgroundColor: T.indigo, borderRadius: 26, padding: 20, marginBottom: 16, shadowColor: T.indigo, shadowOpacity: 0.25, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 5 },
+    heroTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+    heroEyebrow: { color: 'rgba(255,255,255,0.75)', fontSize: 12.5, fontWeight: '700' },
+    heroTitle: { color: T.white, fontSize: 24, fontWeight: '900', marginTop: 4 },
+    heroSub: { color: 'rgba(255,255,255,0.88)', fontSize: 13, marginTop: 6, lineHeight: 19, maxWidth: 240 },
+    heroIconBtn: { backgroundColor: 'rgba(255,255,255,0.2)', padding: 10, borderRadius: 16 },
+    heroStats: { flexDirection: 'row', gap: 10, marginTop: 18 },
+    heroStat: { flex: 1, backgroundColor: 'rgba(255,255,255,0.16)', borderRadius: 14, paddingVertical: 10, alignItems: 'center' },
+    heroStatValue: { color: T.white, fontSize: 18, fontWeight: '900' },
+    heroStatLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: '600', marginTop: 1 },
+
+    resumeCard: { backgroundColor: T.indigoTint, borderColor: T.indigo, borderWidth: 1, borderRadius: 20, padding: 16, marginBottom: 16 },
+    resumeTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    resumeIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: T.indigo, alignItems: 'center', justifyContent: 'center' },
+    resumeTitle: { color: T.textPrimary, fontWeight: '800', fontSize: 14.5 },
+    resumeMeta: { color: T.textSecondary, fontSize: 12, marginTop: 2 },
+    resumeActions: { flexDirection: 'row', gap: 10, marginTop: 14 },
+    resumeBtn: { flex: 1, paddingVertical: 11, borderRadius: 12, alignItems: 'center' },
+
+    banner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: T.amberTint, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 },
+    bannerText: { flex: 1, color: T.textSecondary, fontSize: 12.5, lineHeight: 17 },
+
+    searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: T.card, borderRadius: 16, paddingHorizontal: 14, borderWidth: 1, borderColor: T.border, marginBottom: 18 },
+    searchInput: { flex: 1, marginLeft: 10, fontSize: 15.5, color: T.textPrimary, paddingVertical: 13 },
+    sectionLabel: { fontSize: 13, fontWeight: '800', color: T.textSecondary, marginBottom: 12 },
+
+    courseRow: { justifyContent: 'space-between' },
+    courseCard: { width: '48.5%', backgroundColor: T.card, padding: 16, borderRadius: 18, marginBottom: 12, borderWidth: 1, borderColor: T.border },
+    courseIcon: { backgroundColor: T.indigoTint, width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+    courseTitle: { fontWeight: '800', color: T.textPrimary, fontSize: 14.5, lineHeight: 19, marginBottom: 4, minHeight: 38 },
+    courseMeta: { fontSize: 12, color: T.textMuted, fontWeight: '600' },
+    bestPill: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, marginTop: 10 },
+    bestText: { fontSize: 11, fontWeight: '800' },
+    emptyWrap: { alignItems: 'center', paddingVertical: 48 },
+    emptyText: { color: T.textMuted, fontWeight: '600', marginTop: 12, textAlign: 'center' },
+
+    /* History */
+    historyItem: { backgroundColor: T.card, padding: 16, borderRadius: 18, marginBottom: 12, borderWidth: 1, borderColor: T.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    historyTitle: { fontWeight: '800', fontSize: 15, color: T.textPrimary },
+    historyMeta: { fontSize: 11.5, color: T.textMuted, marginTop: 4 },
+    historyScore: { alignItems: 'center', backgroundColor: T.chip, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 14, minWidth: 74 },
+    historyScoreValue: { fontWeight: '900', fontSize: 17 },
+    historyScorePct: { fontSize: 11, color: T.textMuted, fontWeight: '700', marginTop: 1 },
+    clearHistoryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14 },
+    clearHistoryText: { color: T.rose, fontWeight: '700', fontSize: 13 },
+
+    /* Setup */
+    setupHeader: { borderBottomWidth: 1, borderBottomColor: T.border, paddingBottom: 16, marginBottom: 20 },
+    setupEyebrow: { fontSize: 12.5, fontWeight: '700', color: T.indigo, marginBottom: 4 },
+    setupTitle: { fontSize: 23, fontWeight: '900', color: T.textPrimary },
+    fieldLabel: { fontWeight: '700', color: T.textSecondary, marginBottom: 8, fontSize: 13.5 },
+    fieldInput: { backgroundColor: T.input, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, borderWidth: 1, borderColor: T.border, color: T.textPrimary },
+    fieldInputError: { borderColor: T.rose },
+    fieldHint: { fontSize: 12, color: T.textMuted, marginTop: 6 },
+    fieldError: { fontSize: 12, color: T.rose, marginTop: 6, fontWeight: '600' },
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+    chip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, backgroundColor: T.chip, borderWidth: 1, borderColor: 'transparent' },
+    chipActive: { backgroundColor: T.indigoTint, borderColor: T.indigo },
+    chipText: { fontSize: 12.5, fontWeight: '700', color: T.textSecondary },
+    chipTextActive: { color: T.indigo },
+    summaryBox: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: T.indigoTint, borderRadius: 14, padding: 14, marginBottom: 20 },
+    summaryText: { flex: 1, color: T.textPrimary, fontSize: 13, lineHeight: 18, fontWeight: '600' },
+
+    /* Instructions */
+    tileRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
+    tile: { flex: 1, backgroundColor: T.input, borderRadius: 16, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: T.border },
+    tileValue: { fontSize: 19, fontWeight: '900', color: T.textPrimary },
+    tileLabel: { fontSize: 11.5, color: T.textMuted, fontWeight: '600', marginTop: 2 },
+    ruleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 12 },
+    ruleText: { flex: 1, color: T.textSecondary, fontSize: 14, lineHeight: 20 },
+    agreeBox: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 18, backgroundColor: T.input, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: T.border },
+    checkbox: { width: 24, height: 24, borderRadius: 8, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', borderColor: T.slate },
+    checkboxOn: { backgroundColor: T.indigo, borderColor: T.indigo },
+    agreeText: { flex: 1, fontWeight: '600', color: T.textPrimary, fontSize: 14 },
+
+    /* Exam: terminal chrome */
+    terminalBar: { backgroundColor: T.terminal, paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    termUser: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 },
+    termAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: T.indigo, alignItems: 'center', justifyContent: 'center', marginRight: 12, borderWidth: 1, borderColor: '#818CF8' },
+    termName: { color: T.white, fontWeight: '700', fontSize: 13 },
+    termSub: { color: T.terminalMuted, fontSize: 11, marginTop: 1 },
+    toolRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    toolBtn: { height: 36, minWidth: 36, paddingHorizontal: 9, borderRadius: 11, backgroundColor: T.terminalSoft, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5 },
+    toolBtnOn: { backgroundColor: T.indigo },
+    toolBtnText: { color: T.white, fontWeight: '700', fontSize: 12 },
+
+    timerBar: { paddingVertical: 8, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: T.terminalSoft },
+    timerWarn: { backgroundColor: '#B45309' },
+    timerCritical: { backgroundColor: T.rose },
+    timerLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '700' },
+    timerValueRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    timerValue: { color: T.white, fontFamily: MONO, fontWeight: '900', fontSize: 16, fontVariant: ['tabular-nums'] },
+    progressTrack: { height: 3, backgroundColor: T.terminalSoft },
+    progressFill: { height: 3, backgroundColor: T.green },
+
+    /* Exam: question */
+    qScroll: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 24 },
+    qCard: { backgroundColor: T.card, padding: 20, borderRadius: 22, borderWidth: 1, borderColor: T.border, marginBottom: 16 },
+    qHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+    qLabel: { fontSize: 12.5, fontWeight: '800', color: T.indigo },
+    flagPill: { backgroundColor: T.amberTint, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, flexDirection: 'row', alignItems: 'center', gap: 4 },
+    flagPillText: { fontSize: 11, fontWeight: '800', color: T.amber },
+    qText: { color: T.textPrimary, fontWeight: '500' },
+    optionsWrap: { gap: 10 },
+    option: { flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 16, borderWidth: 1.5, borderColor: T.border, backgroundColor: T.card },
+    optionOn: { borderColor: T.indigo, backgroundColor: T.indigoTint },
+    optionLetter: { width: 32, height: 32, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginRight: 12, backgroundColor: T.chip },
+    optionLetterOn: { backgroundColor: T.indigo },
+    optionLetterText: { fontWeight: '800', fontSize: 12.5, color: T.textSecondary },
+    optionText: { flex: 1, fontWeight: '500', color: T.textPrimary },
+    clearBtn: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 14, paddingVertical: 8, paddingHorizontal: 12 },
+    clearText: { color: T.textMuted, fontWeight: '700', fontSize: 13 },
+
+    dock: { backgroundColor: T.card, borderTopWidth: 1, borderTopColor: T.border, paddingHorizontal: 16, paddingTop: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
+    dockBtn: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
+    dockText: { fontWeight: '800', fontSize: 13 },
+
+    /* Calculator */
+    calc: { position: 'absolute', top: 10, right: 12, zIndex: 50, backgroundColor: T.terminal, borderWidth: 1, borderColor: '#334155', padding: 14, borderRadius: 20, width: 264, shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 16, elevation: 12 },
+    calcHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+    calcTitle: { color: T.terminalMuted, fontSize: 12, fontWeight: '700' },
+    calcScreen: { backgroundColor: 'rgba(0,0,0,0.55)', padding: 12, borderRadius: 12, marginBottom: 10, alignItems: 'flex-end', minHeight: 70, justifyContent: 'flex-end' },
+    calcExpr: { color: T.terminalMuted, fontFamily: MONO, fontSize: 13 },
+    calcResult: { color: T.green, fontFamily: MONO, fontSize: 24, fontWeight: '700', marginTop: 2 },
+    calcRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+    calcKey: { flex: 1, backgroundColor: T.terminalSoft, paddingVertical: 11, borderRadius: 11, alignItems: 'center' },
+    calcKeyOp: { backgroundColor: '#312E81' },
+    calcKeyText: { color: T.white, fontWeight: '700', fontSize: 16 },
+    calcEquals: { backgroundColor: T.indigo, paddingVertical: 12, borderRadius: 11, alignItems: 'center' },
+
+    /* Palette sheet */
+    sheetBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: T.overlay },
+    sheet: { backgroundColor: T.card, borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 20, paddingTop: 10, maxHeight: '82%' },
+    sheetHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: T.border, marginBottom: 12 },
+    sheetHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+    sheetTitle: { fontSize: 19, fontWeight: '900', color: T.textPrimary },
+    sheetClose: { backgroundColor: T.chip, padding: 8, borderRadius: 999 },
+    countRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+    countBox: { flex: 1, borderRadius: 14, paddingVertical: 10, alignItems: 'center' },
+    countValue: { fontSize: 18, fontWeight: '900' },
+    countLabel: { fontSize: 11, fontWeight: '700', marginTop: 1 },
+    gridWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center', marginBottom: 20 },
+    gridCell: { width: 46, height: 46, borderRadius: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
+    gridCellCurrent: { borderColor: T.textPrimary },
+    gridText: { color: T.white, fontWeight: '800' },
+    legend: { backgroundColor: T.input, padding: 14, borderRadius: 16, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10, marginBottom: 16 },
+    legendItem: { flexDirection: 'row', alignItems: 'center', width: '48%' },
+    legendDot: { width: 12, height: 12, borderRadius: 6, marginRight: 8 },
+    legendText: { fontSize: 12, fontWeight: '600', color: T.textSecondary },
+
+    /* Results */
+    resultCard: { backgroundColor: T.card, padding: 24, borderRadius: 26, borderWidth: 1, borderColor: T.border, alignItems: 'center', marginBottom: 24 },
+    ring: { width: 124, height: 124, borderRadius: 62, borderWidth: 9, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+    ringValue: { fontSize: 30, fontWeight: '900' },
+    resultName: { fontSize: 14, fontWeight: '700', color: T.indigo, marginBottom: 2 },
+    resultScore: { fontSize: 22, fontWeight: '900', color: T.textPrimary },
+    resultGrade: { fontSize: 13.5, color: T.textSecondary, marginTop: 4, textAlign: 'center', lineHeight: 19 },
+    statRow: { flexDirection: 'row', gap: 10, width: '100%', marginTop: 22 },
+    statTile: { flex: 1, borderRadius: 16, paddingVertical: 12, alignItems: 'center' },
+    statValue: { fontSize: 20, fontWeight: '900' },
+    statLabel: { fontSize: 11.5, fontWeight: '700', marginTop: 1 },
+    timeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16 },
+    timeText: { color: T.textMuted, fontWeight: '600', fontSize: 13 },
+    resultActions: { flexDirection: 'row', gap: 12, marginTop: 22, width: '100%' },
+    reviewTitle: { fontWeight: '900', fontSize: 18, color: T.textPrimary, marginBottom: 12 },
+    filterRow: { flexDirection: 'row', gap: 8, paddingRight: 16 },
+    filterChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: T.border, backgroundColor: T.card },
+    filterChipOn: { backgroundColor: T.indigo, borderColor: T.indigo },
+    filterText: { fontSize: 12.5, fontWeight: '700', color: T.textMuted },
+    filterTextOn: { color: T.white },
+    reviewCard: { backgroundColor: T.card, padding: 18, borderRadius: 18, marginBottom: 14, borderWidth: 1, borderColor: T.border },
+    reviewHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+    reviewQNum: { fontSize: 12.5, fontWeight: '800', color: T.indigo },
+    badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1 },
+    badgeText: { fontSize: 11, fontWeight: '800' },
+    reviewQuestion: { fontSize: 15.5, color: T.textPrimary, fontWeight: '500', lineHeight: 22, marginBottom: 14 },
+    reviewOpt: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: T.border, marginBottom: 8 },
+    reviewOptCorrect: { borderColor: T.green, backgroundColor: T.greenTint },
+    reviewOptWrong: { borderColor: T.rose, backgroundColor: T.dangerTint },
+    reviewLetter: { width: 26, height: 26, borderRadius: 9, backgroundColor: T.chip, alignItems: 'center', justifyContent: 'center' },
+    reviewLetterText: { fontSize: 11.5, fontWeight: '800', color: T.textSecondary },
+    reviewOptText: { flex: 1, color: T.textPrimary, fontSize: 14 },
+    explainBox: { backgroundColor: T.indigoTint, padding: 14, borderRadius: 12, marginTop: 6 },
+    explainTitle: { fontSize: 12.5, fontWeight: '800', color: T.indigo, marginBottom: 4 },
+    explainText: { fontSize: 14, color: T.textPrimary, lineHeight: 20 },
+
+    /* Dialog */
+    dialogBackdrop: { flex: 1, backgroundColor: T.overlay, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
+    dialogCard: { backgroundColor: T.card, borderRadius: 26, padding: 24, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 20, elevation: 8 },
+    dialogIcon: { width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 16, alignSelf: 'center' },
+    dialogTitle: { fontSize: 18, fontWeight: '900', color: T.textPrimary, textAlign: 'center', marginBottom: 8 },
+    dialogMessage: { fontSize: 14, color: T.textSecondary, textAlign: 'center', lineHeight: 20, marginBottom: 22 },
+    dialogBtn: { paddingVertical: 14, borderRadius: 16, alignItems: 'center' },
+    dialogBtnText: { fontWeight: '800', fontSize: 14 },
+  });
+
+/* -------------------------------------------------------------------------- */
+/*                              Small components                              */
+/* -------------------------------------------------------------------------- */
+
+// In-app dialog (replaces Alert.alert). Backdrop tap only ever closes it; it never triggers an action.
+function ConfirmDialogModal({ dialog, onClose, T, s }) {
   const scale = useRef(new Animated.Value(0.92)).current;
   const opacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (!visible) return;
+    if (!dialog) return;
     scale.setValue(0.92);
     opacity.setValue(0);
     Animated.parallel([
       Animated.spring(scale, { toValue: 1, useNativeDriver: true, friction: 8, tension: 70 }),
       Animated.timing(opacity, { toValue: 1, duration: 160, useNativeDriver: true }),
     ]).start();
-  }, [visible, dialog]);
+  }, [dialog, scale, opacity]);
 
   if (!dialog) return null;
-
   const { icon, iconColor = T.indigo, iconBg = T.indigoTint, title, message, actions = [] } = dialog;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable
-        onPress={onClose}
-        style={{ flex: 1, backgroundColor: T.overlay, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}
-      >
+    <Modal visible transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <Pressable onPress={onClose} style={s.dialogBackdrop}>
         <Animated.View style={{ transform: [{ scale }], opacity, width: '100%', maxWidth: 360 }}>
-          {/* Inner Pressable with a no-op onPress absorbs taps so they don't bubble to the backdrop */}
-          <Pressable
-            onPress={() => {}}
-            style={{ backgroundColor: T.card, borderRadius: 24, padding: 24, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 20, elevation: 8 }}
-          >
+          <Pressable onPress={() => {}} style={s.dialogCard}>
             {icon ? (
-              <View style={{ width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 16, alignSelf: 'center', backgroundColor: iconBg }}>
+              <View style={[s.dialogIcon, { backgroundColor: iconBg }]}>
                 <Ionicons name={icon} size={26} color={iconColor} />
               </View>
             ) : null}
-            {title ? (
-              <Text style={{ fontSize: 18, fontWeight: '900', color: T.textPrimary, textAlign: 'center', marginBottom: 8 }}>{title}</Text>
-            ) : null}
-            {message ? (
-              <Text style={{ fontSize: 14, color: T.textSecondary, textAlign: 'center', lineHeight: 20, marginBottom: 24 }}>{message}</Text>
-            ) : null}
-
+            {title ? <Text style={s.dialogTitle}>{title}</Text> : null}
+            {message ? <Text style={s.dialogMessage}>{message}</Text> : null}
             <View style={{ gap: 10 }}>
               {actions.map((action) => {
-                const bg =
-                  action.variant === 'destructive' ? T.rose :
-                  action.variant === 'secondary' ? T.chip :
-                  T.indigo;
-                const textColor = action.variant === 'secondary' ? T.textSecondary : T.white;
+                const bg = action.variant === 'destructive' ? T.rose : action.variant === 'secondary' ? T.chip : T.indigo;
+                const color = action.variant === 'secondary' ? T.textSecondary : T.white;
                 return (
                   <TouchableOpacity
                     key={action.key}
                     onPress={action.onPress}
-                    style={{ paddingVertical: 14, borderRadius: 16, alignItems: 'center', backgroundColor: bg }}
+                    style={[s.dialogBtn, { backgroundColor: bg }]}
                     accessibilityRole="button"
                     accessibilityLabel={action.label}
                   >
-                    <Text style={{ fontWeight: '700', fontSize: 14, color: textColor }}>{action.label}</Text>
+                    <Text style={[s.dialogBtnText, { color }]}>{action.label}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -172,390 +528,295 @@ function ConfirmDialogModal({ dialog, onClose, T }) {
   );
 }
 
+function ChoiceChip({ label, active, onPress, s }) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={[s.chip, active && s.chipActive]}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+    >
+      <Text style={[s.chipText, active && s.chipTextActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+const CourseCard = React.memo(function CourseCard({ course, best, onPress, s, T }) {
+  const good = best != null && best >= PASS_MARK;
+  return (
+    <TouchableOpacity
+      activeOpacity={0.85}
+      onPress={() => onPress(course)}
+      style={s.courseCard}
+      accessibilityRole="button"
+      accessibilityLabel={`Practise ${course.title}, ${course.question_count} questions`}
+    >
+      <View style={s.courseIcon}>
+        <MaterialCommunityIcons name="file-document-edit-outline" size={22} color={T.indigo} />
+      </View>
+      <Text style={s.courseTitle} numberOfLines={2}>{course.title}</Text>
+      <Text style={s.courseMeta}>{course.question_count} questions</Text>
+      {best != null ? (
+        <View style={[s.bestPill, { backgroundColor: good ? T.greenTint : T.dangerTint }]}>
+          <Ionicons name="ribbon-outline" size={12} color={good ? T.green : T.rose} />
+          <Text style={[s.bestText, { color: good ? T.green : T.rose }]}>Best {best}%</Text>
+        </View>
+      ) : null}
+    </TouchableOpacity>
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/*                                   Screen                                   */
+/* -------------------------------------------------------------------------- */
+
 export default function CBTPracticeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
   const T = useCbtTheme(colors, isDark);
+  const s = useMemo(() => makeStyles(T), [T]);
   const statusMeta = useMemo(() => STATUS_META(T), [T]);
 
-  // Primary State
+  // Catalogue
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [offline, setOffline] = useState(false);
 
-  // App Stages: 'browse' | 'setup' | 'instructions' | 'exam' | 'results' | 'history'
+  // 'browse' | 'history' | 'setup' | 'instructions' | 'exam' | 'results'
   const [stage, setStage] = useState('browse');
   const [searchTerm, setSearchTerm] = useState('');
-  const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState([]);
+  const [resumable, setResumable] = useState(null);
 
-  // Session Config & Identity
+  // Setup
   const [setupCourse, setSetupCourse] = useState(null);
   const [numQuestions, setNumQuestions] = useState('20');
   const [timeLimit, setTimeLimit] = useState('15');
+  const [timeTouched, setTimeTouched] = useState(false);
   const [agreed, setAgreed] = useState(false);
-  const [username, setUsername] = useState('Candidate User');
+  const [username, setUsername] = useState('');
 
-  // Active Session Engine
+  // Active session
   const [activeCourse, setActiveCourse] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [loadingQuestions, setLoadingQuestions] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [answers, setAnswers] = useState({});
+  const [answers, setAnswers] = useState({}); // { [questionIndex]: optionIndex }
   const [markedForReview, setMarkedForReview] = useState({});
   const [visited, setVisited] = useState({});
+  const [endsAt, setEndsAt] = useState(null); // wall-clock deadline: immune to timer drift / backgrounding
   const [timeLeft, setTimeLeft] = useState(0);
   const [totalTimeAllocated, setTotalTimeAllocated] = useState(0);
-  const [startedAt, setStartedAt] = useState(null);
+  const [timeSpent, setTimeSpent] = useState(0);
 
-  // Auxiliary CBT Controls
+  // Tools
   const [showPalette, setShowPalette] = useState(false);
   const [showCalc, setShowCalc] = useState(false);
-  const [calcDisplay, setCalcDisplay] = useState('0');
-  const [fontSizeOffset, setFontSizeOffset] = useState(0);
+  const [calc, setCalc] = useState({ expr: '', result: null, justEvaluated: false });
+  const [fontLevel, setFontLevel] = useState(1);
 
-  // Results Diagnostic
   const [reviewFilter, setReviewFilter] = useState('all');
-
-  // In-app pop-up (replaces Alert.alert everywhere in this screen)
   const [dialog, setDialog] = useState(null);
-  const closeDialog = () => setDialog(null);
+  const closeDialog = useCallback(() => setDialog(null), []);
 
-  const timerRef = useRef(null);
+  const submittedRef = useRef(false);
+  const loadTokenRef = useRef(0);
+  const abortRef = useRef(null);
+  const lastConfigRef = useRef(null);
+  const examScrollRef = useRef(null);
 
-  // Fetch Saved Username & Courses
-  useEffect(() => {
-    const fetchCoursesAndUser = async () => {
+  // Latest values for stable callbacks / the back handler.
+  const live = useRef({});
+  live.current = { stage, showCalc, loadingQuestions, dialog, questions, answers, activeCourse, username, endsAt, totalTimeAllocated };
+
+  const displayName = username.trim() || 'Candidate';
+
+  /* ------------------------------ Data loading ----------------------------- */
+
+  const loadCourses = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const data = await fetchJson(COURSES_URL);
+      if (data?.status !== 'success' || !Array.isArray(data.courses)) throw new Error('bad payload');
+      setCourses(data.courses);
+      setOffline(false);
+      AsyncStorage.setItem(COURSES_KEY, JSON.stringify(data.courses)).catch(() => {});
+    } catch (e) {
+      // Fall back to the last good catalogue so the screen stays useful offline.
       try {
-        const savedUser = await AsyncStorage.getItem('cbt_username');
-        if (savedUser) setUsername(savedUser);
-
-        const response = await fetch('https://taired-cbt.puter.site/api/v1/courses.json');
-        const data = await response.json();
-        if (data.status === 'success') {
-          setCourses(data.courses);
+        const cached = await AsyncStorage.getItem(COURSES_KEY);
+        const list = cached ? JSON.parse(cached) : null;
+        if (Array.isArray(list) && list.length) {
+          setCourses(list);
+          setOffline(true);
         } else {
           setLoadError(true);
         }
-      } catch (error) {
+      } catch (err) {
         setLoadError(true);
-      } finally {
-        setLoading(false);
       }
-    };
-    fetchCoursesAndUser();
-  }, []);
-
-  // Sync History — load once on mount and again whenever the history panel
-  // is opened. (Previously this re-read AsyncStorage on every single stage
-  // change, e.g. every navigation between exam questions.)
-  const loadHistory = useCallback(async () => {
-    try {
-      const saved = await AsyncStorage.getItem('cbt_history_v2');
-      if (saved) setHistory(JSON.parse(saved));
-    } catch (e) {}
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
-
-  useEffect(() => {
-    if (showHistory) loadHistory();
-  }, [showHistory, loadHistory]);
-
-  // finishExam is recreated every render (it closes over current exam
-  // state). confirmExitExam is memoized with an empty dep array so its
-  // dialog actions can be triggered from the hardware back handler without
-  // resubscribing that handler on every render — but that means we can't
-  // let it close over `finishExam` directly, or it would submit whatever
-  // exam state existed on first mount (i.e. nothing). Routing the call
-  // through a ref keeps confirmExitExam stable while always invoking the
-  // *current* finishExam.
-  const finishExamRef = useRef(null);
-
-  // Shared "leave an active exam" pop-up — used by both the hardware back
-  // button and the header back button, so the two entry points stay in sync.
-  const confirmExitExam = useCallback(() => {
-    setDialog({
-      icon: 'warning',
-      iconColor: T.amber,
-      iconBg: T.amberTint,
-      title: 'Active Exam Session',
-      message: 'Are you sure you want to exit? You can submit your current answers for grading, or discard this session entirely.',
-      actions: [
-        { key: 'resume', label: 'Resume Exam', variant: 'secondary', onPress: closeDialog },
-        { key: 'submit', label: 'Submit & Exit', variant: 'primary', onPress: () => { closeDialog(); finishExamRef.current?.(false); } },
-        { key: 'discard', label: 'Discard Session', variant: 'destructive', onPress: () => { closeDialog(); finishExamRef.current?.(true); } },
-      ],
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [T]);
-
-  // Exam Back-button Safety Guard
-  useEffect(() => {
-    const backAction = () => {
-      if (stage === 'exam') {
-        confirmExitExam();
-        return true;
-      }
-      if (stage !== 'browse') {
-        setStage('browse');
-        return true;
-      }
-      return false;
-    };
-
-    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
-    return () => backHandler.remove();
-  }, [stage, confirmExitExam]);
-
-  // Timer Tick
-  useEffect(() => {
-    if (stage !== 'exam') return;
-    timerRef.current = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(timerRef.current);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timerRef.current);
-  }, [stage]);
-
-  // Auto-Submit Handler
-  useEffect(() => {
-    if (stage === 'exam' && timeLeft === 0 && startedAt) {
-      setDialog({
-        icon: 'time',
-        iconColor: T.indigo,
-        iconBg: T.indigoTint,
-        title: 'Time Elapsed',
-        message: 'The official examination duration has concluded. Your test paper has been submitted automatically.',
-        actions: [{ key: 'ok', label: 'View Results', variant: 'primary', onPress: closeDialog }],
-      });
-      finishExam();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeLeft, stage]);
-
-  // Scientific Calculator Logic
-  const handleCalcPress = (val) => {
-    if (val === 'C') {
-      setCalcDisplay('0');
-      return;
-    }
-    if (val === '=') {
+    (async () => {
       try {
-        const sanitized = calcDisplay.replace(/×/g, '*').replace(/÷/g, '/');
-        if (!/^[0-9+\-*/.\s]+$/.test(sanitized)) throw new Error('invalid');
-        // eslint-disable-next-line no-new-func
-        const res = Function(`'use strict'; return (${sanitized})`)();
-        setCalcDisplay(String(res));
+        const [savedUser, savedHistory, savedSession] = await Promise.all([
+          AsyncStorage.getItem(USER_KEY),
+          AsyncStorage.getItem(HISTORY_KEY),
+          AsyncStorage.getItem(SESSION_KEY),
+        ]);
+        if (savedUser) setUsername(savedUser);
+        if (savedHistory) setHistory(JSON.parse(savedHistory));
+        if (savedSession) {
+          const snap = JSON.parse(savedSession);
+          if (snap?.endsAt > Date.now() && Array.isArray(snap.questions) && snap.questions.length) setResumable(snap);
+          else AsyncStorage.removeItem(SESSION_KEY).catch(() => {});
+        }
       } catch (e) {
-        setCalcDisplay('Error');
+        // storage is best-effort
       }
-      return;
-    }
-    setCalcDisplay(prev => (prev === '0' || prev === 'Error' ? val : prev + val));
-  };
+    })();
+    loadCourses();
+    return () => abortRef.current?.abort();
+  }, [loadCourses]);
+
+  /* ------------------------------ Derived data ----------------------------- */
 
   const filteredCourses = useMemo(() => {
-    const term = searchTerm.toLowerCase();
-    return courses.filter(c => c.title.toLowerCase().includes(term) || c.id.toLowerCase().includes(term));
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return courses;
+    return courses.filter((c) => c.title.toLowerCase().includes(term) || String(c.id).toLowerCase().includes(term));
   }, [courses, searchTerm]);
 
-  const statusFor = useCallback((index) => {
-    const isAnswered = Boolean(answers[index]);
-    const isMarked = Boolean(markedForReview[index]);
-    const isVisited = Boolean(visited[index]);
-    if (isAnswered && isMarked) return STATUS.ANSWERED_MARKED;
-    if (isMarked) return STATUS.MARKED;
-    if (isAnswered) return STATUS.ANSWERED;
-    if (isVisited) return STATUS.NOT_ANSWERED;
-    return STATUS.NOT_VISITED;
-  }, [answers, markedForReview, visited]);
-
-  const score = useMemo(() => {
-    return questions.reduce((acc, q, idx) => (answers[idx] === q.correctAnswer ? acc + 1 : acc), 0);
-  }, [questions, answers]);
-
-  const completionPercent = questions.length ? Math.round((score / questions.length) * 100) : 0;
-
-  const timeSpentSeconds = useMemo(() => {
-    return Math.max(0, totalTimeAllocated - timeLeft);
-  }, [totalTimeAllocated, timeLeft]);
-
-  const reviewList = useMemo(() => {
-    return questions.map((q, idx) => {
-      const selected = answers[idx];
-      const isSkipped = !selected;
-      const isCorrect = selected === q.correctAnswer;
-      return { q, idx, selected, isSkipped, isCorrect };
+  const bestByCourse = useMemo(() => {
+    const map = {};
+    history.forEach((h) => {
+      const key = h.courseId || h.courseTitle;
+      const pct = pctOf(h.score, h.totalQuestions);
+      if (map[key] === undefined || pct > map[key]) map[key] = pct;
     });
+    return map;
+  }, [history]);
+
+  const historyStats = useMemo(() => {
+    if (!history.length) return { attempts: 0, average: 0 };
+    const sum = history.reduce((acc, h) => acc + pctOf(h.score, h.totalQuestions), 0);
+    return { attempts: history.length, average: Math.round(sum / history.length) };
+  }, [history]);
+
+  const stats = useMemo(() => {
+    let correct = 0;
+    let wrong = 0;
+    let skipped = 0;
+    questions.forEach((q, idx) => {
+      const a = answers[idx];
+      if (a === undefined) skipped += 1;
+      else if (a === q.correctIndex) correct += 1;
+      else wrong += 1;
+    });
+    return { correct, wrong, skipped };
   }, [questions, answers]);
+
+  const score = stats.correct;
+  const percent = pctOf(score, questions.length);
+  const isPass = percent >= PASS_MARK;
+
+  const reviewList = useMemo(
+    () =>
+      questions.map((q, idx) => {
+        const selected = answers[idx];
+        return { q, idx, selected, isSkipped: selected === undefined, isCorrect: selected === q.correctIndex };
+      }),
+    [questions, answers]
+  );
+
+  const reviewCounts = useMemo(
+    () => ({
+      all: reviewList.length,
+      correct: stats.correct,
+      incorrect: stats.wrong,
+      skipped: stats.skipped,
+      marked: reviewList.filter((r) => markedForReview[r.idx]).length,
+    }),
+    [reviewList, stats, markedForReview]
+  );
 
   const filteredReviewList = useMemo(() => {
-    if (reviewFilter === 'correct') return reviewList.filter(r => r.isCorrect);
-    if (reviewFilter === 'incorrect') return reviewList.filter(r => !r.isCorrect && !r.isSkipped);
-    if (reviewFilter === 'skipped') return reviewList.filter(r => r.isSkipped);
-    if (reviewFilter === 'marked') return reviewList.filter(r => markedForReview[r.idx]);
+    if (reviewFilter === 'correct') return reviewList.filter((r) => r.isCorrect);
+    if (reviewFilter === 'incorrect') return reviewList.filter((r) => !r.isCorrect && !r.isSkipped);
+    if (reviewFilter === 'skipped') return reviewList.filter((r) => r.isSkipped);
+    if (reviewFilter === 'marked') return reviewList.filter((r) => markedForReview[r.idx]);
     return reviewList;
   }, [reviewList, reviewFilter, markedForReview]);
 
-  // Actions
-  const beginSetup = (courseId) => {
-    const course = courses.find(c => c.id === courseId);
-    setSetupCourse(courseId);
-    setNumQuestions(String(Math.min(20, course?.question_count || 20)));
-    setTimeLimit('15');
-    setStage('setup');
-  };
+  const statusFor = useCallback(
+    (index) => {
+      const isAnswered = answers[index] !== undefined;
+      const isMarked = Boolean(markedForReview[index]);
+      if (isAnswered && isMarked) return STATUS.ANSWERED_MARKED;
+      if (isMarked) return STATUS.MARKED;
+      if (isAnswered) return STATUS.ANSWERED;
+      if (visited[index]) return STATUS.NOT_ANSWERED;
+      return STATUS.NOT_VISITED;
+    },
+    [answers, markedForReview, visited]
+  );
 
-  const startExam = async () => {
-    const course = courses.find(c => c.id === setupCourse);
-    if (!course) return;
-
-    if (username.trim()) {
-      await AsyncStorage.setItem('cbt_username', username.trim());
-    }
-
-    setLoadingQuestions(true);
-    setStage('exam');
-    try {
-      const response = await fetch(course.endpoint);
-      const data = await response.json();
-      if (data.status === 'success') {
-        const shuffled = [...data.data].sort(() => 0.5 - Math.random());
-        const limit = parseInt(numQuestions) || 20;
-        const selected = shuffled.slice(0, limit);
-
-        const formatted = selected.map((q, index) => {
-          const rawOpts = Array.isArray(q.options) ? q.options : [q.a, q.b, q.c, q.d, q.e].filter(Boolean);
-          
-          let correctAnswer = '';
-          if (q.answer) {
-            // New API format: answer is "A", "B", "C", "D"
-            const answerIndex = q.answer.toUpperCase().charCodeAt(0) - 65; // 'A' -> 0, 'B' -> 1
-            if (answerIndex >= 0 && answerIndex < rawOpts.length) {
-              correctAnswer = rawOpts[answerIndex];
-            }
-          } else {
-            // Old API format fallback
-            const correctKey = q.correct?.toLowerCase();
-            correctAnswer = correctKey && q[correctKey] ? q[correctKey] : rawOpts[0] || '';
-          }
-
-          return {
-            id: `Q-${index + 1}-${Math.random().toString(36).substring(7)}`,
-            courseTitle: course.title,
-            question: q.question,
-            options: rawOpts,
-            correctAnswer,
-            explanation: q.explanation || 'Official explanation for this option selection is currently under review.',
-          };
-        });
-
-        const allocatedSeconds = (parseInt(timeLimit) || 15) * 60;
-        setActiveCourse(course);
-        setQuestions(formatted);
-        setCurrentIndex(0);
-        setAnswers({});
-        setMarkedForReview({});
-        setVisited({ 0: true });
-        setTimeLeft(allocatedSeconds);
-        setTotalTimeAllocated(allocatedSeconds);
-        setStartedAt(Date.now());
-      } else {
-        setStage('setup');
-        setDialog({
-          icon: 'close-circle',
-          iconColor: T.rose,
-          iconBg: T.dangerTint,
-          title: 'Unable to Start',
-          message: 'Could not parse the test paper from server. Please try again.',
-          actions: [{ key: 'ok', label: 'OK', variant: 'primary', onPress: closeDialog }],
-        });
-      }
-    } catch (error) {
-      setStage('setup');
-      setDialog({
-        icon: 'cloud-offline',
-        iconColor: T.rose,
-        iconBg: T.dangerTint,
-        title: 'Network Failure',
-        message: 'Verify your active internet connection and retry.',
-        actions: [{ key: 'ok', label: 'OK', variant: 'primary', onPress: closeDialog }],
-      });
-    } finally {
-      setLoadingQuestions(false);
-    }
-  };
-
-  const goToQuestion = (index) => {
-    setCurrentIndex(index);
-    setVisited(prev => ({ ...prev, [index]: true }));
-    setShowPalette(false);
-  };
-
-  const selectOption = (option) => setAnswers(prev => ({ ...prev, [currentIndex]: option }));
-  const toggleMarkForReview = () => setMarkedForReview(prev => ({ ...prev, [currentIndex]: !prev[currentIndex] }));
-  const goNext = () => { if (currentIndex < questions.length - 1) goToQuestion(currentIndex + 1); };
-  const goBack = () => { if (currentIndex > 0) goToQuestion(currentIndex - 1); };
-
-  const finishExam = async (abandoned = false) => {
-    clearInterval(timerRef.current);
-    if (abandoned) {
-      setStage('browse');
-      return;
-    }
-    setStage('results');
-    try {
-      const saved = JSON.parse(await AsyncStorage.getItem('cbt_history_v2')) || [];
-      const record = {
-        id: Date.now().toString(),
-        candidate: username,
-        courseTitle: activeCourse?.title,
-        score: questions.reduce((acc, q, idx) => (answers[idx] === q.correctAnswer ? acc + 1 : acc), 0),
-        totalQuestions: questions.length,
-        timeTaken: totalTimeAllocated - timeLeft,
-        date: new Date().toISOString(),
-      };
-      saved.unshift(record);
-      const trimmed = saved.slice(0, 50);
-      await AsyncStorage.setItem('cbt_history_v2', JSON.stringify(trimmed));
-      setHistory(trimmed);
-    } catch (e) {}
-  };
-
-  // Keep the ref pointed at the latest finishExam on every render, so
-  // confirmExitExam (memoized once) always triggers a fresh submission.
-  useEffect(() => {
-    finishExamRef.current = finishExam;
-  });
-
-  const requestSubmit = () => {
-    const unansweredCount = questions.length - Object.keys(answers).length;
-    const message = unansweredCount > 0
-      ? `You have ${unansweredCount} unanswered question${unansweredCount === 1 ? '' : 's'} remaining. Are you sure you want to submit now?`
-      : 'Are you sure you wish to submit your test paper?';
-
-    setDialog({
-      icon: unansweredCount > 0 ? 'alert-circle' : 'checkmark-circle',
-      iconColor: unansweredCount > 0 ? T.amber : T.green,
-      iconBg: unansweredCount > 0 ? T.amberTint : T.greenTint,
-      title: 'Submit Test Paper',
-      message,
-      actions: [
-        { key: 'continue', label: 'Continue Exam', variant: 'secondary', onPress: closeDialog },
-        { key: 'submit', label: 'Yes, Submit', variant: 'primary', onPress: () => { closeDialog(); finishExam(); } },
-      ],
+  const paletteCounts = useMemo(() => {
+    const out = { answered: 0, flagged: 0, remaining: 0 };
+    questions.forEach((_, i) => {
+      if (answers[i] !== undefined) out.answered += 1;
+      else out.remaining += 1;
+      if (markedForReview[i]) out.flagged += 1;
     });
+    return out;
+  }, [questions, answers, markedForReview]);
+
+  /* -------------------------------- Setup ---------------------------------- */
+
+  const setupCourseObj = useMemo(() => courses.find((c) => c.id === setupCourse) || null, [courses, setupCourse]);
+  const maxQuestions = setupCourseObj?.question_count || 0;
+  const qtyNum = parseInt(numQuestions, 10) || 0;
+  const minsNum = parseInt(timeLimit, 10) || 0;
+  const qtyError = qtyNum < 1 ? 'Enter at least 1 question.' : maxQuestions && qtyNum > maxQuestions ? `This paper has ${maxQuestions} questions.` : null;
+  const timeError = minsNum < 1 ? 'Enter at least 1 minute.' : minsNum > MAX_MINUTES ? `The maximum is ${MAX_MINUTES} minutes.` : null;
+  const setupValid = !qtyError && !timeError;
+
+  const qtyPresets = useMemo(() => {
+    const base = [10, 20, 40].filter((n) => !maxQuestions || n < maxQuestions);
+    return maxQuestions ? [...base, maxQuestions] : base;
+  }, [maxQuestions]);
+
+  const beginSetup = useCallback((course) => {
+    const qty = Math.min(20, course?.question_count || 20);
+    setSetupCourse(course.id);
+    setNumQuestions(String(qty));
+    setTimeLimit(String(suggestMinutes(qty)));
+    setTimeTouched(false);
+    setStage('setup');
+  }, []);
+
+  const changeQuantity = (value) => {
+    const clean = digitsOnly(value);
+    setNumQuestions(clean);
+    // Keep the duration in step with the question count until the user sets it themselves.
+    if (!timeTouched && parseInt(clean, 10) > 0) setTimeLimit(String(suggestMinutes(parseInt(clean, 10))));
   };
 
-  const resetAll = () => {
+  const changeTime = (value) => {
+    setTimeTouched(true);
+    setTimeLimit(digitsOnly(value));
+  };
+
+  /* ---------------------------- Exam lifecycle ----------------------------- */
+
+  const resetAll = useCallback(() => {
     setStage('browse');
     setSetupCourse(null);
     setActiveCourse(null);
@@ -565,63 +826,414 @@ export default function CBTPracticeScreen() {
     setMarkedForReview({});
     setVisited({});
     setReviewFilter('all');
+    setEndsAt(null);
+    setShowCalc(false);
+    setShowPalette(false);
+    setLoadingQuestions(false);
+  }, []);
+
+  const finishExam = useCallback(
+    async ({ abandoned = false } = {}) => {
+      if (submittedRef.current) return;
+      submittedRef.current = true;
+      AsyncStorage.removeItem(SESSION_KEY).catch(() => {});
+      setResumable(null);
+
+      if (abandoned) {
+        resetAll();
+        return;
+      }
+
+      const snap = live.current;
+      const left = Math.max(0, Math.ceil(((snap.endsAt || Date.now()) - Date.now()) / 1000));
+      const taken = Math.max(0, Math.min(snap.totalTimeAllocated, snap.totalTimeAllocated - left));
+      setTimeSpent(taken);
+      setShowCalc(false);
+      setShowPalette(false);
+      setStage('results');
+
+      try {
+        const correct = snap.questions.reduce((acc, q, idx) => (snap.answers[idx] === q.correctIndex ? acc + 1 : acc), 0);
+        const record = {
+          id: Date.now().toString(),
+          candidate: snap.username.trim() || 'Candidate',
+          courseId: snap.activeCourse?.id,
+          courseTitle: snap.activeCourse?.title,
+          score: correct,
+          totalQuestions: snap.questions.length,
+          timeTaken: taken,
+          date: new Date().toISOString(),
+        };
+        const raw = await AsyncStorage.getItem(HISTORY_KEY);
+        const saved = raw ? JSON.parse(raw) : [];
+        const next = [record, ...saved].slice(0, MAX_HISTORY);
+        await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+        setHistory(next);
+      } catch (e) {
+        // history is best-effort
+      }
+    },
+    [resetAll]
+  );
+
+  const cancelLoading = useCallback(() => {
+    loadTokenRef.current += 1;
+    abortRef.current?.abort();
+    setLoadingQuestions(false);
+    setStage('setup');
+  }, []);
+
+  const launchExam = useCallback(async (course, qty, mins) => {
+    const token = loadTokenRef.current + 1;
+    loadTokenRef.current = token;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    submittedRef.current = false;
+    lastConfigRef.current = { course, qty, mins };
+    const name = live.current.username.trim();
+    if (name) AsyncStorage.setItem(USER_KEY, name).catch(() => {});
+
+    setActiveCourse(course);
+    setQuestions([]);
+    setAnswers({});
+    setMarkedForReview({});
+    setVisited({});
+    setCurrentIndex(0);
+    setEndsAt(null);
+    setReviewFilter('all');
+    setLoadingQuestions(true);
+    setStage('exam');
+
+    const failWith = (icon, title, message) => {
+      if (token !== loadTokenRef.current) return;
+      setStage('setup');
+      setDialog({
+        icon,
+        iconColor: T.rose,
+        iconBg: T.dangerTint,
+        title,
+        message,
+        actions: [{ key: 'ok', label: 'OK', variant: 'primary', onPress: closeDialog }],
+      });
+    };
+
+    try {
+      let bank = BANK_CACHE.get(course.id);
+      if (!bank) {
+        const data = await fetchJson(course.endpoint, { signal: controller.signal });
+        if (data?.status !== 'success' || !Array.isArray(data.data)) throw new Error('bad payload');
+        bank = data.data;
+        BANK_CACHE.set(course.id, bank);
+      }
+      if (token !== loadTokenRef.current) return;
+
+      const picked = [];
+      const pool = shuffle(bank);
+      for (let i = 0; i < pool.length && picked.length < qty; i += 1) {
+        const q = normalizeQuestion(pool[i], picked.length + 1, course.title);
+        if (q) picked.push(q);
+      }
+      if (!picked.length) {
+        failWith('close-circle', 'No usable questions', 'This paper has no valid questions right now. Please try another paper.');
+        return;
+      }
+
+      const allocated = mins * 60;
+      setQuestions(picked);
+      setVisited({ 0: true });
+      setTotalTimeAllocated(allocated);
+      setTimeLeft(allocated);
+      setEndsAt(Date.now() + allocated * 1000);
+    } catch (error) {
+      if (token !== loadTokenRef.current) return;
+      failWith('cloud-offline', 'Could not load the paper', 'Check your internet connection and try again.');
+    } finally {
+      if (token === loadTokenRef.current) setLoadingQuestions(false);
+    }
+  }, [T, closeDialog]);
+
+  const startFromSetup = () => {
+    if (!setupCourseObj || !setupValid) return;
+    launchExam(setupCourseObj, qtyNum, minsNum);
   };
 
-  // Validate config before moving to the rules screen — previously you
-  // could type "0" or leave the field empty/non-numeric and still proceed,
-  // which produced a broken exam with no questions or no timer.
-  const proceedToInstructions = () => {
-    const qty = parseInt(numQuestions, 10);
-    const mins = parseInt(timeLimit, 10);
-    const course = courses.find(c => c.id === setupCourse);
-    const max = course?.question_count || Infinity;
-
-    if (!qty || qty < 1) {
-      setDialog({
-        icon: 'alert-circle',
-        iconColor: T.rose,
-        iconBg: T.dangerTint,
-        title: 'Invalid Question Count',
-        message: 'Enter a whole number of at least 1 question.',
-        actions: [{ key: 'ok', label: 'OK', variant: 'primary', onPress: closeDialog }],
-      });
-      return;
-    }
-    if (qty > max) {
-      setDialog({
-        icon: 'alert-circle',
-        iconColor: T.rose,
-        iconBg: T.dangerTint,
-        title: 'Too Many Questions',
-        message: `This paper only has ${max} questions available.`,
-        actions: [{ key: 'ok', label: 'OK', variant: 'primary', onPress: closeDialog }],
-      });
-      return;
-    }
-    if (!mins || mins < 1) {
-      setDialog({
-        icon: 'alert-circle',
-        iconColor: T.rose,
-        iconBg: T.dangerTint,
-        title: 'Invalid Duration',
-        message: 'Enter a whole number of at least 1 minute.',
-        actions: [{ key: 'ok', label: 'OK', variant: 'primary', onPress: closeDialog }],
-      });
-      return;
-    }
-
-    setAgreed(false);
-    setStage('instructions');
+  const retake = () => {
+    const cfg = lastConfigRef.current;
+    if (cfg) launchExam(cfg.course, cfg.qty, cfg.mins);
+    else resetAll();
   };
 
-  const dialogModal = <ConfirmDialogModal dialog={dialog} onClose={closeDialog} T={T} />;
+  const resumeSession = () => {
+    const snap = resumable;
+    if (!snap || snap.endsAt <= Date.now()) {
+      setResumable(null);
+      AsyncStorage.removeItem(SESSION_KEY).catch(() => {});
+      return;
+    }
+    const course = courses.find((c) => c.id === snap.courseId) || { id: snap.courseId, title: snap.courseTitle };
+    submittedRef.current = false;
+    lastConfigRef.current = { course, qty: snap.questions.length, mins: Math.round(snap.total / 60) };
+    setActiveCourse(course);
+    setQuestions(snap.questions);
+    setAnswers(snap.answers || {});
+    setMarkedForReview(snap.marked || {});
+    setVisited(snap.visited || {});
+    setCurrentIndex(Math.min(snap.currentIndex || 0, snap.questions.length - 1));
+    setTotalTimeAllocated(snap.total);
+    setTimeLeft(Math.max(0, Math.ceil((snap.endsAt - Date.now()) / 1000)));
+    setEndsAt(snap.endsAt);
+    if (snap.username) setUsername(snap.username);
+    setReviewFilter('all');
+    setLoadingQuestions(false);
+    setStage('exam');
+  };
+
+  const discardResumable = () => {
+    setDialog({
+      icon: 'trash',
+      iconColor: T.rose,
+      iconBg: T.dangerTint,
+      title: 'Discard unfinished exam?',
+      message: 'Your saved answers for this session will be deleted.',
+      actions: [
+        { key: 'keep', label: 'Keep it', variant: 'secondary', onPress: closeDialog },
+        {
+          key: 'discard',
+          label: 'Discard',
+          variant: 'destructive',
+          onPress: () => {
+            closeDialog();
+            setResumable(null);
+            AsyncStorage.removeItem(SESSION_KEY).catch(() => {});
+          },
+        },
+      ],
+    });
+  };
+
+  // Timer: derive the remaining time from the deadline so it stays correct after the app was backgrounded.
+  useEffect(() => {
+    if (stage !== 'exam' || !endsAt) return undefined;
+    const tick = () => setTimeLeft(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [stage, endsAt]);
+
+  // Auto-submit exactly once, and only for a fully loaded session (fixes instant auto-submit on retake).
+  useEffect(() => {
+    if (stage !== 'exam' || !endsAt || !questions.length || timeLeft > 0 || submittedRef.current) return;
+    finishExam();
+    setDialog({
+      icon: 'time',
+      iconColor: T.indigo,
+      iconBg: T.indigoTint,
+      title: "Time's up",
+      message: 'Your test paper was submitted automatically.',
+      actions: [{ key: 'ok', label: 'View results', variant: 'primary', onPress: closeDialog }],
+    });
+  }, [timeLeft, stage, endsAt, questions.length, finishExam, T, closeDialog]);
+
+  const warnAt = Math.min(300, Math.round(totalTimeAllocated * 0.2));
+  const criticalAt = Math.min(60, Math.round(totalTimeAllocated * 0.1));
+  const timerState = timeLeft <= criticalAt ? 'critical' : timeLeft <= warnAt ? 'warn' : 'normal';
+
+  useEffect(() => {
+    if (stage !== 'exam' || !endsAt || !totalTimeAllocated) return;
+    if (timeLeft === warnAt || timeLeft === criticalAt) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+    }
+  }, [timeLeft]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Autosave so an app kill or crash never loses an exam in progress.
+  useEffect(() => {
+    if (stage !== 'exam' || !endsAt || !questions.length) return undefined;
+    const timer = setTimeout(() => {
+      if (submittedRef.current) return;
+      AsyncStorage.setItem(
+        SESSION_KEY,
+        JSON.stringify({
+          courseId: activeCourse?.id,
+          courseTitle: activeCourse?.title,
+          questions,
+          answers,
+          marked: markedForReview,
+          visited,
+          currentIndex,
+          endsAt,
+          total: totalTimeAllocated,
+          username,
+        })
+      ).catch(() => {});
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [stage, endsAt, questions, answers, markedForReview, visited, currentIndex, activeCourse, totalTimeAllocated, username]);
+
+  /* ------------------------------- Exam actions ----------------------------- */
+
+  const goToQuestion = useCallback((index) => {
+    setCurrentIndex(index);
+    setVisited((prev) => (prev[index] ? prev : { ...prev, [index]: true }));
+    setShowPalette(false);
+    examScrollRef.current?.scrollTo?.({ y: 0, animated: false });
+  }, []);
+
+  const selectOption = (optionIndex) => setAnswers((prev) => ({ ...prev, [currentIndex]: optionIndex }));
+  const clearAnswer = () =>
+    setAnswers((prev) => {
+      const next = { ...prev };
+      delete next[currentIndex];
+      return next;
+    });
+  const toggleMark = () => setMarkedForReview((prev) => ({ ...prev, [currentIndex]: !prev[currentIndex] }));
+  const goNext = () => currentIndex < questions.length - 1 && goToQuestion(currentIndex + 1);
+  const goBack = () => currentIndex > 0 && goToQuestion(currentIndex - 1);
+
+  const requestSubmit = useCallback(() => {
+    const { questions: qs, answers: ans } = live.current;
+    const unanswered = qs.length - Object.keys(ans).length;
+    setDialog({
+      icon: unanswered > 0 ? 'alert-circle' : 'checkmark-circle',
+      iconColor: unanswered > 0 ? T.amber : T.green,
+      iconBg: unanswered > 0 ? T.amberTint : T.greenTint,
+      title: 'Submit test paper?',
+      message:
+        unanswered > 0
+          ? `You still have ${unanswered} unanswered question${unanswered === 1 ? '' : 's'}. Submit anyway?`
+          : 'You have answered every question. Submit your paper now?',
+      actions: [
+        { key: 'continue', label: 'Keep working', variant: 'secondary', onPress: closeDialog },
+        { key: 'submit', label: 'Yes, submit', variant: 'primary', onPress: () => { closeDialog(); finishExam(); } },
+      ],
+    });
+  }, [T, closeDialog, finishExam]);
+
+  const confirmExitExam = useCallback(() => {
+    setDialog({
+      icon: 'warning',
+      iconColor: T.amber,
+      iconBg: T.amberTint,
+      title: 'Leave this exam?',
+      message: 'Submit your answers for grading, or discard the session. The clock keeps running if you resume later.',
+      actions: [
+        { key: 'resume', label: 'Resume exam', variant: 'secondary', onPress: closeDialog },
+        { key: 'submit', label: 'Submit and exit', variant: 'primary', onPress: () => { closeDialog(); finishExam(); } },
+        { key: 'discard', label: 'Discard session', variant: 'destructive', onPress: () => { closeDialog(); finishExam({ abandoned: true }); } },
+      ],
+    });
+  }, [T, closeDialog, finishExam]);
+
+  live.current.confirmExit = confirmExitExam;
+
+  const confirmClearHistory = () => {
+    setDialog({
+      icon: 'trash',
+      iconColor: T.rose,
+      iconBg: T.dangerTint,
+      title: 'Clear test history?',
+      message: 'All saved attempts and best scores will be removed from this device.',
+      actions: [
+        { key: 'cancel', label: 'Cancel', variant: 'secondary', onPress: closeDialog },
+        {
+          key: 'clear',
+          label: 'Clear history',
+          variant: 'destructive',
+          onPress: () => {
+            closeDialog();
+            setHistory([]);
+            AsyncStorage.removeItem(HISTORY_KEY).catch(() => {});
+          },
+        },
+      ],
+    });
+  };
+
+  // Hardware back: close overlays first, then step back through the flow.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      const cur = live.current;
+      if (cur.dialog) {
+        setDialog(null);
+        return true;
+      }
+      if (cur.showCalc) {
+        setShowCalc(false);
+        return true;
+      }
+      switch (cur.stage) {
+        case 'exam':
+          if (cur.loadingQuestions) cancelLoading();
+          else cur.confirmExit();
+          return true;
+        case 'results':
+          resetAll();
+          return true;
+        case 'instructions':
+          setStage('setup');
+          return true;
+        case 'setup':
+        case 'history':
+          setStage('browse');
+          return true;
+        default:
+          return false;
+      }
+    });
+    return () => sub.remove();
+  }, [cancelLoading, resetAll]);
+
+  /* ------------------------------- Calculator ------------------------------- */
+
+  const handleCalcPress = (key) => {
+    setCalc((prev) => {
+      if (key === 'C') return { expr: '', result: null, justEvaluated: false };
+      if (key === '⌫') return prev.justEvaluated ? { expr: '', result: null, justEvaluated: false } : { ...prev, expr: prev.expr.slice(0, -1) };
+      if (key === '=') {
+        if (!prev.expr) return prev;
+        try {
+          return { expr: prev.expr, result: formatNumber(evaluateExpression(prev.expr)), justEvaluated: true };
+        } catch (e) {
+          return { ...prev, result: 'Error', justEvaluated: true };
+        }
+      }
+      const isOp = CALC_OPS.test(key) || key === '%';
+      if (prev.justEvaluated) {
+        const base = prev.result && prev.result !== 'Error' ? prev.result : '';
+        return { expr: isOp && base ? base + key : key, result: null, justEvaluated: false };
+      }
+      if (prev.expr.length >= 40) return prev;
+      const last = prev.expr.slice(-1);
+      if (CALC_OPS.test(key) && CALC_OPS.test(last)) {
+        // replace a trailing operator instead of stacking them (allow "×-" for negatives)
+        if (key === '-' && /[×÷]/.test(last)) return { ...prev, expr: prev.expr + key };
+        return { ...prev, expr: prev.expr.slice(0, -1) + key };
+      }
+      return { ...prev, expr: prev.expr + key };
+    });
+  };
+
+  const calcPreview = useMemo(() => {
+    if (calc.justEvaluated || !calc.expr) return null;
+    try {
+      return formatNumber(evaluateExpression(calc.expr));
+    } catch (e) {
+      return null;
+    }
+  }, [calc]);
+
+  /* -------------------------------- Rendering ------------------------------- */
+
+  const dialogModal = <ConfirmDialogModal dialog={dialog} onClose={closeDialog} T={T} s={s} />;
+  const bottomPad = Math.max(insets.bottom, 12) + 24;
 
   if (loading) {
     return (
       <>
-        <ScreenShell showBack title="CBT Terminal" onBack={() => router.back()}>
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 }}>
-            <PageLoader label="Initializing test engine..." />
+        <ScreenShell showBack title="CBT Practice" onBack={() => router.back()} scrollable={false}>
+          <View style={s.center}>
+            <PageLoader label="Loading question banks…" />
           </View>
         </ScreenShell>
         {dialogModal}
@@ -632,11 +1244,15 @@ export default function CBTPracticeScreen() {
   if (loadError) {
     return (
       <>
-        <ScreenShell showBack title="CBT Terminal" onBack={() => router.back()}>
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80, paddingHorizontal: 24 }}>
+        <ScreenShell showBack title="CBT Practice" onBack={() => router.back()} scrollable={false}>
+          <View style={s.center}>
             <Ionicons name="cloud-offline-outline" size={60} color={T.rose} />
-            <Text style={{ fontSize: 20, fontWeight: '900', color: T.textPrimary, marginTop: 16 }}>Server Unreachable</Text>
-            <Text style={{ textAlign: 'center', color: T.textMuted, marginTop: 8 }}>Failed to sync question banks from terminal host.</Text>
+            <Text style={s.centerTitle}>Can't reach the server</Text>
+            <Text style={s.centerText}>We couldn't load the question banks. Check your connection and try again.</Text>
+            <TouchableOpacity onPress={loadCourses} style={[s.primaryBtn, { marginTop: 24, paddingHorizontal: 28 }]} accessibilityRole="button">
+              <Ionicons name="refresh" size={18} color={T.white} />
+              <Text style={s.primaryBtnText}>Try again</Text>
+            </TouchableOpacity>
           </View>
         </ScreenShell>
         {dialogModal}
@@ -644,41 +1260,45 @@ export default function CBTPracticeScreen() {
     );
   }
 
-  if (showHistory) {
+  /* -------------------------------- History -------------------------------- */
+
+  if (stage === 'history') {
     return (
       <>
-        <ScreenShell showBack title="Mock Test History" onBack={() => setShowHistory(false)}>
-          <ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingTop: 16 }}>
+        <ScreenShell showBack title="Test history" onBack={() => setStage('browse')} scrollable={false}>
+          <ScrollView style={s.flex} contentContainerStyle={[s.screenPad, { paddingBottom: bottomPad }]} showsVerticalScrollIndicator={false}>
             {history.length === 0 ? (
-              <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 80 }}>
+              <View style={s.emptyWrap}>
                 <Ionicons name="documents-outline" size={56} color={T.slate} />
-                <Text style={{ color: T.textMuted, fontWeight: '600', marginTop: 12 }}>No prior test attempts recorded.</Text>
+                <Text style={s.emptyText}>No attempts yet.{'\n'}Finish a mock exam and it will show up here.</Text>
               </View>
             ) : (
-              history.map((item) => {
-                const pct = Math.round((item.score / item.totalQuestions) * 100);
-                const isPass = pct >= 50;
-                return (
-                  <View
-                    key={item.id || item.date}
-                    style={{ backgroundColor: T.card, padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: T.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
-                  >
-                    <View style={{ flex: 1, paddingRight: 12 }}>
-                      <Text style={{ fontWeight: '700', fontSize: 16, color: T.textPrimary }} numberOfLines={1}>{item.courseTitle}</Text>
-                      <Text style={{ fontSize: 12, color: T.indigo, fontWeight: '600', marginTop: 2 }}>Candidate: {item.candidate || 'Default'}</Text>
-                      <Text style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>
-                        {new Date(item.date).toLocaleDateString()} • Duration: {formatClock(item.timeTaken || 0)}
-                      </Text>
+              <>
+                {history.map((item) => {
+                  const pct = pctOf(item.score, item.totalQuestions);
+                  const pass = pct >= PASS_MARK;
+                  return (
+                    <View key={item.id || item.date} style={s.historyItem}>
+                      <View style={{ flex: 1, paddingRight: 12 }}>
+                        <Text style={s.historyTitle} numberOfLines={1}>{item.courseTitle}</Text>
+                        <Text style={s.historyMeta}>
+                          {new Date(item.date).toLocaleDateString()} · {formatClock(item.timeTaken)} · {item.candidate || 'Candidate'}
+                        </Text>
+                      </View>
+                      <View style={s.historyScore}>
+                        <Text style={[s.historyScoreValue, { color: pass ? T.green : T.rose }]}>
+                          {item.score}/{item.totalQuestions}
+                        </Text>
+                        <Text style={s.historyScorePct}>{pct}%</Text>
+                      </View>
                     </View>
-                    <View style={{ alignItems: 'flex-end', backgroundColor: T.chip, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 }}>
-                      <Text style={{ fontWeight: '900', fontSize: 18, color: isPass ? T.green : T.rose }}>
-                        {item.score}/{item.totalQuestions}
-                      </Text>
-                      <Text style={{ fontSize: 10, color: T.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>{pct}% Overall</Text>
-                    </View>
-                  </View>
-                );
-              })
+                  );
+                })}
+                <TouchableOpacity onPress={confirmClearHistory} style={s.clearHistoryBtn} accessibilityRole="button">
+                  <Ionicons name="trash-outline" size={16} color={T.rose} />
+                  <Text style={s.clearHistoryText}>Clear history</Text>
+                </TouchableOpacity>
+              </>
             )}
           </ScrollView>
         </ScreenShell>
@@ -687,120 +1307,198 @@ export default function CBTPracticeScreen() {
     );
   }
 
+  /* --------------------------------- Browse -------------------------------- */
+
   if (stage === 'browse') {
-    return (
-      <>
-        <ScreenShell showBack title="MockCBT Simulator" onBack={() => router.back()}>
-          <ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-            {/* Hero Banner */}
-            <View style={{ backgroundColor: T.indigo, borderRadius: 24, padding: 20, marginBottom: 24, shadowColor: T.indigo, shadowOpacity: 0.2, shadowRadius: 16, elevation: 4 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 }}>Mock Simulator</Text>
-                  <Text style={{ color: T.white, fontSize: 24, fontWeight: '900', marginTop: 4 }}>Ready for Practice?</Text>
-                  <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 12, marginTop: 6, lineHeight: 18 }}>Level-up your exam performance with our interactive mock tests.</Text>
-                </View>
-                <TouchableOpacity
-                  onPress={() => setShowHistory(true)}
-                  style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 16 }}
-                  accessibilityRole="button"
-                  accessibilityLabel="View test history"
-                >
-                  <Ionicons name="time-outline" size={22} color={'red'} />
-                </TouchableOpacity>
+    const resumeAnswered = resumable ? Object.keys(resumable.answers || {}).length : 0;
+    const header = (
+      <View>
+        <View style={s.hero}>
+          <View style={s.heroTop}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.heroEyebrow}>Mock exam practice</Text>
+              <Text style={s.heroTitle}>Ready to practise?</Text>
+              <Text style={s.heroSub}>Timed papers, an on-screen calculator and full answer explanations.</Text>
+            </View>
+            <TouchableOpacity onPress={() => setStage('history')} style={s.heroIconBtn} accessibilityRole="button" accessibilityLabel="View test history">
+              <Ionicons name="time-outline" size={22} color={T.white} />
+            </TouchableOpacity>
+          </View>
+          <View style={s.heroStats}>
+            <View style={s.heroStat}>
+              <Text style={s.heroStatValue}>{courses.length}</Text>
+              <Text style={s.heroStatLabel}>Papers</Text>
+            </View>
+            <View style={s.heroStat}>
+              <Text style={s.heroStatValue}>{historyStats.attempts}</Text>
+              <Text style={s.heroStatLabel}>Attempts</Text>
+            </View>
+            <View style={s.heroStat}>
+              <Text style={s.heroStatValue}>{historyStats.attempts ? `${historyStats.average}%` : '–'}</Text>
+              <Text style={s.heroStatLabel}>Average</Text>
+            </View>
+          </View>
+        </View>
+
+        {resumable ? (
+          <View style={s.resumeCard}>
+            <View style={s.resumeTop}>
+              <View style={s.resumeIcon}>
+                <Ionicons name="play" size={18} color={T.white} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.resumeTitle} numberOfLines={1}>Resume {resumable.courseTitle}</Text>
+                <Text style={s.resumeMeta}>
+                  {resumeAnswered}/{resumable.questions.length} answered · {formatClock(Math.ceil((resumable.endsAt - Date.now()) / 1000))} left
+                </Text>
               </View>
             </View>
-
-            {/* Search Bar */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.card, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 20, borderWidth: 1, borderColor: T.border }}>
-              <Ionicons name="search" size={20} color={T.textMuted} />
-              <TextInput
-                style={{ flex: 1, marginLeft: 12, fontSize: 16, color: T.textPrimary }}
-                placeholder="Search subject or course code..."
-                placeholderTextColor={T.textMuted}
-                value={searchTerm}
-                onChangeText={setSearchTerm}
-              />
+            <View style={s.resumeActions}>
+              <TouchableOpacity onPress={discardResumable} style={[s.resumeBtn, { backgroundColor: T.chip }]} accessibilityRole="button">
+                <Text style={s.secondaryBtnText}>Discard</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={resumeSession} style={[s.resumeBtn, { backgroundColor: T.indigo }]} accessibilityRole="button">
+                <Text style={[s.primaryBtnText, { fontSize: 14 }]}>Resume exam</Text>
+              </TouchableOpacity>
             </View>
+          </View>
+        ) : null}
 
-            {/* Course Grid */}
-            <Text style={{ fontSize: 12, fontWeight: '700', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
-              Available Papers ({filteredCourses.length})
-            </Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
-              {filteredCourses.map(course => (
-                <TouchableOpacity
-                  key={course.id}
-                  onPress={() => beginSetup(course.id)}
-                  style={{ width: '48%', backgroundColor: T.card, padding: 16, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: T.border }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Start ${course.title} practice`}
-                >
-                  <View style={{ backgroundColor: T.indigoTint, width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
-                    <MaterialCommunityIcons name="file-document-edit-outline" size={22} color={T.indigo} />
-                  </View>
-                  <Text style={{ fontWeight: '700', color: T.textPrimary, fontSize: 15, marginBottom: 4 }} numberOfLines={2}>{course.title}</Text>
-                  <Text style={{ fontSize: 12, color: T.textMuted, fontWeight: '600' }}>{course.question_count} Questions</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </ScrollView>
+        {offline ? (
+          <View style={s.banner}>
+            <Ionicons name="cloud-offline-outline" size={18} color={T.amber} />
+            <Text style={s.bannerText}>You're offline. Showing saved papers; starting an exam needs a connection.</Text>
+            <TouchableOpacity onPress={loadCourses} accessibilityRole="button" accessibilityLabel="Retry connection">
+              <Ionicons name="refresh" size={18} color={T.indigo} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        <View style={s.searchBox}>
+          <Ionicons name="search" size={19} color={T.textMuted} />
+          <TextInput
+            style={s.searchInput}
+            placeholder="Search subject or course code"
+            placeholderTextColor={T.textMuted}
+            value={searchTerm}
+            onChangeText={setSearchTerm}
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {searchTerm ? (
+            <TouchableOpacity onPress={() => setSearchTerm('')} hitSlop={10} accessibilityRole="button" accessibilityLabel="Clear search">
+              <Ionicons name="close-circle" size={18} color={T.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
+        <Text style={s.sectionLabel}>Available papers ({filteredCourses.length})</Text>
+      </View>
+    );
+
+    return (
+      <>
+        <ScreenShell showBack title="Mock CBT" onBack={() => router.back()} scrollable={false}>
+          <FlatList
+            data={filteredCourses}
+            keyExtractor={(c) => String(c.id)}
+            numColumns={2}
+            columnWrapperStyle={s.courseRow}
+            ListHeaderComponent={header}
+            ListEmptyComponent={
+              <View style={s.emptyWrap}>
+                <Ionicons name="search-outline" size={48} color={T.slate} />
+                <Text style={s.emptyText}>{searchTerm ? `No papers match "${searchTerm}".` : 'No papers available yet.'}</Text>
+              </View>
+            }
+            renderItem={({ item }) => (
+              <CourseCard course={item} best={bestByCourse[item.id] ?? bestByCourse[item.title]} onPress={beginSetup} s={s} T={T} />
+            )}
+            contentContainerStyle={[s.screenPad, { paddingBottom: bottomPad }]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          />
         </ScreenShell>
         {dialogModal}
       </>
     );
   }
 
+  /* --------------------------------- Setup --------------------------------- */
+
   if (stage === 'setup') {
-    const course = courses.find(c => c.id === setupCourse);
     return (
       <>
-        <ScreenShell showBack title="Paper Configuration" onBack={() => setStage('browse')}>
-          <ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingTop: 16 }}>
-            <View style={{ backgroundColor: T.card, padding: 24, borderRadius: 24, borderWidth: 1, borderColor: T.border }}>
-              <View style={{ borderBottomWidth: 1, borderBottomColor: T.border, paddingBottom: 16, marginBottom: 24 }}>
-                <Text style={{ fontSize: 12, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1, color: T.indigo, marginBottom: 4 }}>CBT Setup Desk</Text>
-                <Text style={{ fontSize: 24, fontWeight: '900', color: T.textPrimary }}>{course?.title}</Text>
+        <ScreenShell showBack title="Paper setup" onBack={() => setStage('browse')} scrollable={false}>
+          <ScrollView style={s.flex} contentContainerStyle={[s.screenPad, { paddingBottom: bottomPad }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <View style={s.card}>
+              <View style={s.setupHeader}>
+                <Text style={s.setupEyebrow}>Exam setup</Text>
+                <Text style={s.setupTitle}>{setupCourseObj?.title}</Text>
               </View>
 
               <View style={{ marginBottom: 20 }}>
-                <Text style={{ fontWeight: '700', color: T.textSecondary, marginBottom: 8 }}>Username / Candidate Display Name</Text>
+                <Text style={s.fieldLabel}>Candidate name</Text>
                 <TextInput
-                  style={{ backgroundColor: T.input, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, borderWidth: 1, borderColor: T.border, color: T.textPrimary }}
-                  placeholder="Enter your name..."
+                  style={s.fieldInput}
+                  placeholder="Enter your name"
                   placeholderTextColor={T.textMuted}
                   value={username}
                   onChangeText={setUsername}
+                  maxLength={40}
                 />
               </View>
 
               <View style={{ marginBottom: 20 }}>
-                <Text style={{ fontWeight: '700', color: T.textSecondary, marginBottom: 8 }}>Question Quantity</Text>
+                <Text style={s.fieldLabel}>Number of questions</Text>
                 <TextInput
-                  style={{ backgroundColor: T.input, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, borderWidth: 1, borderColor: T.border, color: T.textPrimary }}
+                  style={[s.fieldInput, qtyError && s.fieldInputError]}
                   keyboardType="number-pad"
                   value={numQuestions}
-                  onChangeText={setNumQuestions}
+                  onChangeText={changeQuantity}
                 />
-                <Text style={{ fontSize: 12, color: T.textMuted, marginTop: 4 }}>Maximum available: {course?.question_count}</Text>
+                {qtyError ? <Text style={s.fieldError}>{qtyError}</Text> : <Text style={s.fieldHint}>This paper has {maxQuestions} questions.</Text>}
+                <View style={s.chipRow}>
+                  {qtyPresets.map((n) => (
+                    <ChoiceChip key={n} label={n === maxQuestions ? `All (${n})` : String(n)} active={qtyNum === n} onPress={() => changeQuantity(String(n))} s={s} />
+                  ))}
+                </View>
               </View>
 
-              <View style={{ marginBottom: 24 }}>
-                <Text style={{ fontWeight: '700', color: T.textSecondary, marginBottom: 8 }}>Duration (Minutes)</Text>
+              <View style={{ marginBottom: 20 }}>
+                <Text style={s.fieldLabel}>Duration (minutes)</Text>
                 <TextInput
-                  style={{ backgroundColor: T.input, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, borderWidth: 1, borderColor: T.border, color: T.textPrimary }}
+                  style={[s.fieldInput, timeError && s.fieldInputError]}
                   keyboardType="number-pad"
                   value={timeLimit}
-                  onChangeText={setTimeLimit}
+                  onChangeText={changeTime}
                 />
+                {timeError ? <Text style={s.fieldError}>{timeError}</Text> : <Text style={s.fieldHint}>Suggested for {qtyNum || 0} questions: {suggestMinutes(qtyNum || 0)} min.</Text>}
+                <View style={s.chipRow}>
+                  {[10, 15, 30, 45, 60].map((m) => (
+                    <ChoiceChip key={m} label={`${m} min`} active={minsNum === m} onPress={() => changeTime(String(m))} s={s} />
+                  ))}
+                </View>
               </View>
 
+              {setupValid ? (
+                <View style={s.summaryBox}>
+                  <Ionicons name="information-circle" size={20} color={T.indigo} />
+                  <Text style={s.summaryText}>
+                    {qtyNum} questions in {minsNum} minutes (about {Math.max(1, Math.round((minsNum * 60) / qtyNum))} seconds each). Pass mark is {PASS_MARK}%.
+                  </Text>
+                </View>
+              ) : null}
+
               <TouchableOpacity
-                onPress={proceedToInstructions}
-                style={{ backgroundColor: T.indigo, paddingVertical: 16, borderRadius: 16, alignItems: 'center', shadowColor: T.indigo, shadowOpacity: 0.3, shadowRadius: 10, elevation: 3 }}
+                onPress={() => { setAgreed(false); setStage('instructions'); }}
+                disabled={!setupValid}
+                style={[s.primaryBtn, !setupValid && s.btnDisabled]}
                 accessibilityRole="button"
+                accessibilityState={{ disabled: !setupValid }}
               >
-                <Text style={{ color: T.white, fontWeight: '900', fontSize: 15 }}>Proceed to Candidate Rules</Text>
+                <Text style={[s.primaryBtnText, !setupValid && s.btnDisabledText]}>Continue</Text>
+                <Ionicons name="arrow-forward" size={18} color={setupValid ? T.white : T.textMuted} />
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -809,50 +1507,66 @@ export default function CBTPracticeScreen() {
       </>
     );
   }
+
+  /* ------------------------------- Instructions ------------------------------ */
 
   if (stage === 'instructions') {
     return (
       <>
-        <ScreenShell showBack title="Candidate Rules" onBack={() => setStage('setup')}>
-          <ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingTop: 16 }}>
-            <View style={{ backgroundColor: T.card, padding: 24, borderRadius: 24, borderWidth: 1, borderColor: T.border }}>
-              <Text style={{ fontSize: 20, fontWeight: '900', color: T.textPrimary, marginBottom: 16 }}>Official Examination Guidelines</Text>
+        <ScreenShell showBack title="Exam rules" onBack={() => setStage('setup')} scrollable={false}>
+          <ScrollView style={s.flex} contentContainerStyle={[s.screenPad, { paddingBottom: bottomPad }]} showsVerticalScrollIndicator={false}>
+            <View style={s.card}>
+              <Text style={[s.setupTitle, { marginBottom: 16 }]}>Before you begin</Text>
 
-              <View style={{ marginBottom: 24, gap: 12 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
-                  <Ionicons name="time" size={20} color={T.indigo} />
-                  <Text style={{ flex: 1, color: T.textSecondary, fontSize: 14, lineHeight: 20 }}>Timer countdown will initiate immediately upon clicking &#34;Launch Test Session&#34;.</Text>
+              <View style={s.tileRow}>
+                <View style={s.tile}>
+                  <Text style={s.tileValue}>{qtyNum}</Text>
+                  <Text style={s.tileLabel}>Questions</Text>
                 </View>
-                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
-                  <Ionicons name="grid" size={20} color={T.indigo} />
-                  <Text style={{ flex: 1, color: T.textSecondary, fontSize: 14, lineHeight: 20 }}>Use the top grid navigator to inspect answered vs unvisited questions.</Text>
+                <View style={s.tile}>
+                  <Text style={s.tileValue}>{minsNum}</Text>
+                  <Text style={s.tileLabel}>Minutes</Text>
                 </View>
-                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
-                  <Ionicons name="calculator" size={20} color={T.indigo} />
-                  <Text style={{ flex: 1, color: T.textSecondary, fontSize: 14, lineHeight: 20 }}>In-app Scientific Calculator is available in the top utility toolbar.</Text>
+                <View style={s.tile}>
+                  <Text style={s.tileValue}>{PASS_MARK}%</Text>
+                  <Text style={s.tileLabel}>Pass mark</Text>
                 </View>
               </View>
 
+              {[
+                ['time', 'The timer starts as soon as the paper loads and keeps running if the app is in the background.'],
+                ['grid', 'Use the grid button to jump to any question and see which are answered, flagged or skipped.'],
+                ['bookmark', 'Flag a question to come back to it. You can clear a response at any time.'],
+                ['calculator', 'An on-screen calculator is available in the top toolbar.'],
+                ['save', 'Your progress is saved automatically, so you can resume if the app closes.'],
+              ].map(([icon, text]) => (
+                <View key={icon} style={s.ruleRow}>
+                  <Ionicons name={icon} size={20} color={T.indigo} />
+                  <Text style={s.ruleText}>{text}</Text>
+                </View>
+              ))}
+
               <TouchableOpacity
-                onPress={() => setAgreed(!agreed)}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 24, backgroundColor: T.input, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: T.border }}
+                onPress={() => setAgreed((v) => !v)}
+                style={s.agreeBox}
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked: agreed }}
               >
-                <View style={{ width: 24, height: 24, borderRadius: 8, borderWidth: agreed ? 0 : 1, alignItems: 'center', justifyContent: 'center', backgroundColor: agreed ? T.indigo : 'transparent', borderColor: T.slate }}>
-                  {agreed && <Ionicons name="checkmark" size={16} color={T.white} />}
+                <View style={[s.checkbox, agreed && s.checkboxOn]}>
+                  {agreed ? <Ionicons name="checkmark" size={16} color={T.white} /> : null}
                 </View>
-                <Text style={{ flex: 1, fontWeight: '600', color: T.textPrimary, fontSize: 14 }}>I certify that I am ready for this mock examination.</Text>
+                <Text style={s.agreeText}>I'm ready to start this mock exam.</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                onPress={startExam}
+                onPress={startFromSetup}
                 disabled={!agreed}
-                style={{ paddingVertical: 16, borderRadius: 16, alignItems: 'center', backgroundColor: agreed ? T.indigo : T.chip, shadowColor: agreed ? T.indigo : 'transparent', shadowOpacity: agreed ? 0.3 : 0, shadowRadius: 10, elevation: agreed ? 3 : 0 }}
+                style={[s.primaryBtn, !agreed && s.btnDisabled]}
                 accessibilityRole="button"
                 accessibilityState={{ disabled: !agreed }}
               >
-                <Text style={{ fontWeight: '900', fontSize: 15, color: agreed ? T.white : T.textMuted }}>Launch Test Session</Text>
+                <Ionicons name="rocket" size={18} color={agreed ? T.white : T.textMuted} />
+                <Text style={[s.primaryBtnText, !agreed && s.btnDisabledText]}>Start exam</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -862,13 +1576,18 @@ export default function CBTPracticeScreen() {
     );
   }
 
+  /* ---------------------------------- Exam --------------------------------- */
+
   if (stage === 'exam') {
-    if (loadingQuestions) {
+    if (loadingQuestions || !questions.length) {
       return (
         <>
-          <ScreenShell showBack title="Loading Room" onBack={() => finishExam(true)}>
-            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-              <PageLoader label="Preparing examination paper..." />
+          <ScreenShell showBack title="Preparing exam" onBack={cancelLoading} scrollable={false}>
+            <View style={s.center}>
+              <PageLoader label="Preparing your paper…" />
+              <TouchableOpacity onPress={cancelLoading} style={[s.secondaryBtn, { marginTop: 28, paddingHorizontal: 28 }]} accessibilityRole="button">
+                <Text style={s.secondaryBtnText}>Cancel</Text>
+              </TouchableOpacity>
             </View>
           </ScreenShell>
           {dialogModal}
@@ -877,365 +1596,376 @@ export default function CBTPracticeScreen() {
     }
 
     const currentQ = questions[currentIndex];
-    const isMarked = markedForReview[currentIndex];
-    const baseFontSize = 16 + fontSizeOffset;
+    const isMarked = Boolean(markedForReview[currentIndex]);
+    const selected = answers[currentIndex];
+    const baseFont = 16 + FONT_LEVELS[fontLevel];
+    const isLast = currentIndex === questions.length - 1;
+    const answeredPct = (Object.keys(answers).length / questions.length) * 100;
+    const fontLabel = FONT_LEVELS[fontLevel] === 0 ? 'A' : FONT_LEVELS[fontLevel] < 0 ? 'A−' : `A${'+'.repeat(FONT_LEVELS[fontLevel] / 2)}`;
 
     return (
       <>
-        <ScreenShell showBack
-          title={activeCourse?.title || "CBT Practice Room"}
-          onBack={confirmExitExam}
-        >
-          <View style={{ flex: 1, backgroundColor: T.bg }}>
-            {/* Authentic CBT Desktop Top Bar */}
-            <View style={{ backgroundColor: '#0F172A', paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#1E293B' }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 }}>
-                <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: T.indigo, alignItems: 'center', justifyContent: 'center', marginRight: 12, borderWidth: 1, borderColor: '#818CF8' }}>
+        <ScreenShell showBack title={activeCourse?.title || 'CBT exam'} onBack={confirmExitExam} scrollable={false}>
+          <View style={[s.flex, { backgroundColor: T.bg }]}>
+            <View style={s.terminalBar}>
+              <View style={s.termUser}>
+                <View style={s.termAvatar}>
                   <Ionicons name="person" size={18} color={T.white} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: T.white, fontWeight: '700', fontSize: 12 }} numberOfLines={1}>{username}</Text>
-                  <Text style={{ color: '#94A3B8', fontFamily: 'monospace', fontSize: 10 }} numberOfLines={1}>{activeCourse?.title}</Text>
+                  <Text style={s.termName} numberOfLines={1}>{displayName}</Text>
+                  <Text style={s.termSub} numberOfLines={1}>{activeCourse?.title}</Text>
                 </View>
               </View>
-
-              {/* Quick Utility Toolbar */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <TouchableOpacity
-                  onPress={() => setShowCalc(!showCalc)}
-                  style={{ padding: 8, borderRadius: 10, backgroundColor: showCalc ? T.indigo : '#1E293B' }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Toggle calculator"
-                >
+              <View style={s.toolRow}>
+                <TouchableOpacity onPress={() => setShowCalc((v) => !v)} style={[s.toolBtn, showCalc && s.toolBtnOn]} accessibilityRole="button" accessibilityLabel="Toggle calculator">
                   <Ionicons name="calculator" size={18} color={T.white} />
                 </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={() => setFontSizeOffset(prev => (prev >= 4 ? -2 : prev + 2))}
-                  style={{ padding: 8, backgroundColor: '#1E293B', borderRadius: 10 }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Adjust text size"
-                >
-                  <Text style={{ color: T.white, fontWeight: '700', fontSize: 12 }}>A{fontSizeOffset > 0 ? `+${fontSizeOffset}` : ''}</Text>
+                <TouchableOpacity onPress={() => setFontLevel((l) => (l + 1) % FONT_LEVELS.length)} style={s.toolBtn} accessibilityRole="button" accessibilityLabel="Change text size">
+                  <Text style={s.toolBtnText}>{fontLabel}</Text>
                 </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={() => setShowPalette(true)}
-                  style={{ padding: 8, backgroundColor: T.indigo, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Open question navigator"
-                >
-                  <Ionicons name="grid" size={16} color={T.white} />
-                  <Text style={{ color: T.white, fontWeight: '700', fontSize: 12 }}>{currentIndex + 1}/{questions.length}</Text>
+                <TouchableOpacity onPress={() => setShowPalette(true)} style={[s.toolBtn, s.toolBtnOn]} accessibilityRole="button" accessibilityLabel="Open question navigator">
+                  <Ionicons name="grid" size={15} color={T.white} />
+                  <Text style={s.toolBtnText}>{currentIndex + 1}/{questions.length}</Text>
                 </TouchableOpacity>
               </View>
             </View>
 
-            {/* Dynamic Countdown Banner */}
-            <View style={{ paddingVertical: 8, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: timeLeft < 180 ? T.rose : '#1E293B' }}>
-              <Text style={{ color: T.white, fontFamily: 'monospace', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 }}>Time Remaining</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <View style={[s.timerBar, timerState === 'warn' && s.timerWarn, timerState === 'critical' && s.timerCritical]} accessibilityLiveRegion="polite">
+              <Text style={s.timerLabel}>{timerState === 'normal' ? 'Time remaining' : 'Time is running out'}</Text>
+              <View style={s.timerValueRow}>
                 <Ionicons name="time-outline" size={16} color={T.white} />
-                <Text style={{ color: T.white, fontFamily: 'monospace', fontWeight: '900', fontSize: 16 }}>{formatClock(timeLeft)}</Text>
+                <Text style={s.timerValue} accessibilityLabel={`${formatClock(timeLeft)} remaining`}>{formatClock(timeLeft)}</Text>
               </View>
             </View>
+            <View style={s.progressTrack}>
+              <View style={[s.progressFill, { width: `${answeredPct}%` }]} />
+            </View>
 
-            {/* Built-in Scientific Calculator Floating Overlay */}
-            {showCalc && (
-              <View style={{ position: 'absolute', top: 112, right: 16, zIndex: 50, backgroundColor: '#0F172A', borderWidth: 1, borderColor: '#334155', padding: 16, borderRadius: 20, width: 256, shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 16, elevation: 8 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <Text style={{ color: '#94A3B8', fontFamily: 'monospace', fontSize: 12, textTransform: 'uppercase' }}>CBT Calculator</Text>
-                  <TouchableOpacity onPress={() => setShowCalc(false)} accessibilityRole="button" accessibilityLabel="Close calculator">
-                    <Ionicons name="close" size={18} color="#94A3B8" />
+            <View style={s.flex}>
+              <ScrollView ref={examScrollRef} style={s.flex} contentContainerStyle={s.qScroll} showsVerticalScrollIndicator={false}>
+                <View style={s.qCard}>
+                  <View style={s.qHeader}>
+                    <Text style={s.qLabel}>Question {currentIndex + 1} of {questions.length}</Text>
+                    {isMarked ? (
+                      <View style={s.flagPill}>
+                        <Ionicons name="bookmark" size={12} color={T.amber} />
+                        <Text style={s.flagPillText}>Flagged</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={[s.qText, { fontSize: baseFont, lineHeight: baseFont * 1.5 }]}>{currentQ.question}</Text>
+                </View>
+
+                <View style={s.optionsWrap}>
+                  {currentQ.options.map((opt, idx) => {
+                    const on = selected === idx;
+                    return (
+                      <TouchableOpacity
+                        key={idx}
+                        activeOpacity={0.85}
+                        onPress={() => selectOption(idx)}
+                        style={[s.option, on && s.optionOn]}
+                        accessibilityRole="radio"
+                        accessibilityState={{ checked: on }}
+                        accessibilityLabel={`Option ${LETTERS[idx]}: ${opt}`}
+                      >
+                        <View style={[s.optionLetter, on && s.optionLetterOn]}>
+                          <Text style={[s.optionLetterText, on && { color: T.white }]}>{LETTERS[idx]}</Text>
+                        </View>
+                        <Text style={[s.optionText, { fontSize: baseFont - 1 }, on && { color: T.indigo }]}>{opt}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {selected !== undefined ? (
+                  <TouchableOpacity onPress={clearAnswer} style={s.clearBtn} accessibilityRole="button">
+                    <Ionicons name="close-circle-outline" size={16} color={T.textMuted} />
+                    <Text style={s.clearText}>Clear response</Text>
                   </TouchableOpacity>
-                </View>
-                <View style={{ backgroundColor: 'rgba(0,0,0,0.6)', padding: 12, borderRadius: 12, marginBottom: 12, alignItems: 'flex-end' }}>
-                  <Text style={{ color: T.green, fontFamily: 'monospace', fontSize: 20, fontWeight: '700' }}>{calcDisplay}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between' }}>
-                  {['7', '8', '9', '÷', '4', '5', '6', '×', '1', '2', '3', '-', 'C', '0', '=', '+'].map((btn) => (
-                    <TouchableOpacity
-                      key={btn}
-                      onPress={() => handleCalcPress(btn)}
-                      style={{ width: '22%', backgroundColor: '#1E293B', paddingVertical: 10, borderRadius: 10, alignItems: 'center' }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Calculator ${btn}`}
-                    >
-                      <Text style={{ color: T.white, fontWeight: '700', fontSize: 16 }}>{btn}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            )}
+                ) : null}
+              </ScrollView>
 
-            {/* Palette Modal Navigation */}
-            <Modal visible={showPalette} animationType="slide" transparent onRequestClose={() => setShowPalette(false)}>
-              <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: T.overlay }}>
-                <View style={{ backgroundColor: T.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '80%', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 20, elevation: 8 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                    <Text style={{ fontSize: 20, fontWeight: '900', color: T.textPrimary }}>Question Navigator Grid</Text>
-                    <TouchableOpacity
-                      onPress={() => setShowPalette(false)}
-                      style={{ backgroundColor: T.chip, padding: 8, borderRadius: 999 }}
-                      accessibilityRole="button"
-                      accessibilityLabel="Close navigator"
-                    >
-                      <Ionicons name="close" size={20} color={T.textMuted} />
+              {showCalc ? (
+                <View style={s.calc}>
+                  <View style={s.calcHead}>
+                    <Text style={s.calcTitle}>Calculator</Text>
+                    <TouchableOpacity onPress={() => setShowCalc(false)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close calculator">
+                      <Ionicons name="close" size={18} color={T.terminalMuted} />
                     </TouchableOpacity>
                   </View>
-
-                  <ScrollView showsVerticalScrollIndicator={false}>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center', marginBottom: 24 }}>
-                      {questions.map((_, idx) => {
-                        const st = statusFor(idx);
-                        const isCurrent = idx === currentIndex;
-                        return (
-                          <TouchableOpacity
-                            key={idx}
-                            onPress={() => goToQuestion(idx)}
-                            style={{
-                              width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
-                              borderWidth: 2, backgroundColor: statusMeta[st].bg,
-                              borderColor: isCurrent ? T.textPrimary : 'transparent',
-                            }}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Question ${idx + 1}, ${statusMeta[st].label}`}
-                          >
-                            <Text style={{ color: T.white, fontWeight: '700' }}>{idx + 1}</Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-
-                    {/* Legend */}
-                    <View style={{ backgroundColor: T.input, padding: 16, borderRadius: 16, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 }}>
-                      {Object.values(statusMeta).map((meta, idx) => (
-                        <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', width: '48%' }}>
-                          <View style={{ width: 12, height: 12, borderRadius: 6, marginRight: 8, backgroundColor: meta.bg }} />
-                          <Text style={{ fontSize: 12, fontWeight: '600', color: T.textSecondary }}>{meta.label}</Text>
-                        </View>
+                  <View style={s.calcScreen}>
+                    <Text style={s.calcExpr} numberOfLines={1}>{calc.expr || ' '}</Text>
+                    <Text style={s.calcResult} numberOfLines={1} adjustsFontSizeToFit>
+                      {calc.result ?? calcPreview ?? (calc.expr ? '' : '0')}
+                    </Text>
+                  </View>
+                  {CALC_ROWS.map((row, r) => (
+                    <View key={r} style={s.calcRow}>
+                      {row.map((k) => (
+                        <TouchableOpacity
+                          key={k}
+                          onPress={() => handleCalcPress(k)}
+                          style={[s.calcKey, (CALC_OPS.test(k) || k === 'C' || k === '⌫') && s.calcKeyOp]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Calculator ${k}`}
+                        >
+                          <Text style={s.calcKeyText}>{k === '-' ? '−' : k}</Text>
+                        </TouchableOpacity>
                       ))}
                     </View>
-                  </ScrollView>
+                  ))}
+                  <TouchableOpacity onPress={() => handleCalcPress('=')} style={s.calcEquals} accessibilityRole="button" accessibilityLabel="Calculate">
+                    <Text style={s.calcKeyText}>=</Text>
+                  </TouchableOpacity>
                 </View>
-              </View>
-            </Modal>
+              ) : null}
+            </View>
 
-            {/* Primary Question View Surface */}
-            <ScrollView style={{ flex: 1, paddingHorizontal: 20, paddingTop: 20 }} contentContainerStyle={{ paddingBottom: 120 }}>
-              <View style={{ backgroundColor: T.card, padding: 24, borderRadius: 24, borderWidth: 1, borderColor: T.border, marginBottom: 24 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <Text style={{ fontSize: 12, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1, color: T.indigo }}>Question {currentIndex + 1}</Text>
-                  {isMarked && (
-                    <View style={{ backgroundColor: T.amberTint, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                      <Ionicons name="bookmark" size={12} color={T.amber} />
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: T.amber, textTransform: 'uppercase' }}>Flagged</Text>
-                    </View>
-                  )}
-                </View>
-
-                <Text style={{ fontSize: baseFontSize, color: T.textPrimary, fontWeight: '500', lineHeight: baseFontSize * 1.5 }}>
-                  {currentQ?.question}
-                </Text>
-              </View>
-
-              {/* Options Grid */}
-              <View style={{ gap: 12 }}>
-                {currentQ?.options.map((opt, idx) => {
-                  const letters = ['A', 'B', 'C', 'D', 'E'];
-                  const isSelected = answers[currentIndex] === opt;
-                  return (
-                    <TouchableOpacity
-                      key={idx}
-                      onPress={() => selectOption(opt)}
-                      style={{
-                        flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 16, borderWidth: 1,
-                        borderColor: isSelected ? T.indigo : T.border,
-                        backgroundColor: isSelected ? T.indigoTint : T.card,
-                      }}
-                      accessibilityRole="radio"
-                      accessibilityState={{ checked: isSelected }}
-                      accessibilityLabel={`Option ${letters[idx]}: ${opt}`}
-                    >
-                      <View style={{ width: 32, height: 32, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: 12, backgroundColor: isSelected ? T.indigo : T.chip }}>
-                        <Text style={{ fontWeight: '700', fontSize: 12, color: isSelected ? T.white : T.textSecondary }}>{letters[idx]}</Text>
-                      </View>
-                      <Text style={{ fontSize: baseFontSize - 1, flex: 1, fontWeight: '500', color: isSelected ? T.indigo : T.textPrimary }}>
-                        {opt}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </ScrollView>
-
-            {/* Authentic CBT Navigation Dock */}
-            <View style={{ backgroundColor: T.card, borderTopWidth: 1, borderTopColor: T.border, padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', bottom: 0, left: 0, right: 0, position: 'absolute' }}>
+            <View style={[s.dock, { paddingBottom: Math.max(insets.bottom, 12) }]}>
               <TouchableOpacity
                 onPress={goBack}
                 disabled={currentIndex === 0}
-                style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4, opacity: currentIndex === 0 ? 0.3 : 1, backgroundColor: T.chip }}
+                style={[s.dockBtn, { backgroundColor: T.chip, opacity: currentIndex === 0 ? 0.35 : 1 }]}
                 accessibilityRole="button"
                 accessibilityLabel="Previous question"
                 accessibilityState={{ disabled: currentIndex === 0 }}
               >
-                <Ionicons name="chevron-back" size={20} color={T.indigo} />
-                <Text style={{ fontWeight: '700', color: T.textSecondary, fontSize: 12, textTransform: 'uppercase' }}>Prev</Text>
+                <Ionicons name="chevron-back" size={18} color={T.indigo} />
+                <Text style={[s.dockText, { color: T.textSecondary }]}>Prev</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                onPress={toggleMarkForReview}
-                style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, borderWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: isMarked ? T.amber : T.input, borderColor: isMarked ? T.amber : T.border }}
+                onPress={toggleMark}
+                style={[s.dockBtn, { flex: 1, backgroundColor: isMarked ? T.amber : T.input, borderWidth: 1, borderColor: isMarked ? T.amber : T.border }]}
                 accessibilityRole="button"
-                accessibilityLabel={isMarked ? 'Unmark for review' : 'Mark for review'}
+                accessibilityLabel={isMarked ? 'Remove flag' : 'Flag for review'}
               >
-                <Ionicons name="bookmark-outline" size={18} color={isMarked ? T.white : T.textMuted} />
-                <Text style={{ fontWeight: '700', fontSize: 12, textTransform: 'uppercase', color: isMarked ? T.white : T.textSecondary }}>Review</Text>
+                <Ionicons name={isMarked ? 'bookmark' : 'bookmark-outline'} size={17} color={isMarked ? T.white : T.textMuted} />
+                <Text style={[s.dockText, { color: isMarked ? T.white : T.textSecondary }]}>{isMarked ? 'Flagged' : 'Flag'}</Text>
               </TouchableOpacity>
 
-              {currentIndex === questions.length - 1 ? (
-                <TouchableOpacity
-                  onPress={requestSubmit}
-                  style={{ backgroundColor: T.green, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Submit exam"
-                >
-                  <Text style={{ color: T.white, fontWeight: '900', fontSize: 12, textTransform: 'uppercase' }}>Submit</Text>
+              {isLast ? (
+                <TouchableOpacity onPress={requestSubmit} style={[s.dockBtn, { backgroundColor: T.green, paddingHorizontal: 20 }]} accessibilityRole="button" accessibilityLabel="Submit exam">
+                  <Text style={[s.dockText, { color: T.white }]}>Submit</Text>
                   <Ionicons name="checkmark-done" size={18} color={T.white} />
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity
-                  onPress={goNext}
-                  style={{ backgroundColor: T.indigo, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Next question"
-                >
-                  <Text style={{ color: T.white, fontWeight: '900', fontSize: 12, textTransform: 'uppercase' }}>Next</Text>
+                <TouchableOpacity onPress={goNext} style={[s.dockBtn, { backgroundColor: T.indigo, paddingHorizontal: 20 }]} accessibilityRole="button" accessibilityLabel="Next question">
+                  <Text style={[s.dockText, { color: T.white }]}>Next</Text>
                   <Ionicons name="chevron-forward" size={18} color={T.white} />
                 </TouchableOpacity>
               )}
             </View>
           </View>
         </ScreenShell>
+
+        <Modal visible={showPalette} animationType="slide" transparent onRequestClose={() => setShowPalette(false)}>
+          <View style={s.sheetBackdrop}>
+            <Pressable style={s.flex} onPress={() => setShowPalette(false)} />
+            <View style={[s.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+              <View style={s.sheetHandle} />
+              <View style={s.sheetHead}>
+                <Text style={s.sheetTitle}>Question navigator</Text>
+                <TouchableOpacity onPress={() => setShowPalette(false)} style={s.sheetClose} accessibilityRole="button" accessibilityLabel="Close navigator">
+                  <Ionicons name="close" size={20} color={T.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={s.countRow}>
+                <View style={[s.countBox, { backgroundColor: T.greenTint }]}>
+                  <Text style={[s.countValue, { color: T.green }]}>{paletteCounts.answered}</Text>
+                  <Text style={[s.countLabel, { color: T.green }]}>Answered</Text>
+                </View>
+                <View style={[s.countBox, { backgroundColor: T.dangerTint }]}>
+                  <Text style={[s.countValue, { color: T.rose }]}>{paletteCounts.remaining}</Text>
+                  <Text style={[s.countLabel, { color: T.rose }]}>Remaining</Text>
+                </View>
+                <View style={[s.countBox, { backgroundColor: T.amberTint }]}>
+                  <Text style={[s.countValue, { color: T.amber }]}>{paletteCounts.flagged}</Text>
+                  <Text style={[s.countLabel, { color: T.amber }]}>Flagged</Text>
+                </View>
+              </View>
+
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={s.gridWrap}>
+                  {questions.map((_, idx) => {
+                    const st = statusFor(idx);
+                    return (
+                      <TouchableOpacity
+                        key={idx}
+                        onPress={() => goToQuestion(idx)}
+                        style={[s.gridCell, { backgroundColor: statusMeta[st].bg }, idx === currentIndex && s.gridCellCurrent]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Question ${idx + 1}, ${statusMeta[st].label}`}
+                      >
+                        <Text style={s.gridText}>{idx + 1}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <View style={s.legend}>
+                  {Object.values(statusMeta).map((meta) => (
+                    <View key={meta.label} style={s.legendItem}>
+                      <View style={[s.legendDot, { backgroundColor: meta.bg }]} />
+                      <Text style={s.legendText}>{meta.label}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowPalette(false);
+                    // let the sheet finish closing before the dialog opens (avoids iOS stacked-modal glitches)
+                    setTimeout(requestSubmit, 320);
+                  }}
+                  style={s.primaryBtn}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="checkmark-done" size={18} color={T.white} />
+                  <Text style={s.primaryBtnText}>Submit paper</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
         {dialogModal}
       </>
     );
   }
 
+  /* --------------------------------- Results -------------------------------- */
+
   if (stage === 'results') {
-    const isPass = completionPercent >= 50;
+    const tone = isPass ? T.green : T.rose;
+    const grade =
+      percent >= 70 ? 'Excellent work. You are well prepared.' : isPass ? 'You passed. Review the misses to push higher.' : 'Not there yet. Review the explanations below and try again.';
+    const filters = [
+      ['all', 'All'],
+      ['correct', 'Correct'],
+      ['incorrect', 'Incorrect'],
+      ['skipped', 'Skipped'],
+      ['marked', 'Flagged'],
+    ];
+
     return (
       <>
-        <ScreenShell showBack title="Test Diagnostics" onBack={resetAll}>
-          <ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingTop: 16 }} showsVerticalScrollIndicator={false}>
-            {/* Diagnostic Result Card */}
-            <View style={{ backgroundColor: T.card, padding: 24, borderRadius: 24, borderWidth: 1, borderColor: T.border, alignItems: 'center', marginBottom: 24 }}>
-              <View style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 12, backgroundColor: isPass ? T.greenTint : T.dangerTint }}>
-                <Ionicons name={isPass ? 'trophy' : 'alert-circle'} size={40} color={isPass ? T.green : T.rose} />
+        <ScreenShell showBack title="Results" onBack={resetAll} scrollable={false}>
+          <ScrollView style={s.flex} contentContainerStyle={[s.screenPad, { paddingBottom: bottomPad }]} showsVerticalScrollIndicator={false}>
+            <View style={s.resultCard}>
+              <View style={[s.ring, { borderColor: tone }]}>
+                <Text style={[s.ringValue, { color: tone }]}>{percent}%</Text>
+              </View>
+              <Text style={s.resultName}>{displayName}</Text>
+              <Text style={s.resultScore}>{score} of {questions.length} correct</Text>
+              <Text style={s.resultGrade}>{grade}</Text>
+
+              <View style={s.statRow}>
+                <View style={[s.statTile, { backgroundColor: T.greenTint }]}>
+                  <Text style={[s.statValue, { color: T.green }]}>{stats.correct}</Text>
+                  <Text style={[s.statLabel, { color: T.green }]}>Correct</Text>
+                </View>
+                <View style={[s.statTile, { backgroundColor: T.dangerTint }]}>
+                  <Text style={[s.statValue, { color: T.rose }]}>{stats.wrong}</Text>
+                  <Text style={[s.statLabel, { color: T.rose }]}>Incorrect</Text>
+                </View>
+                <View style={[s.statTile, { backgroundColor: T.chip }]}>
+                  <Text style={[s.statValue, { color: T.textSecondary }]}>{stats.skipped}</Text>
+                  <Text style={[s.statLabel, { color: T.textSecondary }]}>Skipped</Text>
+                </View>
               </View>
 
-              <Text style={{ fontSize: 14, fontWeight: '700', color: T.indigo, marginBottom: 4 }}>{username}</Text>
-              <Text style={{ fontSize: 30, fontWeight: '900', color: T.textPrimary }}>
-                {score} <Text style={{ color: T.textMuted, fontSize: 18, fontWeight: '500' }}>/ {questions.length}</Text>
-              </Text>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginTop: 2 }}>{completionPercent}% Accuracy Score</Text>
-
-              {/* Metrics Breakdown */}
-              <View style={{ flexDirection: 'row', justifyContent: 'space-around', width: '100%', marginTop: 24, paddingTop: 24, borderTopWidth: 1, borderTopColor: T.border }}>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 12, color: T.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>Time Spent</Text>
-                  <Text style={{ fontSize: 16, fontWeight: '900', color: T.textPrimary, marginTop: 4 }}>{formatClock(timeSpentSeconds)}</Text>
-                </View>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 12, color: T.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>Outcome</Text>
-                  <Text style={{ fontSize: 16, fontWeight: '900', marginTop: 4, color: isPass ? T.green : T.rose }}>{isPass ? 'PASSED' : 'RETAKE'}</Text>
-                </View>
+              <View style={s.timeRow}>
+                <Ionicons name="time-outline" size={16} color={T.textMuted} />
+                <Text style={s.timeText}>Time spent {formatClock(timeSpent)}</Text>
               </View>
 
-              <View style={{ flexDirection: 'row', gap: 12, marginTop: 24, width: '100%' }}>
-                <TouchableOpacity
-                  onPress={resetAll}
-                  style={{ flex: 1, backgroundColor: T.chip, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
-                  accessibilityRole="button"
-                >
-                  <Text style={{ fontWeight: '700', color: T.textSecondary, fontSize: 12, textTransform: 'uppercase' }}>Retake Paper</Text>
+              <View style={s.resultActions}>
+                <TouchableOpacity onPress={retake} style={[s.secondaryBtn, { flex: 1 }]} accessibilityRole="button">
+                  <Ionicons name="refresh" size={16} color={T.textSecondary} />
+                  <Text style={s.secondaryBtnText}>Retake</Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => router.navigate('/')}
-                  style={{ flex: 1, backgroundColor: T.indigo, paddingVertical: 14, borderRadius: 16, alignItems: 'center', shadowColor: T.indigo, shadowOpacity: 0.3, shadowRadius: 10, elevation: 3 }}
-                  accessibilityRole="button"
-                >
-                  <Text style={{ fontWeight: '900', color: T.white, fontSize: 12, textTransform: 'uppercase' }}>Exit Terminal</Text>
+                <TouchableOpacity onPress={resetAll} style={[s.primaryBtn, { flex: 1 }]} accessibilityRole="button">
+                  <Ionicons name="albums" size={16} color={T.white} />
+                  <Text style={[s.primaryBtnText, { fontSize: 14 }]}>All papers</Text>
                 </TouchableOpacity>
               </View>
+              <TouchableOpacity onPress={() => router.navigate('/')} style={{ paddingTop: 16 }} accessibilityRole="button">
+                <Text style={[s.clearText, { color: T.textMuted }]}>Exit to home</Text>
+              </TouchableOpacity>
             </View>
 
-            {/* Diagnostic Filter Bar */}
-            <Text style={{ fontWeight: '900', fontSize: 18, color: T.textPrimary, marginBottom: 12 }}>Questions Review & Explanations</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                {['all', 'correct', 'incorrect', 'skipped', 'marked'].map(filterKey => (
+            <Text style={s.reviewTitle}>Review and explanations</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16, flexGrow: 0 }} contentContainerStyle={s.filterRow}>
+              {filters.map(([key, label]) => {
+                const on = reviewFilter === key;
+                return (
                   <TouchableOpacity
-                    key={filterKey}
-                    onPress={() => setReviewFilter(filterKey)}
-                    style={{
-                      paddingHorizontal: 16, paddingVertical: 8, borderRadius: 999, borderWidth: 1,
-                      backgroundColor: reviewFilter === filterKey ? T.indigo : T.card,
-                      borderColor: reviewFilter === filterKey ? T.indigo : T.border,
-                    }}
+                    key={key}
+                    onPress={() => setReviewFilter(key)}
+                    style={[s.filterChip, on && s.filterChipOn]}
                     accessibilityRole="button"
-                    accessibilityState={{ selected: reviewFilter === filterKey }}
+                    accessibilityState={{ selected: on }}
                   >
-                    <Text style={{ fontSize: 12, fontWeight: '700', textTransform: 'capitalize', color: reviewFilter === filterKey ? T.white : T.textMuted }}>{filterKey}</Text>
+                    <Text style={[s.filterText, on && s.filterTextOn]}>{label} ({reviewCounts[key]})</Text>
                   </TouchableOpacity>
-                ))}
-              </View>
+                );
+              })}
             </ScrollView>
 
-            {/* Filtered Explanation Cards */}
-            {filteredReviewList.map((r) => (
-              <View key={r.idx} style={{ backgroundColor: T.card, padding: 20, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: T.border }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: T.indigo, textTransform: 'uppercase', letterSpacing: 1 }}>Question {r.idx + 1}</Text>
-                  {r.isSkipped ? (
-                    <View style={{ backgroundColor: T.chip, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: T.textMuted }}>Skipped</Text>
-                    </View>
-                  ) : r.isCorrect ? (
-                    <View style={{ backgroundColor: T.greenTint, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: T.green }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: T.green }}>Correct</Text>
-                    </View>
-                  ) : (
-                    <View style={{ backgroundColor: T.dangerTint, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: T.rose }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: T.rose }}>Incorrect</Text>
-                    </View>
-                  )}
-                </View>
-
-                <Text style={{ fontSize: 16, color: T.textPrimary, fontWeight: '500', marginBottom: 16 }}>{r.q.question}</Text>
-
-                <View style={{ gap: 8, marginBottom: 16 }}>
-                  {!r.isSkipped && !r.isCorrect && (
-                    <View style={{ backgroundColor: T.dangerTint, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: T.rose }}>
-                      <Text style={{ fontSize: 10, color: T.rose, fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 }}>Your Choice</Text>
-                      <Text style={{ color: T.textPrimary, fontSize: 14, fontWeight: '500' }}>{r.selected}</Text>
-                    </View>
-                  )}
-                  <View style={{ backgroundColor: T.greenTint, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: T.green }}>
-                    <Text style={{ fontSize: 10, color: T.green, fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 }}>Correct Answer</Text>
-                    <Text style={{ color: T.textPrimary, fontSize: 14, fontWeight: '500' }}>{r.q.correctAnswer}</Text>
-                  </View>
-                </View>
-
-                {r.q.explanation && (
-                  <View style={{ backgroundColor: T.indigoTint, padding: 16, borderRadius: 12, borderWidth: 1, borderColor: T.indigo }}>
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: T.indigo, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Official Explanation</Text>
-                    <Text style={{ fontSize: 14, color: T.textPrimary, lineHeight: 20 }}>{r.q.explanation}</Text>
-                  </View>
-                )}
+            {filteredReviewList.length === 0 ? (
+              <View style={s.emptyWrap}>
+                <Ionicons name="checkmark-done-circle-outline" size={44} color={T.slate} />
+                <Text style={s.emptyText}>Nothing in this category.</Text>
               </View>
-            ))}
-            <View style={{ height: 40 }} />
+            ) : null}
+
+            {filteredReviewList.map((r) => {
+              const badge = r.isSkipped
+                ? { label: 'Skipped', color: T.textMuted, bg: T.chip, border: T.border }
+                : r.isCorrect
+                  ? { label: 'Correct', color: T.green, bg: T.greenTint, border: T.green }
+                  : { label: 'Incorrect', color: T.rose, bg: T.dangerTint, border: T.rose };
+              return (
+                <View key={r.q.id} style={s.reviewCard}>
+                  <View style={s.reviewHead}>
+                    <Text style={s.reviewQNum}>Question {r.idx + 1}</Text>
+                    <View style={[s.badge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
+                      <Text style={[s.badgeText, { color: badge.color }]}>{badge.label}</Text>
+                    </View>
+                  </View>
+                  <Text style={s.reviewQuestion}>{r.q.question}</Text>
+
+                  {r.q.options.map((opt, i) => {
+                    const isRight = i === r.q.correctIndex;
+                    const wrongPick = i === r.selected && !isRight;
+                    return (
+                      <View
+                        key={i}
+                        style={[s.reviewOpt, isRight && s.reviewOptCorrect, wrongPick && s.reviewOptWrong]}
+                        accessibilityLabel={`Option ${LETTERS[i]}: ${opt}${isRight ? ', correct answer' : ''}${wrongPick ? ', your answer' : ''}`}
+                      >
+                        <View style={[s.reviewLetter, isRight && { backgroundColor: T.green }, wrongPick && { backgroundColor: T.rose }]}>
+                          <Text style={[s.reviewLetterText, (isRight || wrongPick) && { color: T.white }]}>{LETTERS[i]}</Text>
+                        </View>
+                        <Text style={s.reviewOptText}>{opt}</Text>
+                        {isRight ? <Ionicons name="checkmark-circle" size={20} color={T.green} /> : null}
+                        {wrongPick ? <Ionicons name="close-circle" size={20} color={T.rose} /> : null}
+                      </View>
+                    );
+                  })}
+
+                  {r.q.explanation ? (
+                    <View style={s.explainBox}>
+                      <Text style={s.explainTitle}>Explanation</Text>
+                      <Text style={s.explainText}>{r.q.explanation}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })}
           </ScrollView>
         </ScreenShell>
         {dialogModal}

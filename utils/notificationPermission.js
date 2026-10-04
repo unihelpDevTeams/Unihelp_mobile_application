@@ -42,6 +42,16 @@ const loadNotificationsModule = async () => {
   return notificationsModulePromise;
 };
 
+const loadLocalNotificationsModule = async () => {
+  if (Platform.OS === 'web') return null;
+  try {
+    return await import('expo-notifications');
+  } catch (error) {
+    console.warn('Unable to load local notification support:', error?.message || error);
+    return null;
+  }
+};
+
 const getExtra = () => Constants.expoConfig?.extra || Constants.manifest2?.extra || Constants.manifest?.extra || {};
 
 const getApiBaseUrl = () => {
@@ -317,7 +327,14 @@ const addLazyNotificationListener = (addListener, handler) => {
   let active = true;
   let subscription = null;
   loadNotificationsModule().then((Notifications) => {
-    if (active && Notifications) subscription = addListener(Notifications, handler);
+    if (!active || !Notifications) return;
+    try {
+      subscription = addListener(Notifications, handler) || null;
+    } catch (error) {
+      console.warn('Unable to register notification listener:', error?.message || error);
+    }
+  }).catch((error) => {
+    console.warn('Unable to initialize notification listener:', error?.message || error);
   });
 
   return {
@@ -369,7 +386,51 @@ export const registerNotificationCategoryForPayload = async (payload = {}) => {
   }
 };
 
-export const listenToNotificationResponses = (handler) => addLazyNotificationListener(
-  (Notifications, callback) => Notifications.addNotificationResponseReceivedListener(callback),
-  handler
-);
+export const listenToNotificationResponses = (handler) => {
+  if (!isAndroidExpoGo) {
+    return addLazyNotificationListener(
+      (Notifications, callback) => Notifications.addNotificationResponseReceivedListener(callback),
+      handler
+    );
+  }
+
+  let active = true;
+  let subscription = null;
+  loadLocalNotificationsModule().then((Notifications) => {
+    if (!active || !Notifications) return;
+    if (typeof Notifications.addNotificationResponseReceivedListener !== 'function') {
+      console.warn('Notification response listeners are unavailable in this runtime.');
+      return;
+    }
+    try {
+      subscription = Notifications.addNotificationResponseReceivedListener(handler) || null;
+    } catch (error) {
+      console.warn('Unable to register notification response listener:', error?.message || error);
+    }
+  }).catch((error) => {
+    console.warn('Unable to initialize notification response listener:', error?.message || error);
+  });
+
+  return {
+    remove: () => {
+      active = false;
+      subscription?.remove?.();
+    },
+  };
+};
+
+export const getLastNotificationResponse = async () => {
+  const Notifications = isAndroidExpoGo
+    ? await loadLocalNotificationsModule()
+    : await loadNotificationsModule();
+  if (typeof Notifications?.getLastNotificationResponseAsync !== 'function') return null;
+  return Notifications.getLastNotificationResponseAsync();
+};
+
+export const clearLastNotificationResponse = async () => {
+  const Notifications = isAndroidExpoGo
+    ? await loadLocalNotificationsModule()
+    : await loadNotificationsModule();
+  if (typeof Notifications?.clearLastNotificationResponseAsync !== 'function') return;
+  await Notifications.clearLastNotificationResponseAsync();
+};

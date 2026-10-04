@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { spacing } from '../../src/shared/theme';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
@@ -30,7 +31,13 @@ import SchoolTypeFilter from '../../src/shared/components/SchoolTypeFilter';
 import SearchableDropdown from '../../src/signup/components/SearchableDropdown';
 import { useUniversities } from '../../src/signup/hooks/useUniversities';
 import { useDepartments } from '../../src/signup/hooks/useDepartments';
-import { ACADEMIC_LEVELS } from '../../src/signup/validation';
+import {
+  ACADEMIC_LEVELS,
+  formatDateOfBirth,
+  GENDER_OPTIONS,
+  isValidDateOfBirth,
+  parseDateOfBirth,
+} from '../../src/signup/validation';
 import { useAuth } from '../../context/AuthContext';
 import { saveUserProfile, fetchDailyStreak } from '../../services/firestoreSync';
 import { getDocs, collection, query, where } from 'firebase/firestore';
@@ -137,6 +144,8 @@ const fields = [
   { key: 'department', label: 'Department', placeholder: 'Add your department', icon: 'library-outline' },
   { key: 'level', label: 'Level', placeholder: 'e.g. ND 1', icon: 'ribbon-outline' },
   { key: 'location', label: 'Location', placeholder: 'Add your city or campus', icon: 'location-outline' },
+  { key: 'gender', label: 'Gender', placeholder: 'Add your gender', icon: 'person-circle-outline' },
+  { key: 'dateOfBirth', label: 'Date of birth', placeholder: 'Add your date of birth', icon: 'calendar-outline' },
 ];
 
 const THEME_OPTIONS = [
@@ -146,7 +155,7 @@ const THEME_OPTIONS = [
 ];
 
 const emptyForm = {
-  username: '', school: '', schoolId: '', department: '', departmentId: '', faculty: '', level: '', location: '', bio: '', role: 'university',
+  username: '', school: '', schoolId: '', department: '', departmentId: '', faculty: '', level: '', location: '', bio: '', gender: '', dateOfBirth: '', role: 'university',
 };
 
 // Sheets are mutually exclusive — only one is meaningfully open at a time.
@@ -169,6 +178,7 @@ export default function ProfileScreen() {
   const [status, setStatus] = useState(null);
   const [sheet, setSheet] = useState(SHEET.NONE);
   const [editingKey, setEditingKey] = useState(null);
+  const [datePickerVisible, setDatePickerVisible] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const { universities, loading: ul, searchText: us, setSearchText: sus, loadMore: lmu, schoolType, setSchoolType } = useUniversities();
   const { departments, loading: dl, searchText: ds, setSearchText: sds, selectUniversity } = useDepartments();
@@ -415,6 +425,16 @@ export default function ProfileScreen() {
     fieldValueEmpty: { color: c.greyLight, fontWeight: '400' },
     fieldInput: { fontSize: 14.5, color: c.ink, fontWeight: '600', padding: 0, margin: 0 },
     fieldInputArea: { minHeight: 40, textAlignVertical: 'top' },
+    genderOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: s.sm },
+    genderOption: { borderWidth: 1, borderColor: c.borderDefault, borderRadius: r.full, paddingHorizontal: s.md, paddingVertical: s.sm, backgroundColor: c.surfacePrimary },
+    genderOptionSelected: { backgroundColor: c.brandLight, borderColor: c.brand },
+    genderOptionText: { color: c.textSecondary, fontSize: 12, fontWeight: '600' },
+    genderOptionTextSelected: { color: c.brandText, fontWeight: '800' },
+    dateButton: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: s.md, borderWidth: 1, borderColor: c.borderDefault, borderRadius: r.lg, paddingHorizontal: s.md, backgroundColor: c.surfacePrimary },
+    dateButtonText: { flex: 1, color: c.textPrimary, fontSize: 14, fontWeight: '600' },
+    datePlaceholder: { color: c.textTertiary, fontWeight: '400' },
+    clearDateButton: { alignSelf: 'flex-start', paddingVertical: s.xs },
+    clearDateText: { color: c.brandText, fontSize: 12, fontWeight: '700' },
     charCount: { fontSize: 11, color: c.greyLight, textAlign: 'right', marginTop: s.xs },
 
     saveButton: {
@@ -447,6 +467,8 @@ export default function ProfileScreen() {
       level: profile?.level || '',
       location: profile?.location || '',
       bio: profile?.bio || '',
+      gender: profile?.gender || '',
+      dateOfBirth: profile?.dateOfBirth || '',
       role: 'university',
     };
     setForm(next);
@@ -567,10 +589,12 @@ export default function ProfileScreen() {
   const closeSheet = () => {
     setSheet(SHEET.NONE);
     setEditingKey(null);
+    setDatePickerVisible(false);
   };
 
   const openFieldEditor = (key) => {
     setEditingKey(key);
+    if (key === 'dateOfBirth') setDatePickerVisible(true);
     setSheet(SHEET.EDIT_FIELD);
     if (key === 'department' && form.schoolId) {
       selectUniversity(form.schoolId);
@@ -579,6 +603,7 @@ export default function ProfileScreen() {
 
   const backToEditProfile = () => {
     setEditingKey(null);
+    setDatePickerVisible(false);
     setSheet(SHEET.EDIT_PROFILE);
   };
 
@@ -698,6 +723,10 @@ export default function ProfileScreen() {
       showStatus({ type: 'error', text: 'Please enter a name with at least 2 characters.' });
       return;
     }
+    if (form.dateOfBirth && !isValidDateOfBirth(form.dateOfBirth)) {
+      showStatus({ type: 'error', text: 'Please enter a valid date of birth that is not in the future.' });
+      return;
+    }
     try {
       setSaving(true);
       setStatus(null);
@@ -706,6 +735,7 @@ export default function ProfileScreen() {
         level: form.level.trim(), location: form.location.trim(), bio: form.bio.trim(), role: form.role,
         schoolId: form.schoolId || '', universityId: form.schoolId || '', universityName: form.school.trim(),
         departmentId: form.departmentId || '', departmentName: form.department.trim(), faculty: form.faculty || '',
+        gender: form.gender || '', dateOfBirth: form.dateOfBirth || '',
       });
       setInitialForm(form);
       await refreshProfile();
@@ -952,6 +982,102 @@ export default function ProfileScreen() {
         />
       );
     }
+    if (editingKey === 'gender') {
+      return (
+        <View style={{ gap: 12 }}>
+          <Text style={styles.fieldLabel}>Gender</Text>
+          <View style={styles.genderOptions}>
+            {GENDER_OPTIONS.map((option) => {
+              const selected = form.gender === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: selected }}
+                  onPress={() => setField('gender', selected ? '' : option.value)}
+                  style={({ pressed }) => [styles.genderOption, selected && styles.genderOptionSelected, pressed && styles.rowPressed]}
+                >
+                  <Text style={[styles.genderOptionText, selected && styles.genderOptionTextSelected]}>{option.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Pressable onPress={backToEditProfile} style={({ pressed }) => [styles.secondaryButton, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="Done">
+            <Text style={styles.secondaryButtonText}>Done</Text>
+          </Pressable>
+        </View>
+      );
+    }
+    if (editingKey === 'dateOfBirth') {
+      const birthDate = parseDateOfBirth(form.dateOfBirth) || new Date(2000, 0, 1);
+      return (
+        <View style={{ gap: 8 }}>
+          <Text style={styles.fieldLabel}>Date of birth</Text>
+          {Platform.OS === 'web' ? (
+            <TextInput
+              value={form.dateOfBirth || ''}
+              onChangeText={(value) => setField('dateOfBirth', value)}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={colors.greyLight}
+              style={styles.fieldInput}
+              maxLength={10}
+              accessibilityLabel="Date of birth in year-month-day format"
+            />
+          ) : null}
+          {Platform.OS === 'android' ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Choose date of birth"
+              onPress={() => setDatePickerVisible(true)}
+              style={({ pressed }) => [styles.dateButton, pressed && styles.rowPressed]}
+            >
+              <Ionicons name="calendar-outline" size={18} color={colors.brandText} />
+              <Text style={[styles.dateButtonText, !form.dateOfBirth && styles.datePlaceholder]}>
+                {form.dateOfBirth ? birthDate.toLocaleDateString() : 'Select your date of birth'}
+              </Text>
+              {form.dateOfBirth ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear date of birth"
+                  onPress={() => {
+                    setField('dateOfBirth', '');
+                    setDatePickerVisible(false);
+                  }}
+                  hitSlop={8}
+                >
+                  <Ionicons name="close-circle" size={19} color={colors.greyLight} />
+                </Pressable>
+              ) : null}
+            </Pressable>
+          ) : null}
+          {datePickerVisible && Platform.OS !== 'web' ? (
+            <DateTimePicker
+              value={birthDate}
+              mode="date"
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              maximumDate={new Date()}
+              minimumDate={new Date(1900, 0, 1)}
+              onChange={(event, selectedDate) => {
+                if (event.type === 'set' && selectedDate) {
+                  setField('dateOfBirth', formatDateOfBirth(selectedDate));
+                  if (Platform.OS !== 'ios') setDatePickerVisible(false);
+                } else if (event.type === 'dismissed') {
+                  setDatePickerVisible(false);
+                }
+              }}
+            />
+          ) : null}
+          {Platform.OS !== 'android' && form.dateOfBirth ? (
+            <Pressable onPress={() => setField('dateOfBirth', '')} style={styles.clearDateButton}>
+              <Text style={styles.clearDateText}>Clear date</Text>
+            </Pressable>
+          ) : null}
+          <Pressable onPress={backToEditProfile} style={({ pressed }) => [styles.secondaryButton, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="Done">
+            <Text style={styles.secondaryButtonText}>Done</Text>
+          </Pressable>
+        </View>
+      );
+    }
     return (
       <View style={{ gap: 6 }}>
         <Text style={styles.fieldLabel}>{editingField?.label}</Text>
@@ -983,6 +1109,11 @@ export default function ProfileScreen() {
     <View>
       {fields.map((field, idx) => {
         const hasValue = !!form[field.key];
+        const displayValue = field.key === 'gender'
+          ? GENDER_OPTIONS.find((option) => option.value === form.gender)?.label || ''
+          : field.key === 'dateOfBirth'
+            ? parseDateOfBirth(form.dateOfBirth)?.toLocaleDateString() || ''
+            : form[field.key];
         return (
           <Pressable
             key={field.key}
@@ -990,7 +1121,7 @@ export default function ProfileScreen() {
             style={({ pressed }) => [styles.editFieldRow, idx !== fields.length - 1 && styles.sheetDivider, pressed && styles.rowPressed]}
             accessibilityRole="button"
             accessibilityLabel={`Edit ${field.label}`}
-            accessibilityValue={{ text: hasValue ? form[field.key] : 'Not set' }}
+            accessibilityValue={{ text: hasValue ? displayValue : 'Not set' }}
           >
             <View style={styles.sheetIconWrap}>
               <Ionicons name={field.icon} size={15} color={colors.brand} />
@@ -998,7 +1129,7 @@ export default function ProfileScreen() {
             <View style={styles.rowTextWrap}>
               <Text style={styles.fieldLabel}>{field.label}</Text>
               <Text style={[styles.fieldValue, !hasValue && styles.fieldValueEmpty]} numberOfLines={field.multiline ? 2 : 1}>
-                {hasValue ? form[field.key] : field.placeholder}
+                {hasValue ? displayValue : field.placeholder}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={16} color={colors.greyLight} />

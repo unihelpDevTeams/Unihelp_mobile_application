@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { spacing, borderRadius } from '../../shared/theme';
 import { useTheme } from '../../shared/theme/ThemeContext';
 import { useThemeStyles } from '../../shared/theme/createStyles';
+import { GENDER_OPTIONS, parseDateOfBirth } from '../validation';
 
 function SummaryRow({ label, value, onEdit, styles, colors }) {
   if (!value) return null;
@@ -85,6 +86,18 @@ export default function Step4Confirmation({ formData, onEditStep }) {
       <View style={styles.card}>
         <SectionHeader title="Profile" step={4} onEdit={() => onEditStep(4)} styles={styles} colors={colors} />
         <SummaryRow label="Bio" value={formData.bio} styles={styles} colors={colors} />
+        <SummaryRow
+          label="Gender"
+          value={GENDER_OPTIONS.find((item) => item.value === formData.gender)?.label}
+          styles={styles}
+          colors={colors}
+        />
+        <SummaryRow
+          label="Date of birth"
+          value={parseDateOfBirth(formData.dateOfBirth)?.toLocaleDateString()}
+          styles={styles}
+          colors={colors}
+        />
         {formData.interests?.length > 0 && (
           <View style={styles.interestsSection}>
             <Text style={styles.summaryLabel}>Interests</Text>

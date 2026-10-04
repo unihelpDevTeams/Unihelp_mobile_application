@@ -107,6 +107,8 @@ const normalizeUserProfile = (profile = {}, uid = null) => {
     departmentName: profile.departmentName || department,
     level: profile.level || '',
     bio: profile.bio || '',
+    gender: profile.gender || '',
+    dateOfBirth: profile.dateOfBirth || profile.date_of_birth || '',
     photo,
     photoURL: profile.photoURL || photo,
     photoThumb: profile.photoThumb || '',
@@ -158,6 +160,10 @@ const toUserApiPayload = (profile = {}) => ({
   level: profile.level || '',
   avatar: profile.photoURL || profile.photo || profile.avatar || '',
   bio: profile.bio || '',
+  ...(('gender' in profile) ? { gender: profile.gender || '' } : {}),
+  ...(('dateOfBirth' in profile || 'date_of_birth' in profile)
+    ? { date_of_birth: profile.dateOfBirth || profile.date_of_birth || '' }
+    : {}),
   total_points: profile.totalPoints ?? profile.total_points,
   rank_name: profile.rankName || profile.rank_name,
   ...(('cover' in profile || 'coverPhoto' in profile || 'coverUrl' in profile || 'cover_url' in profile)

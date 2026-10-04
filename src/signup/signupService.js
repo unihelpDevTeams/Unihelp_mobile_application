@@ -15,6 +15,7 @@ import {
 } from 'firebase/auth';
 import { auth, db } from '../../firebase/config';
 import { getCloudinaryThumbnailUrl, toCloudinaryAsset, uploadToCloudinary } from '../../services/cloudinary';
+import { putJson } from '../shared/services/backend';
 
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 
@@ -84,6 +85,8 @@ export async function createCompleteAccount(formData) {
     studentType,
     bio,
     interests,
+    gender,
+    dateOfBirth,
     heardFrom,
     heardFromOther,
   } = formData;
@@ -132,6 +135,8 @@ export async function createCompleteAccount(formData) {
     studentType: studentType || '',
     bio: bio || '',
     interests: interests || [],
+    gender: gender || '',
+    dateOfBirth: dateOfBirth || '',
     heardFrom: heardFrom || '',
     heardFromOther: heardFromOther || '',
     points: 0,
@@ -147,6 +152,22 @@ export async function createCompleteAccount(formData) {
   };
 
   await setDoc(userRef, userDocument, { merge: true });
+
+  try {
+    await putJson('/api/users', {
+      display_name: displayName,
+      email: email.trim().toLowerCase(),
+      university: universityName || '',
+      department: departmentName || '',
+      level: level || '',
+      avatar: photoURL || '',
+      bio: bio || '',
+      gender: gender || '',
+      date_of_birth: dateOfBirth || '',
+    });
+  } catch (error) {
+    console.warn('Could not sync the new profile with the notification service:', error?.message || error);
+  }
 
   return credential;
 }

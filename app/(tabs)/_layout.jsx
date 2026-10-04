@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/refs, react-hooks/set-state-in-effect */
 import React from 'react';
 import { Animated, Easing, PanResponder, Platform, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Tabs, usePathname, useRouter } from 'expo-router';
@@ -12,21 +13,14 @@ import {
   listenUnreadGroupMessageCount,
 } from '../../services/firestoreSync';
 
-// NOTE: expo-router's usePathname() strips route-group segments like
-// "(tabs)" from the URL, so these must be the *resolved* paths, not the
-// file-system group paths.
 const TAB_ROUTES = ['/', '/chat', '/studyMaterials', '/groups', '/feed'];
 const SWIPE_DISTANCE = 72;
 const SWIPE_VELOCITY = 0.45;
 const TRANSITION_DURATION = 180;
-// If the route never changes after a swipe (navigation failed / no-op),
-// recover instead of leaving the screen parked off-canvas.
 const NAVIGATION_TIMEOUT = 700;
 const TAB_CONTENT_HEIGHT = 48;
 const TAB_PADDING_TOP = 8;
 
-// Exact match only: nested screens (e.g. /chat/123) are NOT tab roots, so the
-// swipe gesture stays disabled there. Returns -1 when not on a tab root.
 function getTabIndex(pathname) {
   const normalized = pathname && pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
   return TAB_ROUTES.indexOf(normalized || '/');
@@ -60,16 +54,21 @@ export default function TabsLayout() {
   const counterX = React.useRef(Animated.multiply(swipeX, -1)).current;
 
   const widthRef = React.useRef(width);
-  widthRef.current = width;
-
   const currentIndex = getTabIndex(pathname);
   const currentIndexRef = React.useRef(currentIndex);
-  currentIndexRef.current = currentIndex;
 
   // Only engage the tab-switch gesture on a root tab screen so nested screens
   // with their own horizontal gestures (and iOS edge-swipe-back) are left alone.
   const canSwipeRef = React.useRef(currentIndex !== -1);
-  canSwipeRef.current = currentIndex !== -1;
+
+  React.useEffect(() => {
+    widthRef.current = width;
+  }, [width]);
+
+  React.useEffect(() => {
+    currentIndexRef.current = currentIndex;
+    canSwipeRef.current = currentIndex !== -1;
+  }, [currentIndex]);
 
   const isAnimatingRef = React.useRef(false);
   const pendingDirectionRef = React.useRef(0);

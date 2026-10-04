@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect, react-hooks/purity, react-hooks/preserve-manual-memoization */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -17,7 +18,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useIsFocused, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import ScreenShell from '../../src/shared/components/ScreenShell';
@@ -41,16 +42,19 @@ import {
   RELATIONSHIP,
   acceptFriendRequest,
   acceptMessageRequest,
+  blockStudent,
   declineMessageRequest,
   listenIncomingMessageRequests,
   listenRelationship,
   sendFriendRequest,
+  unblockStudent,
 } from '../../src/shared/services/friendships';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { getSocket } from '../../src/shared/services/socket';
 import { getJson } from '../../src/shared/services/backend';
+import { submitReport } from '../../src/shared/services/support';
 
 /* -------------------------------------------------------------------------- */
 /*                                  Constants                                 */
@@ -95,7 +99,7 @@ const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '😮'];
 const emitSafe = (event, payload) => {
   try {
     getSocket().emit(event, payload);
-  } catch (error) {
+  } catch (_error) {
     // Socket might not be ready yet; callers never depend on this.
   }
 };
@@ -635,7 +639,7 @@ function AttachmentImage({ uri, styles, colors, spaced, onPress, onLongPress }) 
       {state === 'error' ? (
         <View style={styles.attachmentOverlay}>
           <Ionicons name="image-outline" size={26} color={colors.textTertiary} />
-          <Text style={styles.attachmentOverlayText}>Couldn't load photo</Text>
+          <Text style={styles.attachmentOverlayText}>Could not load photo</Text>
         </View>
       ) : null}
     </Pressable>
@@ -875,6 +879,7 @@ export default function ConversationPage() {
 
 function ConversationScreen({ conversationId }) {
   const router = useRouter();
+  const isFocused = useIsFocused();
   const { user, profile } = useAuth();
   const { colors } = useTheme();
   const styles = useThemeStyles(createStyles);
@@ -1346,10 +1351,10 @@ function ConversationScreen({ conversationId }) {
   // foregrounded, and never twice for the same message. Also pings the sender over the socket
   // so they see "Seen" instantly without anyone reading Firestore.
   useEffect(() => {
-    if (!conversationId || !user?.uid || !lastIncomingId) return undefined;
+    if (!isFocused || !conversationId || !user?.uid || !lastIncomingId) return undefined;
 
     const run = () => {
-      if (AppState.currentState !== 'active' || markedReadRef.current === lastIncomingId) return;
+      if (!isFocused || AppState.currentState !== 'active' || markedReadRef.current === lastIncomingId) return;
       markedReadRef.current = lastIncomingId;
       markConversationRead(conversationId, user.uid).catch(() => {
         markedReadRef.current = null;
@@ -1370,7 +1375,7 @@ function ConversationScreen({ conversationId }) {
       clearTimeout(timer);
       sub.remove();
     };
-  }, [conversationId, user?.uid, lastIncomingId]);
+  }, [conversationId, isFocused, user?.uid, lastIncomingId]);
 
   useEffect(() => {
     setAvatarFailed(false);
@@ -1870,6 +1875,102 @@ function ConversationScreen({ conversationId }) {
     runRelationshipAction('Friend request', 'Could not accept friend request.', () =>
       acceptFriendRequest({ request: relationship.request, currentUid, currentProfile: profile })
     );
+  };
+
+  const handleReportUser = () => {
+    if (!currentUid || !otherId) return;
+    setShowOptionsSheet(false);
+    setTimeout(() => {
+      showConfirmDialog({
+        title: 'Report this user?',
+        subtitle: `Send a moderation report about ${headerTitle}. This creates a flagged record with the chat context for review.`,
+        icon: 'flag-outline',
+        iconBgColor: colors.dangerLight,
+        iconColor: colors.error,
+        primaryText: 'Submit report',
+        primaryStyle: 'danger',
+        onPrimary: async () => {
+          try {
+            await submitReport({
+              reportType: 'harassment',
+              title: `Report: ${headerTitle}`,
+              description: [
+                `User report against ${headerTitle} (${otherId}) in a direct chat.`,
+                `Conversation ID: ${conversationId}`,
+                `Reporter UID: ${currentUid}`,
+                'Reason: Inappropriate behavior or safety concern in chat.',
+                'Please review and take the appropriate action.',
+              ].join('\n'),
+            });
+            showToast('Report submitted');
+          } catch (error) {
+            showAlertDialog('Report failed', error?.message || 'Unable to submit the report right now.');
+          }
+        },
+      });
+    }, 200);
+  };
+
+  const handlePromptBlockUser = () => {
+    if (!currentUid || !otherId) return;
+    setShowOptionsSheet(false);
+    setTimeout(() => {
+      showConfirmDialog({
+        title: 'Block this user?',
+        subtitle: `You will no longer be able to message ${headerTitle} or receive messages from them.`,
+        icon: 'ban-outline',
+        iconBgColor: colors.dangerLight,
+        iconColor: colors.error,
+        primaryText: 'Block user',
+        primaryStyle: 'danger',
+        onPrimary: async () => {
+          try {
+            setRelationshipBusy(true);
+            await blockStudent({
+              currentUid,
+              targetUid: otherId,
+              currentProfile: profile,
+              targetProfile: { ...otherUser, uid: otherId },
+            });
+            setRelationship({ state: RELATIONSHIP.BLOCKED, blockedByMe: true });
+            showToast(`${headerTitle} has been blocked`);
+            setTimeout(() => router.back(), 500);
+          } catch (error) {
+            showAlertDialog('Could not block user', error?.message || 'Please try again.');
+          } finally {
+            setRelationshipBusy(false);
+          }
+        },
+      });
+    }, 200);
+  };
+
+  const handlePromptUnblockUser = () => {
+    if (!currentUid || !otherId) return;
+    setShowOptionsSheet(false);
+    setTimeout(() => {
+      showConfirmDialog({
+        title: 'Unblock this user?',
+        subtitle: `You will be able to view their profile and send a request again.`,
+        icon: 'ban-outline',
+        iconBgColor: colors.brandLight,
+        iconColor: colors.brand,
+        primaryText: 'Unblock user',
+        primaryStyle: 'default',
+        onPrimary: async () => {
+          try {
+            setRelationshipBusy(true);
+            await unblockStudent({ currentUid, targetUid: otherId });
+            setRelationship({ state: RELATIONSHIP.NONE });
+            showToast(`${headerTitle} has been unblocked`);
+          } catch (error) {
+            showAlertDialog('Could not unblock user', error?.message || 'Please try again.');
+          } finally {
+            setRelationshipBusy(false);
+          }
+        },
+      });
+    }, 200);
   };
 
   /* ------------------------------ List behavior --------------------------- */
@@ -2448,6 +2549,27 @@ function ConversationScreen({ conversationId }) {
             <Text style={styles.sheetSubtitle}>Changes only affect your side of this chat.</Text>
 
             {otherId ? <SheetOption styles={styles} colors={colors} icon="person-outline" label="View profile" onPress={handleViewProfile} /> : null}
+            {otherId ? <SheetOption styles={styles} colors={colors} icon="flag-outline" label="Report user" onPress={handleReportUser} /> : null}
+            {otherId ? (
+              isBlocked ? (
+                <SheetOption
+                  styles={styles}
+                  colors={colors}
+                  icon="ban-outline"
+                  label="Unblock user"
+                  onPress={handlePromptUnblockUser}
+                />
+              ) : (
+                <SheetOption
+                  styles={styles}
+                  colors={colors}
+                  icon="ban"
+                  label="Block user"
+                  danger
+                  onPress={handlePromptBlockUser}
+                />
+              )
+            ) : null}
             <SheetOption
               styles={styles}
               colors={colors}

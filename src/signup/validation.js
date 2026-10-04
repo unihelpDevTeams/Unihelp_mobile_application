@@ -51,6 +51,38 @@ export const ACADEMIC_LEVELS = [
   { label: 'HND 2', value: 'HND 2' },
 ];
 
+export const GENDER_OPTIONS = [
+  { label: 'Woman', value: 'woman' },
+  { label: 'Man', value: 'man' },
+  { label: 'Non-binary', value: 'non_binary' },
+  { label: 'Another identity', value: 'another_identity' },
+  { label: 'Prefer not to say', value: 'prefer_not_to_say' },
+];
+
+export function parseDateOfBirth(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  return date;
+}
+
+export function formatDateOfBirth(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function isValidDateOfBirth(value, now = new Date()) {
+  const date = parseDateOfBirth(value);
+  if (!date) return false;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const earliest = new Date(1900, 0, 1);
+  return date >= earliest && date <= today;
+}
+
 export const INTEREST_OPTIONS = [
   'Programming',
   'Medicine',
@@ -150,6 +182,12 @@ export function validateStep(step, data) {
     case 4: {
       if (!data.photoURI) {
         errors.photoURI = 'Please add a profile picture to continue.';
+      }
+      if (data.gender && !GENDER_OPTIONS.some((option) => option.value === data.gender)) {
+        errors.gender = 'Please select a valid gender option.';
+      }
+      if (data.dateOfBirth && !isValidDateOfBirth(data.dateOfBirth)) {
+        errors.dateOfBirth = 'Please select a valid date that is not in the future.';
       }
       break;
     }

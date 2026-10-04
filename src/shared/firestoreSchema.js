@@ -65,6 +65,8 @@ export const profileDefaults = (user, overrides = {}) => {
     department: overrides.department || '',
     level: overrides.level || '',
     bio: overrides.bio || '',
+    gender: overrides.gender || '',
+    dateOfBirth: overrides.dateOfBirth || overrides.date_of_birth || '',
     location: overrides.location || '',
     notificationsEnabled: overrides.notificationsEnabled ?? true,
     dmPolicy: overrides.dmPolicy || 'open',

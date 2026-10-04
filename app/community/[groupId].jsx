@@ -65,16 +65,19 @@ const NEAR_BOTTOM_PX = 140;
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const EDIT_WINDOW_MS = 60 * 60 * 1000;
 const MAX_LENGTH = 2000;
+const PENDING_MATCH_WINDOW_MS = 3 * 60 * 1000;
+const PENDING_SCAN_TAIL = 80; // optimistic messages can only match the newest server messages
 
-// In-memory caches: re-entering a group within the TTL costs zero reads for the
-// group doc, membership, join requests and the message page.
-const GROUP_CACHE_TTL_MS = 2 * 60 * 1000;
-const MESSAGE_CACHE_TTL_MS = 20 * 1000;
+// In-memory caches. Re-entering a group shows cached data instantly and costs ZERO extra
+// page reads: the live listener revalidates, and a page is only fetched when nothing is cached
+// (or when the cache is so old that the listener's window no longer overlaps it).
+const GROUP_CACHE_TTL_MS = 3 * 60 * 1000;
 const MESSAGE_CACHE_MAX = 300;
 const CACHE_MAX_ENTRIES = 12;
 const GROUP_CACHE = new Map();
 const MESSAGE_CACHE = new Map();
 const DRAFT_CACHE = new Map();
+const REQUESTED_CACHE = new Set(); // join requests already sent this session (no read needed)
 
 const putCache = (map, key, value) => {
   if (!key) return;
@@ -82,6 +85,50 @@ const putCache = (map, key, value) => {
   map.set(key, value);
   while (map.size > CACHE_MAX_ENTRIES) map.delete(map.keys().next().value);
 };
+
+/* ------------------------------ Role identity ------------------------------ */
+// One place defines how privileged senders look. Admin = warm gold, Premium = deep violet.
+// - mineBg: solid fill used when the viewer is the sender (white text must stay readable)
+// - tint:   translucent wash laid over the "theirs" bubble so it adapts to light/dark themes
+const ROLE_STYLES = {
+  admin: {
+    key: 'admin',
+    label: 'Admin',
+    icon: 'shield-checkmark',
+    accent: '#C98F00',
+    chipBg: '#F5B301',
+    chipText: '#2B1D00',
+    tint: 'rgba(245,179,1,0.11)',
+    border: 'rgba(245,179,1,0.80)',
+    glow: '#F5B301',
+    mineBg: null,
+    sheen: 'rgba(255,236,170,0.55)',
+  },
+  premium: {
+    key: 'premium',
+    label: 'Premium',
+    icon: 'diamond',
+    accent: '#8B5CF6',
+    chipBg: '#7C3AED',
+    chipText: '#FFFFFF',
+    tint: 'rgba(139,92,246,0.12)',
+    border: 'rgba(139,92,246,0.60)',
+    glow: '#8B5CF6',
+    mineBg: '#5B21B6',
+    sheen: 'rgba(233,222,255,0.55)',
+  },
+};
+
+const roleOf = (message) => {
+  if (message?.senderRole === 'admin') return ROLE_STYLES.admin;
+  if (message?.senderPremium) return ROLE_STYLES.premium;
+  return null;
+};
+
+const bubbleRadii = (mine, tail) =>
+  mine
+    ? { borderTopLeftRadius: 20, borderTopRightRadius: 20, borderBottomLeftRadius: 20, borderBottomRightRadius: tail ? 5 : 20 }
+    : { borderTopLeftRadius: 20, borderTopRightRadius: 20, borderBottomRightRadius: 20, borderBottomLeftRadius: tail ? 5 : 20 };
 
 /* -------------------------------------------------------------------------- */
 /*                                   Helpers                                  */
@@ -145,12 +192,17 @@ const reactionSig = (m) =>
     .map((k) => `${k}:${(m.reactions[k] || []).join(',')}`)
     .join('|');
 
+// Includes role + avatar fields so a promotion / new photo is never swallowed by the merge.
 const isSameMessage = (a, b) =>
   a.text === b.text &&
   a.deleted === b.deleted &&
   a.edited === b.edited &&
   a.type === b.type &&
   a.senderName === b.senderName &&
+  a.senderAvatar === b.senderAvatar &&
+  a.senderRole === b.senderRole &&
+  Boolean(a.senderPremium) === Boolean(b.senderPremium) &&
+  (a.stickerId || a.sticker?.id) === (b.stickerId || b.sticker?.id) &&
   a.replyTo?.id === b.replyTo?.id &&
   getMillis(a) === getMillis(b) &&
   reactionSig(a) === reactionSig(b);
@@ -189,7 +241,16 @@ const matchesPending = (pending, server) => {
       : String(server.text || '').trim() === String(pending.text || '').trim();
   if (!sameContent) return false;
   const sm = getMillis(server);
-  return !sm || Math.abs(sm - getMillis(pending)) < 3 * 60 * 1000;
+  return !sm || Math.abs(sm - getMillis(pending)) < PENDING_MATCH_WINDOW_MS;
+};
+
+// Only the newest server messages can echo an optimistic one, so don't scan all 300.
+const hasServerEcho = (pending, messages) => {
+  const from = Math.max(0, messages.length - PENDING_SCAN_TAIL);
+  for (let i = messages.length - 1; i >= from; i -= 1) {
+    if (matchesPending(pending, messages[i])) return true;
+  }
+  return false;
 };
 
 const computeIsAdmin = (group, membership, uid) =>
@@ -236,6 +297,9 @@ const messagePreview = (message) => {
   return text.length > 80 ? `${text.slice(0, 80).trim()}…` : text;
 };
 
+// expo-image-picker moved from MediaTypeOptions to string arrays; support both.
+const imageMediaTypes = () => (ImagePicker.MediaType ? ['images'] : ImagePicker.MediaTypeOptions?.Images);
+
 // Drag-to-dismiss for bottom sheets. Attach panHandlers to the handle only.
 function useDraggableSheet(onDismiss) {
   const translateY = useRef(new Animated.Value(0)).current;
@@ -258,6 +322,9 @@ function useDraggableSheet(onDismiss) {
           Animated.spring(translateY, { toValue: 0, useNativeDriver: true, bounciness: 6 }).start();
         }
       },
+      onPanResponderTerminate: () => {
+        Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
+      },
     })
   ).current;
   return { translateY, panHandlers: panResponder.panHandlers };
@@ -272,7 +339,7 @@ const createStyles = (c) => ({
   flex: { flex: 1 },
   chatArea: { flex: 1 },
   composerOuter: { backgroundColor: c.surface, borderTopWidth: StyleSheet.hairlineWidth, borderColor: c.borderDefault },
-  chatContent: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 12 },
+  chatContent: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 14 },
 
   jumpButton: { position: 'absolute', right: 14, bottom: 12, width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface, borderWidth: 1, borderColor: c.borderDefault, shadowColor: c.shadow || '#000', shadowOpacity: 0.15, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
   jumpBadge: { position: 'absolute', top: -6, right: -4, minWidth: 20, height: 20, borderRadius: 10, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
@@ -281,17 +348,20 @@ const createStyles = (c) => ({
   toast: { position: 'absolute', top: 10, alignSelf: 'center', backgroundColor: c.textPrimary, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8, maxWidth: '90%', zIndex: 30 },
   toastText: { color: c.surface, fontSize: 13, fontWeight: '700' },
 
-  compactHero: { backgroundColor: c.surface, borderRadius: 16, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: c.borderDefault },
+  compactHero: { backgroundColor: c.surface, borderRadius: 18, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: c.borderDefault },
   heroActionsRowInline: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 'auto' },
   heroIconButton: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brandLight },
   heroTopRow: { flexDirection: 'row', alignItems: 'center' },
-  heroAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center', marginRight: 10, overflow: 'hidden' },
-  heroAvatarImage: { width: 44, height: 44 },
+  heroAvatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center', marginRight: 10, overflow: 'hidden' },
+  heroAvatarImage: { width: 46, height: 46 },
   heroAvatarText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16 },
   heroTextWrap: { flex: 1, justifyContent: 'center', paddingRight: 8 },
-  heroTitle: { color: c.textPrimary, fontSize: 15.5, fontWeight: '800', marginBottom: 2 },
+  heroTitle: { color: c.textPrimary, fontSize: 16, fontWeight: '800', marginBottom: 2 },
   heroText: { color: c.textSecondary, fontSize: 12 },
-  heroDescription: { color: c.textTertiary, fontSize: 12, marginTop: 8, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.borderDefault },
+  heroMetaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+  heroPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: c.surfaceSecondary, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
+  heroPillText: { color: c.textSecondary, fontSize: 11, fontWeight: '700' },
+  heroDescription: { color: c.textTertiary, fontSize: 12, lineHeight: 17, marginTop: 10, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.borderDefault },
 
   joinButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: c.brand, borderRadius: 14, paddingVertical: 13, marginBottom: 16 },
   joinButtonMuted: { backgroundColor: c.skeleton },
@@ -308,7 +378,7 @@ const createStyles = (c) => ({
   skeletonMine: { alignSelf: 'flex-end' },
   skeletonTheirs: { alignSelf: 'flex-start' },
 
-  dateDividerWrap: { alignItems: 'center', marginVertical: 10 },
+  dateDividerWrap: { alignItems: 'center', marginVertical: 12 },
   dateDividerPill: { backgroundColor: c.surfaceSecondary, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
   dateDividerText: { color: c.textSecondary, fontSize: 11, fontWeight: '700' },
 
@@ -316,28 +386,34 @@ const createStyles = (c) => ({
   rowEnd: { marginBottom: 10 },
   rowTheirs: { justifyContent: 'flex-start' },
   rowMine: { justifyContent: 'flex-end' },
-  swipeReplyIconTheirs: { position: 'absolute', left: 38, top: '50%', marginTop: -12, width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  swipeReplyIconTheirs: { position: 'absolute', left: 44, top: '50%', marginTop: -12, width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
   swipeReplyIconMine: { position: 'absolute', right: 2, top: '50%', marginTop: -12, width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
-  avatarSlot: { width: 30, alignItems: 'center', marginRight: 6, justifyContent: 'flex-end' },
+
+  avatarSlot: { width: 36, alignItems: 'center', marginRight: 4, justifyContent: 'flex-end' },
+  avatarRing: { padding: 1.5, borderRadius: 20, borderWidth: 1.5, borderColor: 'transparent' },
   avatar: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarImage: { width: 28, height: 28 },
   avatarText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
+  avatarBadge: { position: 'absolute', right: -3, bottom: -3, width: 14, height: 14, borderRadius: 7, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: c.background },
+
   bubbleColumn: { maxWidth: '78%' },
   pendingDim: { opacity: 0.6 },
   bubble: { paddingHorizontal: 14, paddingVertical: 9, shadowColor: c.shadow || '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 1, elevation: 1 },
   bubbleFailed: { borderWidth: 1, borderColor: c.danger },
-  bubbleAdmin: { borderWidth: 2, borderColor: '#F5B301' },
-  bubblePremium: { borderWidth: 1, borderColor: '#8A2BE2' },
-  roleBadge: { alignSelf: 'flex-start', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8, marginBottom: 4 },
-  roleBadgeAdmin: { backgroundColor: '#F5B301' },
-  roleBadgePremium: { backgroundColor: '#8A2BE2' },
-  roleBadgeText: { fontSize: 9, fontWeight: '900', letterSpacing: 0.4 },
-  bubbleTheirs: { backgroundColor: c.surfacePrimary, borderTopLeftRadius: 20, borderTopRightRadius: 20, borderBottomRightRadius: 20, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: c.borderDefault },
-  bubbleTheirsNoTail: { borderBottomLeftRadius: 20 },
-  bubbleMine: { backgroundColor: c.brand, borderTopLeftRadius: 20, borderTopRightRadius: 20, borderBottomLeftRadius: 20, borderBottomRightRadius: 4 },
-  bubbleMineNoTail: { borderBottomRightRadius: 20 },
+  bubbleTheirs: { backgroundColor: c.surfacePrimary, borderWidth: 1, borderColor: c.borderDefault },
+  bubbleMine: { backgroundColor: c.brand },
   bubbleSticker: { backgroundColor: 'transparent', borderWidth: 0, paddingHorizontal: 2, paddingVertical: 2, shadowOpacity: 0, elevation: 0 },
-  messageAuthor: { fontWeight: '800', fontSize: 12, marginBottom: 2 },
+
+  // Role bubbles (admin / premium): wash + hairline border + soft coloured glow + top sheen.
+  bubbleRole: { borderWidth: 1, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 4 },
+  roleSheen: { position: 'absolute', top: 0, left: 16, right: 16, height: 1 },
+
+  authorRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 },
+  authorRowMine: { justifyContent: 'flex-end' },
+  messageAuthor: { fontWeight: '800', fontSize: 12, flexShrink: 1 },
+  roleChip: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 999 },
+  roleChipText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.2 },
+
   messageBody: { color: c.inkLight, fontSize: 15, lineHeight: 21 },
   messageBodyMine: { color: '#FFFFFF' },
   messageDeleted: { fontStyle: 'italic', opacity: 0.75 },
@@ -355,16 +431,17 @@ const createStyles = (c) => ({
   replyText: { marginTop: 2, color: c.textSecondary, fontSize: 12, lineHeight: 16 },
   replyTextMine: { color: 'rgba(255,255,255,0.85)' },
 
-  reactionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 5, marginLeft: 2 },
-  reactionsRowMine: { justifyContent: 'flex-end', marginLeft: 0, marginRight: 2 },
-  reactionPill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: c.surface, borderWidth: 1, borderColor: c.borderDefault, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  // Reactions tuck under the bubble edge for a layered, native-feeling look.
+  reactionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: -6, paddingHorizontal: 8, zIndex: 2 },
+  reactionsRowMine: { justifyContent: 'flex-end' },
+  reactionPill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: c.surface, borderWidth: 1, borderColor: c.borderDefault, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, shadowColor: c.shadow || '#000', shadowOpacity: 0.1, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
   reactionPillActive: { backgroundColor: c.brandLight, borderColor: c.brand },
   reactionEmoji: { fontSize: 12.5 },
   reactionCount: { fontSize: 11, fontWeight: '700', color: c.textSecondary },
   reactionCountActive: { color: c.brandDark },
 
   actionSheetBackdrop: { flex: 1, backgroundColor: c.overlay, justifyContent: 'flex-end' },
-  actionSheetCard: { backgroundColor: c.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 12, paddingTop: 4, paddingBottom: 24 },
+  actionSheetCard: { backgroundColor: c.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 12, paddingTop: 4, paddingBottom: 24 },
   actionSheetHandleWrap: { paddingVertical: 10, alignItems: 'center' },
   actionSheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: c.borderDefault },
   sheetReactions: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: c.surfaceSecondary, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 6, marginBottom: 8 },
@@ -527,10 +604,21 @@ function SheetRow({ icon, label, onPress, danger, styles, colors }) {
   );
 }
 
+// Small pill shown next to the sender name: icon + role label.
+function RoleChip({ role, styles }) {
+  return (
+    <View style={[styles.roleChip, { backgroundColor: role.chipBg }]} accessibilityLabel={`${role.label} member`}>
+      <Ionicons name={role.icon} size={9} color={role.chipText} />
+      <Text style={[styles.roleChipText, { color: role.chipText }]}>{role.label}</Text>
+    </View>
+  );
+}
+
 // Memoised: typing in the composer no longer re-renders every bubble.
 const MessageRow = React.memo(function MessageRow({
   message,
   mine,
+  isFirst,
   showHeader,
   groupedNext,
   uid,
@@ -555,7 +643,13 @@ const MessageRow = React.memo(function MessageRow({
   const isSticker = message.type === 'sticker' && !isDeleted;
   const lightFooter = mine && !isSticker;
   const senderColor = useMemo(() => colorForName(message.senderName || 'Student'), [message.senderName]);
-  const isAdminSender = message.senderRole === 'admin';
+
+  // Role styling applies to the avatar always, and to the bubble for real text messages only.
+  const senderRole = roleOf(message);
+  const bubbleRole = senderRole && !isSticker && !isDeleted ? senderRole : null;
+  const roleOnMine = Boolean(bubbleRole && mine);
+  const tail = !groupedNext;
+  const radii = bubbleRadii(mine, tail);
 
   const reactionEntries = useMemo(
     () =>
@@ -625,6 +719,8 @@ const MessageRow = React.memo(function MessageRow({
     </View>
   );
 
+  const showAuthorRow = (showHeader && !mine) || (isFirst && bubbleRole);
+
   return (
     <View style={[styles.row, mine ? styles.rowMine : styles.rowTheirs, !groupedNext && styles.rowEnd]} {...panResponder.panHandlers}>
       <Animated.View pointerEvents="none" style={[mine ? styles.swipeReplyIconMine : styles.swipeReplyIconTheirs, { opacity: replyIconOpacity }]}>
@@ -632,14 +728,21 @@ const MessageRow = React.memo(function MessageRow({
       </Animated.View>
 
       {!mine ? (
-        <Pressable style={styles.avatarSlot} onPress={() => message.senderId && onOpenProfile(message.senderId)} disabled={!message.senderId}>
+        <Pressable style={styles.avatarSlot} onPress={() => message.senderId && onOpenProfile(message.senderId)} disabled={!message.senderId} accessibilityRole="button" accessibilityLabel={`Open ${message.senderName || 'student'}'s profile`}>
           {showHeader ? (
-            <View style={[styles.avatar, { backgroundColor: senderColor }]}>
-              {message.senderAvatar ? (
-                <Image source={{ uri: message.senderAvatar }} style={styles.avatarImage} />
-              ) : (
-                <Text style={styles.avatarText}>{initialsForName(message.senderName || 'S')}</Text>
-              )}
+            <View style={[styles.avatarRing, senderRole && { borderColor: senderRole.chipBg }]}>
+              <View style={[styles.avatar, { backgroundColor: senderColor }]}>
+                {message.senderAvatar ? (
+                  <Image source={{ uri: message.senderAvatar }} style={styles.avatarImage} />
+                ) : (
+                  <Text style={styles.avatarText}>{initialsForName(message.senderName || 'S')}</Text>
+                )}
+              </View>
+              {senderRole ? (
+                <View style={[styles.avatarBadge, { backgroundColor: senderRole.chipBg }]}>
+                  <Ionicons name={senderRole.icon} size={8} color={senderRole.chipText} />
+                </View>
+              ) : null}
             </View>
           ) : null}
         </Pressable>
@@ -651,21 +754,35 @@ const MessageRow = React.memo(function MessageRow({
           onPressIn={() => Animated.spring(scaleAnim, { toValue: 0.98, useNativeDriver: true, speed: 40, bounciness: 4 }).start()}
           onPressOut={() => Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 30, bounciness: 4 }).start()}
           delayLongPress={250}
+          accessibilityLabel={`${message.senderName || 'Student'}: ${messagePreview(message)}`}
           style={[
             styles.bubble,
             mine ? styles.bubbleMine : styles.bubbleTheirs,
-            groupedNext && (mine ? styles.bubbleMineNoTail : styles.bubbleTheirsNoTail),
+            radii,
             isSticker && styles.bubbleSticker,
+            bubbleRole && [
+              styles.bubbleRole,
+              { borderColor: bubbleRole.border, shadowColor: bubbleRole.glow },
+              roleOnMine && bubbleRole.mineBg && { backgroundColor: bubbleRole.mineBg },
+            ],
             failed && styles.bubbleFailed,
             sending && styles.pendingDim,
-            !isSticker && isAdminSender && styles.bubbleAdmin,
-            !isSticker && !isAdminSender && message.senderPremium && styles.bubblePremium,
           ]}
         >
-          {showHeader ? <Text style={[styles.messageAuthor, { color: senderColor }]}>{message.senderName || 'Student'}</Text> : null}
-          {isAdminSender || message.senderPremium ? (
-            <View style={[styles.roleBadge, isAdminSender ? styles.roleBadgeAdmin : styles.roleBadgePremium]}>
-              <Text style={[styles.roleBadgeText, { color: isAdminSender ? '#000' : '#FFF' }]}>{isAdminSender ? 'ADMIN' : 'PREMIUM'}</Text>
+          {/* Tinted wash (theirs only) + top sheen make the role bubble read as a premium surface. */}
+          {bubbleRole && !mine ? (
+            <View pointerEvents="none" style={[StyleSheet.absoluteFill, radii, { backgroundColor: bubbleRole.tint }]} />
+          ) : null}
+          {bubbleRole ? <View pointerEvents="none" style={[styles.roleSheen, { backgroundColor: bubbleRole.sheen }]} /> : null}
+
+          {showAuthorRow ? (
+            <View style={[styles.authorRow, mine && styles.authorRowMine]}>
+              {showHeader && !mine ? (
+                <Text style={[styles.messageAuthor, { color: senderRole ? senderRole.accent : senderColor }]} numberOfLines={1}>
+                  {message.senderName || 'Student'}
+                </Text>
+              ) : null}
+              {bubbleRole && isFirst ? <RoleChip role={bubbleRole} styles={styles} /> : null}
             </View>
           ) : null}
 
@@ -701,6 +818,8 @@ const MessageRow = React.memo(function MessageRow({
                   style={[styles.reactionPill, reactedByMe && styles.reactionPillActive]}
                   onPress={() => onToggleReaction(message, emoji)}
                   hitSlop={4}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${emoji} ${uids.length}${reactedByMe ? ', you reacted' : ''}`}
                 >
                   <Text style={styles.reactionEmoji}>{emoji}</Text>
                   <Text style={[styles.reactionCount, reactedByMe && styles.reactionCountActive]}>{uids.length}</Text>
@@ -749,7 +868,7 @@ function GroupDetailScreen({ groupId }) {
   const [reloadKey, setReloadKey] = useState(0);
   const [loading, setLoading] = useState(!cachedGroup);
   const [busy, setBusy] = useState(false);
-  const [requestSent, setRequestSent] = useState(false);
+  const [requestSent, setRequestSent] = useState(() => REQUESTED_CACHE.has(`${uid || 'anon'}:${groupId}`));
   const [processingRequestId, setProcessingRequestId] = useState(null);
   const [draft, setDraft] = useState(() => DRAFT_CACHE.get(groupId) || '');
   const [stickerPickerVisible, setStickerPickerVisible] = useState(false);
@@ -789,9 +908,11 @@ function GroupDetailScreen({ groupId }) {
   const lastKeyRef = useRef(null);
   const messagesRef = useRef(messages);
   const syncedAtRef = useRef(cachedMessages?.ts || 0);
+  const cursorReadyRef = useRef(Boolean(cachedMessages)); // do we know where "older" starts?
   const editCloseTimer = useRef(null);
   const toastTimer = useRef(null);
   const scrollTimer = useRef(null);
+  const olderTimer = useRef(null);
   const handleScrollRef = useRef(null);
   const toastOpacity = useMemo(() => new Animated.Value(0), []);
   const sendScale = useMemo(() => new Animated.Value(1), []);
@@ -815,14 +936,14 @@ function GroupDetailScreen({ groupId }) {
   // Messages shown = server messages + optimistic ones that the server hasn't echoed back yet.
   const displayMessages = useMemo(() => {
     if (!pending.length) return messages;
-    const live = pending.filter((p) => !messages.some((m) => matchesPending(p, m)));
+    const live = pending.filter((p) => !hasServerEcho(p, messages));
     return live.length ? sortMessages([...messages, ...live]) : messages;
   }, [messages, pending]);
 
   // Drop optimistic copies once the real message has arrived.
   useEffect(() => {
     if (!pending.length) return;
-    const stale = pending.filter((p) => messages.some((m) => matchesPending(p, m)));
+    const stale = pending.filter((p) => hasServerEcho(p, messages));
     if (stale.length) setPending((prev) => prev.filter((p) => !stale.some((s) => s.localId === p.localId)));
   }, [messages, pending]);
 
@@ -837,12 +958,14 @@ function GroupDetailScreen({ groupId }) {
       }
       if (ms) prevMs = ms;
       const mine = message.senderId === uid;
+      const isFirst = !inSameGroup(displayMessages[index - 1], message);
       out.push({
         kind: 'message',
         key: message.id,
         message,
         mine,
-        showHeader: !mine && !inSameGroup(displayMessages[index - 1], message),
+        isFirst,
+        showHeader: !mine && isFirst,
         groupedNext: inSameGroup(message, displayMessages[index + 1]),
       });
     });
@@ -870,6 +993,7 @@ function GroupDetailScreen({ groupId }) {
       clearTimeout(editCloseTimer.current);
       clearTimeout(toastTimer.current);
       clearTimeout(scrollTimer.current);
+      clearTimeout(olderTimer.current);
     },
     []
   );
@@ -899,9 +1023,11 @@ function GroupDetailScreen({ groupId }) {
   // `force` is used after actions that really change membership.
   const load = useCallback(
     async (force = false) => {
+      if (!groupId) return;
       const cached = GROUP_CACHE.get(cacheKey);
       if (!force && cached && Date.now() - cached.ts < GROUP_CACHE_TTL_MS) return;
-      const [groupData, memberData] = await Promise.all([getGroup(groupId), getMembership(groupId, uid)]);
+      // No uid yet (auth still hydrating) -> don't pay for a membership read that can't succeed.
+      const [groupData, memberData] = await Promise.all([getGroup(groupId), uid ? getMembership(groupId, uid) : null]);
       let requests = [];
       if (groupData && computeIsAdmin(groupData, memberData, uid)) {
         const result = await listGroupJoinRequests(groupId, 20);
@@ -961,33 +1087,33 @@ function GroupDetailScreen({ groupId }) {
     } finally {
       setLoadingOlderMessages(false);
       // Hold the guard so auto-stick-to-bottom doesn't fight the prepend.
-      setTimeout(() => {
+      clearTimeout(olderTimer.current);
+      olderTimer.current = setTimeout(() => {
         loadingOlderRef.current = false;
       }, 350);
     }
   }, [groupId, hasMoreMessages, isMember, messageCursor]);
 
-  // Initial page + live listener. With a fresh cache the initial page read is skipped entirely
-  // and a stale cache is only used if the new page overlaps it (otherwise it is rebuilt).
+  // Live messages.
+  //  - Cached messages are shown instantly and the listener revalidates them: NO separate page read.
+  //  - A page is fetched only when nothing is cached (we need its cursor for "load older"),
+  //    or when the listener's window doesn't overlap a very old cache (gap -> rebuild).
   useEffect(() => {
     if (!groupId || !isMember) return undefined;
     let cancelled = false;
+    let firstSnapshot = true;
 
-    const init = async () => {
+    const fetchFirstPage = async (rebuild = false) => {
       try {
         const result = await loadRecentGroupMessages(groupId, MESSAGE_PAGE_SIZE);
         if (cancelled) return;
         const next = Array.isArray(result?.messages) ? result.messages : [];
         syncedAtRef.current = Date.now();
-        const current = messagesRef.current;
-        const known = new Set(current.map((m) => m.id));
-        const gap = current.length > 0 && next.length > 0 && !next.some((m) => known.has(m.id));
-        if (!current.length || gap) {
-          setMessages(mergeMessages([], next));
+        setMessages((prev) => mergeMessages(prev, next));
+        if (rebuild || !cursorReadyRef.current) {
+          cursorReadyRef.current = true;
           setMessageCursor(result?.cursor || null);
           setHasMoreMessages(Boolean(result?.hasMore));
-        } else {
-          setMessages((prev) => mergeMessages(prev, next));
         }
         setLoadError(false);
       } catch (error) {
@@ -998,14 +1124,29 @@ function GroupDetailScreen({ groupId }) {
       }
     };
 
-    const fresh = reloadKey === 0 && syncedAtRef.current && Date.now() - syncedAtRef.current < MESSAGE_CACHE_TTL_MS;
-    if (fresh) setMessagesLoading(false);
-    else init();
+    if (messagesRef.current.length) setMessagesLoading(false);
+    else fetchFirstPage();
 
     const unsubscribe = listenGroupMessages(groupId, (incoming) => {
+      if (cancelled) return;
+      const list = Array.isArray(incoming) ? incoming : [];
       syncedAtRef.current = Date.now();
       setMessagesLoading(false);
-      setMessages((prev) => mergeMessages(prev, Array.isArray(incoming) ? incoming : []));
+
+      if (firstSnapshot) {
+        firstSnapshot = false;
+        const current = messagesRef.current;
+        if (current.length && list.length) {
+          const known = new Set(current.map((m) => m.id));
+          if (!list.some((m) => known.has(m.id))) {
+            // Cache is older than the live window: drop it and rebuild the cursor.
+            setMessages(mergeMessages([], list));
+            fetchFirstPage(true);
+            return;
+          }
+        }
+      }
+      setMessages((prev) => mergeMessages(prev, list));
     });
 
     return () => {
@@ -1069,6 +1210,16 @@ function GroupDetailScreen({ groupId }) {
 
   /* -------------------------------- Actions ------------------------------- */
 
+  const handleDraftChange = (text) => {
+    if (editingMessage) {
+      setEditText(text);
+      return;
+    }
+    setDraft(text);
+    if (text) DRAFT_CACHE.set(groupId, text);
+    else DRAFT_CACHE.delete(groupId);
+  };
+
   const insertMention = (name) => {
     if (!name) return;
     const mention = `@${name.replace(/\s+/g, '')} `;
@@ -1100,6 +1251,7 @@ function GroupDetailScreen({ groupId }) {
     try {
       if (group.privacy === 'private' && group.requireApproval !== false) {
         await requestJoinGroup(group, user, profile || {});
+        REQUESTED_CACHE.add(cacheKey);
         setRequestSent(true);
         showToast('Request sent. An admin will review it.');
       } else {
@@ -1117,7 +1269,7 @@ function GroupDetailScreen({ groupId }) {
   // Optimistic: the request disappears immediately; it is restored if the call fails. No full reload.
   const handleJoinRequestAction = async (request, action) => {
     const requestUserId = request?.uid;
-    if (!groupId || !uid || !requestUserId) return;
+    if (!groupId || !uid || !requestUserId || processingRequestId) return;
     setProcessingRequestId(requestUserId);
     setJoinRequests((prev) => prev.filter((r) => r.uid !== requestUserId));
     try {
@@ -1144,6 +1296,8 @@ function GroupDetailScreen({ groupId }) {
       ? { id: replyTo.id, senderId: replyTo.senderId || '', senderName: replyTo.senderName || 'Student', text: messagePreview(replyTo) }
       : null;
 
+  // Role fields are mirrored on the optimistic copy so a premium/admin bubble looks right
+  // the instant it is sent, instead of "popping" into its styling when the server echoes it.
   const buildLocal = (fields, payload) => {
     const localId = createLocalId();
     return {
@@ -1153,6 +1307,8 @@ function GroupDetailScreen({ groupId }) {
       senderId: uid,
       senderName: profile?.name || user?.displayName || 'Student',
       senderAvatar: profile?.photo || profile?.avatar || user?.photoURL || '',
+      senderRole: profile?.role || undefined,
+      senderPremium: Boolean(profile?.isPremium ?? profile?.premium),
       createdAt: new Date(),
       replyTo: payload.replyTo || null,
       payload,
@@ -1168,7 +1324,7 @@ function GroupDetailScreen({ groupId }) {
       setPending((prev) => prev.map((p) => (p.localId === local.localId ? { ...p, localStatus: 'sent', serverId } : p)));
     } catch (error) {
       setPending((prev) => prev.map((p) => (p.localId === local.localId ? { ...p, localStatus: 'failed' } : p)));
-      showToast(error?.message || "Message not sent. Tap it to retry.");
+      showToast(error?.message || 'Message not sent. Tap it to retry.');
     }
   };
 
@@ -1208,16 +1364,6 @@ function GroupDetailScreen({ groupId }) {
 
   const discardPending = (message) => setPending((prev) => prev.filter((p) => p.localId !== message.localId));
 
-  const handleDraftChange = (text) => {
-    if (editingMessage) {
-      setEditText(text);
-      return;
-    }
-    setDraft(text);
-    if (text) DRAFT_CACHE.set(groupId, text);
-    else DRAFT_CACHE.delete(groupId);
-  };
-
   /* ----------------------------- Message actions -------------------------- */
 
   const withinEditWindow = (message) => {
@@ -1238,7 +1384,7 @@ function GroupDetailScreen({ groupId }) {
     setTimeout(() => inputRef.current?.focus(), 100);
   }, []);
 
-  // Optimistic reaction: the pill shows instantly; toggling again restores the old state on failure.
+  // Optimistic reaction: the pill shows instantly; on failure the toggle is undone.
   const toggleReaction = useCallback(
     async (message, emoji) => {
       if (!uid || !groupId || !isMember || message?.localStatus) return;
@@ -1341,7 +1487,7 @@ function GroupDetailScreen({ groupId }) {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: imageMediaTypes(),
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.8,
@@ -1376,7 +1522,8 @@ function GroupDetailScreen({ groupId }) {
           { uri: editPhotoUri, name: `${editName.trim().replace(/\s+/g, '-').toLowerCase() || 'group'}-photo.jpg`, type: 'image/jpeg' },
           { resourceType: 'image', validationKind: 'image' }
         );
-        nextPayload.photoURL = uploaded?.secure_url || null;
+        if (!uploaded?.secure_url) throw new Error('Photo upload failed. Please try again.');
+        nextPayload.photoURL = uploaded.secure_url;
         setUploadingPhoto(false);
       }
 
@@ -1446,6 +1593,7 @@ function GroupDetailScreen({ groupId }) {
         <MessageRow
           message={item.message}
           mine={item.mine}
+          isFirst={item.isFirst}
           showHeader={item.showHeader}
           groupedNext={item.groupedNext}
           uid={uid}
@@ -1506,10 +1654,7 @@ function GroupDetailScreen({ groupId }) {
           </View>
           <View style={styles.heroTextWrap}>
             <Text style={styles.heroTitle} numberOfLines={1}>{group.name}</Text>
-            <Text style={styles.heroText} numberOfLines={1}>
-              {group.privacy === 'private' ? 'Private • ' : ''}
-              {pluralize(Number(group.memberCount || 0), 'member')}
-            </Text>
+            <Text style={styles.heroText} numberOfLines={1}>{pluralize(Number(group.memberCount || 0), 'member')}</Text>
           </View>
           <View style={styles.heroActionsRowInline}>
             {isAdmin ? (
@@ -1524,6 +1669,25 @@ function GroupDetailScreen({ groupId }) {
             ) : null}
           </View>
         </View>
+
+        <View style={styles.heroMetaRow}>
+          <View style={styles.heroPill}>
+            <Ionicons name={group.privacy === 'private' ? 'lock-closed' : 'globe-outline'} size={11} color={colors.textSecondary} />
+            <Text style={styles.heroPillText}>{group.privacy === 'private' ? 'Private' : 'Public'}</Text>
+          </View>
+          {group.category ? (
+            <View style={styles.heroPill}>
+              <Text style={styles.heroPillText}>{group.category}</Text>
+            </View>
+          ) : null}
+          {group.allowMemberMessages === false ? (
+            <View style={styles.heroPill}>
+              <Ionicons name="megaphone-outline" size={11} color={colors.textSecondary} />
+              <Text style={styles.heroPillText}>Announcements</Text>
+            </View>
+          ) : null}
+        </View>
+
         {group.description ? <Text style={styles.heroDescription} numberOfLines={2}>{group.description}</Text> : null}
       </View>
 
@@ -1531,7 +1695,7 @@ function GroupDetailScreen({ groupId }) {
 
       {!isMember ? (
         <>
-          <Pressable style={[styles.joinButton, requestSent && styles.joinButtonMuted]} onPress={join} disabled={busy || requestSent}>
+          <Pressable style={[styles.joinButton, requestSent && styles.joinButtonMuted]} onPress={join} disabled={busy || requestSent} accessibilityRole="button">
             {busy ? (
               <ActivityIndicator color="#fff" />
             ) : requestSent ? (
@@ -1574,7 +1738,10 @@ function GroupDetailScreen({ groupId }) {
         </Pressable>
       </View>
     ) : (
-      <EmptyState title="No messages yet" description="Start the conversation when you are ready." />
+      <EmptyState
+        title="No messages yet"
+        description={group?.welcomeMessage?.trim() || (canSendMessages ? 'Say hello to get the conversation started.' : 'Admins will post here.')}
+      />
     )
   ) : null;
 
@@ -1599,6 +1766,7 @@ function GroupDetailScreen({ groupId }) {
                 keyExtractor={(item) => item.key}
                 renderItem={renderItem}
                 initialNumToRender={20}
+                maxToRenderPerBatch={12}
                 windowSize={11}
                 ListHeaderComponent={listHeader}
                 ListEmptyComponent={listEmpty}
@@ -1811,12 +1979,11 @@ function GroupDetailScreen({ groupId }) {
 
             {[
               { icon: 'mail-outline', label: 'Open messages', onPress: () => { setGroupOptionsVisible(false); router.navigate('/messages'); } },
-              { icon: 'settings-outline', label: 'Group settings', onPress: () => { setGroupOptionsVisible(false); router.navigate({ pathname: '/community-settings', params: { groupId } }); } },
-              ...(isAdmin ? [{ icon: 'create-outline', label: 'Manage this group', onPress: openEdit }] : []),
-              ...(isAdmin ? [{ icon: 'person-remove-outline', label: 'Remove member', danger: true, onPress: () => { setGroupOptionsVisible(false); router.navigate({ pathname: '/community-settings', params: { groupId } }); } }] : []),
+              { icon: 'settings-outline', label: isAdmin ? 'Members and settings' : 'Group settings', onPress: () => { setGroupOptionsVisible(false); router.navigate({ pathname: '/community-settings', params: { groupId } }); } },
+              ...(isAdmin ? [{ icon: 'create-outline', label: 'Edit group details', onPress: openEdit }] : []),
               ...(membership && !isAdmin ? [{ icon: 'exit-outline', label: 'Leave group', danger: true, onPress: confirmLeaveGroup, disabled: busy }] : []),
             ].map((row) => (
-              <Pressable key={row.label} style={styles.linkCard} onPress={row.onPress} disabled={row.disabled}>
+              <Pressable key={row.label} style={styles.linkCard} onPress={row.onPress} disabled={row.disabled} accessibilityRole="button" accessibilityLabel={row.label}>
                 <View style={[styles.linkIconWrap, row.danger && styles.dangerIconWrap]}>
                   <Ionicons name={row.icon} size={16} color={row.danger ? colors.danger : colors.brand} />
                 </View>

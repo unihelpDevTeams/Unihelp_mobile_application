@@ -24,6 +24,8 @@ const INITIAL_FORM_DATA = {
   photoURL: '',
   bio: '',
   interests: [],
+  gender: '',
+  dateOfBirth: '',
 };
 
 const TOTAL_STEPS = 5;
