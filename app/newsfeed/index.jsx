@@ -420,6 +420,7 @@ export default function NewsFeedPage() {
       borderBottomColor: c.borderDefault,
       paddingTop: s.lg,
       paddingBottom: s.sm,
+      paddingHorizontal: s.lg,
     },
     skeletonCard: { backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.borderDefault, padding: s.lg },
     skeletonLine: { height: 12, borderRadius: 6, backgroundColor: c.surfacePrimary },
