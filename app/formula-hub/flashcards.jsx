@@ -8,12 +8,14 @@ import {
   Animated,
   Easing,
   PanResponder,
+  Modal,
   StyleSheet,
   ScrollView,
   StatusBar,
   LayoutAnimation,
   UIManager,
   Platform,
+  Keyboard,
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,13 +28,20 @@ import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { typography, borderRadius, shadows } from '../../src/shared/theme';
 
-// Smooth cross-fade / resize whenever a layout-affecting state flips (Android needs opt-in).
-// if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-//   UIManager.setLayoutAnimationEnabledExperimental(true);
-// }
+// Android needs an opt-in for LayoutAnimation on the old architecture. On the new
+// architecture (Fabric) the call is a harmless no-op, so we guard against warnings.
+if (
+  Platform.OS === 'android' &&
+  UIManager.setLayoutAnimationEnabledExperimental &&
+  !global.nativeFabricUIManager
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 const SWIPE_OUT_DURATION = 220;
 const SEARCH_DEBOUNCE_MS = 250;
+const SWIPE_VELOCITY = 0.5;
+const EMPTY_LIST = [];
 
 const shuffleArray = (items = []) => {
   const next = [...items];
@@ -45,28 +54,52 @@ const shuffleArray = (items = []) => {
 
 const safeHaptic = (fn) => {
   try {
-    fn();
+    const result = fn();
+    result?.catch?.(() => {});
   } catch {
-    // Haptics can silently fail on unsupported devices/simulators — never block the UI for it.
+    // Haptics can fail on unsupported devices/simulators — never block the UI for it.
   }
 };
+
+const formulaKey = (formula) => String(formula?.id ?? formula?.title ?? '');
 
 export default function FlashCardsPage() {
   const { colors } = useTheme();
   const { width, height } = useWindowDimensions();
-  const cardHeight = Math.min(390, Math.max(250, height - 390));
+  // The window height shrinks when the keyboard opens (Android adjustResize), which used to
+  // shrink the card. Remember the tallest height seen for this width and size from that.
+  const viewportRef = useRef({ width, height });
+  if (viewportRef.current.width !== width) {
+    viewportRef.current = { width, height }; // rotation / resize: start over
+  } else if (height > viewportRef.current.height) {
+    viewportRef.current.height = height;
+  }
+  const cardHeight = Math.min(400, Math.max(290, viewportRef.current.height - 380));
+
   const [reloadKey, setReloadKey] = useState(0);
-  const { formulas, loading, error } = useFormulas(reloadKey);
+  const { formulas: hookFormulas, loading, error } = useFormulas(reloadKey);
+  const rawFormulas = hookFormulas || EMPTY_LIST;
+
+  // If the hook hands back a fresh array on every render, everything derived from it (and the
+  // deck-reset effect below) would re-fire constantly. Keep a stable reference instead.
+  const formulaSignature = `${rawFormulas.length}:${formulaKey(rawFormulas[0])}:${formulaKey(
+    rawFormulas[rawFormulas.length - 1]
+  )}`;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const formulas = useMemo(() => rawFormulas, [formulaSignature, reloadKey]);
 
   const [activeSubject, setActiveSubject] = useState('All');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isFlipped, setIsFlipped] = useState(false);
+  const [answerVisible, setAnswerVisible] = useState(false);
   const [isShuffled, setIsShuffled] = useState(false);
+  const [shuffleSeed, setShuffleSeed] = useState(0);
   const [hasInteracted, setHasInteracted] = useState(false);
+  // { [formulaKey]: 'known' | 'review' }
+  const [mastery, setMastery] = useState({});
 
-  // Debounce search input — filtering 2,000+ formulas on every keystroke would jank.
+  // Debounce search — filtering thousands of formulas on every keystroke would jank.
   useEffect(() => {
     const id = setTimeout(() => setSearch(searchInput.trim()), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(id);
@@ -79,7 +112,6 @@ export default function FlashCardsPage() {
     }
   }, [loading]);
 
-  const flipAnim = useRef(new Animated.Value(0)).current;
   const swipeX = useRef(new Animated.Value(0)).current;
   const entranceAnim = useRef(new Animated.Value(1)).current;
   const pressAnim = useRef(new Animated.Value(1)).current;
@@ -88,23 +120,37 @@ export default function FlashCardsPage() {
   const hintAnim = useRef(new Animated.Value(0)).current;
   const hintFloat = useRef(new Animated.Value(0)).current;
   const skeletonPulse = useRef(new Animated.Value(0.4)).current;
+
+  // Refs used by gesture handlers / async callbacks so they never read stale state.
   const isAnimatingRef = useRef(false);
+  const hintDismissedRef = useRef(false);
+  // Bumped whenever the deck resets or the screen unmounts, so in-flight swipe animations
+  // can tell their completion callbacks are outdated and must not touch state.
+  const deckTokenRef = useRef(0);
 
   const subjects = useMemo(() => {
-    const allSubjects = formulas.map((f) => f.subject).filter(Boolean);
-    const unique = Array.from(new Set(allSubjects)).sort();
-    return ['All', ...unique];
+    const counts = new Map();
+    formulas.forEach((f) => {
+      if (f.subject) counts.set(f.subject, (counts.get(f.subject) || 0) + 1);
+    });
+    const sorted = Array.from(counts.keys()).sort();
+    return [
+      { name: 'All', count: formulas.length },
+      ...sorted.map((name) => ({ name, count: counts.get(name) })),
+    ];
   }, [formulas]);
 
-  const randomizedFormulas = useMemo(() => shuffleArray(formulas), [formulas]);
+  // If the active subject vanished (e.g. after a reload), fall back to "All".
+  useEffect(() => {
+    if (activeSubject !== 'All' && !subjects.some((s) => s.name === activeSubject)) {
+      setActiveSubject('All');
+    }
+  }, [subjects, activeSubject]);
 
-  // Filtered and intentionally randomized list
   const activeFormulas = useMemo(() => {
     const normalizedQuery = search.toLowerCase();
     let filtered =
-      activeSubject === 'All'
-        ? randomizedFormulas
-        : randomizedFormulas.filter((f) => f.subject === activeSubject);
+      activeSubject === 'All' ? formulas : formulas.filter((f) => f.subject === activeSubject);
 
     if (normalizedQuery) {
       filtered = filtered.filter((formula) =>
@@ -121,27 +167,36 @@ export default function FlashCardsPage() {
     }
 
     return filtered;
-  }, [activeSubject, isShuffled, randomizedFormulas, search]);
+    // shuffleSeed forces a fresh shuffle every time shuffle is switched on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSubject, isShuffled, shuffleSeed, formulas, search]);
 
   const currentFormula = activeFormulas[currentIndex];
   const nextFormula = activeFormulas[currentIndex + 1];
+  const afterNextFormula = activeFormulas[currentIndex + 2];
   const total = activeFormulas.length;
-  const progress = total > 0 ? (currentIndex + 1) / total : 0;
+  const progress = total > 0 ? Math.min(1, (currentIndex + 1) / total) : 0;
 
-  // Always-fresh snapshot for gesture-handler closures created once via useRef (avoids stale state).
+  const knownCount = useMemo(
+    () => activeFormulas.reduce((n, f) => (mastery[formulaKey(f)] === 'known' ? n + 1 : n), 0),
+    [activeFormulas, mastery]
+  );
+  const currentMastery = currentFormula ? mastery[formulaKey(currentFormula)] : undefined;
+
+  // Always-fresh snapshot for gesture-handler closures created once via useRef.
   const liveRef = useRef({ currentIndex, total, width });
   liveRef.current = { currentIndex, total, width };
 
+  // Side effects must not live inside a setState updater (StrictMode runs those twice),
+  // so the "has the hint been dismissed" flag is a ref.
   const dismissSwipeHint = useCallback(() => {
-    setHasInteracted((prev) => {
-      if (prev) return prev;
-      Animated.timing(hintAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
-      return true;
-    });
+    if (hintDismissedRef.current) return;
+    hintDismissedRef.current = true;
+    setHasInteracted(true);
+    Animated.timing(hintAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
   }, [hintAnim]);
 
-  // One-time swipe affordance: fades in shortly after the deck is ready, gently floats, then
-  // disappears for good the first time the person swipes, taps, or uses the nav buttons.
+  // One-time swipe affordance.
   useEffect(() => {
     if (loading || total <= 1 || hasInteracted) return undefined;
 
@@ -186,12 +241,24 @@ export default function FlashCardsPage() {
     return () => pulseLoop.stop();
   }, [loading, skeletonPulse]);
 
-  // Reset the deck when the filtered set changes underneath the user
+  // On unmount, invalidate and stop any in-flight swipe animation.
+  useEffect(
+    () => () => {
+      deckTokenRef.current += 1;
+      swipeX.stopAnimation();
+      entranceAnim.stopAnimation();
+    },
+    [swipeX, entranceAnim]
+  );
+
+  // Reset the deck whenever the underlying list changes (filter, search, shuffle, reload).
   useEffect(() => {
+    deckTokenRef.current += 1; // invalidate callbacks from any swipe still in flight
+    swipeX.stopAnimation();
+    entranceAnim.stopAnimation();
     isAnimatingRef.current = false;
     setCurrentIndex(0);
-    setIsFlipped(false);
-    flipAnim.setValue(0);
+    setAnswerVisible(false);
     swipeX.setValue(0);
     entranceAnim.setValue(0);
     Animated.spring(entranceAnim, {
@@ -200,16 +267,7 @@ export default function FlashCardsPage() {
       tension: 80,
       useNativeDriver: true,
     }).start();
-  }, [activeSubject, isShuffled, search, flipAnim, swipeX, entranceAnim]);
-
-  // Guard against an out-of-range index (e.g. the list shrank)
-  useEffect(() => {
-    if (total > 0 && currentIndex >= total) {
-      setCurrentIndex(total - 1);
-      setIsFlipped(false);
-      flipAnim.setValue(0);
-    }
-  }, [total, currentIndex, flipAnim]);
+  }, [activeSubject, isShuffled, shuffleSeed, search, formulas, swipeX, entranceAnim]);
 
   // Animate the progress bar smoothly instead of snapping
   useEffect(() => {
@@ -221,6 +279,10 @@ export default function FlashCardsPage() {
     }).start();
   }, [progress, progressAnim]);
 
+  const springBack = useCallback(() => {
+    Animated.spring(swipeX, { toValue: 0, friction: 7, tension: 90, useNativeDriver: true }).start();
+  }, [swipeX]);
+
   const navigate = useCallback(
     (delta) => {
       if (isAnimatingRef.current) return;
@@ -228,11 +290,11 @@ export default function FlashCardsPage() {
       const nextIndex = idx + delta;
 
       if (nextIndex < 0 || nextIndex >= count) {
-        // Nothing to move to — snap back with a soft bounce so it's clear this is the end.
-        Animated.spring(swipeX, { toValue: 0, friction: 6, tension: 90, useNativeDriver: true }).start();
+        springBack();
         return;
       }
 
+      const token = deckTokenRef.current;
       isAnimatingRef.current = true;
       dismissSwipeHint();
       safeHaptic(() => Haptics.selectionAsync());
@@ -242,10 +304,12 @@ export default function FlashCardsPage() {
         duration: SWIPE_OUT_DURATION,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
-      }).start(() => {
+      }).start(({ finished }) => {
+        // Deck was reset / screen left while we were animating: do nothing.
+        if (!finished || token !== deckTokenRef.current) return;
+
         setCurrentIndex(nextIndex);
-        setIsFlipped(false);
-        flipAnim.setValue(0);
+        setAnswerVisible(false);
         // Enter from the opposite side, then spring into place.
         swipeX.setValue(delta > 0 ? viewportWidth * 1.15 : -viewportWidth * 1.15);
         entranceAnim.setValue(0.6);
@@ -253,15 +317,14 @@ export default function FlashCardsPage() {
           Animated.spring(swipeX, { toValue: 0, friction: 9, tension: 90, useNativeDriver: true }),
           Animated.spring(entranceAnim, { toValue: 1, friction: 8, tension: 90, useNativeDriver: true }),
         ]).start(() => {
+          if (token !== deckTokenRef.current) return;
           isAnimatingRef.current = false;
         });
       });
     },
-    [swipeX, flipAnim, entranceAnim, dismissSwipeHint]
+    [swipeX, entranceAnim, dismissSwipeHint, springBack]
   );
 
-  // Keep a ref to the latest `navigate` so the PanResponder (created once) never closes over
-  // stale state — same pattern used elsewhere in the app for gesture/callback refs.
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
 
@@ -270,24 +333,30 @@ export default function FlashCardsPage() {
 
   const panResponder = useRef(
     PanResponder.create({
-      // "Capture" variants let this view claim the gesture mid-drag even though the card's
-      // inner Pressable (for flipping) sees the touch first — so taps still flip normally,
-      // and only genuine horizontal drags turn into a swipe.
-      onMoveShouldSetPanResponderCapture: (_, gesture) =>
-        Math.abs(gesture.dx) > 10 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.5,
+      // Capture variants let this view claim a horizontal drag even though the inner Pressable
+      // (flip) saw the touch first — taps still flip, genuine drags swipe.
+      onMoveShouldSetPanResponderCapture: (_, g) =>
+        !isAnimatingRef.current &&
+        Math.abs(g.dx) > 10 &&
+        Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
       onPanResponderGrant: () => {
         swipeX.stopAnimation();
       },
-      onPanResponderMove: (_, gesture) => {
-        swipeX.setValue(gesture.dx);
+      onPanResponderMove: (_, g) => {
+        const { currentIndex: idx, total: count } = liveRef.current;
+        const atEdge = (g.dx > 0 && idx === 0) || (g.dx < 0 && idx >= count - 1);
+        // Rubber-band resistance when there is no card to swipe to.
+        swipeX.setValue(atEdge ? g.dx * 0.25 : g.dx);
       },
-      onPanResponderRelease: (_, gesture) => {
+      onPanResponderRelease: (_, g) => {
         const { currentIndex: idx, total: count, width: viewportWidth } = liveRef.current;
         const threshold = viewportWidth * 0.25;
+        const goNext = g.dx <= -threshold || (g.vx < -SWIPE_VELOCITY && g.dx < -40);
+        const goPrev = g.dx >= threshold || (g.vx > SWIPE_VELOCITY && g.dx > 40);
 
-        if (gesture.dx <= -threshold && idx < count - 1) {
+        if (goNext && idx < count - 1) {
           navigateRef.current(1);
-        } else if (gesture.dx >= threshold && idx > 0) {
+        } else if (goPrev && idx > 0) {
           navigateRef.current(-1);
         } else {
           Animated.spring(swipeX, { toValue: 0, friction: 7, tension: 90, useNativeDriver: true }).start();
@@ -299,21 +368,29 @@ export default function FlashCardsPage() {
     })
   ).current;
 
-  const flipCard = () => {
+  const revealAnswer = useCallback(() => {
+    if (!currentFormula || isAnimatingRef.current) return;
+    Keyboard.dismiss();
     dismissSwipeHint();
     safeHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
+    setAnswerVisible(true);
+  }, [currentFormula, dismissSwipeHint]);
 
-    Animated.sequence([
-      Animated.timing(pressAnim, { toValue: 0.97, duration: 90, useNativeDriver: true }),
-      Animated.spring(pressAnim, { toValue: 1, friction: 5, tension: 120, useNativeDriver: true }),
-    ]).start();
+  const markCard = (status) => {
+    if (!currentFormula || isAnimatingRef.current) return;
+    setAnswerVisible(false);
+    safeHaptic(() =>
+      Haptics.notificationAsync(
+        status === 'known' ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning
+      )
+    );
+    setMastery((prev) => ({ ...prev, [formulaKey(currentFormula)]: status }));
+    if (currentIndex < total - 1) navigateRef.current(1);
+  };
 
-    Animated.timing(flipAnim, {
-      toValue: isFlipped ? 0 : 180,
-      duration: 340,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start(() => setIsFlipped((prev) => !prev));
+  const resetProgress = () => {
+    safeHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
+    setMastery({});
   };
 
   const toggleShuffle = () => {
@@ -321,7 +398,9 @@ export default function FlashCardsPage() {
     safeHaptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium));
     shuffleAnim.setValue(0);
     Animated.spring(shuffleAnim, { toValue: 1, friction: 5, tension: 120, useNativeDriver: true }).start();
-    setIsShuffled((value) => !value);
+    // No side effects inside the state updater (StrictMode would run it twice).
+    if (!isShuffled) setShuffleSeed((seed) => seed + 1);
+    setIsShuffled(!isShuffled);
   };
 
   const selectSubject = (subject) => {
@@ -331,19 +410,25 @@ export default function FlashCardsPage() {
     setActiveSubject(subject);
   };
 
-  // --- Interpolations -------------------------------------------------
+  const clearFilters = () => {
+    safeHaptic(() => Haptics.selectionAsync());
+    setSearchInput('');
+    setSearch('');
+    setActiveSubject('All');
+  };
 
-  const frontInterpolate = flipAnim.interpolate({ inputRange: [0, 180], outputRange: ['0deg', '180deg'] });
-  const backInterpolate = flipAnim.interpolate({ inputRange: [0, 180], outputRange: ['180deg', '360deg'] });
+  const pressCardIn = () =>
+    Animated.spring(pressAnim, { toValue: 0.98, friction: 8, tension: 200, useNativeDriver: true }).start();
+  const pressCardOut = () =>
+    Animated.spring(pressAnim, { toValue: 1, friction: 8, tension: 200, useNativeDriver: true }).start();
+
+  // --- Interpolations -------------------------------------------------
 
   const rotateFromSwipe = swipeX.interpolate({
     inputRange: [-width, 0, width],
     outputRange: ['-10deg', '0deg', '10deg'],
     extrapolate: 'clamp',
   });
-
-  const frontAnimatedStyle = { transform: [{ perspective: 1200 }, { rotateY: frontInterpolate }] };
-  const backAnimatedStyle = { transform: [{ perspective: 1200 }, { rotateY: backInterpolate }] };
 
   const cardMotionStyle = {
     opacity: entranceAnim,
@@ -358,6 +443,18 @@ export default function FlashCardsPage() {
       },
     ],
   };
+
+  // Subtle edge glows that follow the swipe direction.
+  const nextTint = swipeX.interpolate({
+    inputRange: [-width * 0.5, 0],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+  const prevTint = swipeX.interpolate({
+    inputRange: [0, width * 0.5],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
 
   const shuffleIconStyle = {
     transform: [
@@ -382,21 +479,46 @@ export default function FlashCardsPage() {
         flex: 1,
         backgroundColor: c.background,
       },
+      searchCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: s.sm,
+        paddingHorizontal: s.md,
+        paddingVertical: s.xs,
+        minHeight: 50,
+        borderRadius: borderRadius.xl,
+        backgroundColor: c.surfacePrimary,
+        borderWidth: 1,
+        borderColor: c.borderDefault,
+        marginHorizontal: s.lg,
+        marginBottom: s.md,
+        ...shadows.sm,
+      },
+      searchInput: {
+        flex: 1,
+        color: c.textPrimary,
+        fontSize: 14,
+        paddingVertical: s.sm,
+      },
       filterScroll: {
+        flexGrow: 0,
+      },
+      filterContent: {
         paddingHorizontal: s.lg,
         paddingBottom: s.md,
-        maxHeight: 52,
+        alignItems: 'center',
       },
       filterPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: s.xs,
         paddingHorizontal: s.md,
-        paddingVertical: s.sm,
         borderRadius: borderRadius.full,
         backgroundColor: c.surfaceSecondary,
         marginRight: s.sm,
         borderWidth: 1,
         borderColor: c.borderDefault,
         height: 36,
-        justifyContent: 'center',
       },
       filterPillActive: {
         backgroundColor: c.brand,
@@ -409,6 +531,15 @@ export default function FlashCardsPage() {
       },
       filterPillTextActive: {
         color: c.onBrand,
+      },
+      filterCount: {
+        ...typography.xs,
+        ...typography.semibold,
+        color: c.textTertiary,
+      },
+      filterCountActive: {
+        color: c.onBrand,
+        opacity: 0.85,
       },
       controlsRow: {
         flexDirection: 'row',
@@ -437,27 +568,6 @@ export default function FlashCardsPage() {
         ...typography.sm,
         ...typography.bold,
         color: c.textPrimary,
-      },
-      searchCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: s.sm,
-        paddingHorizontal: s.md,
-        paddingVertical: s.xs,
-        minHeight: 50,
-        borderRadius: borderRadius.xl,
-        backgroundColor: c.surfacePrimary,
-        borderWidth: 1,
-        borderColor: c.borderDefault,
-        marginHorizontal: s.lg,
-        marginBottom: s.md,
-        ...shadows.sm,
-      },
-      searchInput: {
-        flex: 1,
-        color: c.textPrimary,
-        fontSize: 14,
-        paddingVertical: s.sm,
       },
       progressTrack: {
         height: 7,
@@ -488,11 +598,110 @@ export default function FlashCardsPage() {
         color: isShuffled ? c.brand : c.textSecondary,
         marginLeft: s.xs,
       },
-      cardStage: {
+      masteryRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: s.lg,
+        marginBottom: s.sm,
+      },
+      masteryChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: s.xs,
+        paddingHorizontal: s.md,
+        paddingVertical: s.xs,
+        borderRadius: borderRadius.full,
+        backgroundColor: c.brandLight,
+        borderWidth: 1,
+        borderColor: c.brandBorder,
+      },
+      answerBackdrop: {
         flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: s.lg,
+        backgroundColor: 'rgba(15,23,42,0.62)',
+      },
+      answerModal: {
+        width: '100%',
+        maxWidth: 560,
+        maxHeight: '85%',
+        borderRadius: borderRadius['3xl'],
+        padding: s.lg,
+        backgroundColor: c.surfacePrimary,
+        borderWidth: 1,
+        borderColor: c.borderDefault,
+        ...shadows.lg,
+      },
+      answerHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: s.md,
+      },
+      answerHeaderCopy: { flex: 1, marginRight: s.md },
+      answerEyebrow: {
+        ...typography.xs,
+        ...typography.bold,
+        color: c.brandText,
+        textTransform: 'uppercase',
+        letterSpacing: 1,
+      },
+      answerTitle: {
+        ...typography.lg,
+        ...typography.extrabold,
+        color: c.textPrimary,
+        marginTop: 2,
+      },
+      answerQuestion: {
+        ...typography.xs,
+        ...typography.medium,
+        color: c.textSecondary,
+        marginTop: 2,
+      },
+      answerClose: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: c.surfaceSecondary,
+      },
+      answerContent: { flexShrink: 1 },
+      answerFormulaWrap: {
+        height: Math.min(180, Math.max(120, Math.round(height * 0.2))),
+        width: '100%',
+        flexShrink: 0,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderRadius: borderRadius.xl,
+        backgroundColor: c.brandLight,
+        borderWidth: 1,
+        borderColor: c.brandBorder,
+        overflow: 'hidden',
+      },
+      answerExplanation: {
+        ...typography.md,
+        color: c.textPrimary,
+        lineHeight: 23,
         marginTop: s.md,
       },
-      // Deck wrapper: holds the peeking "next card" plus the interactive card on top of it.
+      answerActions: { marginTop: s.lg },
+      masteryChipText: {
+        ...typography.xs,
+        ...typography.bold,
+        color: c.brandText,
+      },
+      resetText: {
+        ...typography.xs,
+        ...typography.semibold,
+        color: c.textTertiary,
+      },
+      cardStage: {
+        flex: 1,
+        marginTop: s.xs,
+      },
       cardDeck: {
         width: Math.min(width - s.lg * 2, 560),
         height: cardHeight,
@@ -514,6 +723,14 @@ export default function FlashCardsPage() {
         transform: [{ rotate: '-2deg' }],
         ...shadows.md,
       },
+      stackCardFar: {
+        top: 24,
+        left: 20,
+        right: 20,
+        bottom: -16,
+        transform: [{ rotate: '2deg' }],
+        opacity: 0.7,
+      },
       card: {
         ...StyleSheet.absoluteFillObject,
         backgroundColor: c.surfacePrimary,
@@ -521,7 +738,6 @@ export default function FlashCardsPage() {
         ...shadows.lg,
         padding: s['2xl'],
         paddingTop: s.xl,
-        backfaceVisibility: 'hidden',
         justifyContent: 'space-between',
         alignItems: 'center',
         borderColor: c.borderDefault,
@@ -537,31 +753,19 @@ export default function FlashCardsPage() {
         height: 4,
         backgroundColor: c.brand,
       },
+      cardEdgeGlow: {
+        position: 'absolute',
+        top: 0,
+        bottom: 0,
+        width: 6,
+        backgroundColor: c.brand,
+      },
       cardSubtleText: {
         ...typography.xs,
         ...typography.medium,
         color: c.textTertiary,
         marginTop: s.xs,
         textAlign: 'center',
-      },
-      cardBack: {
-        backgroundColor: c.brandLight,
-        borderColor: c.brandBorder,
-        justifyContent: 'center',
-        paddingTop: s['2xl'],
-        paddingBottom: s['2xl'],
-      },
-      cardBackTopRow: {
-        position: 'absolute',
-        top: s['2xl'],
-        left: s['2xl'],
-        right: s['2xl'],
-        width: 'auto',
-      },
-      cardBackHintRow: {
-        position: 'absolute',
-        bottom: s['2xl'],
-        alignSelf: 'center',
       },
       cardLabel: {
         ...typography.xs,
@@ -575,6 +779,7 @@ export default function FlashCardsPage() {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
+        minHeight: 30,
       },
       cardBadge: {
         flexDirection: 'row',
@@ -587,13 +792,28 @@ export default function FlashCardsPage() {
         borderWidth: 1,
         borderColor: c.brandBorder,
       },
-      cardBadgeBack: {
-        backgroundColor: c.surfacePrimary,
+      statusBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: s.xs,
+        paddingHorizontal: s.md,
+        paddingVertical: s.xs,
+        borderRadius: borderRadius.full,
+        backgroundColor: c.surfaceSecondary,
+        borderWidth: 1,
+        borderColor: c.borderDefault,
       },
-      cardCounter: {
+      statusBadgeKnown: {
+        backgroundColor: c.brand,
+        borderColor: c.brand,
+      },
+      statusText: {
         ...typography.xs,
         ...typography.bold,
-        color: c.textTertiary,
+        color: c.textSecondary,
+      },
+      statusTextKnown: {
+        color: c.onBrand,
       },
       cardBody: {
         width: '100%',
@@ -603,18 +823,24 @@ export default function FlashCardsPage() {
         paddingVertical: s.sm,
       },
       formulaTitle: {
-        ...typography['5xl'],
         ...typography.bold,
+        fontSize: 28,
+        lineHeight: 34,
         color: c.textPrimary,
         textAlign: 'center',
-        lineHeight: 34,
         letterSpacing: -0.5,
+      },
+      tagRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
+        gap: s.sm,
+        marginTop: s.lg,
       },
       formulaSubject: {
         ...typography.sm,
         ...typography.semibold,
         color: c.brandText,
-        marginTop: s.lg,
         paddingHorizontal: s.md,
         paddingVertical: s.xs,
         borderRadius: borderRadius.full,
@@ -623,12 +849,24 @@ export default function FlashCardsPage() {
         borderColor: c.brandBorder,
         overflow: 'hidden',
       },
+      formulaCategory: {
+        ...typography.sm,
+        ...typography.medium,
+        color: c.textSecondary,
+        paddingHorizontal: s.md,
+        paddingVertical: s.xs,
+        borderRadius: borderRadius.full,
+        backgroundColor: c.surfaceSecondary,
+        borderWidth: 1,
+        borderColor: c.borderDefault,
+        overflow: 'hidden',
+      },
       explanation: {
         ...typography.md,
         color: c.textPrimary,
         textAlign: 'center',
-        lineHeight: 24,
-        marginTop: s.lg,
+        lineHeight: 22,
+        marginTop: s.md,
       },
       hintRow: {
         flexDirection: 'row',
@@ -646,12 +884,45 @@ export default function FlashCardsPage() {
         ...typography.semibold,
         color: c.textSecondary,
       },
+      gradeRow: {
+        flexDirection: 'row',
+        gap: s.sm,
+        width: '100%',
+      },
+      gradeBtn: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: s.xs,
+        minHeight: 48,
+        borderRadius: borderRadius.full,
+        borderWidth: 1,
+        borderColor: c.borderDefault,
+        backgroundColor: c.surfacePrimary,
+      },
+      gradeBtnKnown: {
+        backgroundColor: c.brand,
+        borderColor: c.brand,
+      },
+      gradeBtnActiveReview: {
+        borderColor: c.brand,
+        backgroundColor: c.brandLight,
+      },
+      gradeText: {
+        ...typography.sm,
+        ...typography.bold,
+        color: c.textPrimary,
+      },
+      gradeTextKnown: {
+        color: c.onBrand,
+      },
       swipeHintBubble: {
         alignSelf: 'center',
         flexDirection: 'row',
         alignItems: 'center',
         gap: s.xs,
-        marginTop: s.md,
+        marginTop: s.lg,
         paddingHorizontal: s.md,
         paddingVertical: s.xs,
         borderRadius: borderRadius.full,
@@ -681,7 +952,7 @@ export default function FlashCardsPage() {
         borderColor: c.borderDefault,
       },
       navButtonDisabled: {
-        opacity: 0.5,
+        opacity: 0.4,
       },
       navButtonPressed: {
         transform: [{ scale: 0.92 }],
@@ -719,6 +990,23 @@ export default function FlashCardsPage() {
         marginTop: s.md,
         textAlign: 'center',
       },
+      clearFiltersBtn: {
+        marginTop: s.lg,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: s.xs,
+        paddingHorizontal: s.lg,
+        minHeight: 44,
+        borderRadius: borderRadius.full,
+        backgroundColor: c.brandLight,
+        borderWidth: 1,
+        borderColor: c.brandBorder,
+      },
+      clearFiltersText: {
+        ...typography.sm,
+        ...typography.bold,
+        color: c.brandText,
+      },
       errorCard: {
         backgroundColor: c.dangerLight,
         borderWidth: 1,
@@ -748,21 +1036,6 @@ export default function FlashCardsPage() {
         ...typography.xs,
         ...typography.bold,
         color: c.onBrand,
-      },
-      cardStageInner: {
-        flex: 1,
-        marginTop: s.md,
-      },
-      formulaWrap: {
-        height: 120,
-        width: '100%',
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderRadius: borderRadius.xl,
-        backgroundColor: c.surfacePrimary,
-        borderWidth: 1,
-        borderColor: c.brandBorder,
-        paddingHorizontal: s.md,
       },
       skeletonCard: {
         width: width - s.lg * 2,
@@ -795,7 +1068,7 @@ export default function FlashCardsPage() {
         backgroundColor: c.surfacePrimary,
       },
     }),
-    [cardHeight, isShuffled, width]
+    [cardHeight, height, isShuffled, width]
   );
 
   if (loading) {
@@ -813,6 +1086,11 @@ export default function FlashCardsPage() {
     );
   }
 
+  const isFirst = currentIndex === 0;
+  const isLast = currentIndex === total - 1;
+  const hasActiveFilters = activeSubject !== 'All' || searchInput.length > 0;
+  const answerSubtitle = [currentFormula?.subject, currentFormula?.category].filter(Boolean).join(' · ');
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle={colors.statusBar === 'light' ? 'light-content' : 'dark-content'} />
@@ -827,42 +1105,50 @@ export default function FlashCardsPage() {
             style={styles.searchInput}
             autoCapitalize="none"
             autoCorrect={false}
+            returnKeyType="search"
+            onSubmitEditing={Keyboard.dismiss}
+            accessibilityLabel="Search formulas"
           />
           {searchInput ? (
             <TouchableOpacity
               onPress={() => setSearchInput('')}
               accessibilityRole="button"
               accessibilityLabel="Clear search"
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
               <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
             </TouchableOpacity>
           ) : null}
         </View>
 
-        {/* Subjects Filter */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
-          {subjects.map((subject) => (
-            <Pressable
-              key={subject}
-              onPress={() => selectSubject(subject)}
-              accessibilityRole="button"
-              accessibilityLabel={`Filter by ${subject}`}
-              style={({ pressed }) => [
-                styles.filterPill,
-                activeSubject === subject && styles.filterPillActive,
-                pressed && { opacity: 0.75 },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.filterPillText,
-                  activeSubject === subject && styles.filterPillTextActive,
+        {/* Subjects filter */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterScroll}
+          contentContainerStyle={styles.filterContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          {subjects.map(({ name, count }) => {
+            const active = activeSubject === name;
+            return (
+              <Pressable
+                key={name}
+                onPress={() => selectSubject(name)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`Filter by ${name}, ${count} cards`}
+                style={({ pressed }) => [
+                  styles.filterPill,
+                  active && styles.filterPillActive,
+                  pressed && { opacity: 0.75 },
                 ]}
               >
-                {subject}
-              </Text>
-            </Pressable>
-          ))}
+                <Text style={[styles.filterPillText, active && styles.filterPillTextActive]}>{name}</Text>
+                <Text style={[styles.filterCount, active && styles.filterCountActive]}>{count}</Text>
+              </Pressable>
+            );
+          })}
         </ScrollView>
 
         {error ? (
@@ -885,7 +1171,7 @@ export default function FlashCardsPage() {
                 <View style={styles.progressHeader}>
                   <Text style={styles.progressEyebrow}>YOUR PROGRESS</Text>
                   <Text style={styles.progressText}>
-                    {currentIndex + 1} / {total}
+                    {Math.min(currentIndex + 1, total)} / {total}
                   </Text>
                 </View>
                 <View style={styles.progressTrack}>
@@ -896,6 +1182,7 @@ export default function FlashCardsPage() {
                 style={({ pressed }) => [styles.shuffleBtn, pressed && { opacity: 0.8 }]}
                 onPress={toggleShuffle}
                 accessibilityRole="button"
+                accessibilityState={{ selected: isShuffled }}
                 accessibilityLabel={isShuffled ? 'Turn off shuffle' : 'Shuffle cards'}
               >
                 <Animated.View style={shuffleIconStyle}>
@@ -905,83 +1192,74 @@ export default function FlashCardsPage() {
               </Pressable>
             </View>
 
-            {/* Flash Card deck: a static peek of the next card sits behind the live one */}
+            <View style={styles.masteryRow}>
+              <View style={styles.masteryChip}>
+                <Ionicons name="trophy-outline" size={13} color={colors.brandText} />
+                <Text style={styles.masteryChipText}>
+                  {knownCount} of {total} mastered
+                </Text>
+              </View>
+              {Object.keys(mastery).length > 0 ? (
+                <Pressable
+                  onPress={resetProgress}
+                  accessibilityRole="button"
+                  accessibilityLabel="Reset mastery progress"
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Text style={styles.resetText}>Reset</Text>
+                </Pressable>
+              ) : null}
+            </View>
+
+            {/* Flash card deck: static peeks of upcoming cards sit behind the live one */}
             <View style={styles.cardDeck}>
+              {afterNextFormula ? <View style={[styles.stackCard, styles.stackCardFar]} pointerEvents="none" /> : null}
               {nextFormula ? <View style={styles.stackCard} pointerEvents="none" /> : null}
 
               <Animated.View {...panResponder.panHandlers} style={[styles.cardContainer, cardMotionStyle]}>
-                {/* Front side */}
-                <Animated.View pointerEvents={isFlipped ? 'none' : 'auto'} style={[styles.card, frontAnimatedStyle]}>
+                <Animated.View style={styles.card}>
                   <View style={styles.cardAccent} />
+                  <Animated.View pointerEvents="none" style={[styles.cardEdgeGlow, { right: 0, opacity: nextTint }]} />
+                  <Animated.View pointerEvents="none" style={[styles.cardEdgeGlow, { left: 0, opacity: prevTint }]} />
                   <View style={styles.cardTopRow}>
                     <View style={styles.cardBadge}>
                       <Ionicons name="help-circle-outline" size={15} color={colors.brand} />
                       <Text style={styles.cardLabel}>Question</Text>
                     </View>
-                    <Text style={styles.cardCounter}>
-                      {currentIndex + 1}/{total}
-                    </Text>
+                    {currentMastery ? (
+                      <View style={[styles.statusBadge, currentMastery === 'known' && styles.statusBadgeKnown]}>
+                        <Ionicons
+                          name={currentMastery === 'known' ? 'checkmark-circle' : 'repeat-outline'}
+                          size={13}
+                          color={currentMastery === 'known' ? colors.onBrand : colors.textSecondary}
+                        />
+                        <Text style={[styles.statusText, currentMastery === 'known' && styles.statusTextKnown]}>
+                          {currentMastery === 'known' ? 'Mastered' : 'Still learning'}
+                        </Text>
+                      </View>
+                    ) : null}
                   </View>
                   <Pressable
-                    onPress={flipCard}
+                    onPress={revealAnswer}
+                    onPressIn={pressCardIn}
+                    onPressOut={pressCardOut}
                     style={styles.cardBody}
                     accessibilityRole="button"
-                    accessibilityLabel="Flip card to reveal the answer"
+                    accessibilityLabel="Reveal answer"
                   >
-                    <Text style={styles.formulaTitle} numberOfLines={3} adjustsFontSizeToFit minimumFontScale={0.72}>
+                    <Text style={styles.formulaTitle} numberOfLines={3} adjustsFontSizeToFit minimumFontScale={0.7}>
                       {currentFormula?.title || 'Untitled Formula'}
                     </Text>
-                    <Text style={styles.formulaSubject}>{currentFormula?.subject || 'General'}</Text>
-                    <Text style={styles.cardSubtleText}>Think of the answer before revealing it</Text>
+                    <View style={styles.tagRow}>
+                      <Text style={styles.formulaSubject}>{currentFormula?.subject || 'General'}</Text>
+                      {currentFormula?.category ? (
+                        <Text style={styles.formulaCategory}>{currentFormula.category}</Text>
+                      ) : null}
+                    </View>
                   </Pressable>
                   <View style={styles.hintRow}>
-                    <Ionicons name="finger-print-outline" size={14} color={colors.textSecondary} />
-                    <Text style={styles.hintText}>Tap card to reveal answer</Text>
-                  </View>
-                </Animated.View>
-
-                {/* Back side */}
-                <Animated.View
-                  pointerEvents={isFlipped ? 'auto' : 'none'}
-                  style={[styles.card, styles.cardBack, backAnimatedStyle]}
-                >
-                  <View style={styles.cardAccent} />
-                  <View style={[styles.cardTopRow, styles.cardBackTopRow]}>
-                    <View style={[styles.cardBadge, styles.cardBadgeBack]}>
-                      <Ionicons name="checkmark-circle-outline" size={15} color={colors.brand} />
-                      <Text style={styles.cardLabel}>Answer</Text>
-                    </View>
-                    <Text style={styles.cardCounter}>
-                      {currentIndex + 1}/{total}
-                    </Text>
-                  </View>
-                  <Pressable
-                    onPress={flipCard}
-                    style={styles.cardBody}
-                    accessibilityRole="button"
-                    accessibilityLabel="Flip card back to the question"
-                  >
-                    <View style={styles.formulaWrap}>
-                      {currentFormula?.formula ? (
-                        <FormulaMath
-                          source={currentFormula.formula}
-                          color={colors.textPrimary}
-                          backgroundColor={colors.surfacePrimary}
-                          size="display"
-                        />
-                      ) : (
-                        <Text style={styles.explanation}>No formula expression was provided.</Text>
-                      )}
-                    </View>
-                    {currentFormula?.explanation ? (
-                      <Text style={styles.explanation} numberOfLines={2}>
-                        {currentFormula.explanation}
-                      </Text>
-                    ) : null}
-                  </Pressable>
-                  <View style={[styles.hintRow, styles.cardBackHintRow]}>
-                    <Ionicons name="refresh-outline" size={14} color={colors.textSecondary} />
-                    <Text style={styles.hintText}>Tap card to return</Text>
+                    <Ionicons name="eye-outline" size={14} color={colors.textSecondary} />
+                    <Text style={styles.hintText}>Recall it, then tap to reveal</Text>
                   </View>
                 </Animated.View>
               </Animated.View>
@@ -992,41 +1270,43 @@ export default function FlashCardsPage() {
               <Text style={styles.swipeHintText}>Swipe to browse cards</Text>
             </Animated.View>
 
-            {/* Navigation Controls */}
+            {/* Navigation controls */}
             <View style={styles.navRow}>
               <Pressable
                 onPress={prevCard}
-                disabled={currentIndex === 0}
+                disabled={isFirst}
                 accessibilityRole="button"
+                accessibilityState={{ disabled: isFirst }}
                 accessibilityLabel="Previous card"
                 style={({ pressed }) => [
                   styles.navButton,
-                  currentIndex === 0 && styles.navButtonDisabled,
-                  pressed && currentIndex !== 0 && styles.navButtonPressed,
+                  isFirst && styles.navButtonDisabled,
+                  pressed && !isFirst && styles.navButtonPressed,
                 ]}
               >
                 <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
               </Pressable>
 
               <Pressable
-                onPress={flipCard}
+                onPress={revealAnswer}
                 accessibilityRole="button"
-                accessibilityLabel={isFlipped ? 'Show question' : 'Flip card'}
+                accessibilityLabel="Reveal answer"
                 style={({ pressed }) => [styles.flipButton, pressed && styles.flipButtonPressed]}
               >
-                <Ionicons name="sync" size={20} color={colors.onBrand} />
-                <Text style={styles.flipText}>{isFlipped ? 'Show Front' : 'Flip Card'}</Text>
+                <Ionicons name="eye-outline" size={20} color={colors.onBrand} />
+                <Text style={styles.flipText}>Reveal Answer</Text>
               </Pressable>
 
               <Pressable
                 onPress={nextCard}
-                disabled={currentIndex === total - 1}
+                disabled={isLast}
                 accessibilityRole="button"
+                accessibilityState={{ disabled: isLast }}
                 accessibilityLabel="Next card"
                 style={({ pressed }) => [
                   styles.navButton,
-                  currentIndex === total - 1 && styles.navButtonDisabled,
-                  pressed && currentIndex !== total - 1 && styles.navButtonPressed,
+                  isLast && styles.navButtonDisabled,
+                  pressed && !isLast && styles.navButtonPressed,
                 ]}
               >
                 <Ionicons name="chevron-forward" size={24} color={colors.textPrimary} />
@@ -1038,9 +1318,106 @@ export default function FlashCardsPage() {
             <Ionicons name="albums-outline" size={48} color={colors.borderDefault} />
             <Text style={styles.emptyText}>No formulas found</Text>
             <Text style={styles.cardSubtleText}>Try another subject or search term.</Text>
+            {hasActiveFilters ? (
+              <Pressable
+                onPress={clearFilters}
+                accessibilityRole="button"
+                accessibilityLabel="Clear all filters"
+                style={({ pressed }) => [styles.clearFiltersBtn, pressed && { opacity: 0.8 }]}
+              >
+                <Ionicons name="refresh-outline" size={16} color={colors.brandText} />
+                <Text style={styles.clearFiltersText}>Clear filters</Text>
+              </Pressable>
+            ) : null}
           </View>
         )}
       </ScreenShell>
+      <Modal
+        visible={answerVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setAnswerVisible(false)}
+      >
+        <View style={styles.answerBackdrop}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setAnswerVisible(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close answer"
+          />
+          <View style={styles.answerModal} accessibilityViewIsModal>
+            <View style={styles.answerHeader}>
+              <View style={styles.answerHeaderCopy}>
+                <Text style={styles.answerEyebrow}>Answer</Text>
+                <Text style={styles.answerTitle} numberOfLines={2}>
+                  {currentFormula?.title || 'Untitled Formula'}
+                </Text>
+                {answerSubtitle ? (
+                  <Text style={styles.answerQuestion} numberOfLines={1}>
+                    {answerSubtitle}
+                  </Text>
+                ) : null}
+              </View>
+              <Pressable
+                style={styles.answerClose}
+                onPress={() => setAnswerVisible(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Close answer"
+              >
+                <Ionicons name="close" size={22} color={colors.textPrimary} />
+              </Pressable>
+            </View>
+
+            {currentFormula?.formula ? (
+              <View style={styles.answerFormulaWrap}>
+                <FormulaMath
+                  source={currentFormula.formula}
+                  color={colors.textPrimary}
+                  backgroundColor={colors.brandLight}
+                  size="display"
+                />
+              </View>
+            ) : (
+              <Text style={styles.explanation}>No formula expression was provided.</Text>
+            )}
+            <ScrollView
+              style={styles.answerContent}
+              contentContainerStyle={{ paddingBottom: 4 }}
+              showsVerticalScrollIndicator={false}
+            >
+              {currentFormula?.explanation ? (
+                <Text style={styles.answerExplanation}>{currentFormula.explanation}</Text>
+              ) : null}
+            </ScrollView>
+
+            <View style={[styles.gradeRow, styles.answerActions]}>
+              <Pressable
+                onPress={() => markCard('review')}
+                accessibilityRole="button"
+                accessibilityLabel="Mark as still learning"
+                style={({ pressed }) => [
+                  styles.gradeBtn,
+                  currentMastery === 'review' && styles.gradeBtnActiveReview,
+                  pressed && { opacity: 0.8 },
+                ]}
+              >
+                <Ionicons name="repeat-outline" size={16} color={colors.textPrimary} />
+                <Text style={styles.gradeText}>Still learning</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => markCard('known')}
+                accessibilityRole="button"
+                accessibilityLabel="Mark as got it"
+                style={({ pressed }) => [styles.gradeBtn, styles.gradeBtnKnown, pressed && { opacity: 0.85 }]}
+              >
+                <Ionicons name="checkmark" size={16} color={colors.onBrand} />
+                <Text style={[styles.gradeText, styles.gradeTextKnown]}>Got it</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
