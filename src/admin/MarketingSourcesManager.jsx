@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { addDoc, collection, deleteDoc, doc, getDocs, orderBy, query, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useTheme } from '../shared/theme/ThemeContext';
-import { uploadImage } from '../../services/cloudinary';
+import { uploadFeatureMedia } from '../shared/services/backend';
 import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 import { DEFAULT_MARKETING_SOURCES } from './marketingSources';
 
@@ -121,13 +121,27 @@ export default function MarketingSourcesManager() {
       setMessage('Photo permission is needed to add a logo.');
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.9, allowsEditing: true, aspect: [1, 1] });
-    if (result.canceled || !result.assets?.[0]) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.92,
+      allowsEditing: false,
+    });
+    const asset = result.assets?.[0];
+    if (result.canceled || !asset?.uri) return;
     setUploading(true);
     try {
-      const asset = result.assets[0];
-      const uploaded = await uploadImage({ uri: asset.uri, name: asset.fileName || 'partner-logo.jpg', type: asset.mimeType || 'image/jpeg', size: asset.fileSize });
-      setForm((prev) => ({ ...prev, logoUrl: uploaded?.secure_url || uploaded?.url || '' }));
+      const uploaded = await uploadFeatureMedia({
+        uri: asset.uri,
+        name: asset.fileName || `partner-logo-${Date.now()}.jpg`,
+        type: asset.mimeType || 'image/jpeg',
+        size: asset.fileSize || 0,
+      }, {
+        feature: 'marketing',
+        resourceType: 'image',
+      });
+      const logoUrl = uploaded?.secure_url || uploaded?.url;
+      if (!logoUrl) throw new Error('Image upload completed without returning a logo URL.');
+      setForm((prev) => ({ ...prev, logoUrl }));
       setMessage('Logo ready.');
     } catch (error) {
       setMessage(error.message || 'Could not upload logo.');

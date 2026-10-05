@@ -7,6 +7,7 @@ import {
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -69,6 +70,38 @@ const getPostHashtags = (item) => item.tags?.length
   ? item.tags
   : [...new Set((item.content || '').match(/#[a-zA-Z0-9_]{1,40}/g) || [])].map((tag) => tag.toLowerCase());
 
+const renderFeedText = (content, linkStyle, onOpenLink) => {
+  const text = String(content || '');
+  const pattern = /https?:\/\/[^\s]+|www\.[^\s]+/gi;
+  const parts = [];
+  let last = 0;
+  let match;
+
+  while ((match = pattern.exec(text))) {
+    const raw = match[0];
+    const trailing = raw.match(/[.,!?;:)}\]]+$/)?.[0] || '';
+    const visible = trailing ? raw.slice(0, -trailing.length) : raw;
+    if (!visible) continue;
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    parts.push(
+      <Text
+        key={`link-${match.index}`}
+        accessibilityRole="link"
+        style={linkStyle}
+        onPress={() => onOpenLink(/^https?:\/\//i.test(visible) ? visible : `https://${visible}`)}
+      >
+        {visible}
+      </Text>
+    );
+    if (trailing) parts.push(trailing);
+    last = match.index + raw.length;
+  }
+
+  if (!parts.length) return text;
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+};
+
 // Firestore can hand back Timestamp objects instead of ISO strings, and
 // `new Date(timestamp)` on one of those silently produces "Invalid Date".
 // Normalize either shape before using it.
@@ -92,6 +125,14 @@ const timeAgo = (value) => {
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
+
+// 1243 -> 1.2k, 15300 -> 15k, 2400000 -> 2.4m
+const formatCount = (n) => {
+  const value = Number(n) || 0;
+  if (value < 1000) return String(value);
+  if (value < 1000000) return `${(value / 1000).toFixed(value < 10000 ? 1 : 0).replace(/\.0$/, '')}k`;
+  return `${(value / 1000000).toFixed(1).replace(/\.0$/, '')}m`;
 };
 
 // Reads the paging info off a feed response in one place.
@@ -144,7 +185,7 @@ function BottomSheet({ visible, onClose, styles, sheetStyle, avoidKeyboard = fal
 // A single post. Memoized so liking / commenting on one post doesn't
 // re-render every card in the list.
 const PostCard = React.memo(function PostCard({
-  item, liked, styles, colors, onOpenProfile, onMenu, onLike, onComment, onShare, onOpenImage, onTagPress,
+  item, liked, styles, colors, onOpenProfile, onMenu, onLike, onComment, onShare, onOpenImage, onTagPress, onOpenLink,
 }) {
   const tags = useMemo(() => getPostHashtags(item), [item]);
   const isColored = item.type === 'colored';
@@ -179,11 +220,11 @@ const PostCard = React.memo(function PostCard({
         </Pressable>
       </View>
 
-      {!isColored && item.content ? <Text style={styles.description}>{item.content}</Text> : null}
+      {!isColored && item.content ? <Text style={styles.description}>{renderFeedText(item.content, styles.postLink, onOpenLink)}</Text> : null}
 
       {isColored ? (
         <View style={[styles.colored, { backgroundColor: PRESET_COLORS[item.backgroundPreset] || PRESET_COLORS.indigo }]}>
-          <Text style={styles.coloredText}>{item.content}</Text>
+          <Text style={styles.coloredText}>{renderFeedText(item.content, styles.coloredLink, onOpenLink)}</Text>
         </View>
       ) : null}
 
@@ -212,7 +253,7 @@ const PostCard = React.memo(function PostCard({
           accessibilityLabel={liked ? 'Unlike post' : 'Like post'}
         >
           <Ionicons name={liked ? 'heart' : 'heart-outline'} size={19} color={liked ? colors.error || '#DC2626' : colors.textSecondary} />
-          <Text style={[styles.metaText, liked && styles.metaTextActive]}>{item.likesCount || 0}</Text>
+          <Text style={[styles.metaText, liked && styles.metaTextActive]}>{formatCount(item.likesCount)}</Text>
         </Pressable>
         <Pressable
           style={({ pressed }) => [styles.metaButton, pressed && { opacity: 0.65 }]}
@@ -222,11 +263,11 @@ const PostCard = React.memo(function PostCard({
           accessibilityLabel="Open comments"
         >
           <Ionicons name="chatbubble-outline" size={18} color={colors.textSecondary} />
-          <Text style={styles.metaText}>{item.commentsCount || 0}</Text>
+          <Text style={styles.metaText}>{formatCount(item.commentsCount)}</Text>
         </Pressable>
         <View style={styles.metaButton}>
           <Ionicons name="eye-outline" size={19} color={colors.textTertiary} />
-          <Text style={[styles.metaText, { color: colors.textTertiary }]}>{item.viewsCount || 0}</Text>
+          <Text style={[styles.metaText, { color: colors.textTertiary }]}>{formatCount(item.viewsCount)}</Text>
         </View>
         <Pressable
           style={({ pressed }) => [styles.metaButton, { marginLeft: 'auto' }, pressed && { opacity: 0.65 }]}
@@ -248,6 +289,7 @@ export default function NewsFeedPage() {
   const keyboardVisible = useKeyboardVisible();
   const { colors } = useTheme();
   const { user, profile } = useAuth();
+  const currentUid = user?.uid;
   const viewerAvatar = profile?.photoThumb || profile?.photoURL || profile?.photo || profile?.avatar || user?.photoURL || '';
 
   const [items, setItems] = useState([]);
@@ -290,7 +332,7 @@ export default function NewsFeedPage() {
 
   const viewedPosts = useRef(new Set());
   const pillAnim = useRef(new Animated.Value(0)).current;
-  const scrollY = useRef(new Animated.Value(0)).current;
+  const skeletonAnim = useRef(new Animated.Value(0.55)).current;
   const listRef = useRef(null);
   // Incremented on every refresh so slow "load more" / refresh responses
   // from an older request can never overwrite newer data.
@@ -300,6 +342,7 @@ export default function NewsFeedPage() {
   const busyRef = useRef(true);
   const likedRef = useRef(new Set());
   const likeBusyRef = useRef(new Set());
+  const commentLikeBusyRef = useRef(new Set());
 
   const sheetBottomPad = keyboardVisible ? 10 : Math.max(insets.bottom, 10);
 
@@ -309,8 +352,8 @@ export default function NewsFeedPage() {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-        marginHorizontal: s.md,
-        marginTop: s.sm,
+      marginHorizontal: s.md,
+      marginTop: s.sm,
       marginBottom: s.xs || 4,
       paddingHorizontal: s.md,
       borderRadius: r.xl,
@@ -320,12 +363,11 @@ export default function NewsFeedPage() {
     },
     searchInput: { flex: 1, color: c.textPrimary, paddingVertical: 11, fontSize: 14 },
 
-    // Composer entry (top of the list)
-    stickyHeader: {
+    // Fixed bar above the list: composer entry + active filter chips
+    fixedTop: {
       backgroundColor: c.background,
-      borderBottomWidth: 1,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: c.borderDefault,
-      zIndex: 10,
     },
     composerEntry: {
       flexDirection: 'row',
@@ -415,32 +457,60 @@ export default function NewsFeedPage() {
 
     // Post cards
     card: {
-      backgroundColor: c.background,
-      borderBottomWidth: 1,
-      borderBottomColor: c.borderDefault,
-      paddingTop: s.lg,
-      paddingBottom: s.sm,
+      backgroundColor: c.card,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      marginHorizontal: s.md,
+      marginTop: s.md,
+      paddingTop: s.md,
+      paddingBottom: 4,
       paddingHorizontal: s.lg,
     },
-    skeletonCard: { backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.borderDefault, padding: s.lg },
+    skeletonCard: {
+      backgroundColor: c.card,
+      borderRadius: r.xl,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      marginHorizontal: s.md,
+      marginTop: s.md,
+      padding: s.lg,
+    },
     skeletonLine: { height: 12, borderRadius: 6, backgroundColor: c.surfacePrimary },
     skeletonBlock: { height: 140, borderRadius: r.xl, backgroundColor: c.surfacePrimary, marginTop: 12 },
     avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.brandLight },
     postHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     authorCol: { flex: 1, gap: 1 },
     authorRow: { flexDirection: 'row', alignItems: 'center' },
-    author: { flexShrink: 1, color: c.textPrimary, fontSize: 15, fontWeight: '800' },
+    author: { flexShrink: 1, color: c.textPrimary, fontSize: 15, fontWeight: '700' },
     time: { color: c.textTertiary, fontSize: 12.5 },
     menu: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-    description: { marginTop: 10, fontSize: 15.5, lineHeight: 22, color: c.textPrimary },
+    description: { marginTop: 10, fontSize: 15.5, lineHeight: 23, color: c.textPrimary },
+    postLink: { color: c.brand, textDecorationLine: 'underline' },
     colored: { minHeight: 220, justifyContent: 'center', alignItems: 'center', padding: 28, borderRadius: r.xl, marginTop: 10 },
     coloredText: { color: '#fff', fontSize: 22, lineHeight: 30, textAlign: 'center', fontWeight: '900' },
+    coloredLink: { color: '#DBEAFE', textDecorationLine: 'underline' },
     image: { height: 280, width: '100%', backgroundColor: c.surfacePrimary, borderRadius: r.xl, marginTop: 10 },
     hashtagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
     hashtag: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: r.lg, backgroundColor: c.brandLight },
     hashtagText: { color: c.brandText, fontSize: 11.5, fontWeight: '800' },
-    metaRow: { flexDirection: 'row', alignItems: 'center', gap: 22, marginTop: 8 },
-    metaButton: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8 },
+    metaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 12,
+      paddingTop: 4,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: c.borderDefault,
+    },
+    metaButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingVertical: 8,
+      paddingHorizontal: 10,
+      borderRadius: 999,
+    },
     metaText: { fontSize: 13, fontWeight: '800', color: c.textSecondary },
     metaTextActive: { color: c.error || '#DC2626' },
 
@@ -519,7 +589,7 @@ export default function NewsFeedPage() {
     imageLightboxClose: { position: 'absolute', right: 20, width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.16)' },
 
     // "New posts" pill — floats over the top of the list.
-    pillLayer: { position: 'absolute', top: 10, left: 0, right: 0, alignItems: 'center', zIndex: 20 },
+    pillLayer: { position: 'absolute', top: 8, left: 0, right: 0, alignItems: 'center', zIndex: 20 },
     pill: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -568,6 +638,17 @@ export default function NewsFeedPage() {
     }
   }, [hasNewPosts, pillAnim]);
 
+  // Gentle pulse on the skeleton cards while the first page loads.
+  useEffect(() => {
+    if (!loading) return undefined;
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(skeletonAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+      Animated.timing(skeletonAnim, { toValue: 0.55, duration: 800, useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [loading, skeletonAnim]);
+
   // Adds author hydration (name / avatar / premium flag) for any posts that
   // the backend returned without it. Shared by refresh and load-more.
   const hydrateItems = useCallback(async (rawItems) => Promise.all(rawItems.map(async (item) => {
@@ -610,11 +691,7 @@ export default function NewsFeedPage() {
       setFeedCursor(page.cursor);
       setHasMore(page.hasMore);
       setNewPosts(null);
-      setLikedPostIds((current) => {
-        const next = new Set();
-        hydratedItems.forEach((item) => { if (item.likedByMe || current.has(item.id)) next.add(item.id); });
-        return next;
-      });
+      setLikedPostIds(new Set(hydratedItems.filter((item) => item.likedByMe).map((item) => item.id)));
     } catch (error) {
       if (requestId !== requestIdRef.current) return;
       console.error('[Feed] Failed to load feed', error);
@@ -864,11 +941,28 @@ export default function NewsFeedPage() {
   };
 
   const recordView = useCallback((item) => {
-    if (!item?.id || viewedPosts.current.has(item.id)) return;
-    viewedPosts.current.add(item.id);
-    postJson(`/api/feed/posts/${item.id}/view`, {}).catch(() => {
-      viewedPosts.current.delete(item.id);
+    if (!currentUid || !item?.id) return;
+    const viewKey = `${currentUid}:${item.id}`;
+    if (viewedPosts.current.has(viewKey)) return;
+    viewedPosts.current.add(viewKey);
+    postJson(`/api/feed/posts/${item.id}/view`, {}).then((response) => {
+      if (Number.isFinite(response?.viewsCount)) {
+        setItems((current) => current.map((post) => post.id === item.id
+          ? { ...post, viewsCount: response.viewsCount }
+          : post));
+      }
+    }).catch((error) => {
+      console.warn('[Feed] Could not record post view', error);
+      viewedPosts.current.delete(viewKey);
     });
+  }, [currentUid]);
+
+  const openFeedLink = useCallback(async (url) => {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert("Couldn't open link", 'Please try opening this link again.');
+    }
   }, []);
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
@@ -895,11 +989,18 @@ export default function NewsFeedPage() {
         : post));
     };
     applyLike(!alreadyLiked, delta);
-    const request = alreadyLiked 
-      ? deleteJson(`/api/feed/posts/${item.id}/like`) 
+    const request = alreadyLiked
+      ? deleteJson(`/api/feed/posts/${item.id}/like`)
       : postJson(`/api/feed/posts/${item.id}/like`, {});
-    
+
     request
+      .then((response) => {
+        if (Number.isFinite(response?.likesCount)) {
+          setItems((current) => current.map((post) => post.id === item.id
+            ? { ...post, likesCount: response.likesCount }
+            : post));
+        }
+      })
       .catch((error) => {
         applyLike(alreadyLiked, -delta);
         Alert.alert('Could not update like', error.message || 'Please try again.');
@@ -980,29 +1081,40 @@ export default function NewsFeedPage() {
   };
 
   const toggleCommentLike = useCallback((comment) => {
+    if (commentLikeBusyRef.current.has(comment.id)) return;
+    commentLikeBusyRef.current.add(comment.id);
+
     const alreadyLiked = comment.liked;
     const delta = alreadyLiked ? -1 : 1;
-    
+
     // Optimistic UI update
-    setComments((current) => current.map((c) => 
-      c.id === comment.id 
+    setComments((current) => current.map((c) =>
+      c.id === comment.id
         ? { ...c, liked: !alreadyLiked, likesCount: Math.max(0, (c.likesCount || 0) + delta) }
         : c
     ));
-    
-    const request = alreadyLiked 
-      ? deleteJson(`/api/feed/comments/${comment.id}/like`) 
+
+    const request = alreadyLiked
+      ? deleteJson(`/api/feed/comments/${comment.id}/like`)
       : postJson(`/api/feed/comments/${comment.id}/like`, {});
-      
-    request.catch((error) => {
-      // Revert on error
-      setComments((current) => current.map((c) => 
-        c.id === comment.id 
-          ? { ...c, liked: alreadyLiked, likesCount: Math.max(0, (c.likesCount || 0) - delta) }
-          : c
-      ));
-      Alert.alert('Could not update like', error.message || 'Please try again.');
-    });
+
+    request
+      .then((response) => {
+        if (Number.isFinite(response?.likesCount)) {
+          setComments((current) => current.map((c) => c.id === comment.id
+            ? { ...c, liked: response.liked, likesCount: response.likesCount }
+            : c));
+        }
+      })
+      .catch((error) => {
+        setComments((current) => current.map((c) =>
+          c.id === comment.id
+            ? { ...c, liked: alreadyLiked, likesCount: Math.max(0, (c.likesCount || 0) - delta) }
+            : c
+        ));
+        Alert.alert('Could not update like', error.message || 'Please try again.');
+      })
+      .finally(() => commentLikeBusyRef.current.delete(comment.id));
   }, []);
 
   const addComment = async () => {
@@ -1099,8 +1211,9 @@ export default function NewsFeedPage() {
       onShare={sharePost}
       onOpenImage={setImagePreview}
       onTagPress={handleTagPress}
+      onOpenLink={openFeedLink}
     />
-  ), [likedPostIds, styles, colors, openProfilePreview, toggleLike, openComments, sharePost, handleTagPress]);
+  ), [likedPostIds, styles, colors, openProfilePreview, toggleLike, openComments, sharePost, handleTagPress, openFeedLink]);
 
   // Bottom of the list: spinner while loading, a clear button when there is
   // more, a retry message on failure, and a quiet "all caught up" ending.
@@ -1197,10 +1310,10 @@ export default function NewsFeedPage() {
     </View>
   );
 
-  // Collapsed composer + active-filter summary. Lives in the list header so it
-  // scrolls away with the feed instead of eating screen space.
-  const listHeader = (
-    <View style={styles.stickyHeader}>
+  // Composer entry + active-filter summary. Rendered once, outside the list,
+  // so it stays pinned under the header while posts scroll beneath it.
+  const fixedTop = (
+    <View style={styles.fixedTop}>
       <View style={styles.composerEntry}>
         {viewerAvatar ? <Image source={{ uri: viewerAvatar }} style={styles.avatarSm} contentFit="cover" /> : <View style={styles.avatarSm} />}
         <Pressable style={styles.composerPill} onPress={() => setComposerOpen(true)} accessibilityRole="button" accessibilityLabel="Write a post">
@@ -1233,7 +1346,6 @@ export default function NewsFeedPage() {
       actions={headerActions}
       onSearch={toggleSearch}
       showNotifications={false}
-      headerScrollY={scrollY}
     >
       {searchOpen ? (
         <View style={styles.searchWrap}>
@@ -1257,24 +1369,25 @@ export default function NewsFeedPage() {
         </View>
       ) : null}
 
+      {fixedTop}
+
       {loading && !items.length ? (
         <View>
-          {listHeader}
           {[0, 1, 2].map((key) => (
-            <View key={key} style={styles.skeletonCard}>
+            <Animated.View key={key} style={[styles.skeletonCard, { opacity: skeletonAnim }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <View style={[styles.avatar, { opacity: 0.6 }]} />
+                <View style={styles.avatar} />
                 <View style={{ flex: 1, gap: 6 }}>
                   <View style={[styles.skeletonLine, { width: '40%' }]} />
                   <View style={[styles.skeletonLine, { width: '25%', height: 9 }]} />
                 </View>
               </View>
               <View style={styles.skeletonBlock} />
-            </View>
+            </Animated.View>
           ))}
         </View>
       ) : (
-        <Animated.FlatList
+        <FlatList
           ref={listRef}
           data={visibleItems}
           keyExtractor={(item) => item.id}
@@ -1284,11 +1397,6 @@ export default function NewsFeedPage() {
           viewabilityConfig={viewabilityConfig}
           refreshing={refreshing}
           onRefresh={() => loadFeed(true)}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            { useNativeDriver: false }
-          )}
-          scrollEventThrottle={16}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           onEndReached={() => { if (!loadMoreError) loadMore(); }}
@@ -1296,8 +1404,6 @@ export default function NewsFeedPage() {
           initialNumToRender={5}
           windowSize={9}
           maxToRenderPerBatch={6}
-          stickyHeaderIndices={[0]}
-          ListHeaderComponent={listHeader}
           ListEmptyComponent={!loading ? (
             <EmptyState
               title={items.length && !visibleItems.length ? 'No matching posts' : 'Your feed is quiet'}
@@ -1590,8 +1696,14 @@ export default function NewsFeedPage() {
                 <Text style={styles.commentBody}>{item.content}</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 12 }}>
                   <Text style={styles.commentDate}>{timeAgo(item.createdAt)}</Text>
-                  <Pressable onPress={() => toggleCommentLike(item)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Ionicons name={item.liked ? "heart" : "heart-outline"} size={14} color={item.liked ? colors.error : colors.textMuted} />
+                  <Pressable
+                    onPress={() => toggleCommentLike(item)}
+                    disabled={commentLikeBusyRef.current.has(item.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={item.liked ? 'Unlike comment' : 'Like comment'}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                  >
+                    <Ionicons name={item.liked ? 'heart' : 'heart-outline'} size={14} color={item.liked ? colors.error : colors.textMuted} />
                     {item.likesCount > 0 && <Text style={[styles.commentDate, { color: item.liked ? colors.error : colors.textMuted }]}>{item.likesCount}</Text>}
                   </Pressable>
                 </View>

@@ -27,7 +27,6 @@ import MarketingSourcesManager from '../../src/admin/MarketingSourcesManager';
 import PromoSpotlightManager from '../../src/admin/PromoSpotlightManager';
 import StickerManager from '../../src/admin/StickerManager';
 import PastQuestionReviewManager from '../../src/admin/PastQuestionReviewManager';
-import UniversityManager from '../../src/admin/UniversityManager';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import {
   ADMIN_PREMIUM_GIFT_DAYS,
@@ -63,7 +62,6 @@ const ADMIN_NAV_SECTIONS = [
     label: 'Content',
     items: [
       { key: 'pastQuestions', label: 'Past Questions', icon: 'clipboard-outline', description: 'Review uploaded past questions before they go live.' },
-      { key: 'academicData', label: 'Universities', icon: 'school-outline', description: 'Manage universities, faculties and departments.' },
       { key: 'mediaSources', label: 'Media Sources', icon: 'megaphone-outline', description: 'Manage where new students say they heard about UniHelp.' },
     ],
   },
@@ -563,8 +561,6 @@ export default function AdminPanelPage() {
         return <UsersList colors={colors} users={users} setUsers={setUsers} loading={usersLoading} currentUid={user?.uid} notify={notify} askConfirm={askConfirm} premiumOnly />;
       case 'mediaSources':
         return <MarketingSourcesManager colors={colors} />;
-      case 'academicData':
-        return <UniversityManager />;
       case 'support':
         return (
           <View style={pageStyles.supportCard}>
