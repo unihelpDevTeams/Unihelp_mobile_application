@@ -390,8 +390,8 @@ const createStyles = (c) => ({
   toast: { position: 'absolute', top: 10, alignSelf: 'center', backgroundColor: c.textPrimary, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8, maxWidth: '90%' },
   toastText: { color: c.surfacePrimary, fontSize: 13, fontWeight: '700' },
 
-  composerContainer: { backgroundColor: c.surfacePrimary, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.borderDefault, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 24 : 12, paddingHorizontal: 12 },
-  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+  composerContainer: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.borderDefault, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 24 : 12},
+  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
   recorderExpanded: { flex: 1 },
   stickerButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.surfaceSecondary, alignItems: 'center', justifyContent: 'center' },
   inputWrap: { flex: 1 },

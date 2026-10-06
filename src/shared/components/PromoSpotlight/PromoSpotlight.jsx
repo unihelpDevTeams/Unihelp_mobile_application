@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
   Linking,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -11,11 +12,12 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../theme/ThemeContext';
-import { Button } from '../Button';
 
 const LABELS = {
   external_ad: 'Sponsored',
@@ -24,6 +26,30 @@ const LABELS = {
 };
 
 const AUTO_CLOSE_MS = 5000;
+
+// Portrait card: width / height = 4:5
+const CARD_ASPECT = 0.8;
+const CARD_WIDTH_RATIO = 0.86; // of screen width
+const CARD_MAX_WIDTH = 360;
+const SIDE_MARGIN = 16;
+
+const HEX_REGEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+const hexToRgba = (hex, alpha) => {
+  if (typeof hex !== 'string' || !HEX_REGEX.test(hex)) return `rgba(15, 15, 35, ${alpha})`;
+  let h = hex.slice(1);
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+const clamp = (value, min, max, fallback) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.min(max, Math.max(min, n));
+};
 
 export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) {
   const router = useRouter();
@@ -39,16 +65,41 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
 
   const [imageLoading, setImageLoading] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
-  const [countdown, setCountdown] = useState(5);
   const [userDismissed, setUserDismissed] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
 
-  const closeTimerRef = useRef(null);
   const animRef = useRef(null);
-
+  const pausedRef = useRef(false);
   const remainingMsRef = useRef(AUTO_CLOSE_MS);
   const lastStartTimestampRef = useRef(null);
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
 
+  const handleClose = useCallback(() => {
+    setUserDismissed(true);
+    onDismissRef.current?.();
+  }, []);
+
+  const clearCountdown = useCallback(() => {
+    if (animRef.current) animRef.current.stop();
+  }, []);
+
+  const startCountdown = useCallback(
+    (durationMs) => {
+      lastStartTimestampRef.current = Date.now();
+      animRef.current = Animated.timing(countdownAnim, {
+        toValue: 0,
+        duration: durationMs,
+        useNativeDriver: false,
+      });
+      animRef.current.start(({ finished }) => {
+        if (finished) handleClose();
+      });
+    },
+    [countdownAnim, handleClose]
+  );
+
+  // Show / hide spring
   useEffect(() => {
     Animated.spring(progress, {
       toValue: visible ? 1 : 0,
@@ -58,71 +109,40 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
     }).start();
   }, [progress, visible]);
 
-  // Handle countdown setup & auto-dismiss life cycle
+  // Countdown lifecycle
   useEffect(() => {
+    pausedRef.current = false;
+    remainingMsRef.current = AUTO_CLOSE_MS;
+    countdownAnim.setValue(1);
+    holdScale.setValue(1);
+    setUserDismissed(false);
+    setIsPaused(false);
+
     if (!visible) {
-      clearCountdownTimers();
-      countdownAnim.setValue(1);
-      setCountdown(5);
-      setUserDismissed(false);
-      setIsPaused(false);
-      remainingMsRef.current = AUTO_CLOSE_MS;
+      clearCountdown();
       return undefined;
     }
 
     setImageFailed(false);
     setImageLoading(Boolean(promo?.imageUrl));
-    setCountdown(5);
-    setUserDismissed(false);
-    setIsPaused(false);
-    remainingMsRef.current = AUTO_CLOSE_MS;
-    countdownAnim.setValue(1);
-
     startCountdown(AUTO_CLOSE_MS);
 
-    const listenerId = countdownAnim.addListener(({ value }) => {
-      const secondsLeft = Math.max(0, Math.ceil(value * 5));
-      setCountdown((prev) => (prev !== secondsLeft ? secondsLeft : prev));
-    });
-
     return () => {
-      clearCountdownTimers();
-      countdownAnim.removeListener(listenerId);
+      clearCountdown();
     };
   }, [promo?.id, promo?.imageUrl, visible]);
 
-  const clearCountdownTimers = () => {
-    if (animRef.current) animRef.current.stop();
-    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
-  };
-
-  const startCountdown = (durationMs) => {
-    lastStartTimestampRef.current = Date.now();
-
-    animRef.current = Animated.timing(countdownAnim, {
-      toValue: 0,
-      duration: durationMs,
-      useNativeDriver: false,
-    });
-
-    animRef.current.start(({ finished }) => {
-      if (finished) {
-        handleClose();
-      }
-    });
-  };
-
   const pauseCountdown = () => {
-    if (isPaused || !visible) return;
-
+    if (pausedRef.current || !visible) return;
+    pausedRef.current = true;
     setIsPaused(true);
-    clearCountdownTimers();
+    clearCountdown();
 
-    const elapsed = Date.now() - lastStartTimestampRef.current;
+    const elapsed = Date.now() - (lastStartTimestampRef.current || Date.now());
     remainingMsRef.current = Math.max(0, remainingMsRef.current - elapsed);
 
     Animated.spring(holdScale, {
-      toValue: 0.98,
+      toValue: 0.985,
       useNativeDriver: true,
       speed: 20,
       bounciness: 4,
@@ -130,8 +150,8 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
   };
 
   const resumeCountdown = () => {
-    if (!isPaused || !visible) return;
-
+    if (!pausedRef.current || !visible) return;
+    pausedRef.current = false;
     setIsPaused(false);
 
     Animated.spring(holdScale, {
@@ -141,31 +161,32 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
       bounciness: 4,
     }).start();
 
-    if (remainingMsRef.current > 0) {
-      startCountdown(remainingMsRef.current);
-    } else {
-      handleClose();
-    }
+    if (remainingMsRef.current > 0) startCountdown(remainingMsRef.current);
+    else handleClose();
   };
 
   const sizing = useMemo(() => {
-    const maxWidth = Math.min(width - 32, 390);
-    const maxHeight = height - insets.top - insets.bottom - 44;
-    const contentHeight = promo?.description ? 180 : 140;
-    const imageHeight = Math.max(220, Math.min(maxWidth * 1.35, maxHeight - contentHeight));
-    return { maxWidth, maxHeight, imageHeight };
-  }, [height, insets.bottom, insets.top, promo?.description, width]);
+    // Symmetric vertical padding so the card is truly centered, even on notched devices
+    const verticalPad = Math.max(insets.top, insets.bottom) + 20;
+    const maxCardHeight = height - verticalPad * 2;
+
+    let cardWidth = Math.min(width * CARD_WIDTH_RATIO, CARD_MAX_WIDTH);
+    let cardHeight = cardWidth / CARD_ASPECT;
+
+    // On short screens, shrink the card but keep the portrait ratio
+    if (cardHeight > maxCardHeight) {
+      cardHeight = maxCardHeight;
+      cardWidth = cardHeight * CARD_ASPECT;
+    }
+    return { cardWidth, cardHeight, verticalPad };
+  }, [width, height, insets.top, insets.bottom]);
 
   if (!promo) return null;
-
-  const handleClose = () => {
-    setUserDismissed(true);
-    onDismiss?.();
-  };
 
   const handleAction = async () => {
     try {
       setUserDismissed(true);
+      clearCountdown();
       if (promo.actionType === 'external_url' || promo.actionType === 'deep_link') {
         if (promo.actionUrl) {
           await Linking.openURL(promo.actionUrl);
@@ -193,102 +214,158 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
 
   const hasAction = Boolean(promo.actionType && promo.actionType !== 'none' && promo.actionUrl);
   const label = (promo.type && LABELS[promo.type]) || 'Announcement';
-
   const isExternal = promo.type === 'external_ad';
-  const badgeBg = isExternal
-    ? colors.amberLight || 'rgba(245, 158, 11, 0.15)'
-    : colors.brandLight || 'rgba(99, 102, 241, 0.15)';
+  const accent = isExternal ? colors.amber || '#F59E0B' : colors.brand || '#4F46E5';
+  const buttonBg = colors.brand || '#4F46E5';
+  const buttonLabel = promo.buttonText || (hasAction ? 'Open' : 'Got it');
 
-  const badgeTextColor = isExternal
-    ? colors.amber || '#D97706'
-    : colors.brandText || colors.brand || '#4F46E5';
+  const gradientStart = HEX_REGEX.test(promo.gradientStart || '') ? promo.gradientStart : '#1A1A2E';
+  const gradientEnd = HEX_REGEX.test(promo.gradientEnd || '') ? promo.gradientEnd : '#0F0F23';
+  const textColor = HEX_REGEX.test(promo.textColor || '') ? promo.textColor : '#FFFFFF';
+  const titleSize = clamp(promo.titleSize, 16, 26, 20);
+  const descSize = clamp(promo.descriptionSize, 12, 16, 13);
 
-  const overlayBg = colors.overlay || 'rgba(0, 0, 0, 0.65)';
-  const closeBtnBg = isDark
-    ? colors.surfaceSecondary || 'rgba(255, 255, 255, 0.16)'
-    : colors.whiteTransparent || 'rgba(255, 255, 255, 0.9)';
+  const dimColor = isDark ? 'rgba(0, 0, 0, 0.55)' : 'rgba(10, 12, 20, 0.45)';
 
   const countdownWidth = countdownAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ['0%', '100%'],
   });
 
+  const showImage = promo.imageUrl && !imageFailed;
+
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
-      <Animated.View style={[styles.overlay, { opacity: progress, backgroundColor: overlayBg }]}>
+    <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose} statusBarTranslucent>
+      {/* Blurred + dimmed backdrop */}
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: progress }]}>
+        <BlurView
+          intensity={Platform.OS === 'ios' ? 40 : 60}
+          tint="dark"
+          experimentalBlurMethod="dimezisBlurView"
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: dimColor }]} />
         <Pressable
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
           onPress={handleClose}
           accessibilityRole="button"
           accessibilityLabel="Dismiss promotion"
         />
       </Animated.View>
 
+      {/* Perfectly centered stage */}
       <View
         pointerEvents="box-none"
-        style={[styles.centerWrap, { paddingTop: insets.top + 18, paddingBottom: insets.bottom + 18 }]}
+        style={[
+          styles.centerWrap,
+          { paddingVertical: sizing.verticalPad, paddingHorizontal: SIDE_MARGIN },
+        ]}
       >
         <Pressable
           onLongPress={pauseCountdown}
           onPressOut={resumeCountdown}
           delayLongPress={180}
-          style={{ width: sizing.maxWidth }}
+          style={{ width: sizing.cardWidth, height: sizing.cardHeight }}
         >
           <Animated.View
             style={[
               styles.card,
               shadows?.xl,
               {
-                width: sizing.maxWidth,
-                maxHeight: sizing.maxHeight,
-                backgroundColor: colors.modalBackground || colors.card || '#FFFFFF',
-                borderColor: colors.borderDefault || colors.border || '#E5E7EB',
+                width: sizing.cardWidth,
+                height: sizing.cardHeight,
+                backgroundColor: gradientEnd,
                 opacity: progress,
                 transform: [
-                  { scale: Animated.multiply(progress.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }), holdScale) },
-                  { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) },
+                  {
+                    scale: Animated.multiply(
+                      progress.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }),
+                      holdScale
+                    ),
+                  },
+                  { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) },
                 ],
               },
             ]}
             accessibilityViewIsModal
           >
-            {/* Image Section */}
-            <View style={[styles.imageWrap, { height: sizing.imageHeight }]}>
-              {promo.imageUrl && !imageFailed ? (
-                <Image
-                  source={{ uri: promo.imageUrl }}
-                  style={styles.image}
-                  contentFit="cover"
-                  transition={200}
-                  onLoadStart={() => setImageLoading(true)}
-                  onLoadEnd={() => setImageLoading(false)}
-                  onError={() => {
-                    setImageLoading(false);
-                    setImageFailed(true);
-                  }}
+            {/* Full-bleed portrait creative (or themed gradient fallback) */}
+            {showImage ? (
+              <Image
+                source={{ uri: promo.imageUrl }}
+                style={StyleSheet.absoluteFill}
+                contentFit="cover"
+                transition={200}
+                onLoadStart={() => setImageLoading(true)}
+                onLoadEnd={() => setImageLoading(false)}
+                onError={() => {
+                  setImageLoading(false);
+                  setImageFailed(true);
+                }}
+              />
+            ) : (
+              <LinearGradient
+                colors={[gradientStart, gradientEnd]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={StyleSheet.absoluteFill}
+              >
+                <View style={styles.fallback}>
+                  <Ionicons name="sparkles-outline" size={38} color="rgba(255,255,255,0.7)" />
+                </View>
+              </LinearGradient>
+            )}
+
+            {imageLoading && (
+              <View style={styles.imageLoader}>
+                <ActivityIndicator color="#FFFFFF" />
+              </View>
+            )}
+
+            {/* Soft top shade so the badge and close button stay readable on any image */}
+            <LinearGradient
+              pointerEvents="none"
+              colors={['rgba(0,0,0,0.45)', 'rgba(0,0,0,0)']}
+              style={styles.topShade}
+            />
+
+            {/* Bottom scrim tinted with the campaign's theme colour */}
+            <LinearGradient
+              pointerEvents="none"
+              colors={[hexToRgba(gradientEnd, 0), hexToRgba(gradientEnd, 0.8), hexToRgba(gradientEnd, 0.97)]}
+              locations={[0, 0.55, 1]}
+              style={styles.bottomScrim}
+            />
+
+            {/* Story-style countdown */}
+            {!userDismissed && (
+              <View style={styles.countdownTrack}>
+                <Animated.View
+                  style={[
+                    styles.countdownFill,
+                    {
+                      width: countdownWidth,
+                      backgroundColor: isPaused ? 'rgba(255,255,255,0.6)' : '#FFFFFF',
+                    },
+                  ]}
                 />
-              ) : (
-                <View style={[styles.fallback, { backgroundColor: colors.surfaceSecondary || '#F3F4F6' }]}>
-                  <Ionicons name="sparkles-outline" size={38} color={colors.brand || '#4F46E5'} />
-                  <Text style={[styles.fallbackText, { color: colors.textSecondary || '#6B7280' }]}>
-                    UniHelp Spotlight
-                  </Text>
-                </View>
-              )}
+              </View>
+            )}
 
-              {imageLoading && (
-                <View style={styles.imageLoader}>
-                  <ActivityIndicator color={colors.brand || '#4F46E5'} />
+            {/* Top row: badge, paused pill, close */}
+            <View style={styles.topRow} pointerEvents="box-none">
+              <View style={styles.topLeft}>
+                <View style={styles.badge}>
+                  <View style={[styles.badgeDot, { backgroundColor: accent }]} />
+                  <Text style={styles.badgeText}>{label}</Text>
                 </View>
-              )}
-
-              {/* Pause Overlay Indicator */}
-              {isPaused && (
-                <View style={styles.pausedBadge}>
-                  <Ionicons name="pause" size={12} color="#FFFFFF" />
-                  <Text style={styles.pausedBadgeText}>Paused</Text>
-                </View>
-              )}
+                {isPaused && (
+                  <View style={styles.badge}>
+                    <Ionicons name="pause" size={10} color="#FFFFFF" />
+                    <Text style={styles.badgeText}>Paused</Text>
+                  </View>
+                )}
+              </View>
 
               <Pressable
                 onPress={handleClose}
@@ -296,98 +373,55 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
                 onPressOut={() => animatePress(closeScale, 1)}
                 accessibilityRole="button"
                 accessibilityLabel="Close promotion"
-                hitSlop={8}
-                style={styles.closeButtonContainer}
+                hitSlop={10}
               >
-                <Animated.View
-                  style={[
-                    styles.closeButton,
-                    { backgroundColor: closeBtnBg, transform: [{ scale: closeScale }] },
-                  ]}
-                >
-                  <Ionicons name="close" size={20} color={colors.textPrimary || '#111827'} />
+                <Animated.View style={[styles.closeButton, { transform: [{ scale: closeScale }] }]}>
+                  <Ionicons name="close" size={18} color="#FFFFFF" />
                 </Animated.View>
               </Pressable>
             </View>
 
-            {/* Content & Action Section */}
-            <View style={styles.content}>
-              <View style={styles.metaRow}>
-                <View style={[styles.badge, { backgroundColor: badgeBg }]}>
-                  <Text style={[styles.badgeText, { color: badgeTextColor }]}>{label}</Text>
-                </View>
-                {promo.advertiserName ? (
-                  <Text
-                    style={[styles.advertiser, { color: colors.textSecondary || '#6B7280' }]}
-                    numberOfLines={1}
-                  >
-                    {promo.advertiserName}
-                  </Text>
-                ) : null}
-              </View>
+            {/* Bottom content */}
+            <View style={styles.content} pointerEvents="box-none">
+              {promo.advertiserName ? (
+                <Text style={styles.advertiser} numberOfLines={1}>
+                  {promo.advertiserName}
+                </Text>
+              ) : null}
 
               {promo.title ? (
-                <Text style={[styles.title, { color: colors.textPrimary || '#111827' }]} numberOfLines={2}>
+                <Text
+                  style={[styles.title, { color: textColor, fontSize: titleSize, lineHeight: titleSize + 6 }]}
+                  numberOfLines={3}
+                >
                   {promo.title}
                 </Text>
               ) : null}
 
               {promo.description ? (
                 <Text
-                  style={[styles.description, { color: colors.textSecondary || '#6B7280' }]}
-                  numberOfLines={2}
+                  style={[styles.description, { color: textColor, fontSize: descSize, lineHeight: descSize + 6 }]}
+                  numberOfLines={3}
                 >
                   {promo.description}
                 </Text>
               ) : null}
 
-              {!userDismissed ? (
-                <View style={styles.countdownRow}>
-                  <View style={styles.countdownHeader}>
-                    <Text style={[styles.countdownText, { color: colors.textSecondary || '#6B7280' }]}>
-                      {isPaused ? 'Hold to read' : `Auto-closing in ${countdown}s`}
-                    </Text>
-                  </View>
-                  <View
-                    style={[
-                      styles.countdownTrack,
-                      { backgroundColor: colors.borderDefault || colors.border || '#E5E7EB' },
-                    ]}
-                  >
-                    <Animated.View
-                      style={[
-                        styles.countdownFill,
-                        {
-                          width: countdownWidth,
-                          backgroundColor: isPaused
-                            ? colors.textSecondary || '#9CA3AF'
-                            : isExternal
-                            ? colors.amber || '#F59E0B'
-                            : colors.brand || '#4F46E5',
-                        },
-                      ]}
-                    />
-                  </View>
-                </View>
-              ) : null}
-
-              <View style={styles.actions}>
+              <Animated.View style={[styles.actions, { transform: [{ scale: actionScale }] }]}>
                 <Pressable
                   onPress={hasAction ? handleAction : handleClose}
                   onPressIn={() => animatePress(actionScale, 0.97)}
                   onPressOut={() => animatePress(actionScale, 1)}
+                  accessibilityRole="button"
+                  accessibilityLabel={buttonLabel}
+                  style={[styles.actionButton, { backgroundColor: buttonBg }]}
                 >
-                  <Animated.View style={{ transform: [{ scale: actionScale }] }}>
-                    <Button
-                      label={promo.buttonText || (hasAction ? 'Open' : 'Got it')}
-                      onPress={hasAction ? handleAction : handleClose}
-                      icon={hasAction ? 'arrow-forward-outline' : 'checkmark-outline'}
-                      iconPosition="right"
-                      fullWidth
-                    />
-                  </Animated.View>
+                  <Text style={styles.actionText} numberOfLines={1}>
+                    {buttonLabel}
+                  </Text>
+                  <Ionicons name={hasAction ? 'arrow-forward' : 'checkmark'} size={16} color="#FFFFFF" />
                 </Pressable>
-              </View>
+              </Animated.View>
             </View>
           </Animated.View>
         </Pressable>
@@ -397,129 +431,131 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-  },
   centerWrap: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
-    justify: 'center',
-    paddingHorizontal: 16,
+    justifyContent: 'center',
   },
   card: {
     borderRadius: 24,
     overflow: 'hidden',
-    borderWidth: 1,
   },
-  imageWrap: {
-    width: '100%',
-    position: 'relative',
-  },
-  image: {
-    width: '100%',
-    height: '100%',
+  fallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   imageLoader: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  fallback: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  fallbackText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  closeButtonContainer: {
+  topShade: {
     position: 'absolute',
-    top: 12,
-    right: 12,
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 90,
   },
-  closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pausedBadge: {
+  bottomScrim: {
     position: 'absolute',
-    top: 12,
-    left: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-  pausedBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  content: {
-    padding: 20,
-    gap: 12,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  badge: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
-  },
-  advertiser: {
-    flex: 1,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: '800',
-    lineHeight: 24,
-  },
-  description: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  countdownRow: {
-    gap: 6,
-    marginTop: 2,
-  },
-  countdownHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  countdownText: {
-    fontSize: 11,
-    fontWeight: '600',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '62%',
   },
   countdownTrack: {
-    height: 4,
+    position: 'absolute',
+    top: 10,
+    left: 14,
+    right: 14,
+    height: 3,
     borderRadius: 999,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
     overflow: 'hidden',
   },
   countdownFill: {
     height: '100%',
     borderRadius: 999,
   },
+  topRow: {
+    position: 'absolute',
+    top: 22,
+    left: 14,
+    right: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  topLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  badgeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  closeButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  content: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 18,
+    paddingBottom: 18,
+    gap: 5,
+  },
+  advertiser: {
+    color: 'rgba(255, 255, 255, 0.75)',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  title: {
+    fontWeight: '800',
+  },
+  description: {
+    opacity: 0.85,
+  },
   actions: {
-    marginTop: 4,
+    marginTop: 12,
+  },
+  actionButton: {
+    height: 46,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  actionText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,8 +17,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useAuth } from '../../context/AuthContext';
-import { uploadImage, toCloudinaryAsset } from '../../services/cloudinary';
-import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
+import { deleteMarketingMedia, uploadFeatureMedia } from '../shared/services/backend';
 import {
   createPromoSpotlight,
   deletePromoSpotlight,
@@ -49,6 +48,11 @@ const PRESET_GRADIENTS = [
   { label: 'Emerald Deep', start: '#064E3B', end: '#022C22' },
 ];
 
+// Matches the portrait card in PromoSpotlight (CARD_ASPECT = 0.8, i.e. 4:5)
+const CREATIVE_ASPECT = 0.8;
+const TITLE_MAX = 60;
+const DESCRIPTION_MAX = 120;
+
 const emptyForm = {
   type: 'external_ad',
   title: '',
@@ -74,6 +78,16 @@ const emptyForm = {
   descriptionSize: 13,
 };
 
+const HEX_REGEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+// Safe alpha helper: only appends alpha to 6-digit hex colors, otherwise returns the color untouched
+const withAlpha = (color, alpha) => {
+  if (typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)) {
+    return color + Math.round(alpha * 255).toString(16).padStart(2, '0');
+  }
+  return color;
+};
+
 const dateValue = (value) => {
   if (!value) return '';
   if (typeof value?.toDate === 'function') return value.toDate().toISOString();
@@ -82,13 +96,33 @@ const dateValue = (value) => {
   return '';
 };
 
-const formFromPromo = (promo) => ({
-  ...emptyForm,
-  ...promo,
-  priority: String(promo?.priority ?? 0),
-  startAt: dateValue(promo?.startAt),
-  endAt: dateValue(promo?.endAt),
-});
+const getMarketingAssetKey = (asset) => {
+  const key = asset?.key || asset?.publicId;
+  return typeof key === 'string' && key.startsWith('unihelp/marketing/') && !key.includes('..')
+    ? key
+    : '';
+};
+
+const deleteMarketingAsset = async (asset) => {
+  const key = getMarketingAssetKey(asset);
+  if (!key) return false;
+  await deleteMarketingMedia(key);
+  return true;
+};
+
+// Only copy known form fields so ids / server timestamps never leak back into the update payload
+const formFromPromo = (promo) => {
+  const next = Object.keys(emptyForm).reduce((acc, key) => {
+    acc[key] = promo?.[key] ?? emptyForm[key];
+    return acc;
+  }, {});
+  return {
+    ...next,
+    priority: String(promo?.priority ?? 0),
+    startAt: dateValue(promo?.startAt),
+    endAt: dateValue(promo?.endAt),
+  };
+};
 
 const formatDisplayDate = (isoString) => {
   if (!isoString) return 'Not scheduled';
@@ -115,7 +149,24 @@ const formatScheduleDuration = (startAt, endAt) => {
   return `${days} day${days === 1 ? '' : 's'}${hours ? ` ${hours}h` : ''} scheduled`;
 };
 
-export default function PromoSpotlightManager() {
+const getCampaignStatus = (item) => {
+  if (!item.enabled) return 'paused';
+  const now = Date.now();
+  const start = Date.parse(dateValue(item.startAt));
+  const end = Date.parse(dateValue(item.endAt));
+  if (!Number.isNaN(end) && end < now) return 'expired';
+  if (!Number.isNaN(start) && start > now) return 'scheduled';
+  return 'live';
+};
+
+const compactNumber = (n) => {
+  const value = Number(n) || 0;
+  if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
+  return String(value);
+};
+
+export default function PromoSpotlightManager({ onEditStart }) {
   const { profile, user } = useAuth();
   const { colors, isDark } = useTheme();
 
@@ -125,6 +176,7 @@ export default function PromoSpotlightManager() {
       indigoDark: colors.brandDark || colors.brand || '#4338CA',
       indigoSoft: isDark ? colors.brandLight || '#1E1B4B' : '#EEF2FF',
       white: colors.card || '#FFFFFF',
+      onBrand: '#FFFFFF',
       ink: colors.textPrimary || '#0F172A',
       inkSoft: colors.textSecondary || '#64748B',
       border: colors.borderDefault || '#E2E8F0',
@@ -132,6 +184,8 @@ export default function PromoSpotlightManager() {
       successSoft: isDark ? 'rgba(16,185,129,0.18)' : '#ECFDF5',
       error: colors.danger || '#EF4444',
       errorSoft: isDark ? 'rgba(239,68,68,0.18)' : '#FEF2F2',
+      warning: '#F59E0B',
+      warningSoft: isDark ? 'rgba(245,158,11,0.18)' : '#FFFBEB',
       bgLight: colors.canvas || '#F8FAFC',
       surface: colors.card || '#FFFFFF',
       inputSurface: isDark ? colors.surfaceSecondary || '#1E293B' : '#F8FAFC',
@@ -141,6 +195,7 @@ export default function PromoSpotlightManager() {
   );
 
   const styles = useMemo(() => createStyles(palette), [palette]);
+
   const [items, setItems] = useState([]);
   const [statsByPromoId, setStatsByPromoId] = useState({});
   const [form, setForm] = useState(emptyForm);
@@ -151,8 +206,9 @@ export default function PromoSpotlightManager() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [previewVisible, setPreviewVisible] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(true);
+  const pendingUploadedAssetRef = useRef(null);
+  const originalEditingAssetRef = useRef(null);
 
-  // Date Picker State
   const [datePickerConfig, setDatePickerConfig] = useState({
     visible: false,
     field: null,
@@ -163,20 +219,36 @@ export default function PromoSpotlightManager() {
 
   const isEditing = Boolean(editingId);
 
+  // The preview must never trigger real navigation or open links, so the action is neutralised here
   const previewPromo = useMemo(
     () => ({
       id: editingId || 'preview',
       ...form,
+      actionType: 'none',
+      actionUrl: '',
       priority: Number(form.priority) || 0,
     }),
     [editingId, form]
   );
 
+  const summary = useMemo(() => {
+    let live = 0;
+    let impressions = 0;
+    let clicks = 0;
+    items.forEach((item) => {
+      if (getCampaignStatus(item) === 'live') live += 1;
+      impressions += Number(statsByPromoId[item.id]?.impressions) || 0;
+      clicks += Number(statsByPromoId[item.id]?.clicks) || 0;
+    });
+    const ctr = impressions ? ((clicks / impressions) * 100).toFixed(1) : '0.0';
+    return { live, impressions, clicks, ctr };
+  }, [items, statsByPromoId]);
+
   const loadItems = useCallback(async () => {
     setLoading(true);
     try {
-      const promos = await fetchPromoSpotlightsForAdmin();
-      setItems(promos || []);
+      const promos = (await fetchPromoSpotlightsForAdmin()) || [];
+      setItems(promos);
       const stats = await fetchPromoSpotlightStats(promos.map((p) => p.id));
       setStatsByPromoId(stats || {});
     } catch (err) {
@@ -192,11 +264,29 @@ export default function PromoSpotlightManager() {
     loadItems();
   }, [loadItems]);
 
+  // Remove an uploaded-but-unsaved creative if the screen unmounts mid-edit
+  useEffect(
+    () => () => {
+      const pending = pendingUploadedAssetRef.current;
+      if (pending) deleteMarketingAsset(pending).catch(() => {});
+    },
+    []
+  );
+
   const updateField = useCallback((key, value) => {
     setForm((current) => ({ ...current, [key]: value }));
   }, []);
 
   const resetForm = useCallback(() => {
+    const pendingAsset = pendingUploadedAssetRef.current;
+    pendingUploadedAssetRef.current = null;
+    originalEditingAssetRef.current = null;
+    if (pendingAsset) {
+      deleteMarketingAsset(pendingAsset).catch((error) => {
+        console.error('[PromoSpotlightManager] Failed to remove an unsaved R2 creative.', error);
+        Alert.alert('Cleanup failed', error?.message || 'The unused creative could not be removed from storage.');
+      });
+    }
     setEditingId(null);
     setForm(emptyForm);
   }, []);
@@ -209,9 +299,11 @@ export default function PromoSpotlightManager() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      // New expo-image-picker uses ['images']; fall back for older SDKs without touching the deprecated enum
+      mediaTypes: ImagePicker.MediaType ? ['images'] : ImagePicker.MediaTypeOptions.Images,
       quality: 0.92,
-      allowsEditing: false,
+      allowsEditing: true,
+      aspect: [4, 5],
     });
 
     const asset = result.assets?.[0];
@@ -220,27 +312,49 @@ export default function PromoSpotlightManager() {
     setUploading(true);
     setUploadProgress(0);
     try {
-      const uploadResult = await uploadImage(
+      const uploadResult = await uploadFeatureMedia(
         {
           uri: asset.uri,
           name: asset.fileName || `promo-creative-${Date.now()}.jpg`,
           type: asset.mimeType || 'image/jpeg',
           size: asset.fileSize || 0,
         },
-        setUploadProgress
+        {
+          feature: 'marketing',
+          resourceType: 'image',
+          onProgress: setUploadProgress,
+        }
       );
 
-      const nextAsset = toCloudinaryAsset(uploadResult);
-      const previousAsset = form.imageAsset;
+      const imageUrl = uploadResult?.secure_url || uploadResult?.url;
+      const assetKey = uploadResult?.key || uploadResult?.publicId;
+      if (!imageUrl || !assetKey) {
+        throw new Error('R2 upload completed without returning an image URL and storage key.');
+      }
+
+      const nextAsset = {
+        url: imageUrl,
+        key: assetKey,
+        publicId: assetKey,
+        resourceType: 'image',
+        storageProvider: 'r2',
+      };
+      const previousPendingAsset = pendingUploadedAssetRef.current;
+      pendingUploadedAssetRef.current = nextAsset;
 
       setForm((current) => ({
         ...current,
-        imageUrl: nextAsset.url,
+        imageUrl,
         imageAsset: nextAsset,
       }));
 
-      if (previousAsset?.publicId && previousAsset.publicId !== nextAsset.publicId) {
-        deleteCloudinaryAssets({ assets: [previousAsset] }).catch(() => {});
+      if (previousPendingAsset && getMarketingAssetKey(previousPendingAsset) !== assetKey) {
+        try {
+          await deleteMarketingAsset(previousPendingAsset);
+        } catch (cleanupError) {
+          console.error('[PromoSpotlightManager] Failed to remove a replaced unsaved R2 creative.', cleanupError);
+          Alert.alert('Cleanup failed', cleanupError?.message || 'The replaced creative could not be removed from storage.');
+        }
       }
     } catch (err) {
       Alert.alert('Upload failed', err?.message || 'Could not upload image.');
@@ -252,7 +366,22 @@ export default function PromoSpotlightManager() {
   const validate = () => {
     if (!form.title.trim()) return 'Title is required.';
     if (!form.imageUrl.trim()) return 'Upload a promotional creative image.';
-    if (form.actionType !== 'none' && !form.actionUrl.trim()) return 'Action Target (URL or Route) is required.';
+    if (form.actionType !== 'none') {
+      const target = form.actionUrl.trim();
+      if (!target) return 'Action Target (URL or Route) is required.';
+      if (form.actionType === 'external_url' && !/^https?:\/\//i.test(target)) {
+        return 'External URL must start with http:// or https://';
+      }
+      if (form.actionType === 'screen' && !target.startsWith('/')) {
+        return 'Screen route must start with "/", e.g. /screens/home';
+      }
+      if (form.actionType === 'deep_link' && !/^[a-z][a-z0-9+.-]*:/i.test(target)) {
+        return 'Deep link must include a scheme, e.g. unihelp://challenges';
+      }
+    }
+    if (!HEX_REGEX.test(form.gradientStart.trim()) || !HEX_REGEX.test(form.gradientEnd.trim())) {
+      return 'Gradient colors must be valid hex values like #1A1A2E.';
+    }
     if (form.startAt && Number.isNaN(Date.parse(form.startAt))) return 'Start date is invalid.';
     if (form.endAt && Number.isNaN(Date.parse(form.endAt))) return 'End date is invalid.';
     if (form.startAt && form.endAt && new Date(form.startAt) > new Date(form.endAt)) {
@@ -262,6 +391,10 @@ export default function PromoSpotlightManager() {
   };
 
   const save = async () => {
+    if (uploading) {
+      Alert.alert('Please wait', 'The creative is still uploading.');
+      return;
+    }
     const validationError = validate();
     if (validationError) {
       Alert.alert('Check promotion', validationError);
@@ -271,8 +404,11 @@ export default function PromoSpotlightManager() {
     setSaving(true);
     const wasEditing = Boolean(editingId);
     try {
+      let cleanupWarning = '';
       const payload = {
         ...form,
+        title: form.title.trim(),
+        description: form.description.trim(),
         priority: Number(form.priority) || 0,
         updatedByName: profile?.username || user?.email || 'Admin',
       };
@@ -281,9 +417,29 @@ export default function PromoSpotlightManager() {
       } else {
         await createPromoSpotlight(payload);
       }
+
+      const previousAsset = originalEditingAssetRef.current;
+      const previousKey = getMarketingAssetKey(previousAsset);
+      const nextKey = getMarketingAssetKey(form.imageAsset);
+      pendingUploadedAssetRef.current = null;
+      originalEditingAssetRef.current = null;
+      if (previousKey && previousKey !== nextKey) {
+        try {
+          await deleteMarketingMedia(previousKey);
+        } catch (cleanupError) {
+          console.error('[PromoSpotlightManager] Promotion saved but the old R2 creative could not be removed.', cleanupError);
+          cleanupWarning = cleanupError?.message || 'The old creative could not be removed from storage.';
+        }
+      }
+
       resetForm();
       await loadItems();
-      Alert.alert('Success', `PromoSpotlight successfully ${wasEditing ? 'updated' : 'created'}.`);
+      Alert.alert(
+        cleanupWarning ? 'Saved with cleanup warning' : 'Success',
+        cleanupWarning
+          ? `PromoSpotlight was successfully ${wasEditing ? 'updated' : 'created'}, but ${cleanupWarning}`
+          : `PromoSpotlight successfully ${wasEditing ? 'updated' : 'created'}.`
+      );
     } catch (err) {
       Alert.alert('Save failed', err?.message || 'Could not save promotion.');
     } finally {
@@ -292,9 +448,17 @@ export default function PromoSpotlightManager() {
   };
 
   const edit = (item) => {
+    // Discard any unsaved upload from a previous edit before switching
+    const pendingAsset = pendingUploadedAssetRef.current;
+    if (pendingAsset) {
+      pendingUploadedAssetRef.current = null;
+      deleteMarketingAsset(pendingAsset).catch(() => {});
+    }
+    originalEditingAssetRef.current = item.imageAsset || null;
     setEditingId(item.id);
     setForm(formFromPromo(item));
     setIsFormOpen(true);
+    onEditStart?.();
   };
 
   const remove = (item) => {
@@ -307,6 +471,12 @@ export default function PromoSpotlightManager() {
           try {
             await deletePromoSpotlight(item.id);
             if (editingId === item.id) resetForm();
+            try {
+              await deleteMarketingAsset(item.imageAsset);
+            } catch (cleanupError) {
+              console.error('[PromoSpotlightManager] Promotion deleted but its R2 creative could not be removed.', cleanupError);
+              Alert.alert('Deleted with cleanup warning', cleanupError?.message || 'The creative could not be removed from storage.');
+            }
             await loadItems();
           } catch (err) {
             Alert.alert('Delete failed', err?.message || 'Could not delete promotion.');
@@ -316,13 +486,14 @@ export default function PromoSpotlightManager() {
     ]);
   };
 
+  const closeDatePicker = () => setDatePickerConfig((prev) => ({ ...prev, visible: false }));
+
   const openDatePicker = (field) => {
     const currentDateVal = form[field] ? new Date(form[field]) : new Date();
-    const validDate = isNaN(currentDateVal.getTime()) ? new Date() : currentDateVal;
+    const validDate = Number.isNaN(currentDateVal.getTime()) ? new Date() : currentDateVal;
     const startDate = form.startAt ? new Date(form.startAt) : null;
-    const minimumDate = field === 'endAt' && startDate && !Number.isNaN(startDate.getTime())
-      ? startDate
-      : undefined;
+    const minimumDate =
+      field === 'endAt' && startDate && !Number.isNaN(startDate.getTime()) ? startDate : undefined;
     setDatePickerConfig({
       visible: true,
       field,
@@ -335,24 +506,23 @@ export default function PromoSpotlightManager() {
   const handleDateChange = (event, selectedDate) => {
     if (Platform.OS === 'android') {
       if (event.type === 'dismissed') {
-        setDatePickerConfig((prev) => ({ ...prev, visible: false }));
+        closeDatePicker();
         return;
       }
       if (selectedDate) {
         if (datePickerConfig.mode === 'date') {
-          const currentTemp = new Date(selectedDate);
-          // Spread `prev` so `field` and `minimumDate` survive the date -> time
-          // step transition. Previously this rebuilt the object from scratch and
-          // dropped `minimumDate`, which let the time step pick a time earlier
-          // than the required minimum on the same calendar day.
+          // Spread prev so `field` and `minimumDate` survive the date -> time transition
           setDatePickerConfig((prev) => ({
             ...prev,
             mode: 'time',
-            tempDate: currentTemp,
+            tempDate: new Date(selectedDate),
           }));
         } else {
-          updateField(datePickerConfig.field, selectedDate.toISOString());
-          setDatePickerConfig((prev) => ({ ...prev, visible: false }));
+          // The Android time picker ignores minimumDate, so clamp manually
+          const min = datePickerConfig.minimumDate;
+          const finalDate = min && selectedDate < min ? min : selectedDate;
+          updateField(datePickerConfig.field, finalDate.toISOString());
+          closeDatePicker();
         }
       }
     } else if (selectedDate) {
@@ -362,38 +532,65 @@ export default function PromoSpotlightManager() {
 
   const confirmIOSDate = () => {
     updateField(datePickerConfig.field, datePickerConfig.tempDate.toISOString());
-    setDatePickerConfig((prev) => ({ ...prev, visible: false }));
+    closeDatePicker();
+  };
+
+  const statusMeta = {
+    live: { label: 'Live', color: palette.success, bg: palette.successSoft },
+    scheduled: { label: 'Scheduled', color: palette.indigo, bg: palette.indigoSoft },
+    paused: { label: 'Paused', color: palette.inkSoft, bg: withAlpha(palette.muted, 0.18) },
+    expired: { label: 'Expired', color: palette.error, bg: palette.errorSoft },
   };
 
   return (
     <View style={styles.wrap}>
-      {/* Top Header */}
+      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerTitleContainer}>
           <View style={styles.headerTitleRow}>
             <Text style={styles.title}>Spotlight Studio</Text>
             <View style={styles.badgeCount}>
-              <Text style={styles.badgeCountText}>{items.length} Active</Text>
+              <View style={[styles.liveDot, { backgroundColor: summary.live ? palette.success : palette.muted }]} />
+              <Text style={styles.badgeCountText}>{summary.live} Live</Text>
             </View>
           </View>
-          <Text style={styles.subtitle}>Craft and manage high-converting takeover campaigns</Text>
+          <Text style={styles.subtitle}>Craft and manage takeover campaigns</Text>
         </View>
 
         <View style={styles.headerActions}>
-          <Pressable style={styles.previewButton} onPress={() => setPreviewVisible(true)}>
+          <Pressable
+            style={styles.previewButton}
+            onPress={() => setPreviewVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Preview spotlight"
+          >
             <Ionicons name="eye-outline" size={16} color={palette.indigo} />
             <Text style={styles.previewText}>Preview</Text>
           </Pressable>
           <Pressable
             style={[styles.toggleFormButton, isFormOpen && styles.toggleFormButtonActive]}
             onPress={() => setIsFormOpen((prev) => !prev)}
+            accessibilityRole="button"
+            accessibilityLabel={isFormOpen ? 'Collapse form' : 'Open form'}
           >
-            <Ionicons name={isFormOpen ? 'chevron-up-outline' : 'add-outline'} size={18} color={isFormOpen ? palette.indigo : palette.white} />
+            <Ionicons
+              name={isFormOpen ? 'chevron-up-outline' : 'add-outline'}
+              size={18}
+              color={isFormOpen ? palette.indigo : palette.onBrand}
+            />
           </Pressable>
         </View>
       </View>
 
-      {/* Accordion Form */}
+      {/* Performance summary */}
+      <View style={styles.summaryRow}>
+        <SummaryTile icon="layers-outline" label="Campaigns" value={String(items.length)} palette={palette} styles={styles} />
+        <SummaryTile icon="eye-outline" label="Views" value={compactNumber(summary.impressions)} palette={palette} styles={styles} />
+        <SummaryTile icon="hand-left-outline" label="Clicks" value={compactNumber(summary.clicks)} palette={palette} styles={styles} />
+        <SummaryTile icon="trending-up-outline" label="Avg CTR" value={`${summary.ctr}%`} accent palette={palette} styles={styles} />
+      </View>
+
+      {/* Form */}
       {isFormOpen && (
         <View style={styles.formCard}>
           <View style={styles.formCardHeader}>
@@ -405,13 +602,13 @@ export default function PromoSpotlightManager() {
             </View>
             {isEditing && (
               <Pressable style={styles.resetBadge} onPress={resetForm}>
-                <Ionicons name="refresh-outline" size={12} color={palette.error} />
+                <Ionicons name="close-outline" size={13} color={palette.error} />
                 <Text style={styles.resetBadgeText}>Cancel Edit</Text>
               </Pressable>
             )}
           </View>
 
-          {/* Section 1: Campaign Category */}
+          {/* 1. Type */}
           <SectionBlock title="1. Campaign Type" palette={palette} styles={styles}>
             <View style={styles.typeGrid}>
               {TYPES.map((t) => {
@@ -419,26 +616,31 @@ export default function PromoSpotlightManager() {
                 return (
                   <Pressable
                     key={t.key}
-                    style={[styles.typeCard, active && { borderColor: t.color, backgroundColor: t.color + '12' }]}
+                    style={[styles.typeCard, active && { borderColor: t.color, backgroundColor: withAlpha(t.color, 0.09) }]}
                     onPress={() => updateField('type', t.key)}
                   >
                     <Ionicons name={t.icon} size={20} color={active ? t.color : palette.inkSoft} />
-                    <Text style={[styles.typeCardLabel, active && { color: t.color, fontWeight: '800' }]}>{t.label}</Text>
+                    <Text
+                      style={[styles.typeCardLabel, active && { color: t.color, fontWeight: '800' }]}
+                      numberOfLines={1}
+                    >
+                      {t.label}
+                    </Text>
                   </Pressable>
                 );
               })}
             </View>
           </SectionBlock>
 
-          {/* Section 2: Visual Creative */}
+          {/* 2. Visual asset */}
           <SectionBlock title="2. Visual Asset" palette={palette} styles={styles}>
             <Pressable style={styles.uploadBox} onPress={pickCreative} disabled={uploading}>
               {form.imageUrl ? (
                 <View style={styles.imagePreviewContainer}>
                   <Image source={{ uri: form.imageUrl }} style={styles.uploadImage} contentFit="cover" />
                   <View style={styles.reuploadBadge}>
-                    <Ionicons name="camera-outline" size={14} color={palette.white} />
-                    <Text style={styles.reuploadText}>Replace Creative</Text>
+                    <Ionicons name="camera-outline" size={14} color="#FFFFFF" />
+                    <Text style={styles.reuploadText}>Replace</Text>
                   </View>
                 </View>
               ) : (
@@ -446,26 +648,28 @@ export default function PromoSpotlightManager() {
                   <View style={styles.uploadIconCircle}>
                     <Ionicons name="cloud-upload-outline" size={26} color={palette.indigo} />
                   </View>
-                  <Text style={styles.uploadText}>Drop image here or browse</Text>
-                  <Text style={styles.uploadHint}>Vertical Banner (4:5 or 9:16 portrait)</Text>
+                  <Text style={styles.uploadText}>Tap to upload creative</Text>
+                  <Text style={styles.uploadHint}>Portrait 4:5 works best{'\n'}(e.g. 1080 x 1350)</Text>
                 </View>
               )}
               {uploading && (
                 <View style={styles.uploadOverlay}>
-                  <ActivityIndicator color={palette.white} size="large" />
+                  <ActivityIndicator color="#FFFFFF" size="large" />
                   <Text style={styles.uploadOverlayText}>{uploadProgress}% uploaded</Text>
                 </View>
               )}
             </Pressable>
           </SectionBlock>
 
-          {/* Section 3: Content & Messaging */}
+          {/* 3. Content */}
           <SectionBlock title="3. Content & Copy" palette={palette} styles={styles}>
             <Field
               label="Headline *"
               value={form.title}
               onChangeText={(val) => updateField('title', val)}
               placeholder="e.g., Campus Challenge Arena is Live!"
+              maxLength={TITLE_MAX}
+              showCounter
               palette={palette}
               styles={styles}
             />
@@ -474,6 +678,8 @@ export default function PromoSpotlightManager() {
               value={form.description}
               onChangeText={(val) => updateField('description', val)}
               placeholder="Short engaging message that drives action..."
+              maxLength={DESCRIPTION_MAX}
+              showCounter
               multiline
               palette={palette}
               styles={styles}
@@ -497,6 +703,8 @@ export default function PromoSpotlightManager() {
                   placeholder="https://..."
                   containerStyle={styles.flex}
                   autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
                   palette={palette}
                   styles={styles}
                 />
@@ -504,7 +712,7 @@ export default function PromoSpotlightManager() {
             )}
           </SectionBlock>
 
-          {/* Section 4: Styling & Gradient Presets */}
+          {/* 4. Theme */}
           <SectionBlock title="4. Visual Theme" palette={palette} styles={styles}>
             <Text style={styles.subLabel}>Background Presets</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.presetScroll}>
@@ -515,11 +723,13 @@ export default function PromoSpotlightManager() {
                     key={p.label}
                     style={[styles.presetChip, active && styles.presetChipActive]}
                     onPress={() => {
-                      updateField('gradientStart', p.start);
-                      updateField('gradientEnd', p.end);
+                      setForm((current) => ({ ...current, gradientStart: p.start, gradientEnd: p.end }));
                     }}
                   >
-                    <View style={[styles.colorPreviewCircle, { backgroundColor: p.start }]} />
+                    <View style={styles.presetSwatch}>
+                      <View style={[styles.presetSwatchHalf, { backgroundColor: p.start }]} />
+                      <View style={[styles.presetSwatchHalf, { backgroundColor: p.end }]} />
+                    </View>
                     <Text style={[styles.presetChipText, active && styles.presetChipTextActive]}>{p.label}</Text>
                   </Pressable>
                 );
@@ -530,9 +740,12 @@ export default function PromoSpotlightManager() {
               <Field
                 label="Start Hex"
                 value={form.gradientStart}
-                onChangeText={(val) => updateField('gradientStart', val || '#')}
+                onChangeText={(val) => updateField('gradientStart', val.startsWith('#') ? val : `#${val}`)}
                 placeholder="#1A1A2E"
                 autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={7}
+                swatch={HEX_REGEX.test(form.gradientStart) ? form.gradientStart : null}
                 containerStyle={styles.flex}
                 palette={palette}
                 styles={styles}
@@ -540,32 +753,35 @@ export default function PromoSpotlightManager() {
               <Field
                 label="End Hex"
                 value={form.gradientEnd}
-                onChangeText={(val) => updateField('gradientEnd', val || '#')}
+                onChangeText={(val) => updateField('gradientEnd', val.startsWith('#') ? val : `#${val}`)}
                 placeholder="#0F0F23"
                 autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={7}
+                swatch={HEX_REGEX.test(form.gradientEnd) ? form.gradientEnd : null}
                 containerStyle={styles.flex}
                 palette={palette}
                 styles={styles}
               />
             </View>
 
-            <View style={styles.scheduleSummary}>
-              <View style={styles.scheduleSummaryIcon}>
-                <Ionicons name="calendar-clear-outline" size={19} color={palette.indigo} />
-              </View>
-              <View style={styles.scheduleSummaryCopy}>
-                <Text style={styles.scheduleSummaryTitle}>
-                  {form.startAt ? formatDisplayDate(form.startAt) : 'Ready to schedule'}
-                </Text>
-                <Text style={styles.scheduleSummaryText}>
-                  {formatScheduleDuration(form.startAt, form.endAt)}
-                </Text>
-              </View>
-              <Ionicons name="sparkles-outline" size={16} color={palette.indigo} />
+            <View style={styles.gradientStrip}>
+              <View
+                style={[
+                  styles.gradientStripHalf,
+                  { backgroundColor: HEX_REGEX.test(form.gradientStart) ? form.gradientStart : palette.border },
+                ]}
+              />
+              <View
+                style={[
+                  styles.gradientStripHalf,
+                  { backgroundColor: HEX_REGEX.test(form.gradientEnd) ? form.gradientEnd : palette.border },
+                ]}
+              />
             </View>
           </SectionBlock>
 
-          {/* Section 5: Interactive Actions & Linkage */}
+          {/* 5. Action */}
           <SectionBlock title="5. Action & Links" palette={palette} styles={styles}>
             <View style={styles.row}>
               <Field
@@ -573,6 +789,7 @@ export default function PromoSpotlightManager() {
                 value={form.buttonText}
                 onChangeText={(val) => updateField('buttonText', val)}
                 placeholder="Learn More"
+                maxLength={20}
                 containerStyle={styles.flex}
                 palette={palette}
                 styles={styles}
@@ -580,9 +797,9 @@ export default function PromoSpotlightManager() {
               <Field
                 label="Priority"
                 value={form.priority}
-                onChangeText={(val) => updateField('priority', val)}
-                keyboardType="numeric"
-                containerStyle={{ width: 90 }}
+                onChangeText={(val) => updateField('priority', val.replace(/[^0-9]/g, ''))}
+                keyboardType="number-pad"
+                containerStyle={styles.priorityField}
                 palette={palette}
                 styles={styles}
               />
@@ -598,7 +815,7 @@ export default function PromoSpotlightManager() {
                     style={[styles.segment, active && styles.segmentActive]}
                     onPress={() => updateField('actionType', a.key)}
                   >
-                    <Ionicons name={a.icon} size={14} color={active ? palette.white : palette.inkSoft} style={{ marginRight: 4 }} />
+                    <Ionicons name={a.icon} size={14} color={active ? palette.onBrand : palette.inkSoft} style={styles.segmentIcon} />
                     <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{a.label}</Text>
                   </Pressable>
                 );
@@ -610,16 +827,23 @@ export default function PromoSpotlightManager() {
                 label="Target Route or Link"
                 value={form.actionUrl}
                 onChangeText={(val) => updateField('actionUrl', val)}
-                placeholder={form.actionType === 'external_url' ? 'https://example.com' : '/screens/home'}
+                placeholder={
+                  form.actionType === 'external_url'
+                    ? 'https://example.com'
+                    : form.actionType === 'deep_link'
+                    ? 'unihelp://challenges'
+                    : '/screens/home'
+                }
                 autoCapitalize="none"
+                autoCorrect={false}
                 palette={palette}
                 styles={styles}
               />
             )}
           </SectionBlock>
 
-          {/* Section 6: Schedule & Status */}
-          <SectionBlock title="6. Availability & Schedule" palette={palette} styles={styles}>
+          {/* 6. Schedule */}
+          <SectionBlock title="6. Availability & Schedule" last palette={palette} styles={styles}>
             <View style={styles.row}>
               <DatePickerTrigger
                 label="Starts At"
@@ -643,6 +867,20 @@ export default function PromoSpotlightManager() {
               />
             </View>
 
+            <View style={styles.scheduleSummary}>
+              <View style={styles.scheduleSummaryIcon}>
+                <Ionicons name="calendar-clear-outline" size={19} color={palette.indigo} />
+              </View>
+              <View style={styles.scheduleSummaryCopy}>
+                <Text style={styles.scheduleSummaryTitle}>
+                  {form.startAt ? formatDisplayDate(form.startAt) : 'Starts immediately'}
+                </Text>
+                <Text style={styles.scheduleSummaryText}>
+                  {formatScheduleDuration(form.startAt, form.endAt)}
+                </Text>
+              </View>
+            </View>
+
             <View style={styles.enabledBox}>
               <View style={styles.enabledTextGroup}>
                 <Ionicons name="pulse-outline" size={18} color={form.enabled ? palette.success : palette.muted} />
@@ -654,19 +892,24 @@ export default function PromoSpotlightManager() {
               <Switch
                 value={form.enabled}
                 onValueChange={(val) => updateField('enabled', val)}
-                trackColor={{ false: palette.border, true: palette.indigoSoft }}
+                trackColor={{ false: palette.border, true: withAlpha(palette.indigo, 0.45) }}
                 thumbColor={form.enabled ? palette.indigo : palette.muted}
               />
             </View>
           </SectionBlock>
 
-          {/* Submit CTA */}
-          <Pressable style={[styles.saveButton, saving && styles.disabled]} onPress={save} disabled={saving}>
+          {/* Submit */}
+          <Pressable
+            style={[styles.saveButton, (saving || uploading) && styles.disabled]}
+            onPress={save}
+            disabled={saving || uploading}
+            accessibilityRole="button"
+          >
             {saving ? (
-              <ActivityIndicator color={palette.white} />
+              <ActivityIndicator color="#FFFFFF" />
             ) : (
               <View style={styles.saveBtnRow}>
-                <Ionicons name={isEditing ? 'checkmark-circle-outline' : 'rocket-outline'} size={18} color={palette.white} />
+                <Ionicons name={isEditing ? 'checkmark-circle-outline' : 'rocket-outline'} size={18} color="#FFFFFF" />
                 <Text style={styles.saveText}>{isEditing ? 'Update Spotlight' : 'Publish Spotlight'}</Text>
               </View>
             )}
@@ -674,14 +917,16 @@ export default function PromoSpotlightManager() {
         </View>
       )}
 
-      {/* Date Picker Modal */}
+      {/* iOS date picker */}
       {datePickerConfig.visible && Platform.OS === 'ios' && (
-        <Modal transparent animationType="fade" visible={datePickerConfig.visible}>
+        <Modal transparent animationType="fade" visible onRequestClose={closeDatePicker}>
           <View style={styles.modalOverlay}>
             <View style={styles.pickerContainer}>
               <View style={styles.pickerHeader}>
-                <Text style={styles.pickerTitle}>Select {datePickerConfig.field === 'startAt' ? 'Start' : 'End'} Schedule</Text>
-                <Pressable onPress={() => setDatePickerConfig((prev) => ({ ...prev, visible: false }))}>
+                <Text style={styles.pickerTitle}>
+                  Select {datePickerConfig.field === 'startAt' ? 'Start' : 'End'} Schedule
+                </Text>
+                <Pressable onPress={closeDatePicker} hitSlop={8}>
                   <Ionicons name="close-circle" size={24} color={palette.inkSoft} />
                 </Pressable>
               </View>
@@ -691,10 +936,11 @@ export default function PromoSpotlightManager() {
                 display="spinner"
                 onChange={handleDateChange}
                 textColor={palette.ink}
+                themeVariant={isDark ? 'dark' : 'light'}
                 minimumDate={datePickerConfig.minimumDate}
               />
               <View style={styles.pickerActions}>
-                <Pressable style={styles.pickerCancelBtn} onPress={() => setDatePickerConfig((prev) => ({ ...prev, visible: false }))}>
+                <Pressable style={styles.pickerCancelBtn} onPress={closeDatePicker}>
                   <Text style={styles.pickerCancelText}>Cancel</Text>
                 </Pressable>
                 <Pressable style={styles.pickerConfirmBtn} onPress={confirmIOSDate}>
@@ -706,76 +952,83 @@ export default function PromoSpotlightManager() {
         </Modal>
       )}
 
+      {/* Android date picker */}
       {datePickerConfig.visible && Platform.OS === 'android' && (
         <DateTimePicker
           value={datePickerConfig.tempDate}
           mode={datePickerConfig.mode}
           is24Hour={false}
           onChange={handleDateChange}
-          minimumDate={datePickerConfig.minimumDate}
+          minimumDate={datePickerConfig.mode === 'date' ? datePickerConfig.minimumDate : undefined}
         />
       )}
 
-      {/* Campaign Inventory List */}
+      {/* Inventory */}
       <View style={styles.listHeaderContainer}>
         <Text style={styles.sectionTitle}>Campaign Inventory</Text>
-        <Text style={styles.inventoryCount}>{items.length} Campaigns</Text>
+        <Text style={styles.inventoryCount}>
+          {items.length} {items.length === 1 ? 'Campaign' : 'Campaigns'}
+        </Text>
       </View>
 
       {loading ? (
-        <ActivityIndicator color={palette.indigo} style={{ marginVertical: 20 }} />
+        <ActivityIndicator color={palette.indigo} style={styles.loader} />
       ) : (
         <ScrollView style={styles.list} nestedScrollEnabled showsVerticalScrollIndicator={false}>
           {items.length ? (
-            items.map((item) => (
-              <View key={item.id} style={[styles.itemCard, editingId === item.id && styles.itemCardSelected]}>
-                {item.imageUrl ? (
-                  <Image source={{ uri: item.imageUrl }} style={styles.itemImage} contentFit="cover" />
-                ) : (
-                  <View style={styles.itemImageFallback}>
-                    <Ionicons name="image-outline" size={20} color={palette.inkSoft} />
-                  </View>
-                )}
-                <View style={styles.itemBody}>
-                  <View style={styles.itemTitleRow}>
-                    <Text style={styles.itemTitle} numberOfLines={1}>
-                      {item.title || 'Untitled Campaign'}
-                    </Text>
-                    <View style={[styles.statusTag, item.enabled ? styles.statusTagActive : styles.statusTagInactive]}>
-                      <Text style={[styles.statusTagText, item.enabled ? styles.statusTextActive : styles.statusTextInactive]}>
-                        {item.enabled ? 'Active' : 'Paused'}
+            items.map((item) => {
+              const status = statusMeta[getCampaignStatus(item)];
+              const typeMeta = TYPES.find((t) => t.key === item.type);
+              const stats = statsByPromoId[item.id] || {};
+              return (
+                <View key={item.id} style={[styles.itemCard, editingId === item.id && styles.itemCardSelected]}>
+                  {item.imageUrl ? (
+                    <Image source={{ uri: item.imageUrl }} style={styles.itemImage} contentFit="cover" />
+                  ) : (
+                    <View style={styles.itemImageFallback}>
+                      <Ionicons name="image-outline" size={20} color={palette.inkSoft} />
+                    </View>
+                  )}
+                  <View style={styles.itemBody}>
+                    <View style={styles.itemTitleRow}>
+                      <Text style={styles.itemTitle} numberOfLines={1}>
+                        {item.title || 'Untitled Campaign'}
                       </Text>
+                      <View style={[styles.statusTag, { backgroundColor: status.bg }]}>
+                        <Text style={[styles.statusTagText, { color: status.color }]}>{status.label}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.itemMeta} numberOfLines={1}>
+                      P{item.priority ?? 0} • {typeMeta?.label || item.type}
+                    </Text>
+
+                    <View style={styles.statsRow}>
+                      <View style={styles.statChip}>
+                        <Ionicons name="eye-outline" size={11} color={palette.inkSoft} />
+                        <Text style={styles.statChipText}>{compactNumber(stats.impressions)}</Text>
+                      </View>
+                      <View style={styles.statChip}>
+                        <Ionicons name="hand-left-outline" size={11} color={palette.inkSoft} />
+                        <Text style={styles.statChipText}>{compactNumber(stats.clicks)}</Text>
+                      </View>
+                      <View style={styles.statChip}>
+                        <Ionicons name="trending-up-outline" size={11} color={palette.indigo} />
+                        <Text style={[styles.statChipText, { color: palette.indigo }]}>{stats.ctr || 0}% CTR</Text>
+                      </View>
                     </View>
                   </View>
-                  <Text style={styles.itemMeta}>Priority P{item.priority} • {item.type}</Text>
 
-                  {/* Performance Metrics Row */}
-                  <View style={styles.statsRow}>
-                    <View style={styles.statChip}>
-                      <Ionicons name="eye-outline" size={11} color={palette.inkSoft} />
-                      <Text style={styles.statChipText}>{statsByPromoId[item.id]?.impressions || 0}</Text>
-                    </View>
-                    <View style={styles.statChip}>
-                      <Ionicons name="hand-left-outline" size={11} color={palette.inkSoft} />
-                      <Text style={styles.statChipText}>{statsByPromoId[item.id]?.clicks || 0}</Text>
-                    </View>
-                    <View style={styles.statChip}>
-                      <Ionicons name="trending-up-outline" size={11} color={palette.indigo} />
-                      <Text style={[styles.statChipText, { color: palette.indigo }]}>{statsByPromoId[item.id]?.ctr || 0}% CTR</Text>
-                    </View>
+                  <View style={styles.itemActions}>
+                    <Pressable style={styles.iconButton} onPress={() => edit(item)} hitSlop={4}>
+                      <Ionicons name="create-outline" size={16} color={palette.indigo} />
+                    </Pressable>
+                    <Pressable style={[styles.iconButton, styles.deleteIcon]} onPress={() => remove(item)} hitSlop={4}>
+                      <Ionicons name="trash-outline" size={16} color={palette.error} />
+                    </Pressable>
                   </View>
                 </View>
-
-                <View style={styles.itemActions}>
-                  <Pressable style={styles.iconButton} onPress={() => edit(item)}>
-                    <Ionicons name="create-outline" size={16} color={palette.indigo} />
-                  </Pressable>
-                  <Pressable style={[styles.iconButton, styles.deleteIcon]} onPress={() => remove(item)}>
-                    <Ionicons name="trash-outline" size={16} color={palette.error} />
-                  </Pressable>
-                </View>
-              </View>
-            ))
+              );
+            })
           ) : (
             <View style={styles.empty}>
               <Ionicons name="layers-outline" size={36} color={palette.muted} />
@@ -785,7 +1038,7 @@ export default function PromoSpotlightManager() {
         </ScrollView>
       )}
 
-      {/* Live Preview Modal Component */}
+      {/* Live preview (actions disabled so it can't navigate or open links) */}
       <PromoSpotlight
         promo={previewPromo}
         visible={previewVisible}
@@ -796,19 +1049,55 @@ export default function PromoSpotlightManager() {
   );
 }
 
-function SectionBlock({ title, children, palette, styles }) {
+function SectionBlock({ title, children, last = false, styles }) {
   return (
-    <View style={styles.sectionBlock}>
+    <View style={[styles.sectionBlock, last && styles.sectionBlockLast]}>
       <Text style={styles.sectionBlockTitle}>{title}</Text>
       <View style={styles.sectionBlockBody}>{children}</View>
     </View>
   );
 }
 
-function Field({ label, containerStyle, multiline = false, palette, styles, ...props }) {
+function SummaryTile({ icon, label, value, accent = false, palette, styles }) {
+  return (
+    <View style={styles.summaryTile}>
+      <Ionicons name={icon} size={14} color={accent ? palette.indigo : palette.inkSoft} />
+      <Text style={[styles.summaryValue, accent && { color: palette.indigo }]} numberOfLines={1}>
+        {value}
+      </Text>
+      <Text style={styles.summaryLabel} numberOfLines={1}>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+function Field({
+  label,
+  containerStyle,
+  multiline = false,
+  showCounter = false,
+  swatch = null,
+  palette,
+  styles,
+  ...props
+}) {
+  const length = typeof props.value === 'string' ? props.value.length : 0;
   return (
     <View style={[styles.field, containerStyle]}>
-      {label && <Text style={styles.label}>{label}</Text>}
+      {label ? (
+        <View style={styles.labelRow}>
+          <View style={styles.labelLeft}>
+            {swatch ? <View style={[styles.labelSwatch, { backgroundColor: swatch }]} /> : null}
+            <Text style={styles.label}>{label}</Text>
+          </View>
+          {showCounter && props.maxLength ? (
+            <Text style={[styles.counter, length >= props.maxLength && { color: palette.error }]}>
+              {length}/{props.maxLength}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
       <TextInput
         {...props}
         multiline={multiline}
@@ -830,8 +1119,8 @@ function DatePickerTrigger({ label, value, isSet, onPress, onClear, containerSty
           {value}
         </Text>
         {isSet && (
-          <Pressable onPress={(event) => { event.stopPropagation(); onClear(); }} style={styles.clearDateBtn}>
-            <Ionicons name="close-circle" size={15} color={palette.inkSoft} />
+          <Pressable onPress={onClear} style={styles.clearDateBtn} hitSlop={8}>
+            <Ionicons name="close-circle" size={16} color={palette.inkSoft} />
           </Pressable>
         )}
       </Pressable>
@@ -842,11 +1131,20 @@ function DatePickerTrigger({ label, value, isSet, onPress, onClear, containerSty
 const createStyles = (palette) =>
   StyleSheet.create({
     wrap: { gap: 14, backgroundColor: palette.bgLight, padding: 12, borderRadius: 16 },
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
     headerTitleContainer: { flex: 1 },
-    headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
     title: { fontSize: 22, fontWeight: '900', color: palette.ink, letterSpacing: -0.5 },
-    badgeCount: { backgroundColor: palette.indigoSoft, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 },
+    badgeCount: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      backgroundColor: palette.indigoSoft,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 12,
+    },
+    liveDot: { width: 6, height: 6, borderRadius: 3 },
     badgeCountText: { fontSize: 11, fontWeight: '800', color: palette.indigoDark },
     subtitle: { marginTop: 2, fontSize: 12, color: palette.inkSoft },
     headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -870,7 +1168,22 @@ const createStyles = (palette) =>
     },
     toggleFormButtonActive: { backgroundColor: palette.indigoSoft },
 
-    /* Form Styles */
+    /* Summary */
+    summaryRow: { flexDirection: 'row', gap: 8 },
+    summaryTile: {
+      flex: 1,
+      alignItems: 'center',
+      gap: 2,
+      paddingVertical: 10,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: palette.border,
+      backgroundColor: palette.surface,
+    },
+    summaryValue: { fontSize: 15, fontWeight: '900', color: palette.ink },
+    summaryLabel: { fontSize: 10, fontWeight: '600', color: palette.inkSoft },
+
+    /* Form */
     formCard: {
       backgroundColor: palette.surface,
       borderRadius: 16,
@@ -885,7 +1198,7 @@ const createStyles = (palette) =>
       elevation: 2,
     },
     formCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    formHeaderTitleGroup: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    formHeaderTitleGroup: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
     formHeaderIcon: {
       width: 28,
       height: 28,
@@ -895,11 +1208,31 @@ const createStyles = (palette) =>
       justifyContent: 'center',
     },
     cardHeaderTitle: { fontSize: 15, fontWeight: '800', color: palette.ink },
-    resetBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: palette.errorSoft },
+    resetBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 8,
+      paddingVertical: 5,
+      borderRadius: 8,
+      backgroundColor: palette.errorSoft,
+    },
     resetBadgeText: { fontSize: 11, color: palette.error, fontWeight: '700' },
 
-    sectionBlock: { gap: 8, borderBottomWidth: 1, borderBottomColor: palette.border + '50', paddingBottom: 14 },
-    sectionBlockTitle: { fontSize: 12, fontWeight: '800', color: palette.indigo, textTransform: 'uppercase', letterSpacing: 0.5 },
+    sectionBlock: {
+      gap: 8,
+      borderBottomWidth: 1,
+      borderBottomColor: withAlpha(palette.border, 0.55),
+      paddingBottom: 14,
+    },
+    sectionBlockLast: { borderBottomWidth: 0, paddingBottom: 0 },
+    sectionBlockTitle: {
+      fontSize: 12,
+      fontWeight: '800',
+      color: palette.indigo,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
     sectionBlockBody: { gap: 10 },
 
     typeGrid: { flexDirection: 'row', gap: 8 },
@@ -910,15 +1243,26 @@ const createStyles = (palette) =>
       justifyContent: 'center',
       gap: 6,
       paddingVertical: 10,
+      paddingHorizontal: 4,
       borderWidth: 1,
       borderColor: palette.border,
       borderRadius: 10,
       backgroundColor: palette.surface,
     },
-    typeCardLabel: { fontSize: 11, fontWeight: '700', color: palette.inkSoft },
+    typeCardLabel: { fontSize: 11, fontWeight: '700', color: palette.inkSoft, flexShrink: 1 },
 
     field: { gap: 5 },
+    labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    labelLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    labelSwatch: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: palette.border,
+    },
     label: { fontSize: 12, color: palette.ink, fontWeight: '700' },
+    counter: { fontSize: 10, color: palette.inkSoft, fontWeight: '600' },
     subLabel: { fontSize: 11, color: palette.inkSoft, fontWeight: '700', marginTop: 2 },
     input: {
       borderWidth: 1,
@@ -931,10 +1275,15 @@ const createStyles = (palette) =>
       backgroundColor: palette.inputSurface,
     },
     textArea: { minHeight: 68 },
+    priorityField: { width: 84 },
 
+    // Portrait 4:5 upload box, centered and capped so it doesn't take over the whole form
     uploadBox: {
-      height: 180,
-      borderRadius: 12,
+      width: '62%',
+      maxWidth: 260,
+      alignSelf: 'center',
+      aspectRatio: CREATIVE_ASPECT,
+      borderRadius: 14,
       borderWidth: 1.5,
       borderStyle: 'dashed',
       borderColor: palette.indigo,
@@ -955,13 +1304,26 @@ const createStyles = (palette) =>
       paddingVertical: 6,
       borderRadius: 8,
     },
-    reuploadText: { color: palette.white, fontSize: 11, fontWeight: '700' },
-    uploadEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6 },
-    uploadIconCircle: { width: 42, height: 42, borderRadius: 21, backgroundColor: palette.surface, alignItems: 'center', justifyContent: 'center' },
-    uploadText: { color: palette.indigoDark, fontWeight: '800', fontSize: 13 },
-    uploadHint: { color: palette.inkSoft, fontSize: 11 },
-    uploadOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,23,42,0.7)', alignItems: 'center', justifyContent: 'center', gap: 8 },
-    uploadOverlayText: { color: palette.white, fontWeight: '800', fontSize: 13 },
+    reuploadText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+    uploadEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12 },
+    uploadIconCircle: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      backgroundColor: palette.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    uploadText: { color: palette.indigoDark, fontWeight: '800', fontSize: 13, textAlign: 'center' },
+    uploadHint: { color: palette.inkSoft, fontSize: 11, textAlign: 'center' },
+    uploadOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(15,23,42,0.7)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+    },
+    uploadOverlayText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 },
 
     presetScroll: { gap: 8, paddingVertical: 2 },
     presetChip: {
@@ -976,9 +1338,20 @@ const createStyles = (palette) =>
       backgroundColor: palette.surface,
     },
     presetChipActive: { borderColor: palette.indigo, backgroundColor: palette.indigoSoft },
-    colorPreviewCircle: { width: 12, height: 12, borderRadius: 6 },
+    presetSwatch: { width: 18, height: 12, borderRadius: 6, overflow: 'hidden', flexDirection: 'row' },
+    presetSwatchHalf: { flex: 1 },
     presetChipText: { fontSize: 11, fontWeight: '600', color: palette.inkSoft },
     presetChipTextActive: { color: palette.indigo, fontWeight: '800' },
+
+    gradientStrip: {
+      height: 10,
+      borderRadius: 999,
+      overflow: 'hidden',
+      flexDirection: 'row',
+      borderWidth: 1,
+      borderColor: palette.border,
+    },
+    gradientStripHalf: { flex: 1 },
 
     row: { flexDirection: 'row', gap: 10 },
     flex: { flex: 1 },
@@ -994,9 +1367,10 @@ const createStyles = (palette) =>
       paddingVertical: 7,
       backgroundColor: palette.surface,
     },
+    segmentIcon: { marginRight: 4 },
     segmentActive: { backgroundColor: palette.indigo, borderColor: palette.indigo },
     segmentText: { fontSize: 11, fontWeight: '700', color: palette.inkSoft },
-    segmentTextActive: { color: palette.white },
+    segmentTextActive: { color: palette.onBrand },
 
     dateTrigger: {
       flexDirection: 'row',
@@ -1021,7 +1395,7 @@ const createStyles = (palette) =>
       padding: 12,
       borderRadius: 12,
       borderWidth: 1,
-      borderColor: palette.indigo + '45',
+      borderColor: withAlpha(palette.indigo, 0.27),
       backgroundColor: palette.indigoSoft,
     },
     scheduleSummaryIcon: {
@@ -1047,19 +1421,26 @@ const createStyles = (palette) =>
       alignItems: 'center',
       backgroundColor: palette.inputSurface,
     },
-    enabledTextGroup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    enabledTextGroup: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
     enabledTitle: { fontSize: 12, fontWeight: '700', color: palette.ink },
     enabledSubtitle: { fontSize: 11, color: palette.inkSoft },
 
-    saveButton: { backgroundColor: palette.indigo, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+    saveButton: {
+      backgroundColor: palette.indigo,
+      borderRadius: 12,
+      paddingVertical: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     saveBtnRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    saveText: { color: palette.white, fontWeight: '800', fontSize: 13 },
-    disabled: { opacity: 0.65 },
+    saveText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
+    disabled: { opacity: 0.55 },
 
-    /* Inventory List Styles */
+    /* Inventory */
     listHeaderContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
     sectionTitle: { fontSize: 15, fontWeight: '800', color: palette.ink },
     inventoryCount: { fontSize: 12, color: palette.inkSoft, fontWeight: '600' },
+    loader: { marginVertical: 20 },
     list: { maxHeight: 380 },
     itemCard: {
       flexDirection: 'row',
@@ -1073,31 +1454,48 @@ const createStyles = (palette) =>
       marginBottom: 8,
     },
     itemCardSelected: { borderColor: palette.indigo, borderWidth: 1.5 },
-    itemImage: { width: 44, height: 56, borderRadius: 8 },
-    itemImageFallback: { width: 44, height: 56, borderRadius: 8, backgroundColor: palette.indigoSoft, alignItems: 'center', justifyContent: 'center' },
+    // Portrait 4:5 thumbnail to match the spotlight card
+    itemImage: { width: 48, height: 60, borderRadius: 8 },
+    itemImageFallback: {
+      width: 48,
+      height: 60,
+      borderRadius: 8,
+      backgroundColor: palette.indigoSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     itemBody: { flex: 1, gap: 2 },
     itemTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
     itemTitle: { fontSize: 13, fontWeight: '800', color: palette.ink, flex: 1 },
-    statusTag: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-    statusTagActive: { backgroundColor: palette.successSoft },
-    statusTagInactive: { backgroundColor: palette.errorSoft },
+    statusTag: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
     statusTagText: { fontSize: 10, fontWeight: '800' },
-    statusTextActive: { color: palette.success },
-    statusTextInactive: { color: palette.error },
     itemMeta: { color: palette.inkSoft, fontSize: 11 },
 
-    statsRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
+    statsRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
     statChip: { flexDirection: 'row', alignItems: 'center', gap: 3 },
     statChipText: { fontSize: 10, fontWeight: '700', color: palette.inkSoft },
 
-    itemActions: { flexDirection: 'row', gap: 6 },
-    iconButton: { width: 32, height: 32, borderRadius: 8, backgroundColor: palette.indigoSoft, alignItems: 'center', justifyContent: 'center' },
+    itemActions: { gap: 6 },
+    iconButton: {
+      width: 32,
+      height: 32,
+      borderRadius: 8,
+      backgroundColor: palette.indigoSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     deleteIcon: { backgroundColor: palette.errorSoft },
     empty: { alignItems: 'center', paddingVertical: 32, gap: 8 },
     emptyText: { color: palette.inkSoft, fontWeight: '600', fontSize: 13 },
 
     /* Modal */
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(15,23,42,0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 20,
+    },
     pickerContainer: { width: '100%', backgroundColor: palette.surface, borderRadius: 16, padding: 16, gap: 12 },
     pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     pickerTitle: { fontSize: 15, fontWeight: '800', color: palette.ink },
@@ -1105,5 +1503,5 @@ const createStyles = (palette) =>
     pickerCancelBtn: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8 },
     pickerCancelText: { color: palette.inkSoft, fontWeight: '700' },
     pickerConfirmBtn: { backgroundColor: palette.indigo, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8 },
-    pickerConfirmText: { color: palette.white, fontWeight: '800' },
+    pickerConfirmText: { color: '#FFFFFF', fontWeight: '800' },
   });
