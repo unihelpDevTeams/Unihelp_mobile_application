@@ -14,8 +14,7 @@ import {
   updateProfile as updateFirebaseAuthProfile,
 } from 'firebase/auth';
 import { auth, db } from '../../firebase/config';
-import { getCloudinaryThumbnailUrl, toCloudinaryAsset, uploadToCloudinary } from '../../services/cloudinary';
-import { putJson } from '../shared/services/backend';
+import { deleteProfileMedia, putJson, uploadFeatureMedia } from '../shared/services/backend';
 
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 
@@ -54,16 +53,26 @@ export async function uploadProfilePicture(uri) {
     throw new Error('Image is too large. Please upload an image smaller than 30MB.');
   }
 
-  const fileName = `profile-${Date.now()}.${String(uri).toLowerCase().endsWith('.png') ? 'png' : 'jpg'}`;
-  const uploaded = await uploadToCloudinary(
-    { uri, name: fileName, type: 'image/jpeg', size: fileInfo.size },
-    { resourceType: 'image', validationKind: 'image' }
+  const extension = String(uri).toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+  const mimeType = extension === 'png' ? 'image/png' : 'image/jpeg';
+  const uploaded = await uploadFeatureMedia(
+    { uri, name: `profile-${Date.now()}.${extension}`, type: mimeType, mimeType, size: fileInfo.size },
+    { feature: 'profile', resourceType: 'image' }
   );
 
   const secureUrl = uploaded?.secure_url || uploaded?.url || '';
+  if (!secureUrl) {
+    throw new Error('The image upload did not return a valid URL. Please try again.');
+  }
+
   return {
     url: secureUrl,
-    asset: toCloudinaryAsset(uploaded, { url: secureUrl, resourceType: 'image' }),
+    asset: {
+      url: secureUrl,
+      publicId: uploaded?.publicId || uploaded?.key || '',
+      resourceType: uploaded?.resourceType || 'image',
+      storageProvider: 'r2',
+    },
   };
 }
 
@@ -76,6 +85,7 @@ export async function createCompleteAccount(formData) {
     password,
     photoURL,
     photoAsset,
+    photoURI,
     universityId,
     universityName,
     departmentId,
@@ -103,74 +113,92 @@ export async function createCompleteAccount(formData) {
     throw error;
   }
 
-  await updateFirebaseAuthProfile(credential.user, {
-    displayName,
-    photoURL: photoURL || null,
-  });
-
-  // Step 2: Save complete profile in Firestore
-  const userRef = doc(db, 'users', credential.user.uid);
-  const userDocument = {
-    uid: credential.user.uid,
-    firstName: firstName || '',
-    lastName: lastName || '',
-    displayName,
-    username: username.trim(),
-    usernameLower: username.trim().toLowerCase(),
-    email: email.trim().toLowerCase(),
-    premium: false,
-    photoURL: photoURL || '',
-    photo: photoURL || '',
-    photoThumb: getCloudinaryThumbnailUrl(photoURL || ''),
-    photoAsset: photoAsset || null,
-    universityId: universityId || '',
-    universityName: universityName || '',
-    schoolId: universityId || '',
-    school: universityName || '',
-    departmentId: departmentId || '',
-    departmentName: departmentName || '',
-    department: departmentName || '',
-    faculty: faculty || '',
-    level: level || '',
-    studentType: studentType || '',
-    bio: bio || '',
-    interests: interests || [],
-    gender: gender || '',
-    dateOfBirth: dateOfBirth || '',
-    heardFrom: heardFrom || '',
-    heardFromOther: heardFromOther || '',
-    points: 0,
-    xp: 0,
-    currentStreak: 0,
-    highestStreak: 0,
-    questionsAnswered: 0,
-    accuracy: 0,
-    badges: [],
-    role: studentType || 'university',
-    provider: 'email',
-    createdAt: serverTimestamp(),
-  };
-
-  await setDoc(userRef, userDocument, { merge: true });
-
+  let uploadedPhoto = null;
   try {
-    await putJson('/api/users', {
-      display_name: displayName,
-      email: email.trim().toLowerCase(),
-      university: universityName || '',
-      department: departmentName || '',
-      level: level || '',
-      avatar: photoURL || '',
-      bio: bio || '',
-      gender: gender || '',
-      date_of_birth: dateOfBirth || '',
-    });
-  } catch (error) {
-    console.warn(
-      '[Signup] Firebase profile was created, but PostgreSQL profile sync failed. A later authenticated profile refresh can retry from the saved Firebase profile:',
-      { status: error?.status || null, message: error?.message || String(error) }
-    );
-  }
+    if (photoURI) uploadedPhoto = await uploadProfilePicture(photoURI);
+    const resolvedPhotoURL = uploadedPhoto?.url || photoURL || '';
+    const resolvedPhotoAsset = uploadedPhoto?.asset || photoAsset || null;
 
-  return credential;
+    await updateFirebaseAuthProfile(credential.user, {
+      displayName,
+      photoURL: resolvedPhotoURL || null,
+    });
+
+    // Step 2: Save complete profile in Firestore
+    const userRef = doc(db, 'users', credential.user.uid);
+    const userDocument = {
+      uid: credential.user.uid,
+      firstName: firstName || '',
+      lastName: lastName || '',
+      displayName,
+      username: username.trim(),
+      usernameLower: username.trim().toLowerCase(),
+      email: email.trim().toLowerCase(),
+      premium: false,
+      photoURL: resolvedPhotoURL,
+      photo: resolvedPhotoURL,
+      photoThumb: resolvedPhotoURL,
+      photoAsset: resolvedPhotoAsset,
+      universityId: universityId || '',
+      universityName: universityName || '',
+      schoolId: universityId || '',
+      school: universityName || '',
+      departmentId: departmentId || '',
+      departmentName: departmentName || '',
+      department: departmentName || '',
+      faculty: faculty || '',
+      level: level || '',
+      studentType: studentType || '',
+      bio: bio || '',
+      interests: interests || [],
+      gender: gender || '',
+      dateOfBirth: dateOfBirth || '',
+      heardFrom: heardFrom || '',
+      heardFromOther: heardFromOther || '',
+      points: 0,
+      xp: 0,
+      currentStreak: 0,
+      highestStreak: 0,
+      questionsAnswered: 0,
+      accuracy: 0,
+      badges: [],
+      role: studentType || 'university',
+      provider: 'email',
+      createdAt: serverTimestamp(),
+    };
+
+    await setDoc(userRef, userDocument, { merge: true });
+
+    try {
+      await putJson('/api/users', {
+        display_name: displayName,
+        email: email.trim().toLowerCase(),
+        university: universityName || '',
+        department: departmentName || '',
+        level: level || '',
+        avatar: resolvedPhotoURL,
+        photo_asset: resolvedPhotoAsset,
+        bio: bio || '',
+        gender: gender || '',
+        date_of_birth: dateOfBirth || '',
+      });
+    } catch (error) {
+      console.warn(
+        '[Signup] Firebase profile was created, but PostgreSQL profile sync failed. A later authenticated profile refresh can retry from the saved Firebase profile:',
+        { status: error?.status || null, message: error?.message || String(error) }
+      );
+    }
+
+    return credential;
+  } catch (error) {
+    if (uploadedPhoto?.asset?.publicId) {
+      await deleteProfileMedia(uploadedPhoto.asset.publicId).catch((cleanupError) => {
+        console.warn('[Signup] Failed to clean up an unsaved R2 profile photo.', cleanupError);
+      });
+    }
+    await deleteUser(credential.user).catch((cleanupError) => {
+      console.error('[Signup] Failed to remove the incomplete Firebase account.', cleanupError);
+    });
+    throw error;
+  }
 }

@@ -113,6 +113,7 @@ const normalizeUserProfile = (profile = {}, uid = null) => {
     photo,
     photoURL: profile.photoURL || photo,
     photoThumb: profile.photoThumb || '',
+    photoAsset: profile.photoAsset || profile.photo_asset || null,
     cover: profile.cover || profile.coverPhoto || profile.coverUrl || profile.cover_url || '',
     coverPhoto: profile.coverPhoto || profile.cover || profile.coverUrl || profile.cover_url || '',
     coverUrl: profile.coverUrl || profile.cover_url || profile.coverPhoto || profile.cover || '',
@@ -210,6 +211,9 @@ const toUserApiPayload = (profile = {}) => ({
   location: profile.location || '',
   avatar: profile.photoURL || profile.photo || profile.avatar || '',
   bio: profile.bio || '',
+  ...(('photoAsset' in profile || 'photo_asset' in profile)
+    ? { photo_asset: profile.photoAsset || profile.photo_asset || null }
+    : {}),
   ...(('gender' in profile) ? { gender: profile.gender || '' } : {}),
   ...(('dateOfBirth' in profile || 'date_of_birth' in profile)
     ? { date_of_birth: profile.dateOfBirth || profile.date_of_birth || '' }

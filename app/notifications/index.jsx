@@ -1,13 +1,15 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, SectionList, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
+import { useAuth } from '../../context/AuthContext';
 import EmptyState from '../../src/shared/components/EmptyState';
 import ConfirmDialog from '../../src/shared/components/ConfirmDialog';
 import { deleteNotification, fetchNotificationsPage, markNotificationRead } from '../../services/firestoreSync';
+import { markConversationRead } from '../../src/shared/services/community';
 
 const PAGE_SIZE = 30;
 const BANNER_DURATION_MS = 5000;
@@ -87,10 +89,21 @@ const GROUP_ORDER = ['Today', 'Yesterday', 'This week', 'Earlier'];
 // Returns a route string, or null when there is nowhere sensible to go.
 const resolveNotificationRoute = (item) => {
   const type = String(item.type || '');
-  const conversationId = item.conversationId || item.data?.conversationId;
+  const conversationId = item.conversationId || item.conversation_id || item.data?.conversationId || item.data?.conversation_id;
   if (conversationId) return `/messages/${conversationId}`;
 
-  const route = typeof item.route === 'string' ? item.route : '';
+  const groupId = item.groupId || item.group_id || item.data?.groupId || item.data?.group_id;
+  if (groupId) return `/community/${groupId}`;
+
+  const route = typeof item.route === 'string'
+    ? item.route
+    : typeof item.url === 'string'
+      ? item.url
+      : typeof item.data?.route === 'string'
+        ? item.data.route
+        : typeof item.data?.url === 'string'
+          ? item.data.url
+          : '';
   if (route && route !== '/notifications') {
     // Handles /messages?conversationId=abc and /messages?foo=1&conversationId=abc
     const match = route.match(/^\/messages\?(?:[^#]*&)?conversationId=([^&#]+)/);
@@ -110,51 +123,88 @@ const resolveNotificationRoute = (item) => {
 /* Row                                                                        */
 /* -------------------------------------------------------------------------- */
 
-const NotificationRow = memo(function NotificationRow({ item, meta, styles, colors, onOpen, onRequestDelete }) {
+const NotificationRow = memo(function NotificationRow({
+  item,
+  meta,
+  styles,
+  colors,
+  onOpen,
+  onReply,
+  onMarkRead,
+  onRequestDelete,
+}) {
   const title = item.title || 'Notification';
   const body = item.body || item.message || 'No message';
   const time = formatRelativeTime(item.createdAt);
+  const type = String(item.type || '').toLowerCase();
+  const replyRoute = resolveNotificationRoute(item);
+  const canReply = ['message', 'direct_message', 'group_message'].includes(type)
+    && (replyRoute?.startsWith('/messages/') || replyRoute?.startsWith('/community/'));
 
   return (
-    <Pressable
-      style={({ pressed }) => [styles.row, !item.read && styles.rowUnread, pressed && styles.rowPressed]}
-      onPress={() => onOpen(item)}
-      onLongPress={() => onRequestDelete(item)}
-      delayLongPress={300}
-      accessibilityRole="button"
-      accessibilityLabel={`${item.read ? '' : 'Unread. '}${title}. ${body}. ${time}`}
-      accessibilityHint="Opens the notification. Long press to delete."
-    >
-      <View style={[styles.iconWrap, { backgroundColor: meta.soft }]}>
-        <Ionicons name={meta.icon} size={18} color={meta.color} />
-      </View>
+    <View style={[styles.row, !item.read && styles.rowUnread]}>
+      <Pressable
+        style={({ pressed }) => [styles.rowMain, pressed && styles.rowPressed]}
+        onPress={() => onOpen(item)}
+        onLongPress={() => onRequestDelete(item)}
+        delayLongPress={300}
+        accessibilityRole="button"
+        accessibilityLabel={`${item.read ? '' : 'Unread. '}${title}. ${body}. ${time}`}
+        accessibilityHint="Opens the notification. Long press to delete."
+      >
+        <View style={[styles.iconWrap, { backgroundColor: meta.soft }]}>
+          <Ionicons name={meta.icon} size={18} color={meta.color} />
+        </View>
 
-      <View style={styles.rowBody}>
-        <View style={styles.rowTopLine}>
-          <Text style={[styles.rowTitle, !item.read && styles.rowTitleUnread]} numberOfLines={1}>
-            {title}
+        <View style={styles.rowBody}>
+          <View style={styles.rowTopLine}>
+            <Text style={[styles.rowTitle, !item.read && styles.rowTitleUnread]} numberOfLines={1}>
+              {title}
+            </Text>
+            {!item.read ? <View style={styles.unreadBadgeDot} /> : null}
+          </View>
+
+          <Text style={styles.rowText} numberOfLines={2}>
+            {body}
           </Text>
-          {!item.read ? <View style={styles.unreadBadgeDot} /> : null}
-        </View>
-
-        <Text style={styles.rowText} numberOfLines={2}>
-          {body}
-        </Text>
-
-        <View style={styles.rowFooter}>
           <Text style={styles.rowTime}>{time}</Text>
-          <Pressable
-            onPress={() => onRequestDelete(item)}
-            hitSlop={10}
-            style={({ pressed }) => [styles.deleteButton, pressed && styles.deleteButtonPressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Delete notification"
-          >
-            <Ionicons name="trash-outline" size={15} color={colors.greyLight} />
-          </Pressable>
         </View>
+      </Pressable>
+
+      <View style={styles.rowActions}>
+        {canReply ? (
+          <Pressable
+            onPress={() => onReply(item)}
+            style={({ pressed }) => [styles.rowActionButton, pressed && styles.deleteButtonPressed]}
+            accessibilityRole="button"
+            accessibilityLabel={`Reply to ${title}`}
+          >
+            <Ionicons name="chatbubble-ellipses-outline" size={15} color={colors.brand} />
+            <Text style={styles.rowActionText}>Reply</Text>
+          </Pressable>
+        ) : null}
+        {!item.read ? (
+          <Pressable
+            onPress={() => onMarkRead(item)}
+            style={({ pressed }) => [styles.rowActionButton, pressed && styles.deleteButtonPressed]}
+            accessibilityRole="button"
+            accessibilityLabel={`Mark ${title} as read`}
+          >
+            <Ionicons name="checkmark-done-outline" size={15} color={colors.grey} />
+            <Text style={styles.rowActionSecondaryText}>Mark as read</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          onPress={() => onRequestDelete(item)}
+          hitSlop={10}
+          style={({ pressed }) => [styles.deleteButton, pressed && styles.deleteButtonPressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Delete notification"
+        >
+          <Ionicons name="trash-outline" size={15} color={colors.greyLight} />
+        </Pressable>
       </View>
-    </Pressable>
+    </View>
   );
 });
 
@@ -164,6 +214,8 @@ const NotificationRow = memo(function NotificationRow({ item, meta, styles, colo
 
 export default function NotificationsPage() {
   const router = useRouter();
+  const { user } = useAuth();
+  const userId = user?.uid;
   const { colors } = useTheme();
   const styles = useThemeStyles(createStyles);
   const typeMeta = useMemo(() => getTypeMeta(colors), [colors]);
@@ -191,7 +243,7 @@ export default function NotificationsPage() {
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
-  }, []);
+  }, [user?.uid]);
 
   // Auto-dismiss the error banner.
   useEffect(() => {
@@ -293,17 +345,47 @@ export default function NotificationsPage() {
     }));
   }, [items, filter]);
 
-  const markOneRead = useCallback((item) => {
-    if (item.read) return;
+  const markNotificationAndChatRead = useCallback(async (item) => {
+    await markNotificationRead(item.id);
+    const conversationId = item.conversationId
+      || item.conversation_id
+      || item.data?.conversationId
+      || item.data?.conversation_id;
+    if (conversationId && userId && ['message', 'direct_message'].includes(String(item.type || '').toLowerCase())) {
+      try {
+        await markConversationRead(conversationId, userId);
+      } catch (error) {
+        if (mountedRef.current) {
+          setBanner(`Notification marked as read, but the chat unread count couldn't be cleared: ${error?.message || 'Please open the chat to sync it.'}`);
+        }
+      }
+    }
+  }, [userId]);
+
+  const markOneRead = useCallback(async (item) => {
+    if (item.read) return true;
     setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, read: true } : entry)));
-    markNotificationRead(item.id).catch(() => {
+    try {
+      await markNotificationAndChatRead(item);
+      return true;
+    } catch (error) {
       setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, read: false } : entry)));
-    });
-  }, []);
+      if (mountedRef.current) {
+        setBanner(error?.message || "Couldn't mark this notification as read. Please try again.");
+      }
+      return false;
+    }
+  }, [markNotificationAndChatRead]);
 
   const openNotification = useCallback((item) => {
     markOneRead(item);
     const route = resolveNotificationRoute(item);
+    if (route) router.navigate(route);
+  }, [markOneRead, router]);
+
+  const replyToNotification = useCallback(async (item) => {
+    const route = resolveNotificationRoute(item);
+    await markOneRead(item);
     if (route) router.navigate(route);
   }, [markOneRead, router]);
 
@@ -316,7 +398,7 @@ export default function NotificationsPage() {
     setMarkingAll(true);
     setItems((current) => current.map((entry) => (entry.read ? entry : { ...entry, read: true })));
 
-    const results = await Promise.allSettled(unread.map((item) => markNotificationRead(item.id)));
+    const results = await Promise.allSettled(unread.map(markNotificationAndChatRead));
     if (!mountedRef.current) return;
 
     const failedIds = new Set(
@@ -332,7 +414,7 @@ export default function NotificationsPage() {
       );
     }
     setMarkingAll(false);
-  }, [items, markingAll]);
+  }, [items, markingAll, markNotificationAndChatRead]);
 
   const confirmDelete = useCallback(async () => {
     if (!pendingDelete || deleting) return;
@@ -361,9 +443,11 @@ export default function NotificationsPage() {
       styles={styles}
       colors={colors}
       onOpen={openNotification}
+      onReply={replyToNotification}
+      onMarkRead={markOneRead}
       onRequestDelete={requestDelete}
     />
-  ), [typeMeta, styles, colors, openNotification, requestDelete]);
+  ), [typeMeta, styles, colors, openNotification, replyToNotification, markOneRead, requestDelete]);
 
   const renderSectionHeader = useCallback(({ section }) => (
     <View style={styles.sectionHeaderRow}>
@@ -596,8 +680,8 @@ const createStyles = (colors, spacing, borderRadius) => ({
     color: colors.grey,
   },
   row: {
-    flexDirection: 'row',
-    gap: spacing.md,
+    flexDirection: 'column',
+    gap: spacing.sm,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
@@ -606,7 +690,12 @@ const createStyles = (colors, spacing, borderRadius) => ({
     marginBottom: spacing.sm,
   },
   rowPressed: {
-    backgroundColor: colors.canvasLight,
+    opacity: 0.75,
+  },
+  rowMain: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
   },
   rowUnread: {
     backgroundColor: colors.brandLight,
@@ -670,16 +759,38 @@ const createStyles = (colors, spacing, borderRadius) => ({
     fontSize: 12.5,
     lineHeight: 17,
   },
-  rowFooter: {
+  rowActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 6,
+    gap: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.borderLight,
+    paddingTop: spacing.xs,
+  },
+  rowActionButton: {
+    minHeight: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+  },
+  rowActionText: {
+    color: colors.brandText,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  rowActionSecondaryText: {
+    color: colors.grey,
+    fontSize: 11,
+    fontWeight: '700',
   },
   rowTime: {
     color: colors.greyLight,
     fontSize: 11,
     fontWeight: '600',
+    marginTop: 6,
   },
   deleteButton: {
     width: 26,
@@ -687,6 +798,7 @@ const createStyles = (colors, spacing, borderRadius) => ({
     borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
+    marginLeft: 'auto',
   },
   deleteButtonPressed: {
     backgroundColor: colors.canvasLight,
