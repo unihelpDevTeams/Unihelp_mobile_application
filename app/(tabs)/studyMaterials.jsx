@@ -19,6 +19,7 @@ import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import DocumentCard from '../../src/shared/components/DocumentCard';
 import EmptyState from '../../src/shared/components/EmptyState';
+import CBTPracticeScreen from '../cbt/index';
 import DraggableBottomSheet from '../../src/shared/components/DraggableBottomSheet';
 import {
   deleteNote,
@@ -688,10 +689,8 @@ export default function StudyMaterials() {
   }, [activeSubject, subjects]);
 
   // Render Header Section for FlatList
-  const ListHeader = (
-    <View style={styles.libraryHeaderContainer}>
-      {/* SEGMENTED SWITCHER */}
-      <View style={styles.segmentContainer}>
+  const SegmentTabs = (
+      <View style={[styles.segmentContainer, { marginHorizontal: 16, marginTop: 16, marginBottom: activeTab === 'cbt' ? 16 : 0 }]}>
         <Pressable
           onPress={() => handleTabSwitch('questions')}
           accessibilityRole="tab"
@@ -711,19 +710,39 @@ export default function StudyMaterials() {
         <Pressable
           onPress={() => handleTabSwitch('notes')}
           accessibilityRole="tab"
-          accessibilityState={{ selected: !isQuestions }}
-          style={[styles.segmentTab, !isQuestions && styles.segmentTabActiveNotes]}
+          accessibilityState={{ selected: activeTab === 'notes' }}
+          style={[styles.segmentTab, activeTab === 'notes' && styles.segmentTabActiveNotes]}
         >
           <Ionicons
-            name={!isQuestions ? 'book' : 'book-outline'}
+            name={activeTab === 'notes' ? 'book' : 'book-outline'}
             size={16}
-            color={!isQuestions ? colors.onBrand : colors.textSecondary}
+            color={activeTab === 'notes' ? colors.onBrand : colors.textSecondary}
           />
-          <Text style={[styles.segmentText, !isQuestions && styles.segmentTextActive]}>
+          <Text style={[styles.segmentText, activeTab === 'notes' && styles.segmentTextActive]}>
             Lecture Notes
           </Text>
         </Pressable>
+
+        <Pressable
+          onPress={() => handleTabSwitch('cbt')}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: activeTab === 'cbt' }}
+          style={[styles.segmentTab, activeTab === 'cbt' && { backgroundColor: colors.surface }]}
+        >
+          <Ionicons
+            name={activeTab === 'cbt' ? 'desktop' : 'desktop-outline'}
+            size={16}
+            color={activeTab === 'cbt' ? colors.onBrand : colors.textSecondary}
+          />
+          <Text style={[styles.segmentText, activeTab === 'cbt' && styles.segmentTextActive]}>
+            CBT
+          </Text>
+        </Pressable>
       </View>
+  );
+
+  const ListHeader = (
+    <View style={styles.libraryHeaderContainer}>
 
       {/* META SUMMARY & UPLOAD BUTTON */}
       <View style={styles.actionHeaderRow}>
@@ -860,8 +879,13 @@ export default function StudyMaterials() {
     </View>
   );
 
+  if (activeTab === 'cbt') {
+    return <CBTPracticeScreen customTopNode={SegmentTabs} isEmbedded={true} />;
+  }
+
   return (
     <ScreenShell scrollable={false} title="Resources" subtitle={`${resourceTypeLabel} library`} showBack={false}>
+      {SegmentTabs}
       {loading ? (
         <View style={styles.loadingWrap}>
           {ListHeader}

@@ -222,8 +222,9 @@ export default function DocumentCard({
 
   const itemTitle = firstText(item?.title, item?.name) || 'Untitled Resource';
   const itemDescription = resourcePreviewText(item);
-  const isLong = itemDescription.length > 110;
-  const [expanded, setExpanded] = useState(!isLong);
+  const isPastQuestion = kind === 'question' || kind === 'past_question';
+  const isLong = !isPastQuestion && itemDescription.length > 110;
+  const [expanded, setExpanded] = useState(!isLong && !isPastQuestion);
 
   const resolved = resolveDocumentAsset(item || {});
 

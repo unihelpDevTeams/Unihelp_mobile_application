@@ -257,7 +257,8 @@ export default function TabsLayout() {
               options={{
                 title: 'Chats',
                 tabBarIcon: ICONS.chat,
-                tabBarBadge: formatBadge(unreadChats),
+                tabBarBadge: unreadChats > 0 ? '' : undefined,
+                tabBarBadgeStyle: { minWidth: 10, height: 10, borderRadius: 5, backgroundColor: badgeColor, marginTop: 4, marginLeft: 2 },
                 tabBarAccessibilityLabel: unreadChats > 0 ? `Chats, ${unreadChats} unread` : 'Chats',
               }}
             />
@@ -267,7 +268,8 @@ export default function TabsLayout() {
               options={{
                 title: 'Groups',
                 tabBarIcon: ICONS.groups,
-                tabBarBadge: formatBadge(unreadGroupMessages),
+                tabBarBadge: unreadGroupMessages > 0 ? '' : undefined,
+                tabBarBadgeStyle: { minWidth: 10, height: 10, borderRadius: 5, backgroundColor: badgeColor, marginTop: 4, marginLeft: 2 },
                 tabBarAccessibilityLabel: unreadGroupMessages > 0 ? `Groups, ${unreadGroupMessages} unread` : 'Groups',
               }}
             />

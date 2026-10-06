@@ -570,7 +570,7 @@ const CourseCard = React.memo(function CourseCard({ course, best, onPress, s, T 
 /*                                   Screen                                   */
 /* -------------------------------------------------------------------------- */
 
-export default function CBTPracticeScreen() {
+export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
@@ -1313,6 +1313,7 @@ export default function CBTPracticeScreen() {
     const resumeAnswered = resumable ? Object.keys(resumable.answers || {}).length : 0;
     const header = (
       <View>
+        {customTopNode}
         <View style={s.hero}>
           <View style={s.heroTop}>
             <View style={{ flex: 1 }}>
@@ -1398,7 +1399,7 @@ export default function CBTPracticeScreen() {
 
     return (
       <>
-        <ScreenShell showBack title="Mock CBT" onBack={() => router.back()} scrollable={false}>
+        <ScreenShell showBack={!isEmbedded} title={isEmbedded ? "Resources" : "Mock CBT"} onBack={() => !isEmbedded && router.back()} scrollable={false}>
           <FlatList
             data={filteredCourses}
             keyExtractor={(c) => String(c.id)}
