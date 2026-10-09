@@ -257,8 +257,7 @@ export default function TabsLayout() {
               options={{
                 title: 'Chats',
                 tabBarIcon: ICONS.chat,
-                tabBarBadge: unreadChats > 0 ? '' : undefined,
-                tabBarBadgeStyle: { minWidth: 10, height: 10, borderRadius: 5, backgroundColor: badgeColor, marginTop: 4, marginLeft: 2 },
+                tabBarBadge: formatBadge(unreadChats),
                 tabBarAccessibilityLabel: unreadChats > 0 ? `Chats, ${unreadChats} unread` : 'Chats',
               }}
             />

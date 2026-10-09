@@ -21,6 +21,7 @@ import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import logo from '../../assets/images/favicon.png';
 import { useAuth } from '../../context/AuthContext';
+import { readPendingDeepLink, clearPendingDeepLink } from '../../utils/deepLink';
 
 import { logError, translateError } from '../../src/utils/errorLogger';
 
@@ -148,6 +149,14 @@ export default function Login() {
         LOGIN_STORAGE_KEY,
         JSON.stringify({ email: email.trim(), password })
       );
+
+      const pending = await readPendingDeepLink();
+      if (pending) {
+        await clearPendingDeepLink();
+        router.replace({ pathname: pending.pathname, params: pending.params || {} });
+        return;
+      }
+
       router.replace('/(tabs)');
     } catch (submitError) {
       logError('Login', submitError, { email: email.trim() });

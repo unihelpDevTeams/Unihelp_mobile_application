@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
   Linking,
   Platform,
@@ -32,12 +33,21 @@ import { canManageResource, canUploadResource, isResourceAdmin } from '../../src
 import { buildPastQuestionWhatsAppUrl } from '../../src/shared/config/resourceContribution';
 
 const PAGE_SIZE = 20;
+const VALID_TABS = ['questions', 'notes', 'cbt'];
 
 const SORT_OPTIONS = [
   { key: 'newest', label: 'Newest first', icon: 'time-outline' },
   { key: 'title_asc', label: 'Title A - Z', icon: 'arrow-up-outline' },
   { key: 'title_desc', label: 'Title Z - A', icon: 'arrow-down-outline' },
 ];
+
+const TABS = [
+  { key: 'questions', label: 'Questions', icon: 'clipboard', iconOutline: 'clipboard-outline' },
+  { key: 'notes', label: 'Notes', icon: 'book', iconOutline: 'book-outline' },
+  { key: 'cbt', label: 'CBT', icon: 'desktop', iconOutline: 'desktop-outline' },
+];
+
+const getSubject = (item) => String(item?.subject || item?.course || item?.courseCode || '').trim();
 
 export default function StudyMaterials() {
   const router = useRouter();
@@ -46,18 +56,12 @@ export default function StudyMaterials() {
   const { colors } = useTheme();
   const { width } = useWindowDimensions();
 
-  // Active Tab ('questions' | 'notes')
-  const [activeTab, setActiveTab] = useState('questions');
-
-  useEffect(() => {
-    if (tab === 'notes' || tab === 'questions') {
-      setActiveTab(tab);
-    }
-  }, [tab]);
+  // Active Tab ('questions' | 'notes' | 'cbt')
+  const [activeTab, setActiveTab] = useState(VALID_TABS.includes(tab) ? tab : 'questions');
 
   // Shared Data & Pagination States
   const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(activeTab !== 'cbt');
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor] = useState(null);
@@ -69,35 +73,38 @@ export default function StudyMaterials() {
   const [sort, setSort] = useState('newest');
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
 
-  // Ref flag to handle rapid tab switching safely
-  const isMountedRef = useRef(true);
+  // Request guards: protect against stale responses (rapid tab switching, refresh during load-more)
+  const requestIdRef = useRef(0);
+  const loadingMoreRef = useRef(false);
+
+  // Skeleton pulse
+  const pulse = useRef(new Animated.Value(0.55)).current;
 
   // Dynamic Accents
   const isQuestions = activeTab === 'questions';
 
-  // Memoize fetcher function to prevent unnecessary re-renders
   const fetcher = useMemo(
-    () => isQuestions ? fetchQuestionsPage : fetchNotesPage,
-    [isQuestions]
+    () => (activeTab === 'notes' ? fetchNotesPage : fetchQuestionsPage),
+    [activeTab]
   );
 
   const activeTone = isQuestions ? colors.blue : colors.brand;
   const activeLightTone = isQuestions ? colors.blueLight : colors.brandLight;
+  const cbtTone = colors.success || colors.brand;
   const resourceColumns = width >= 900 ? 2 : 1;
   const resourceTypeLabel = isQuestions ? 'Past Questions' : 'Lecture Notes';
   const resourceNoun = isQuestions ? 'papers' : 'notes';
+  const resourceKind = isQuestions ? 'question' : 'note';
   const isAdmin = isResourceAdmin(profile, user);
-  const canUploadCurrent = canUploadResource({ type: isQuestions ? 'question' : 'note', user, profile });
+  const canUploadCurrent = canUploadResource({ type: resourceKind, user, profile });
+
+  const toneForTab = (key) => (key === 'questions' ? colors.blue : key === 'notes' ? colors.brand : cbtTone);
 
   const styles = useThemeStyles((c, s, r) => ({
     page: { flex: 1 },
     listContent: { gap: s.sm, paddingBottom: 32 },
 
-    // COMPACT SEGMENTED SWITCHER & HEADER
-    libraryHeaderContainer: {
-      marginBottom: s.md,
-      gap: s.sm,
-    },
+    // SEGMENTED SWITCHER
     segmentContainer: {
       flexDirection: 'row',
       backgroundColor: c.surfaceSecondary,
@@ -113,20 +120,13 @@ export default function StudyMaterials() {
       alignItems: 'center',
       justifyContent: 'center',
       paddingVertical: 10,
+      paddingHorizontal: 6,
       borderRadius: r.lg,
       gap: 6,
     },
-    segmentTabActiveQuestions: {
-      backgroundColor: c.blue,
+    segmentTabActive: {
       ...Platform.select({
-        ios: { shadowColor: c.blue, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4 },
-        android: { elevation: 3 },
-      }),
-    },
-    segmentTabActiveNotes: {
-      backgroundColor: c.brand,
-      ...Platform.select({
-        ios: { shadowColor: c.brand, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4 },
+        ios: { shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4 },
         android: { elevation: 3 },
       }),
     },
@@ -140,12 +140,18 @@ export default function StudyMaterials() {
       fontWeight: '800',
     },
 
+    libraryHeaderContainer: {
+      marginBottom: s.md,
+      gap: s.sm,
+    },
+
     // ACTION ROW (Count & Upload)
     actionHeaderRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       paddingHorizontal: 2,
+      minHeight: 30,
     },
     metaSummaryText: {
       fontSize: 13,
@@ -175,9 +181,11 @@ export default function StudyMaterials() {
     uploadButtonPressed: {
       opacity: 0.75,
     },
+
+    // CONTRIBUTION CARD
     contributionCard: {
       flexDirection: width >= 640 ? 'row' : 'column',
-      alignItems: width >= 640 ? 'center' : 'flex-start',
+      alignItems: width >= 640 ? 'center' : 'stretch',
       justifyContent: 'space-between',
       gap: s.md,
       backgroundColor: c.card,
@@ -186,9 +194,23 @@ export default function StudyMaterials() {
       borderColor: c.borderDefault,
       padding: s.md,
     },
+    contributionInfo: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.sm,
+    },
+    contributionIconWrap: {
+      width: 38,
+      height: 38,
+      borderRadius: r.full,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.successLight || c.surfaceSecondary,
+    },
     contributionCopy: {
       flex: 1,
-      gap: 3,
+      gap: 2,
     },
     contributionTitle: {
       fontSize: 14,
@@ -271,10 +293,36 @@ export default function StudyMaterials() {
       borderColor: c.card,
     },
 
-    // ACTIVE FILTER CHIPS ROW
-    activeChipsScroll: {
-      marginTop: 2,
+    // QUICK SUBJECT CHIPS
+    quickChipsContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingRight: s.md,
     },
+    quickChip: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: r.full,
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+    },
+    quickChipActive: {
+      backgroundColor: activeTone,
+      borderColor: activeTone,
+    },
+    quickChipText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: c.textSecondary,
+    },
+    quickChipTextActive: {
+      color: c.onBrand,
+      fontWeight: '800',
+    },
+
+    // ACTIVE FILTER TAGS
     activeChipsContainer: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -309,7 +357,6 @@ export default function StudyMaterials() {
       alignItems: 'center',
       justifyContent: 'space-between',
       marginTop: s.xs,
-      marginBottom: s.xs,
     },
     resultsTitle: {
       fontSize: 15,
@@ -330,8 +377,10 @@ export default function StudyMaterials() {
 
     // SKELETON LOADERS
     loadingWrap: {
-      gap: s.md,
-      paddingTop: s.xs,
+      flex: 1,
+    },
+    skeletonList: {
+      gap: s.sm,
     },
     skeletonCard: {
       height: 96,
@@ -366,10 +415,30 @@ export default function StudyMaterials() {
       backgroundColor: c.surfaceSecondary,
       width: '45%',
     },
+
+    // FOOTER
     footerLoader: {
       paddingVertical: s.md,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    loadMoreButton: {
+      alignSelf: 'center',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginVertical: s.sm,
+      paddingHorizontal: s.md,
+      paddingVertical: 10,
+      borderRadius: r.full,
+      backgroundColor: activeLightTone,
+      borderWidth: 1,
+      borderColor: activeTone,
+    },
+    loadMoreText: {
+      fontSize: 12.5,
+      fontWeight: '800',
+      color: activeTone,
     },
     gridItem: {
       flex: 1,
@@ -455,25 +524,84 @@ export default function StudyMaterials() {
       color: c.onBrand,
       fontWeight: '800',
     },
-    clearAllButton: {
+    sheetActions: {
+      flexDirection: 'row',
+      gap: s.sm,
+      marginTop: s.md,
+    },
+    resetButton: {
+      flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
       paddingVertical: 12,
       borderRadius: r.xl,
       backgroundColor: c.surfaceSecondary,
-      marginTop: s.md,
     },
-    clearAllText: {
+    resetButtonText: {
       fontSize: 13.5,
       fontWeight: '800',
       color: c.red,
     },
-  }), [activeTone, activeLightTone]);
+    applyButton: {
+      flex: 2,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 12,
+      borderRadius: r.xl,
+      backgroundColor: activeTone,
+    },
+    applyButtonText: {
+      fontSize: 13.5,
+      fontWeight: '800',
+      color: c.onBrand,
+    },
+  }), [activeTone, activeLightTone, width]);
+
+  // Respond to ?tab= param changes (deep links / navigation)
+  useEffect(() => {
+    if (VALID_TABS.includes(tab)) {
+      setActiveTab((current) => {
+        if (current !== tab) {
+          setItems([]);
+          setLoading(tab !== 'cbt');
+          setSearch('');
+          setActiveSubject('All');
+          setSort('newest');
+        }
+        return tab;
+      });
+    }
+  }, [tab]);
+
+  // Skeleton pulse animation
+  useEffect(() => {
+    if (!loading) return undefined;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.55, duration: 700, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [loading, pulse]);
+
+  // Invalidate any in-flight request on unmount
+  useEffect(() => {
+    return () => {
+      requestIdRef.current += 1;
+    };
+  }, []);
 
   // Handle Tab Switching
-  const handleTabSwitch = (tab) => {
-    if (tab === activeTab) return;
-    setActiveTab(tab);
+  const handleTabSwitch = (nextTab) => {
+    if (nextTab === activeTab) return;
+    // Reset immediately so the previous tab's items never flash on the new tab
+    setItems([]);
+    setCursor(null);
+    setHasMore(false);
+    setLoading(nextTab !== 'cbt');
+    setActiveTab(nextTab);
     setSearch('');
     setActiveSubject('All');
     setSort('newest');
@@ -482,10 +610,18 @@ export default function StudyMaterials() {
   // Safe Infinite Page Loader
   const loadMaterials = useCallback(
     async (isReset = false) => {
+      if (activeTab === 'cbt') return;
+
+      let requestId;
       if (isReset) {
+        requestId = ++requestIdRef.current;
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
         setRefreshing(true);
       } else {
-        if (loadingMore || !hasMore) return;
+        if (loadingMoreRef.current || !hasMore) return;
+        loadingMoreRef.current = true;
+        requestId = requestIdRef.current;
         setLoadingMore(true);
       }
 
@@ -495,7 +631,7 @@ export default function StudyMaterials() {
           cursor: isReset ? null : cursor,
         });
 
-        if (!isMountedRef.current) return;
+        if (requestId !== requestIdRef.current) return;
 
         setItems((current) => {
           const nextItems = page?.items || [];
@@ -509,49 +645,55 @@ export default function StudyMaterials() {
       } catch (err) {
         console.error('Failed to load study materials:', err);
       } finally {
-        if (isMountedRef.current) {
+        if (requestId === requestIdRef.current) {
+          loadingMoreRef.current = false;
           setLoading(false);
           setRefreshing(false);
           setLoadingMore(false);
         }
       }
     },
-    [cursor, fetcher, hasMore, loadingMore]
+    [activeTab, cursor, fetcher, hasMore]
   );
 
-  // Primary Fetch Handler
+  // Primary Fetch Handler (first page for the active tab)
   useEffect(() => {
-    isMountedRef.current = true;
+    if (activeTab === 'cbt') {
+      requestIdRef.current += 1; // invalidate anything in flight
+      return;
+    }
+
+    const requestId = ++requestIdRef.current;
+    loadingMoreRef.current = false;
     setLoading(true);
+    setLoadingMore(false);
+    setRefreshing(false);
     setItems([]);
     setCursor(null);
     setHasMore(false);
 
     fetcher({ pageSize: PAGE_SIZE })
       .then((page) => {
-        if (!isMountedRef.current) return;
+        if (requestId !== requestIdRef.current) return;
         setItems(page?.items || []);
         setCursor(page?.cursor || null);
         setHasMore(Boolean(page?.hasMore));
       })
       .catch((err) => {
+        if (requestId !== requestIdRef.current) return;
         console.error('Error fetching study data:', err);
       })
       .finally(() => {
-        if (isMountedRef.current) setLoading(false);
+        if (requestId === requestIdRef.current) setLoading(false);
       });
-
-    return () => {
-      isMountedRef.current = false;
-    };
   }, [activeTab, fetcher]);
 
   // Extract distinct subjects dynamically
   const subjects = useMemo(() => {
     const subjectSet = new Set();
     items.forEach((i) => {
-      const sub = i.subject || i.course || i.courseCode || '';
-      if (sub.trim()) subjectSet.add(sub.trim());
+      const sub = getSubject(i);
+      if (sub) subjectSet.add(sub);
     });
     return ['All', ...Array.from(subjectSet).sort()];
   }, [items]);
@@ -560,8 +702,7 @@ export default function StudyMaterials() {
   const filteredItems = useMemo(() => {
     const query = search.trim().toLowerCase();
     const result = items.filter((item) => {
-      const itemSubject = (item.subject || item.course || item.courseCode || '').trim();
-      if (activeSubject !== 'All' && itemSubject !== activeSubject) {
+      if (activeSubject !== 'All' && getSubject(item) !== activeSubject) {
         return false;
       }
       if (query) {
@@ -607,8 +748,21 @@ export default function StudyMaterials() {
     return sorted;
   }, [items, activeSubject, search, sort]);
 
+  // Pad with invisible spacers so the last card in a multi-column grid keeps its width
+  const displayData = useMemo(() => {
+    if (resourceColumns === 1 || filteredItems.length === 0) return filteredItems;
+    const remainder = filteredItems.length % resourceColumns;
+    if (remainder === 0) return filteredItems;
+    const spacers = Array.from({ length: resourceColumns - remainder }, (_, i) => ({
+      id: `__spacer_${i}`,
+      __spacer: true,
+    }));
+    return [...filteredItems, ...spacers];
+  }, [filteredItems, resourceColumns]);
+
   const hasActiveFilters = activeSubject !== 'All' || sort !== 'newest';
   const hasAnyRefinement = hasActiveFilters || !!search;
+  const showSecondaryTags = sort !== 'newest' || search.length > 0;
 
   const clearFilters = () => {
     setActiveSubject('All');
@@ -642,7 +796,7 @@ export default function StudyMaterials() {
       openContributionWhatsApp();
       return;
     }
-    router.navigate(`/upload?type=${isQuestions ? 'question' : 'note'}`);
+    router.navigate(`/upload?type=${resourceKind}`);
   };
 
   const deleteResource = async (item) => {
@@ -659,12 +813,11 @@ export default function StudyMaterials() {
   };
 
   const openResourceActions = (item) => {
-    const resourceType = isQuestions ? 'question' : 'note';
-    if (!canManageResource({ type: resourceType, item, user, profile })) return;
+    if (!canManageResource({ type: resourceKind, item, user, profile })) return;
     Alert.alert(item.title || item.name || 'Resource actions', 'Choose what you want to do.', [
       {
         text: 'Edit',
-        onPress: () => router.navigate({ pathname: '/upload', params: { type: resourceType, editId: item.id } }),
+        onPress: () => router.navigate({ pathname: '/upload', params: { type: resourceKind, editId: item.id } }),
       },
       {
         text: 'Delete',
@@ -681,73 +834,66 @@ export default function StudyMaterials() {
 
   const activeSortLabel = SORT_OPTIONS.find((o) => o.key === sort)?.label || 'Newest first';
 
-  // Align Subject selection when tab switches
+  // Reset the subject filter if it no longer exists in the loaded data
   useEffect(() => {
     if (activeSubject !== 'All' && !subjects.includes(activeSubject)) {
       setActiveSubject('All');
     }
   }, [activeSubject, subjects]);
 
-  // Render Header Section for FlatList
+  // Segmented tabs (shared between library and embedded CBT screen)
+  const isCbt = activeTab === 'cbt';
   const SegmentTabs = (
-      <View style={[styles.segmentContainer, { marginHorizontal: 16, marginTop: 16, marginBottom: activeTab === 'cbt' ? 16 : 0 }]}>
-        <Pressable
-          onPress={() => handleTabSwitch('questions')}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: isQuestions }}
-          style={[styles.segmentTab, isQuestions && styles.segmentTabActiveQuestions]}
-        >
-          <Ionicons
-            name={isQuestions ? 'clipboard' : 'clipboard-outline'}
-            size={16}
-            color={isQuestions ? colors.onBrand : colors.textSecondary}
-          />
-          <Text style={[styles.segmentText, isQuestions && styles.segmentTextActive]}>
-            Past Questions
-          </Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => handleTabSwitch('notes')}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: activeTab === 'notes' }}
-          style={[styles.segmentTab, activeTab === 'notes' && styles.segmentTabActiveNotes]}
-        >
-          <Ionicons
-            name={activeTab === 'notes' ? 'book' : 'book-outline'}
-            size={16}
-            color={activeTab === 'notes' ? colors.onBrand : colors.textSecondary}
-          />
-          <Text style={[styles.segmentText, activeTab === 'notes' && styles.segmentTextActive]}>
-            Lecture Notes
-          </Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => handleTabSwitch('cbt')}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: activeTab === 'cbt' }}
-          style={[styles.segmentTab, activeTab === 'cbt' && { backgroundColor: colors.surface }]}
-        >
-          <Ionicons
-            name={activeTab === 'cbt' ? 'desktop' : 'desktop-outline'}
-            size={16}
-            color={activeTab === 'cbt' ? colors.onBrand : colors.textSecondary}
-          />
-          <Text style={[styles.segmentText, activeTab === 'cbt' && styles.segmentTextActive]}>
-            CBT
-          </Text>
-        </Pressable>
-      </View>
+    <View
+      style={[
+        styles.segmentContainer,
+        isCbt
+          ? { marginHorizontal: 16, marginTop: 16, marginBottom: 16 }
+          : { marginTop: 4, marginBottom: 12 },
+      ]}
+    >
+      {TABS.map((t) => {
+        const selected = activeTab === t.key;
+        const tone = toneForTab(t.key);
+        return (
+          <Pressable
+            key={t.key}
+            onPress={() => handleTabSwitch(t.key)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+            style={[
+              styles.segmentTab,
+              selected && styles.segmentTabActive,
+              selected && { backgroundColor: tone, shadowColor: tone },
+            ]}
+          >
+            <Ionicons
+              name={selected ? t.icon : t.iconOutline}
+              size={16}
+              color={selected ? colors.onBrand : colors.textSecondary}
+            />
+            <Text
+              numberOfLines={1}
+              style={[styles.segmentText, selected && styles.segmentTextActive]}
+            >
+              {t.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 
   const ListHeader = (
     <View style={styles.libraryHeaderContainer}>
-
       {/* META SUMMARY & UPLOAD BUTTON */}
       <View style={styles.actionHeaderRow}>
         <Text style={styles.metaSummaryText}>
-          <Text style={styles.metaHighlight}>{items.length}</Text> {resourceNoun} available
+          <Text style={styles.metaHighlight}>
+            {items.length}
+            {hasMore ? '+' : ''}
+          </Text>{' '}
+          {resourceNoun} available
         </Text>
         {canUploadCurrent ? (
           <Pressable
@@ -764,11 +910,16 @@ export default function StudyMaterials() {
 
       {isQuestions && !isAdmin ? (
         <View style={styles.contributionCard}>
-          <View style={styles.contributionCopy}>
-            <Text style={styles.contributionTitle}>Have a past question to share?</Text>
-            <Text style={styles.contributionText}>
-              Send it to UniHelp on WhatsApp and an admin will review and publish it.
-            </Text>
+          <View style={styles.contributionInfo}>
+            <View style={styles.contributionIconWrap}>
+              <Ionicons name="logo-whatsapp" size={20} color={colors.success || colors.brand} />
+            </View>
+            <View style={styles.contributionCopy}>
+              <Text style={styles.contributionTitle}>Have a past question to share?</Text>
+              <Text style={styles.contributionText}>
+                Send it to UniHelp on WhatsApp and an admin will review and publish it.
+              </Text>
+            </View>
           </View>
           <Pressable
             onPress={openContributionWhatsApp}
@@ -776,8 +927,8 @@ export default function StudyMaterials() {
             accessibilityRole="button"
             accessibilityLabel="Contribute past question on WhatsApp"
           >
-            <Ionicons name="logo-whatsapp" size={17} color={colors.success || colors.brand} />
             <Text style={styles.contributionButtonText}>Contribute</Text>
+            <Ionicons name="arrow-forward" size={14} color={colors.success || colors.brand} />
           </Pressable>
         </View>
       ) : null}
@@ -826,23 +977,41 @@ export default function StudyMaterials() {
         </Pressable>
       </View>
 
-      {/* ACTIVE FILTER SUMMARY CHIPS */}
+      {/* QUICK SUBJECT CHIPS */}
+      {subjects.length > 2 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.quickChipsContainer}
+        >
+          {subjects.map((sub) => {
+            const selected = activeSubject === sub;
+            return (
+              <Pressable
+                key={sub}
+                onPress={() => setActiveSubject(sub)}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                style={[styles.quickChip, selected && styles.quickChipActive]}
+              >
+                <Text style={[styles.quickChipText, selected && styles.quickChipTextActive]}>
+                  {sub}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      )}
+
+      {/* ACTIVE FILTER SUMMARY TAGS (sort & search; subject lives in the chip row) */}
       {hasAnyRefinement && (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={styles.activeChipsScroll}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.activeChipsContainer}
         >
-          {activeSubject !== 'All' && (
-            <View style={styles.filterTag}>
-              <Text style={styles.filterTagText}>{activeSubject}</Text>
-              <Pressable onPress={() => setActiveSubject('All')} hitSlop={6}>
-                <Ionicons name="close" size={12} color={activeTone} />
-              </Pressable>
-            </View>
-          )}
-
           {sort !== 'newest' && (
             <View style={styles.filterTag}>
               <Text style={styles.filterTagText}>{activeSortLabel}</Text>
@@ -861,9 +1030,11 @@ export default function StudyMaterials() {
             </View>
           )}
 
-          <Pressable onPress={clearEverything} hitSlop={8}>
-            <Text style={styles.clearAllTagText}>Clear all</Text>
-          </Pressable>
+          {(showSecondaryTags || activeSubject !== 'All') && (
+            <Pressable onPress={clearEverything} hitSlop={8}>
+              <Text style={styles.clearAllTagText}>Clear all</Text>
+            </Pressable>
+          )}
         </ScrollView>
       )}
 
@@ -879,7 +1050,7 @@ export default function StudyMaterials() {
     </View>
   );
 
-  if (activeTab === 'cbt') {
+  if (isCbt) {
     return <CBTPracticeScreen customTopNode={SegmentTabs} isEmbedded={true} />;
   }
 
@@ -889,42 +1060,49 @@ export default function StudyMaterials() {
       {loading ? (
         <View style={styles.loadingWrap}>
           {ListHeader}
-          {[1, 2, 3, 4].map((i) => (
-            <View key={i} style={styles.skeletonCard}>
-              <View style={styles.skeletonIcon} />
-              <View style={styles.skeletonLines}>
-                <View style={styles.skeletonLineWide} />
-                <View style={styles.skeletonLineNarrow} />
+          <Animated.View style={[styles.skeletonList, { opacity: pulse }]}>
+            {[1, 2, 3, 4].map((i) => (
+              <View key={i} style={styles.skeletonCard}>
+                <View style={styles.skeletonIcon} />
+                <View style={styles.skeletonLines}>
+                  <View style={styles.skeletonLineWide} />
+                  <View style={styles.skeletonLineNarrow} />
+                </View>
               </View>
-            </View>
-          ))}
+            ))}
+          </Animated.View>
         </View>
       ) : (
         <FlatList
           key={resourceColumns}
-          data={filteredItems}
+          data={displayData}
           numColumns={resourceColumns}
           keyExtractor={(item) => item.id}
           ListHeaderComponent={ListHeader}
-          renderItem={({ item }) => (
-            <View style={styles.gridItem}>
-              <DocumentCard
-                item={item}
-                tone={activeTone}
-                kind={isQuestions ? 'question' : 'note'}
-                actionLabel={isQuestions ? 'View' : 'Open'}
-                compact={resourceColumns > 1}
-                showActions={canManageResource({ type: isQuestions ? 'question' : 'note', item, user, profile })}
-                onActionPress={openResourceActions}
-                onPress={() =>
-                  router.navigate({
-                    pathname: '/view/[type]/[id]',
-                    params: { type: isQuestions ? 'question' : 'note', id: item.id },
-                  })
-                }
-              />
-            </View>
-          )}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          renderItem={({ item }) => {
+            if (item.__spacer) return <View style={styles.gridItem} />;
+            return (
+              <View style={styles.gridItem}>
+                <DocumentCard
+                  item={item}
+                  tone={activeTone}
+                  kind={resourceKind}
+                  actionLabel={isQuestions ? 'View' : 'Open'}
+                  compact={resourceColumns > 1}
+                  showActions={canManageResource({ type: resourceKind, item, user, profile })}
+                  onActionPress={openResourceActions}
+                  onPress={() =>
+                    router.navigate({
+                      pathname: '/view/[type]/[id]',
+                      params: { type: resourceKind, id: item.id },
+                    })
+                  }
+                />
+              </View>
+            );
+          }}
           columnWrapperStyle={resourceColumns > 1 ? { gap: 12 } : undefined}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
@@ -937,15 +1115,27 @@ export default function StudyMaterials() {
               <View style={styles.footerLoader}>
                 <ActivityIndicator size="small" color={activeTone} />
               </View>
+            ) : hasMore && hasAnyRefinement ? (
+              <Pressable
+                onPress={() => loadMaterials(false)}
+                style={({ pressed }) => [styles.loadMoreButton, pressed && styles.uploadButtonPressed]}
+                accessibilityRole="button"
+                accessibilityLabel={`Load more ${resourceNoun}`}
+              >
+                <Ionicons name="refresh-outline" size={14} color={activeTone} />
+                <Text style={styles.loadMoreText}>Load more {resourceNoun}</Text>
+              </Pressable>
             ) : null
           }
           ListEmptyComponent={
             <EmptyState
-              icon={hasAnyRefinement ? 'search-outline' : ''}
+              icon={hasAnyRefinement ? 'search-outline' : 'folder-open-outline'}
               title={hasAnyRefinement ? 'No matching resources' : `No ${resourceNoun} found`}
               description={
                 hasAnyRefinement
-                  ? 'Try adjusting your search terms, sorting, or subject filter.'
+                  ? hasMore
+                    ? 'Nothing matches in the loaded results. Try loading more or adjusting your filters.'
+                    : 'Try adjusting your search terms, sorting, or subject filter.'
                   : `There are currently no ${resourceNoun} available in this library.`
               }
               actionLabel={hasAnyRefinement ? 'Clear all filters' : canUploadCurrent ? `Upload ${resourceTypeLabel}` : ''}
@@ -1014,12 +1204,19 @@ export default function StudyMaterials() {
           })}
         </View>
 
-        {/* CLEAR ALL BUTTON */}
-        {hasActiveFilters && (
-          <Pressable onPress={clearFilters} style={styles.clearAllButton}>
-            <Text style={styles.clearAllText}>Reset Filters</Text>
+        {/* ACTIONS */}
+        <View style={styles.sheetActions}>
+          {hasActiveFilters && (
+            <Pressable onPress={clearFilters} style={styles.resetButton}>
+              <Text style={styles.resetButtonText}>Reset</Text>
+            </Pressable>
+          )}
+          <Pressable onPress={() => setFilterSheetOpen(false)} style={styles.applyButton}>
+            <Text style={styles.applyButtonText}>
+              Show {filteredItems.length} {filteredItems.length === 1 ? 'result' : 'results'}
+            </Text>
           </Pressable>
-        )}
+        </View>
       </DraggableBottomSheet>
     </ScreenShell>
   );

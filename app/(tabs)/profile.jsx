@@ -43,7 +43,7 @@ import { getDocs, collection, query, where } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { COLLECTIONS } from '../../src/shared/firestoreSchema';
 import { fetchChallengeStats } from './../../src/shared/challenge/service';
-
+import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 import { isPremiumActive } from '../../src/shared/services/premium';
 import { fetchFriendStats } from '../../src/shared/services/friendships';
 import { deleteProfileMedia, getJson, uploadFeatureMedia } from '../../src/shared/services/backend';
@@ -323,7 +323,7 @@ const updateProfilePhoto = async ({ kind = 'photo', uri }) => {
     throw new Error('The image upload did not return a valid URL. Please try again.');
   }
 
-  const assetInfo = {
+  const mediaAsset = {
     url: secureUrl,
     publicId: uploaded?.publicId || uploaded?.key || '',
     resourceType: uploaded?.resourceType || 'image',
@@ -332,27 +332,29 @@ const updateProfilePhoto = async ({ kind = 'photo', uri }) => {
 
   if (kind === 'photo') {
     try {
-      await saveUserProfile({ photo: secureUrl, photoURL: secureUrl, photoThumb: secureUrl, photoAsset: assetInfo });
+      await saveUserProfile({ photo: secureUrl, photoURL: secureUrl, photoThumb: secureUrl, photoAsset: mediaAsset });
     } catch (saveError) {
-      if (assetInfo.publicId) {
-        await deleteProfileMedia(assetInfo.publicId).catch(() => {});
+      if (mediaAsset.publicId) {
+        await deleteProfileMedia(mediaAsset.publicId).catch((cleanupError) => {
+          console.warn('[Profile] Failed to clean up unsaved R2 profile photo.', cleanupError);
+        });
       }
       throw saveError;
     }
-    return assetInfo;
+    return mediaAsset;
   }
 
   try {
-    await saveUserProfile({ cover: secureUrl, coverPhoto: secureUrl, coverAsset: assetInfo });
+    await saveUserProfile({ cover: secureUrl, coverPhoto: secureUrl, coverAsset: mediaAsset });
   } catch (saveError) {
-    if (assetInfo.publicId) {
-      await deleteProfileMedia(assetInfo.publicId).catch((cleanupError) => {
+    if (mediaAsset.publicId) {
+      await deleteProfileMedia(mediaAsset.publicId).catch((cleanupError) => {
         console.warn('[Profile] Failed to clean up unsaved R2 cover image.', cleanupError);
       });
     }
     throw saveError;
   }
-  return assetInfo;
+  return mediaAsset;
 };
 
 // Fields shown together inside the single "Edit Profile" sheet, in order.
@@ -956,7 +958,9 @@ export default function ProfileScreen() {
         } else if (previousAsset?.url?.includes('res.cloudinary.com')) {
           await deleteCloudinaryAssets({ assets: [previousAsset] }).catch((error) => console.warn('[Profile] Failed to delete replaced Cloudinary cover image.', error));
         }
-      } else if (previousAsset?.publicId || previousAsset?.url) {
+      } else if (previousAsset?.storageProvider === 'r2' && previousAsset?.publicId) {
+        await deleteProfileMedia(previousAsset.publicId).catch((error) => console.warn('[Profile] Failed to delete replaced R2 profile photo.', error));
+      } else if (previousAsset?.url?.includes('res.cloudinary.com')) {
         await deleteCloudinaryAssets({ assets: [previousAsset] }).catch((error) => console.warn('[Profile] Failed to delete replaced Cloudinary profile photo.', error));
       }
       if (isMountedRef.current) showStatus({ type: 'success', text: isCover ? 'Cover photo updated.' : 'Profile photo updated.' });

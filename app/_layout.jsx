@@ -14,8 +14,10 @@ import { Accelerometer } from 'expo-sensors';
 import * as Haptics from 'expo-haptics';
 import { useFonts, Manrope_400Regular, Manrope_500Medium, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold } from '@expo-google-fonts/manrope';
 import { useFonts as useSoraFonts, Sora_400Regular, Sora_500Medium, Sora_600SemiBold, Sora_700Bold, Sora_800ExtraBold } from '@expo-google-fonts/sora';
+import * as Linking from 'expo-linking';
 import '@/global.css';
 import { AuthProvider, useAuth } from '../context/AuthContext';
+import { parseDeepLink, readPendingDeepLink, clearPendingDeepLink, savePendingDeepLink } from '../utils/deepLink';
 import { AIProvider } from '../src/shared/context/AIContext';
 import RoleGuard from '../components/RoleGuard';
 import { PushNotificationBootstrap } from '../hooks/usePushNotifications';
@@ -51,6 +53,53 @@ function AppContent() {
   const [reportError, setReportError] = useState('');
   const lastShakeRef = useRef(0);
   const shakeMagnitudeRef = useRef(0);
+
+  useEffect(() => {
+    const handleInitialUrl = async () => {
+      const initialUrl = await Linking.getInitialURL();
+      if (!initialUrl) return;
+
+      const match = parseDeepLink(initialUrl);
+      if (!match) return;
+
+      if (!user) {
+        await savePendingDeepLink(initialUrl);
+        return;
+      }
+
+      router.push({ pathname: match.pathname, params: match.params || {} });
+    };
+
+    handleInitialUrl();
+  }, [router, user]);
+
+  useEffect(() => {
+    const subscription = Linking.addEventListener('url', async ({ url }) => {
+      const match = parseDeepLink(url);
+      if (!match) return;
+
+      if (!user) {
+        await savePendingDeepLink(url);
+        return;
+      }
+
+      router.push({ pathname: match.pathname, params: match.params || {} });
+    });
+
+    return () => subscription?.remove?.();
+  }, [router, user]);
+
+  useEffect(() => {
+    const resumePendingDeepLink = async () => {
+      if (!user) return;
+      const pending = await readPendingDeepLink();
+      if (!pending) return;
+      await clearPendingDeepLink();
+      router.push({ pathname: pending.pathname, params: pending.params || {} });
+    };
+
+    resumePendingDeepLink();
+  }, [router, user]);
 
   useEffect(() => {
     if (isOnline === false && premiumUnlocked && router.pathname !== '/offline-center' && router.pathname !== '/premium') {
@@ -269,15 +318,6 @@ export default function RootLayout() {
   if (!fontsReady) {
     return <FullScreenLoader label="Loading fonts..." />;
   }
-
-  const baseTextStyle = { fontFamily: 'Manrope_400Regular' };
-  const previousStyle = Text.defaultProps?.style;
-  Text.defaultProps = {
-    ...(Text.defaultProps || {}),
-    style: Array.isArray(previousStyle)
-      ? [baseTextStyle, ...previousStyle]
-      : [baseTextStyle, previousStyle].filter(Boolean),
-  };
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

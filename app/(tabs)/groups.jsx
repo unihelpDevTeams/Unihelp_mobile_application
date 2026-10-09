@@ -153,7 +153,7 @@ export default function Groups() {
   const [userGroupsById, setUserGroupsById] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [reloadKey, setReloadKey] = useState(0);
+  const [, setReloadKey] = useState(0);
   const [joiningId, setJoiningId] = useState(null);
   const [joinStates, setJoinStates] = useState({});
   const [joinError, setJoinError] = useState('');
@@ -320,10 +320,7 @@ export default function Groups() {
     return map;
   }, [groups]);
 
-  // If a selected category disappears after a refresh, fall back to "All".
-  useEffect(() => {
-    if (categoryFilter !== 'All' && !categories.includes(categoryFilter)) setCategoryFilter('All');
-  }, [categories, categoryFilter]);
+  const resolvedCategoryFilter = categoryFilter === 'All' || categories.includes(categoryFilter) ? categoryFilter : 'All';
 
   const entries = useMemo(
     () =>
@@ -347,7 +344,7 @@ export default function Groups() {
   );
 
   const searchTerm = normalize(query);
-  const hasActiveFilters = Boolean(searchTerm) || categoryFilter !== 'All' || membershipFilter !== 'all';
+  const hasActiveFilters = Boolean(searchTerm) || resolvedCategoryFilter !== 'All' || membershipFilter !== 'all';
 
   const filteredEntries = useMemo(() => {
     const compare = sorters[sortKey](user?.uid);
@@ -357,14 +354,14 @@ export default function Groups() {
           const text = normalize(`${groupTitle(group)} ${groupDescription(group)} ${group.category || ''}`);
           if (!text.includes(searchTerm)) return false;
         }
-        if (categoryFilter !== 'All' && group.category !== categoryFilter) return false;
+        if (resolvedCategoryFilter !== 'All' && group.category !== resolvedCategoryFilter) return false;
         if (membershipFilter === 'joined' && !isJoined) return false;
         if (membershipFilter === 'available' && (isJoined || isRequested)) return false;
         if (membershipFilter === 'private' && !isPrivate) return false;
         return true;
       })
       .sort(compare);
-  }, [categoryFilter, entries, membershipFilter, searchTerm, sortKey, user?.uid]);
+  }, [entries, membershipFilter, resolvedCategoryFilter, searchTerm, sortKey, user?.uid]);
 
   // With no filters applied, show "Your groups" as a quick-access rail and
   // keep the main list focused on discovery. Any filter switches to one flat list.
@@ -431,7 +428,7 @@ export default function Groups() {
       return () => {
         active = false;
       };
-    }, [reloadKey, user?.uid]),
+    }, [user]),
   );
 
   /* -------------------------------- actions -------------------------------- */
@@ -797,8 +794,12 @@ function Meta({ icon, text, styles, colors }) {
 function GroupAvatar({ group, style, styles, textSize = 20 }) {
   const imageUrl = pickImage(group);
   const [failed, setFailed] = useState(false);
+  const previousImageRef = useRef(null);
   useEffect(() => {
-    setFailed(false);
+    if (previousImageRef.current !== imageUrl) {
+      previousImageRef.current = imageUrl;
+      setFailed(false);
+    }
   }, [imageUrl]);
   const showImage = Boolean(imageUrl) && !failed;
   return (
@@ -949,7 +950,7 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
 }
 
 function GroupSkeletons({ styles }) {
-  const pulse = useRef(new Animated.Value(0.4)).current;
+  const [pulse] = useState(() => new Animated.Value(0.4));
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([

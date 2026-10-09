@@ -11,8 +11,7 @@ import logo from '../../assets/images/favicon.png';
 import ProgressIndicator from './components/ProgressIndicator';
 import { useSignupForm } from './hooks/useSignupForm';
 import { validateStep } from './validation';
-import { createCompleteAccount, uploadProfilePicture, updateProfilePhoto } from './signupService';
-import { deleteProfileMedia } from '../shared/services/backend';
+import { createCompleteAccount } from './signupService';
 import { Button } from '../shared/components/Button';
 import Step1BasicInfo from './steps/Step1BasicInfo';
 import Step2AcademicInfo from './steps/Step2AcademicInfo';
@@ -79,36 +78,16 @@ export default function SignupFlow() {
 
       setLoading(true);
       setSubmitError('');
-      
-      try {
-        const credential = await createCompleteAccount(formData);
-        
-        let uploadedPhotoURL = '';
-        let uploadedPhotoAsset = null;
-        if (formData.photoURI) {
-          const uploadedPhoto = await uploadProfilePicture(formData.photoURI);
-          if (uploadedPhoto) {
-            uploadedPhotoURL = uploadedPhoto.url;
-            uploadedPhotoAsset = uploadedPhoto.asset;
-            await updateProfilePhoto(credential.user.uid, uploadedPhotoURL, uploadedPhotoAsset);
-          }
-        }
+      await createCompleteAccount({ ...formData, photoURI: formData.photoURI });
 
-        
-        const { auth } = require('../../firebase/config');
-        const { sendEmailVerification } = require('firebase/auth');
-        if (!auth.currentUser) {
-          throw new Error('Your account was created, but the verification email could not be sent. Please log in and resend it.');
-        }
-        await sendEmailVerification(auth.currentUser);
-
-        router.replace({ pathname: '/(auth)/verify-email', params: { email: formData.email } });
-      } catch (accountError) {
-        if (uploadedPhotoAsset && uploadedPhotoAsset.key) {
-          await deleteProfileMedia(uploadedPhotoAsset.key).catch(() => {});
-        }
-        throw accountError;
+      const { auth } = require('../../firebase/config');
+      const { sendEmailVerification } = require('firebase/auth');
+      if (!auth.currentUser) {
+        throw new Error('Your account was created, but the verification email could not be sent. Please log in and resend it.');
       }
+      await sendEmailVerification(auth.currentUser);
+
+      router.replace({ pathname: '/(auth)/verify-email', params: { email: formData.email } });
     } catch (error) {
       const errorMessage = getSignupErrorMessage(error);
       setSubmitError(errorMessage);
