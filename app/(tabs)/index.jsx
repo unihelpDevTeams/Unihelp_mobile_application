@@ -171,7 +171,7 @@ const buildHeroSlides = ({ streakCount = 0, announcements = [], notes = [], ques
 function PremiumMarquee({ onPress }) {
   const { colors } = useTheme();
   const [contentWidth, setContentWidth] = useState(0);
-  const translateX = useRef(new Animated.Value(0)).current;
+  const [translateX] = useState(() => new Animated.Value(0));
 
   const styles = useThemeStyles((c, s, r) => ({
     wrap: {
@@ -663,7 +663,9 @@ export default function HomeScreen() {
 
   const [streakCount, setStreakCount] = useState(0);
   const [heroContent, setHeroContent] = useState({ announcements: [], notes: [], questions: [] });
-  const [avatarFailed, setAvatarFailed] = useState(false);
+  const avatarKey = profile?.photoURL || 'default';
+  const [avatarFailures, setAvatarFailures] = useState({});
+  const avatarFailed = Boolean(avatarFailures[avatarKey]);
   const [discoverData, setDiscoverData] = useState({
     hostels: [],
     friends: [],
@@ -685,16 +687,25 @@ export default function HomeScreen() {
 
   // Reset avatar-error state whenever the source photo actually changes,
   // otherwise a newly-uploaded photo can never recover from a prior failed load.
+  const previousAvatarRef = useRef(profile?.photoURL || 'default');
   useEffect(() => {
-    setAvatarFailed(false);
+    const nextAvatarKey = profile?.photoURL || 'default';
+    if (previousAvatarRef.current !== nextAvatarKey) {
+      previousAvatarRef.current = nextAvatarKey;
+      setAvatarFailures((current) => {
+        const next = { ...current };
+        delete next[nextAvatarKey];
+        return next;
+      });
+    }
   }, [profile?.photoURL]);
 
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const fabPan = useRef(new Animated.ValueXY({
+  const [fabPan] = useState(() => new Animated.ValueXY({
     x: Math.max(layout.screenPadding, screenWidth - FAB_SIZE - layout.screenPadding),
     y: Math.max(insets.top + FAB_TOP_GAP, screenHeight - FAB_SIZE - FAB_BOTTOM_GAP - insets.bottom),
-  })).current;
-  const fabScale = useRef(new Animated.Value(1)).current;
+  }));
+  const [fabScale] = useState(() => new Animated.Value(1));
   const fabPositionRef = useRef({ x: 0, y: 0 });
   const fabStartRef = useRef({ x: 0, y: 0 });
   const fabLayerSize = useRef({ width: screenWidth, height: screenHeight });
@@ -745,8 +756,9 @@ export default function HomeScreen() {
     [clampFabPosition, fabPan]
   );
 
-  const panResponder = useRef(
-    PanResponder.create({
+  /* eslint-disable react-hooks/refs */
+  const panResponder = useMemo(
+    () => PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderTerminationRequest: () => false,
@@ -767,8 +779,6 @@ export default function HomeScreen() {
       onPanResponderRelease: () => {
         Animated.spring(fabScale, { toValue: 1, useNativeDriver: false, friction: 8, tension: 120 }).start();
 
-        // A tiny movement is a tap, not a drag. The pan responder owns the whole gesture,
-        // so taps are detected here (there is no inner Pressable to double-fire).
         if (dragDistance.current < 8) {
           dragDistance.current = 0;
           routerRef.current.navigate('/ai');
@@ -776,7 +786,6 @@ export default function HomeScreen() {
         }
         dragDistance.current = 0;
 
-        // Snap to the nearest horizontal edge.
         const { width } = fabLayerSize.current;
         const pad = layout.screenPadding;
         const midX = fabPositionRef.current.x + FAB_SIZE / 2;
@@ -788,8 +797,10 @@ export default function HomeScreen() {
         Animated.spring(fabScale, { toValue: 1, useNativeDriver: false }).start();
         dragDistance.current = 0;
       },
-    })
-  ).current;
+    }),
+    [clampFabPosition, fabPan, fabScale]
+  );
+  /* eslint-enable react-hooks/refs */
 
   const styles = useThemeStyles((c, s, r) => ({
     root: {
@@ -1323,7 +1334,10 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    loadData();
+    const timer = setTimeout(() => {
+      loadData();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [loadData]);
 
   useEffect(() => {
@@ -1572,7 +1586,7 @@ export default function HomeScreen() {
                 <Image
                   source={{ uri: profile.photoURL }}
                   style={styles.avatarImg}
-                  onError={() => setAvatarFailed(true)}
+                  onError={() => setAvatarFailures((current) => ({ ...current, [avatarKey]: true }))}
                 />
               ) : (
                 <Text style={styles.avatarTxt}>{avatarInitial}</Text>

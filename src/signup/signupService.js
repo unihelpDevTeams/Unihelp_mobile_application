@@ -17,6 +17,29 @@ import { auth, db } from '../../firebase/config';
 import { deleteProfileMedia, putJson, uploadFeatureMedia } from '../shared/services/backend';
 
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
+const CLOUDINARY_HOST_PATTERN = /cloudinary\.com/i;
+
+const hasLegacyCloudinaryUrl = (value) => typeof value === 'string' && CLOUDINARY_HOST_PATTERN.test(value.trim());
+
+const normalizeProfilePhotoField = ({ photoURL, photoAsset, uploadedPhoto } = {}) => {
+  const uploadedUrl = uploadedPhoto?.url || uploadedPhoto?.secure_url || '';
+  if (uploadedUrl) {
+    return {
+      url: uploadedUrl,
+      asset: uploadedPhoto?.asset || uploadedPhoto || null,
+    };
+  }
+
+  const legacyCloudinary = hasLegacyCloudinaryUrl(photoURL) || hasLegacyCloudinaryUrl(photoAsset?.url) || hasLegacyCloudinaryUrl(photoAsset?.secure_url);
+  if (legacyCloudinary) {
+    return { url: '', asset: null };
+  }
+
+  return {
+    url: photoURL || '',
+    asset: photoAsset || null,
+  };
+};
 
 export async function checkUsernameAvailability(username) {
   if (!username || username.trim().length < 3) {
@@ -116,8 +139,9 @@ export async function createCompleteAccount(formData) {
   let uploadedPhoto = null;
   try {
     if (photoURI) uploadedPhoto = await uploadProfilePicture(photoURI);
-    const resolvedPhotoURL = uploadedPhoto?.url || photoURL || '';
-    const resolvedPhotoAsset = uploadedPhoto?.asset || photoAsset || null;
+    const resolvedPhoto = normalizeProfilePhotoField({ photoURL, photoAsset, uploadedPhoto });
+    const resolvedPhotoURL = resolvedPhoto.url || '';
+    const resolvedPhotoAsset = resolvedPhoto.asset || null;
 
     await updateFirebaseAuthProfile(credential.user, {
       displayName,
