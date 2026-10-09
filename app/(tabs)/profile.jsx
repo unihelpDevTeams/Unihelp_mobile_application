@@ -43,8 +43,7 @@ import { getDocs, collection, query, where } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { COLLECTIONS } from '../../src/shared/firestoreSchema';
 import { fetchChallengeStats } from './../../src/shared/challenge/service';
-import { getCloudinaryThumbnailUrl, toCloudinaryAsset, uploadToCloudinary } from '../../services/cloudinary';
-import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
+
 import { isPremiumActive } from '../../src/shared/services/premium';
 import { fetchFriendStats } from '../../src/shared/services/friendships';
 import { deleteProfileMedia, getJson, uploadFeatureMedia } from '../../src/shared/services/backend';
@@ -317,43 +316,43 @@ const updateProfilePhoto = async ({ kind = 'photo', uri }) => {
   const filename = `${kind}-${Date.now()}.${extension}`;
   const mimeType = extension === 'png' ? 'image/png' : 'image/jpeg';
   const uploadFile = { uri, name: filename, type: mimeType, mimeType, size: fileInfo.size };
-  const uploaded = kind === 'cover'
-    ? await uploadFeatureMedia(uploadFile, { feature: 'profile', resourceType: 'image' })
-    : await uploadToCloudinary(uploadFile, { resourceType: 'image', validationKind: 'image' });
+  const uploaded = await uploadFeatureMedia(uploadFile, { feature: 'profile', resourceType: 'image' });
 
   const secureUrl = uploaded?.secure_url || uploaded?.url || '';
   if (!secureUrl) {
     throw new Error('The image upload did not return a valid URL. Please try again.');
   }
 
-  if (kind === 'photo') {
-    const photoAsset = toCloudinaryAsset(uploaded, { url: secureUrl, resourceType: 'image' });
-    try {
-      await saveUserProfile({ photo: secureUrl, photoURL: secureUrl, photoThumb: getCloudinaryThumbnailUrl(secureUrl), photoAsset });
-    } catch (saveError) {
-      await deleteCloudinaryAssets({ assets: [photoAsset] }).catch(() => {});
-      throw saveError;
-    }
-    return photoAsset;
-  }
-
-  const coverAsset = {
+  const assetInfo = {
     url: secureUrl,
     publicId: uploaded?.publicId || uploaded?.key || '',
     resourceType: uploaded?.resourceType || 'image',
     storageProvider: 'r2',
   };
+
+  if (kind === 'photo') {
+    try {
+      await saveUserProfile({ photo: secureUrl, photoURL: secureUrl, photoThumb: secureUrl, photoAsset: assetInfo });
+    } catch (saveError) {
+      if (assetInfo.publicId) {
+        await deleteProfileMedia(assetInfo.publicId).catch(() => {});
+      }
+      throw saveError;
+    }
+    return assetInfo;
+  }
+
   try {
-    await saveUserProfile({ cover: secureUrl, coverPhoto: secureUrl, coverAsset });
+    await saveUserProfile({ cover: secureUrl, coverPhoto: secureUrl, coverAsset: assetInfo });
   } catch (saveError) {
-    if (coverAsset.publicId) {
-      await deleteProfileMedia(coverAsset.publicId).catch((cleanupError) => {
+    if (assetInfo.publicId) {
+      await deleteProfileMedia(assetInfo.publicId).catch((cleanupError) => {
         console.warn('[Profile] Failed to clean up unsaved R2 cover image.', cleanupError);
       });
     }
     throw saveError;
   }
-  return coverAsset;
+  return assetInfo;
 };
 
 // Fields shown together inside the single "Edit Profile" sheet, in order.

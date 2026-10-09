@@ -51,7 +51,7 @@ import {
   toggleMessageReaction,
   updateGroup,
 } from '../../src/shared/services/community';
-import { uploadToCloudinary } from '../../services/cloudinary';
+import { uploadFeatureMedia } from '../../src/shared/services/backend';
 
 /* -------------------------------------------------------------------------- */
 /*                                  Constants                                 */
@@ -1518,12 +1518,13 @@ function GroupDetailScreen({ groupId }) {
       // Upload the new photo FIRST, so a failed upload never leaves the group without a picture.
       if (editPhotoUri) {
         setUploadingPhoto(true);
-        const uploaded = await uploadToCloudinary(
+        const uploaded = await uploadFeatureMedia(
           { uri: editPhotoUri, name: `${editName.trim().replace(/\s+/g, '-').toLowerCase() || 'group'}-photo.jpg`, type: 'image/jpeg' },
-          { resourceType: 'image', validationKind: 'image' }
+          { feature: 'groups', resourceType: 'image' }
         );
-        if (!uploaded?.secure_url) throw new Error('Photo upload failed. Please try again.');
-        nextPayload.photoURL = uploaded.secure_url;
+        const secureUrl = uploaded?.secure_url || uploaded?.url || '';
+        if (!secureUrl) throw new Error('Photo upload failed. Please try again.');
+        nextPayload.photoURL = secureUrl;
         setUploadingPhoto(false);
       }
 

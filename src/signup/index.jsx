@@ -11,8 +11,8 @@ import logo from '../../assets/images/favicon.png';
 import ProgressIndicator from './components/ProgressIndicator';
 import { useSignupForm } from './hooks/useSignupForm';
 import { validateStep } from './validation';
-import { createCompleteAccount, uploadProfilePicture } from './signupService';
-import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
+import { createCompleteAccount, uploadProfilePicture, updateProfilePhoto } from './signupService';
+import { deleteProfileMedia } from '../shared/services/backend';
 import { Button } from '../shared/components/Button';
 import Step1BasicInfo from './steps/Step1BasicInfo';
 import Step2AcademicInfo from './steps/Step2AcademicInfo';
@@ -79,15 +79,21 @@ export default function SignupFlow() {
 
       setLoading(true);
       setSubmitError('');
-      let uploadedPhotoURL = '';
-      let uploadedPhotoAsset = null;
-      if (formData.photoURI) {
-        const uploadedPhoto = await uploadProfilePicture(formData.photoURI, formData.username);
-        uploadedPhotoURL = uploadedPhoto.url;
-        uploadedPhotoAsset = uploadedPhoto.asset;
-      }
+      
       try {
-        await createCompleteAccount({ ...formData, photoURL: uploadedPhotoURL, photoAsset: uploadedPhotoAsset });
+        const credential = await createCompleteAccount(formData);
+        
+        let uploadedPhotoURL = '';
+        let uploadedPhotoAsset = null;
+        if (formData.photoURI) {
+          const uploadedPhoto = await uploadProfilePicture(formData.photoURI);
+          if (uploadedPhoto) {
+            uploadedPhotoURL = uploadedPhoto.url;
+            uploadedPhotoAsset = uploadedPhoto.asset;
+            await updateProfilePhoto(credential.user.uid, uploadedPhotoURL, uploadedPhotoAsset);
+          }
+        }
+
         
         const { auth } = require('../../firebase/config');
         const { sendEmailVerification } = require('firebase/auth');
@@ -98,8 +104,8 @@ export default function SignupFlow() {
 
         router.replace({ pathname: '/(auth)/verify-email', params: { email: formData.email } });
       } catch (accountError) {
-        if (uploadedPhotoAsset) {
-          await deleteCloudinaryAssets({ assets: [uploadedPhotoAsset] }).catch(() => {});
+        if (uploadedPhotoAsset && uploadedPhotoAsset.key) {
+          await deleteProfileMedia(uploadedPhotoAsset.key).catch(() => {});
         }
         throw accountError;
       }

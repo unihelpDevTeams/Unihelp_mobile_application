@@ -5,6 +5,7 @@ import {
   getDocs,
   doc,
   setDoc,
+  updateDoc,
   serverTimestamp,
 } from 'firebase/firestore';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -14,8 +15,7 @@ import {
   updateProfile as updateFirebaseAuthProfile,
 } from 'firebase/auth';
 import { auth, db } from '../../firebase/config';
-import { getCloudinaryThumbnailUrl, toCloudinaryAsset, uploadToCloudinary } from '../../services/cloudinary';
-import { putJson } from '../shared/services/backend';
+import { putJson, uploadFeatureMedia } from '../shared/services/backend';
 
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 
@@ -43,7 +43,7 @@ export async function checkUsernameAvailability(username) {
 }
 
 export async function uploadProfilePicture(uri) {
-  if (!uri) return '';
+  if (!uri) return null;
 
   const fileInfo = await FileSystem.getInfoAsync(uri);
   if (!fileInfo.exists || !fileInfo.size) {
@@ -55,16 +55,32 @@ export async function uploadProfilePicture(uri) {
   }
 
   const fileName = `profile-${Date.now()}.${String(uri).toLowerCase().endsWith('.png') ? 'png' : 'jpg'}`;
-  const uploaded = await uploadToCloudinary(
-    { uri, name: fileName, type: 'image/jpeg', size: fileInfo.size },
-    { resourceType: 'image', validationKind: 'image' }
+  
+  const result = await uploadFeatureMedia(
+    { uri, name: fileName, type: 'image/jpeg' },
+    { feature: 'profile', resourceType: 'image' }
   );
 
-  const secureUrl = uploaded?.secure_url || uploaded?.url || '';
   return {
-    url: secureUrl,
-    asset: toCloudinaryAsset(uploaded, { url: secureUrl, resourceType: 'image' }),
+    url: result.url || result.secure_url || '',
+    asset: result,
   };
+}
+
+export async function updateProfilePhoto(uid, photoURL, photoAsset) {
+  if (!auth.currentUser) return;
+  
+  await updateFirebaseAuthProfile(auth.currentUser, { photoURL });
+  
+  const userRef = doc(db, 'users', uid);
+  await updateDoc(userRef, {
+    photoURL,
+    photo: photoURL,
+    photoThumb: photoURL,
+    photoAsset: photoAsset || null
+  });
+  
+  await putJson('/api/users', { avatar: photoURL });
 }
 
 export async function createCompleteAccount(formData) {
@@ -74,8 +90,6 @@ export async function createCompleteAccount(formData) {
     username,
     email,
     password,
-    photoURL,
-    photoAsset,
     universityId,
     universityName,
     departmentId,
@@ -105,7 +119,7 @@ export async function createCompleteAccount(formData) {
 
   await updateFirebaseAuthProfile(credential.user, {
     displayName,
-    photoURL: photoURL || null,
+    photoURL: null,
   });
 
   // Step 2: Save complete profile in Firestore
@@ -119,10 +133,10 @@ export async function createCompleteAccount(formData) {
     usernameLower: username.trim().toLowerCase(),
     email: email.trim().toLowerCase(),
     premium: false,
-    photoURL: photoURL || '',
-    photo: photoURL || '',
-    photoThumb: getCloudinaryThumbnailUrl(photoURL || ''),
-    photoAsset: photoAsset || null,
+    photoURL: '',
+    photo: '',
+    photoThumb: '',
+    photoAsset: null,
     universityId: universityId || '',
     universityName: universityName || '',
     schoolId: universityId || '',
@@ -160,7 +174,7 @@ export async function createCompleteAccount(formData) {
       university: universityName || '',
       department: departmentName || '',
       level: level || '',
-      avatar: photoURL || '',
+      avatar: '',
       bio: bio || '',
       gender: gender || '',
       date_of_birth: dateOfBirth || '',

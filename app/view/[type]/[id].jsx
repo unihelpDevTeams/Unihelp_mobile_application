@@ -1034,7 +1034,7 @@ export default function RecordViewPage() {
   const canPromoteListing = Boolean(type === 'listing' && isOwner);
   const isPremiumUser = isPremiumActive(profile);
   // UX gate only: the offline endpoint stays the authority for entitlement.
-  const canSaveOffline = Boolean(asset?.hasDocumentUrl && isPremiumUser && ['note', 'question', 'studyMaterial'].includes(type));
+  const canSaveOffline = Boolean(isPremiumUser && (['note', 'studyMaterial'].includes(type) ? asset?.hasDocumentUrl : (type === 'question' && (asset?.hasDocumentUrl || Array.isArray(item?.content)))));
 
   const title = item?.title || item?.name || 'Untitled';
   const description = item?.description || item?.body || item?.summary || '';

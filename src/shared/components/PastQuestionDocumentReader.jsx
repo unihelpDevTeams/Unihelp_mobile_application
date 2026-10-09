@@ -314,17 +314,7 @@ function ReaderHeader({ document, stats, progress, questions, doneCount, hasOrig
             <Text style={styles.codeText}>{code}</Text>
           </View>
         ) : <View />}
-        {hasOriginal ? (
-          <Pressable
-            style={({ pressed }) => [styles.pillButton, pressed && styles.pressed]}
-            onPress={onOpenOriginal}
-            accessibilityRole="button"
-            accessibilityLabel="View original paper"
-          >
-            <Ionicons name="document-text-outline" size={15} color={colors.brand} />
-            <Text style={styles.pillButtonText}>Original paper</Text>
-          </Pressable>
-        ) : null}
+
       </View>
 
       <Text style={styles.coverTitle} accessibilityRole="header" selectable>{title}</Text>
@@ -809,17 +799,7 @@ function ReaderEmptyState({ icon, title, text, styles, colors, hasOriginal = fal
       <View style={styles.emptyIcon}><Ionicons name={icon} size={24} color={colors.brand} /></View>
       <Text style={styles.emptyTitle}>{title}</Text>
       <Text style={styles.emptyText}>{text}</Text>
-      {hasOriginal ? (
-        <Pressable
-          style={({ pressed }) => [styles.emptyOriginalButton, pressed && styles.pressed]}
-          onPress={onOpenOriginal}
-          accessibilityRole="button"
-          accessibilityLabel="View original paper"
-        >
-          <Ionicons name="document-text-outline" size={15} color={colors.brand} />
-          <Text style={styles.pillButtonText}>View original paper</Text>
-        </Pressable>
-      ) : null}
+
     </View>
   );
 }

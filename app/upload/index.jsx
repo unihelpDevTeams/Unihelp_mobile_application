@@ -1371,7 +1371,7 @@ export default function UploadPage() {
     <ScreenShell title={screenTitle} subtitle={config.subtitle} showBack scrollable={false}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         <ScrollView

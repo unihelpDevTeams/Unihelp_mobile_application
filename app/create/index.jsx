@@ -5,7 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { createGroup } from '../../services/firestoreSync';
-import { uploadToCloudinary } from '../../services/cloudinary';
+import { uploadFeatureMedia } from '../../src/shared/services/backend';
 import { colors } from '../../src/shared/theme';
 
 const COLORS = {
@@ -75,18 +75,18 @@ export default function CreatePage() {
       let avatarAsset = null;
       if (photoUri) {
         setPhotoUploading(true);
-        const uploaded = await uploadToCloudinary(
+        const uploaded = await uploadFeatureMedia(
           {
             uri: photoUri,
             name: `${name.trim().replace(/\s+/g, '-').toLowerCase() || 'group'}-photo.jpg`,
             type: 'image/jpeg',
           },
           {
+            feature: 'groups',
             resourceType: 'image',
-            validationKind: 'image',
           }
         );
-        avatarUrl = uploaded?.secure_url || '';
+        avatarUrl = uploaded?.secure_url || uploaded?.url || '';
         avatarAsset = uploaded || null;
         setPhotoUploading(false);
       }

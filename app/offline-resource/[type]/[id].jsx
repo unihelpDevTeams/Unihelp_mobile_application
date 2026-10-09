@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, ScrollView, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,6 +8,7 @@ import ScreenShell from '../../../src/shared/components/ScreenShell';
 import FormulaMath from '../../../src/shared/components/FormulaMath';
 import { useTheme } from '../../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../../src/shared/theme/createStyles';
+import PastQuestionDocumentReader from '../../../src/shared/components/PastQuestionDocumentReader';
 import { getDownloadRecord, hasOfflineLibraryAccess, removeDownload } from '../../../src/shared/offline/offlineLearningService';
 
 const PAGE_SIZE = 10;
@@ -624,16 +625,24 @@ export default function OfflineResourceScreen() {
 
   return (
     <ScreenShell title={record.title || 'Offline Resource'} subtitle={typeMeta.label} showBack>
-      <FlatList
-        ref={flatListRef}
-        data={paginatedItems}
-        keyExtractor={(item, index) => String(item.id || item.title || index)}
-        contentContainerStyle={styles.listContainer}
-        ListHeaderComponent={renderHeader}
-        ListFooterComponent={renderFooter}
-        renderItem={renderItem}
-        showsVerticalScrollIndicator={false}
-      />
+      {type === 'pastQuestions' ? (
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
+          {renderHeader()}
+          <View style={{ height: 24 }} />
+          <PastQuestionDocumentReader document={record.payload} />
+        </ScrollView>
+      ) : (
+        <FlatList
+          ref={flatListRef}
+          data={paginatedItems}
+          keyExtractor={(item, index) => String(item.id || item.title || index)}
+          contentContainerStyle={styles.listContainer}
+          ListHeaderComponent={renderHeader}
+          ListFooterComponent={renderFooter}
+          renderItem={renderItem}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
     </ScreenShell>
   );
 }
