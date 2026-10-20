@@ -66,6 +66,7 @@ export default function StudyMaterials() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor] = useState(null);
   const [hasMore, setHasMore] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   // Filter & Search States
   const [activeSubject, setActiveSubject] = useState('All');
@@ -626,6 +627,7 @@ export default function StudyMaterials() {
       }
 
       try {
+        setLoadError('');
         const page = await fetcher({
           pageSize: PAGE_SIZE,
           cursor: isReset ? null : cursor,
@@ -644,6 +646,7 @@ export default function StudyMaterials() {
         setHasMore(Boolean(page?.hasMore));
       } catch (err) {
         console.error('Failed to load study materials:', err);
+        if (requestId === requestIdRef.current) setLoadError(err?.message || 'Could not load resources.');
       } finally {
         if (requestId === requestIdRef.current) {
           loadingMoreRef.current = false;
@@ -671,6 +674,7 @@ export default function StudyMaterials() {
     setItems([]);
     setCursor(null);
     setHasMore(false);
+    setLoadError('');
 
     fetcher({ pageSize: PAGE_SIZE })
       .then((page) => {
@@ -682,6 +686,7 @@ export default function StudyMaterials() {
       .catch((err) => {
         if (requestId !== requestIdRef.current) return;
         console.error('Error fetching study data:', err);
+        setLoadError(err?.message || 'Could not load resources.');
       })
       .finally(() => {
         if (requestId === requestIdRef.current) setLoading(false);
@@ -1129,18 +1134,22 @@ export default function StudyMaterials() {
           }
           ListEmptyComponent={
             <EmptyState
-              icon={hasAnyRefinement ? 'search-outline' : 'folder-open-outline'}
-              title={hasAnyRefinement ? 'No matching resources' : `No ${resourceNoun} found`}
+              icon={loadError ? 'cloud-offline-outline' : hasAnyRefinement ? 'search-outline' : 'folder-open-outline'}
+              title={loadError ? 'Could not load resources' : hasAnyRefinement ? 'No matching resources' : `No ${resourceNoun} found`}
               description={
-                hasAnyRefinement
+                loadError
+                  ? 'Check your connection and try again.'
+                  : hasAnyRefinement
                   ? hasMore
                     ? 'Nothing matches in the loaded results. Try loading more or adjusting your filters.'
                     : 'Try adjusting your search terms, sorting, or subject filter.'
                   : `There are currently no ${resourceNoun} available in this library.`
               }
-              actionLabel={hasAnyRefinement ? 'Clear all filters' : canUploadCurrent ? `Upload ${resourceTypeLabel}` : ''}
+              actionLabel={loadError ? 'Try again' : hasAnyRefinement ? 'Clear all filters' : canUploadCurrent ? `Upload ${resourceTypeLabel}` : ''}
               onAction={
-                hasAnyRefinement
+                loadError
+                  ? () => loadMaterials(true)
+                  : hasAnyRefinement
                   ? clearEverything
                   : canUploadCurrent
                     ? openUpload

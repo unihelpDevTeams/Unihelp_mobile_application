@@ -110,6 +110,11 @@ service cloud.firestore {
         request.time < createdAt + duration.value(1, 'h');
     }
 
+    function voiceMessageWithinDeleteWindow(createdAt) {
+      return createdAt is timestamp &&
+        request.time < createdAt + duration.value(30, 'm');
+    }
+
     function friendRequestAllowed(from, to) {
       let privacy = userData(to).privacy.friendRequests;
       return privacy == null ||
@@ -171,8 +176,23 @@ service cloud.firestore {
         allow read, write: if isUser(uid);
       }
 
+      // Per-thread notification preferences, such as message/group push muting.
+      // These are intentionally private to the owner of the user profile.
+      match /conversationSettings/{threadId} {
+        allow read, write: if isUser(uid);
+      }
+
       match /bookmarks/{bookmarkId} {
         allow read, write: if isUser(uid);
+      }
+
+      match /savedResources/{resourceId} {
+        allow read, delete: if isUser(uid);
+        allow create, update: if isUser(uid) &&
+          userData(uid).premium == true &&
+          (!('subscriptionStatus' in userData(uid)) || userData(uid).subscriptionStatus != 'expired') &&
+          (!('subscriptionExpiresAt' in userData(uid)) || userData(uid).subscriptionExpiresAt == null || userData(uid).subscriptionExpiresAt > request.time) &&
+          (!('premiumExpiresAt' in userData(uid)) || userData(uid).premiumExpiresAt == null || userData(uid).premiumExpiresAt > request.time);
       }
 
       match /learningProgress/{scopeId} {
@@ -307,11 +327,17 @@ service cloud.firestore {
             (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds &&
               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])) ||
             (resource.data.senderId == request.auth.uid &&
-              messageWithinEditWindow(resource.data.createdAt) &&
               request.resource.data.senderId == resource.data.senderId &&
               request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                 'text', 'attachments', 'deleted', 'deletedAt', 'edited', 'editedAt'
-              ]))
+              ]) &&
+              (
+                (resource.data.type == 'voice' &&
+                  request.resource.data.deleted == true &&
+                  voiceMessageWithinDeleteWindow(resource.data.createdAt)) ||
+                (resource.data.type != 'voice' &&
+                  messageWithinEditWindow(resource.data.createdAt))
+              ))
           );
         allow delete: if false;
       }
@@ -720,6 +746,19 @@ service cloud.firestore {
         allow delete: if requesterId == request.auth.uid || groupOwner(groupId) || groupAdmin(groupId);
       }
 
+      match /posts/{postId} {
+        allow read: if groupMember(groupId);
+        allow create: if groupMember(groupId) &&
+          request.resource.data.authorId == request.auth.uid &&
+          request.resource.data.createdAt == request.time;
+        allow update: if groupMember(groupId) &&
+          request.resource.data.authorId == resource.data.authorId &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'reactions', 'userReactions', 'reactionCount', 'updatedAt'
+          ]);
+        allow delete: if resource.data.authorId == request.auth.uid || groupOwner(groupId) || groupAdmin(groupId);
+      }
+
       match /messages/{messageId} {
         allow read: if groupMember(groupId);
         allow create: if groupMember(groupId) &&
@@ -730,6 +769,9 @@ service cloud.firestore {
           (
             (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']) &&
               request.resource.data.senderId == resource.data.senderId) ||
+            (resource.data.type == 'poll' &&
+              request.resource.data.senderId == resource.data.senderId &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['poll', 'updatedAt'])) ||
             (resource.data.senderId == request.auth.uid &&
               messageWithinEditWindow(resource.data.createdAt) &&
               request.resource.data.senderId == resource.data.senderId &&

@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import {
   NOTIFICATION_ACTION_IDS,
@@ -21,9 +21,11 @@ const loadNotificationsModule = async () => {
     notificationsModulePromise = import('expo-notifications')
       .then((Notifications) => {
         Notifications.setNotificationHandler({
-          handleNotification: async () => ({
+          handleNotification: async (notification) => ({
             shouldShowAlert: true,
-            shouldPlaySound: true,
+            // Respect local Pomodoro's silent setting while retaining normal
+            // alert sounds for remote UniHelp notifications.
+            shouldPlaySound: notification?.request?.content?.sound !== null && notification?.request?.content?.sound !== false,
             shouldSetBadge: false,
             shouldShowBanner: true,
             shouldShowList: true,
@@ -67,50 +69,52 @@ const getApiUrl = (path = '/api/notifications/push-token') => {
 };
 
 export const configureAndroidNotificationChannels = async () => {
-  if (Platform.OS !== 'android' || isAndroidExpoGo) {
+  if (Platform.OS === 'web' || isAndroidExpoGo) {
     return null;
   }
 
   const Notifications = await loadNotificationsModule();
   if (!Notifications) return null;
 
-  const channel = await Notifications.setNotificationChannelAsync(ANDROID_DEFAULT_CHANNEL_ID, {
-    name: 'Default',
-    description: 'General UniHelp notifications',
-    importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#4F46E5',
-    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-    sound: 'default',
-  });
+  const channel = Platform.OS === 'android'
+    ? await Notifications.setNotificationChannelAsync(ANDROID_DEFAULT_CHANNEL_ID, {
+        name: 'Default',
+        description: 'General UniHelp notifications',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#4F46E5',
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        sound: 'default',
+      })
+    : null;
 
   const categoryMap = {
     unihelp_message: {
       actions: [
-        { identifier: NOTIFICATION_ACTION_IDS.REPLY, buttonTitle: 'Reply', textInput: { submitButtonTitle: 'Send', placeholder: 'Type a message' } },
-        { identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read' },
-        { identifier: NOTIFICATION_ACTION_IDS.MUTE, buttonTitle: 'Mute' },
+        { identifier: NOTIFICATION_ACTION_IDS.REPLY, buttonTitle: 'Reply', textInput: { submitButtonTitle: 'Send', placeholder: 'Type a message' }, options: { opensAppToForeground: false } },
+        { identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read', options: { opensAppToForeground: false } },
+        { identifier: NOTIFICATION_ACTION_IDS.MUTE, buttonTitle: 'Mute', options: { opensAppToForeground: false } },
       ],
     },
     unihelp_group_message: {
       actions: [
-        { identifier: NOTIFICATION_ACTION_IDS.REPLY, buttonTitle: 'Reply', textInput: { submitButtonTitle: 'Send', placeholder: 'Type a message' } },
-        { identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read' },
-        { identifier: NOTIFICATION_ACTION_IDS.MUTE, buttonTitle: 'Mute' },
+        { identifier: NOTIFICATION_ACTION_IDS.REPLY, buttonTitle: 'Reply', textInput: { submitButtonTitle: 'Send', placeholder: 'Type a message' }, options: { opensAppToForeground: false } },
+        { identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read', options: { opensAppToForeground: false } },
+        { identifier: NOTIFICATION_ACTION_IDS.MUTE, buttonTitle: 'Mute', options: { opensAppToForeground: false } },
       ],
     },
     unihelp_comment: {
       actions: [
-        { identifier: NOTIFICATION_ACTION_IDS.REPLY, buttonTitle: 'Reply', textInput: { submitButtonTitle: 'Send', placeholder: 'Reply' } },
-        { identifier: NOTIFICATION_ACTION_IDS.LIKE, buttonTitle: 'Like' },
-        { identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read' },
+        { identifier: NOTIFICATION_ACTION_IDS.REPLY, buttonTitle: 'Reply', textInput: { submitButtonTitle: 'Send', placeholder: 'Reply' }, options: { opensAppToForeground: false } },
+        { identifier: NOTIFICATION_ACTION_IDS.LIKE, buttonTitle: 'Like', options: { opensAppToForeground: false } },
+        { identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read', options: { opensAppToForeground: false } },
       ],
     },
     unihelp_like: {
-      actions: [{ identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read' }],
+      actions: [{ identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read', options: { opensAppToForeground: false } }],
     },
     unihelp_general: {
-      actions: [{ identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read' }],
+      actions: [{ identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read', options: { opensAppToForeground: false } }],
     },
     unihelp_promotion: {
       actions: [
@@ -128,7 +132,7 @@ export const configureAndroidNotificationChannels = async () => {
     });
   }
 
-  console.log('[push-debug] Android notification channel ready:', {
+  console.log('[push-debug] Notification actions ready:', {
     id: ANDROID_DEFAULT_CHANNEL_ID,
     importance: channel?.importance,
   });
@@ -208,13 +212,9 @@ export const registerPushNotificationsForCurrentUser = async () => {
     }
 
     try {
-      const userSnap = await getDoc(doc(db, 'users', currentUser.uid));
-      const existingToken = userSnap.exists() ? userSnap.data()?.fcmToken || userSnap.data()?.expoPushToken : null;
-
-      if (existingToken === token) {
-        console.log('[push-debug] Push token unchanged; skipping Firestore write.', { uid: currentUser.uid });
-        return token;
-      }
+      // Always refresh the backend record, even if the Firebase token is unchanged.
+      // Backend deploys/data cleanup can remove a valid record while the device still
+      // holds the same native token.
 
       await setDoc(
         doc(db, 'users', currentUser.uid),
@@ -368,6 +368,7 @@ export const registerNotificationCategoryForPayload = async (payload = {}) => {
     const category = await Notifications.setNotificationCategoryAsync(categoryIdentifier, actions.map((action) => ({
       identifier: action.action,
       buttonTitle: action.title,
+      options: { opensAppToForeground: false },
       ...(action.action === NOTIFICATION_ACTION_IDS.REPLY ? {
         textInput: {
           submitButtonTitle: 'Send',

@@ -14,16 +14,41 @@ const isWeb = Platform.OS === 'web';
 let notificationsPromise = null;
 let storageWriteQueue = Promise.resolve();
 
+// Pomodoro uses local notifications, so it must install a presentation handler
+// itself. Relying on push registration leaves local alarms silent/invisible in
+// Expo Go and whenever the user has not registered a remote push token.
+const configurePomodoroNotificationHandler = (Notifications) => {
+  if (typeof Notifications?.setNotificationHandler !== 'function') return;
+  Notifications.setNotificationHandler({
+    handleNotification: async (notification) => {
+      const sound = notification?.request?.content?.sound;
+      return {
+        shouldShowAlert: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldSetBadge: false,
+        shouldPlaySound: sound !== null && sound !== false,
+        priority: Notifications.AndroidNotificationPriority?.HIGH ?? 'high',
+      };
+    },
+  });
+};
+
 export { DEFAULT_POMODORO_SETTINGS, POMODORO_MODES };
 
 const loadNotifications = async () => {
   if (isWeb) return null;
   if (!notificationsPromise) {
-    notificationsPromise = import('expo-notifications').catch((error) => {
-      notificationsPromise = null;
-      console.warn('Pomodoro local notifications are unavailable:', error?.message || error);
-      return null;
-    });
+    notificationsPromise = import('expo-notifications')
+      .then((Notifications) => {
+        configurePomodoroNotificationHandler(Notifications);
+        return Notifications;
+      })
+      .catch((error) => {
+        notificationsPromise = null;
+        console.warn('Pomodoro local notifications are unavailable:', error?.message || error);
+        return null;
+      });
   }
   return notificationsPromise;
 };
@@ -81,10 +106,16 @@ const configurePomodoroChannel = async (Notifications, settings) => {
 
 const getNotificationPermission = async (Notifications) => {
   const current = await Notifications.getPermissionsAsync();
-  if (current.status === 'granted') return true;
+  const hasPermission = (permission) => (
+    permission?.granted ||
+    permission?.status === 'granted' ||
+    permission?.ios?.status === Notifications.IosAuthorizationStatus?.PROVISIONAL ||
+    permission?.ios?.status === Notifications.IosAuthorizationStatus?.EPHEMERAL
+  );
+  if (hasPermission(current)) return true;
 
   const requested = await Notifications.requestPermissionsAsync();
-  return requested.status === 'granted';
+  return hasPermission(requested);
 };
 
 const notificationCopy = (mode) => {

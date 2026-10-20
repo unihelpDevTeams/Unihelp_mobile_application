@@ -17,6 +17,7 @@ import {
   syncQueuedLearningActions,
 } from '../src/shared/offline/offlineLearningService';
 import { isPremiumActive } from '../src/shared/services/premium';
+import { listResourceBookmarks } from '../src/shared/services/resourceBookmarks';
 
 const DOWNLOADABLE_TYPES = [
   { key: 'pastQuestions', label: 'Past Questions', icon: 'clipboard-outline' },
@@ -32,10 +33,11 @@ const formatSize = (bytes = 0) => {
 
 export default function OfflineCenterScreen() {
   const router = useRouter();
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const { colors } = useTheme();
   const { isConnected } = useNetInfo();
   const [downloads, setDownloads] = useState([]);
+  const [savedResources, setSavedResources] = useState([]);
   const [syncQueue, setSyncQueue] = useState([]);
   const [entitlement, setEntitlement] = useState(null);
   const [accessAllowed, setAccessAllowed] = useState(false);
@@ -391,24 +393,42 @@ export default function OfflineCenterScreen() {
       alignItems: 'center',
       justifyContent: 'center',
     },
+    savedLibraryCard: {
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.borderDefault,
+      borderRadius: r.xl,
+      overflow: 'hidden',
+    },
+    savedLibraryIntro: { flexDirection: 'row', alignItems: 'center', gap: s.sm, padding: s.md, backgroundColor: c.surfaceSecondary },
+    savedLibraryIcon: { width: 34, height: 34, borderRadius: r.md, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brandLight || c.surface },
+    savedLibraryTitle: { flex: 1, color: c.textPrimary, fontWeight: '800', fontSize: 14 },
+    savedLibraryHint: { color: c.textSecondary, fontSize: 12, marginTop: 2 },
+    savedResourceRow: { flexDirection: 'row', alignItems: 'center', gap: s.sm, paddingHorizontal: s.md, paddingVertical: s.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.borderDefault },
+    savedResourceTitle: { color: c.textPrimary, fontSize: 13, fontWeight: '700' },
+    savedResourceMeta: { color: c.textSecondary, fontSize: 11.5, marginTop: 2 },
+    savedLibraryAction: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: s.xs, padding: s.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.borderDefault },
+    savedLibraryActionText: { color: c.brand, fontWeight: '800', fontSize: 13 },
   }));
 
   const loadData = useCallback(async () => {
     try {
-      const [downloadList, queued, localEntitlement, allowed] = await Promise.all([
+      const [downloadList, queued, localEntitlement, allowed, bookmarks] = await Promise.all([
         getDownloadRecords(),
         getSyncQueue(),
         getOfflineEntitlement(),
         hasOfflineLibraryAccess(),
+        listResourceBookmarks(user?.uid).catch(() => []),
       ]);
       setDownloads(downloadList);
+      setSavedResources(bookmarks || []);
       setSyncQueue(queued);
       setEntitlement(localEntitlement);
       setAccessAllowed(allowed);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user?.uid]);
 
   const premiumUnlocked = isPremiumActive(profile);
 
@@ -493,6 +513,18 @@ export default function OfflineCenterScreen() {
       { text: 'Clear', style: 'destructive', onPress: async () => { await clearOfflineDownloads(); await loadData(); } },
     ]);
   };
+
+  const openSavedResource = (item) => {
+    if (item.resourceType === 'cbt') {
+      router.navigate({ pathname: '/cbt', params: { courseId: item.courseId || item.resourceId } });
+      return;
+    }
+    router.navigate({ pathname: '/view/[type]/[id]', params: { type: item.resourceType, id: item.resourceId } });
+  };
+
+  const savedTypeLabel = (type) => (
+    type === 'question' ? 'Past question' : type === 'cbt' ? 'CBT paper' : 'Study note'
+  );
 
   const premiumText = accessAllowed
     ? isConnected === false
@@ -749,6 +781,37 @@ export default function OfflineCenterScreen() {
                 </Text>
               </View>
             )}
+          </View>
+
+          <View>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Saved Study Library</Text>
+            </View>
+            <View style={styles.savedLibraryCard}>
+              <View style={styles.savedLibraryIntro}>
+                <View style={styles.savedLibraryIcon}>
+                  <Ionicons name="bookmark-outline" size={19} color={colors.brand} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.savedLibraryTitle}>{savedResources.length ? `${savedResources.length} saved ${savedResources.length === 1 ? 'resource' : 'resources'}` : 'Your saved resources'}</Text>
+                  <Text style={styles.savedLibraryHint}>Notes, past questions, and CBT papers saved to your library.</Text>
+                </View>
+              </View>
+              {savedResources.slice(0, 3).map((item) => (
+                <Pressable key={item.id} style={styles.savedResourceRow} onPress={() => openSavedResource(item)} accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'saved resource'}`}>
+                  <Ionicons name={item.resourceType === 'cbt' ? 'desktop-outline' : item.resourceType === 'question' ? 'clipboard-outline' : 'document-text-outline'} size={18} color={colors.brand} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.savedResourceTitle} numberOfLines={1}>{item.title || 'Saved resource'}</Text>
+                    <Text style={styles.savedResourceMeta}>{savedTypeLabel(item.resourceType)}{item.subject ? ` · ${item.subject}` : ''}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={17} color={colors.textTertiary} />
+                </Pressable>
+              ))}
+              <Pressable style={styles.savedLibraryAction} onPress={() => router.navigate('/saved')} accessibilityRole="button">
+                <Ionicons name="library-outline" size={17} color={colors.brand} />
+                <Text style={styles.savedLibraryActionText}>{savedResources.length ? 'View all saved resources' : 'Open saved study library'}</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       )}

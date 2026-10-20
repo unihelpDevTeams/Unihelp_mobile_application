@@ -13,22 +13,6 @@ import { useAuth } from '../../../context/AuthContext';
 import { getJson, deleteJson } from '../services/backend';
 
 const CONFIGS = {
-  hostels: {
-    title: 'My Hostels',
-    subtitle: 'Manage hostel photos, rent details, availability, and cleanup.',
-    collection: 'hostels',
-    ownerField: 'userId',
-    emptyTitle: 'No hostel uploads yet',
-    emptyDescription: 'Your hostel listings will appear here after you publish them.',
-    uploadRoute: '/upload?type=hostel',
-    editRoute: (id) => ({ pathname: '/upload', params: { type: 'hostel', editId: id } }),
-    viewRoute: (id) => ({ pathname: '/view/[type]/[id]', params: { type: 'hostel', id } }),
-    deleteItem: (id) => deleteJson(`/api/hostels/${id}`),
-    endpoint: '/api/hostels',
-    createLabel: 'Add hostel',
-    icon: 'home-outline',
-    accent: 'blue',
-  },
   listings: {
     title: 'My Listings',
     subtitle: 'Keep product listings organized, current, and easy to remove.',
@@ -44,22 +28,6 @@ const CONFIGS = {
     createLabel: 'Sell item',
     icon: 'storefront-outline',
     accent: 'brand',
-  },
-  stories: {
-    title: 'My Stories',
-    subtitle: 'Review drafts, published stories, covers, and story media.',
-    collection: 'stories',
-    ownerField: 'authorId',
-    emptyTitle: 'No stories yet',
-    emptyDescription: 'Drafts and published stories you create will appear here.',
-    uploadRoute: '/stories/create',
-    editRoute: (id) => ({ pathname: '/stories/create', params: { editId: id } }),
-    viewRoute: (id) => ({ pathname: '/stories/[storyId]', params: { storyId: id } }),
-    deleteItem: (id) => deleteJson(`/api/stories/${id}`),
-    endpoint: '/api/stories',
-    createLabel: 'Create story',
-    icon: 'book-outline',
-    accent: 'purple',
   },
 };
 

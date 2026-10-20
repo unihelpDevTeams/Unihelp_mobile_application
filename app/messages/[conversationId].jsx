@@ -62,6 +62,7 @@ import { submitReport } from '../../src/shared/services/support';
 
 const CHAT_PAGE_SIZE = 25;
 const EDIT_WINDOW_MS = 60 * 60 * 1000;
+const VOICE_DELETE_WINDOW_MS = 30 * 60 * 1000;
 const GROUP_GAP_MS = 5 * 60 * 1000;
 const MAX_LENGTH = 4000;
 const TYPING_REFRESH_MS = 3000;
@@ -392,7 +393,7 @@ const createStyles = (c) => ({
 
   composerContainer: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.borderDefault, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 24 : 12},
   composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
-  recorderExpanded: { flex: 1 },
+  recorderExpanded: { flex: 1, minWidth: 0 },
   stickerButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.surfaceSecondary, alignItems: 'center', justifyContent: 'center' },
   inputWrap: { flex: 1 },
   input: { minHeight: 44, maxHeight: 120, backgroundColor: c.inputBackground, borderWidth: 1, borderColor: c.borderDefault, borderRadius: 22, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, color: c.textPrimary, fontSize: 15.5, lineHeight: 20 },
@@ -970,6 +971,7 @@ function ConversationScreen({ conversationId }) {
 
   const recording = voiceState === 'recording';
   const voiceUploading = voiceState === 'uploading';
+  const voiceBusy = recording || voiceUploading;
 
   const isMine = useCallback((item) => item?.senderId === currentUid, [currentUid]);
 
@@ -1635,8 +1637,21 @@ function ConversationScreen({ conversationId }) {
     return Boolean(sentAt && Date.now() - sentAt <= EDIT_WINDOW_MS);
   };
 
+  const withinVoiceDeleteWindow = (message) => {
+    const sentAt = toMillis(message?.createdAt);
+    return Boolean(sentAt && Date.now() - sentAt <= VOICE_DELETE_WINDOW_MS);
+  };
+
   const canDeleteMessage = (message) =>
-    Boolean(message && isMine(message) && !message.deleted && !isLocalId(message.id) && message.status !== 'failed' && message.status !== 'sending' && withinEditWindow(message));
+    Boolean(
+      message &&
+      isMine(message) &&
+      !message.deleted &&
+      !isLocalId(message.id) &&
+      message.status !== 'failed' &&
+      message.status !== 'sending' &&
+      (message.type === 'voice' ? withinVoiceDeleteWindow(message) : withinEditWindow(message))
+    );
 
   const startReply = useCallback((message) => {
     if (!message || message.deleted) return;
@@ -1740,6 +1755,16 @@ function ConversationScreen({ conversationId }) {
 
   const handleConfirmDelete = async () => {
     if (!activeMessage || !conversationId) return;
+    if (!canDeleteMessage(activeMessage)) {
+      showAlertDialog(
+        'Delete unavailable',
+        activeMessage.type === 'voice'
+          ? 'Voice messages can only be deleted within 30 minutes of sending.'
+          : 'Messages can only be deleted within 1 hour of sending.'
+      );
+      setConfirmingDelete(false);
+      return;
+    }
     const target = activeMessage;
     closeSheet();
     setMessages((prev) => prev.map((m) => (m.id === target.id ? { ...m, deleted: true } : m)));
@@ -2174,6 +2199,7 @@ function ConversationScreen({ conversationId }) {
     const failed = m.status === 'failed';
     const sending = m.status === 'sending';
     const editable = mine && !failed && !sending && withinEditWindow(m);
+    const deletable = canDeleteMessage(m);
     const isText = !m.type || m.type === 'text';
     const canReact = !failed && !sending && !m.deleted && !isLocalId(m.id);
     const opt = { styles, colors };
@@ -2215,9 +2241,13 @@ function ConversationScreen({ conversationId }) {
             {!sending && !m.deleted ? (
               <SheetOption {...opt} icon="checkbox-outline" label="Select" onPress={() => { setSelection([m.id], true); closeSheet(); }} />
             ) : null}
-            {editable ? <SheetOption {...opt} icon="trash-outline" label="Delete message" danger onPress={() => setConfirmingDelete(true)} /> : null}
-            {mine && !editable && !sending ? (
-              <Text style={styles.sheetHint}>Messages can be edited or deleted within 1 hour of sending.</Text>
+            {deletable ? <SheetOption {...opt} icon="trash-outline" label="Delete message" danger onPress={() => setConfirmingDelete(true)} /> : null}
+            {mine && !deletable && !sending ? (
+              <Text style={styles.sheetHint}>
+                {m.type === 'voice'
+                  ? 'Voice messages can be deleted within 30 minutes of sending.'
+                  : 'Messages can be edited or deleted within 1 hour of sending.'}
+              </Text>
             ) : null}
           </>
         )}
@@ -2448,17 +2478,22 @@ function ConversationScreen({ conversationId }) {
             <View style={styles.composer}>
               {!editingMessage ? (
                 <>
-                  {!recording ? (
+                  {!voiceBusy ? (
                     <Pressable style={styles.stickerButton} onPress={() => setStickerPickerVisible(true)} accessibilityRole="button" accessibilityLabel="Open sticker picker">
                       <Ionicons name="happy-outline" size={22} color={colors.brand} />
                     </Pressable>
                   ) : null}
-                  <View style={recording ? styles.recorderExpanded : null}>
-                    <VoiceRecorderBar conversationId={conversationId} onVoiceSent={sendVoiceMessage} onStateChange={setVoiceState} />
+                  <View style={voiceBusy ? styles.recorderExpanded : null}>
+                    <VoiceRecorderBar
+                      conversationId={conversationId}
+                      onVoiceSent={sendVoiceMessage}
+                      onStateChange={setVoiceState}
+                      expanded={voiceBusy}
+                    />
                   </View>
                 </>
               ) : null}
-              {!recording ? (
+              {!voiceBusy ? (
                 <>
                   <View style={styles.inputWrap}>
                     <TextInput
@@ -2549,6 +2584,16 @@ function ConversationScreen({ conversationId }) {
             <Text style={styles.sheetSubtitle}>Changes only affect your side of this chat.</Text>
 
             {otherId ? <SheetOption styles={styles} colors={colors} icon="person-outline" label="View profile" onPress={handleViewProfile} /> : null}
+            <SheetOption
+              styles={styles}
+              colors={colors}
+              icon="settings-outline"
+              label="Conversation settings"
+              onPress={() => {
+                setShowOptionsSheet(false);
+                router.navigate({ pathname: '/messages/[conversationId]/settings', params: { conversationId } });
+              }}
+            />
             {otherId ? <SheetOption styles={styles} colors={colors} icon="flag-outline" label="Report user" onPress={handleReportUser} /> : null}
             {otherId ? (
               isBlocked ? (

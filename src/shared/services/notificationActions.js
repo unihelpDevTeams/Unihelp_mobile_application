@@ -135,7 +135,7 @@ const replyToConversation = async ({ conversationId, groupId, userText, uid }) =
       { username: currentProfile?.name || currentUser.displayName || 'Student', photo: currentProfile?.avatar || '' },
       { text: trimmed, type: 'text' }
     );
-    return { handled: true, route: `/community/${groupId}` };
+    return { handled: true };
   }
 
   if (!conversationId) {
@@ -149,7 +149,7 @@ const replyToConversation = async ({ conversationId, groupId, userText, uid }) =
     { text: trimmed, type: 'text' }
   );
 
-  return { handled: true, route: `/messages/${conversationId}` };
+  return { handled: true };
 };
 
 const likeNotificationTarget = async ({ storyId, commentId, uid, notificationId }) => {
@@ -189,12 +189,12 @@ export const handleNotificationAction = async ({
 
     case NOTIFICATION_ACTION_IDS.MARK_AS_READ:
       await markNotificationAndConversationRead({ notificationId, conversationId, uid });
-      return { handled: true, route: payload.route || null };
+      return { handled: true };
 
     case NOTIFICATION_ACTION_IDS.MUTE:
       await muteConversation({ conversationId, groupId, uid });
       await markNotificationAndConversationRead({ notificationId, conversationId, uid });
-      return { handled: true, route: payload.route || null };
+      return { handled: true };
 
     case NOTIFICATION_ACTION_IDS.LIKE:
       return likeNotificationTarget({ storyId, commentId, uid, notificationId });
@@ -204,7 +204,7 @@ export const handleNotificationAction = async ({
 
     case NOTIFICATION_ACTION_IDS.DISMISS:
       await markNotificationAndConversationRead({ notificationId, conversationId, uid });
-      return { handled: true, route: payload.route || null };
+      return { handled: true };
 
     default:
       return { handled: false, route: payload.route || null };

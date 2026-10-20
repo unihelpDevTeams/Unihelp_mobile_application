@@ -27,6 +27,7 @@ export const PAGE_SIZE = 20;
 export const CHAT_PAGE_SIZE = 20;
 export const MESSAGE_PAGE_SIZE = CHAT_PAGE_SIZE;
 export const MESSAGE_EDIT_WINDOW_MS = 60 * 60 * 1000;
+export const VOICE_MESSAGE_DELETE_WINDOW_MS = 30 * 60 * 1000;
 
 const normalizeSearch = (value = '') => value.trim().toLowerCase();
 
@@ -414,6 +415,102 @@ export const sendGroupMessage = async (groupId, user, profile, payload) => {
   } catch (notificationError) {
     console.log('Group push notification failed:', notificationError);
   }
+  return messageRef.id;
+};
+
+export const createGroupPost = async (groupId, user, profile, payload = {}) => {
+  const summary = userSummary(user, profile);
+  const postRef = doc(collection(db, 'groups', groupId, 'posts'));
+  const batch = writeBatch(db);
+  batch.set(postRef, {
+    text: String(payload.text || '').trim(),
+    attachments: Array.isArray(payload.attachments) ? payload.attachments : [],
+    authorId: user.uid,
+    authorName: summary.name,
+    authorAvatar: summary.avatar,
+    reactions: {},
+    userReactions: {},
+    reactionCount: 0,
+    commentCount: 0,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  batch.update(doc(db, 'groups', groupId), { lastActivityAt: serverTimestamp() });
+  await batch.commit();
+  return postRef.id;
+};
+
+export const listenGroupPosts = (groupId, callback) => onSnapshot(
+  query(collection(db, 'groups', groupId, 'posts'), orderBy('createdAt', 'desc'), limit(PAGE_SIZE)),
+  (snapshot) => callback(mapDocs(snapshot))
+);
+
+export const reactToGroupPost = async (groupId, postId, emoji, uid) => {
+  const postRef = doc(db, 'groups', groupId, 'posts', postId);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(postRef);
+    if (!snapshot.exists()) throw new Error('This post is no longer available.');
+    const post = snapshot.data();
+    const reactions = { ...(post.reactions || {}) };
+    const userReactions = { ...(post.userReactions || {}) };
+    const previous = userReactions[uid];
+    if (previous === emoji) { reactions[emoji] = Math.max((reactions[emoji] || 1) - 1, 0); if (!reactions[emoji]) delete reactions[emoji]; delete userReactions[uid]; }
+    else { if (previous) { reactions[previous] = Math.max((reactions[previous] || 1) - 1, 0); if (!reactions[previous]) delete reactions[previous]; } reactions[emoji] = (reactions[emoji] || 0) + 1; userReactions[uid] = emoji; }
+    transaction.update(postRef, { reactions, userReactions, reactionCount: Object.values(reactions).reduce((total, count) => total + count, 0), updatedAt: serverTimestamp() });
+  });
+};
+
+const normalizePollInput = ({ question, options, multiSelect = false } = {}) => {
+  const cleanQuestion = String(question || '').trim();
+  const cleanOptions = (options || []).map((option) => String(option || '').trim()).filter(Boolean).slice(0, 6);
+  if (!cleanQuestion || cleanOptions.length < 2) throw new Error('Add a question and at least two options.');
+  return { cleanQuestion, cleanOptions, multiSelect: Boolean(multiSelect) };
+};
+
+export const createGroupPoll = async (groupId, user, profile, input) => {
+  const { cleanQuestion, cleanOptions, multiSelect } = normalizePollInput(input);
+  return sendGroupMessage(groupId, user, profile, {
+    type: 'poll', text: '', poll: { question: cleanQuestion, multiSelect, isClosed: false, options: cleanOptions.map((text, index) => ({ id: `option-${index}`, text, voterIds: [] })) },
+  });
+};
+
+export const voteGroupPoll = async (groupId, messageId, optionId, uid) => {
+  if (!groupId || !messageId || !optionId || !uid) throw new Error('Missing poll vote details.');
+  const messageRef = doc(db, 'groups', groupId, 'messages', messageId);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(messageRef);
+    if (!snapshot.exists()) throw new Error('This poll is no longer available.');
+    const poll = snapshot.data().poll;
+    if (poll?.isClosed) throw new Error('This poll has been closed.');
+    if (!poll?.options?.some((option) => option.id === optionId)) throw new Error('That option is unavailable.');
+    const options = poll.options.map((option) => ({ ...option, voterIds: poll.multiSelect ? [...(option.voterIds || [])] : (option.voterIds || []).filter((id) => id !== uid) }));
+    const selected = options.find((option) => option.id === optionId);
+    selected.voterIds = selected.voterIds.includes(uid) ? selected.voterIds.filter((id) => id !== uid) : [...selected.voterIds, uid];
+    transaction.update(messageRef, { poll: { ...poll, options }, updatedAt: serverTimestamp() });
+  });
+};
+
+export const editGroupPoll = async (groupId, messageId, uid, input) => {
+  const { cleanQuestion, cleanOptions, multiSelect } = normalizePollInput(input);
+  const messageRef = doc(db, 'groups', groupId, 'messages', messageId);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(messageRef);
+    if (!snapshot.exists() || snapshot.data().type !== 'poll') throw new Error('This poll is no longer available.');
+    const message = snapshot.data();
+    if (message.senderId !== uid) throw new Error('Only the poll creator can edit it.');
+    const oldOptions = message.poll?.options || [];
+    const options = cleanOptions.map((text, index) => ({ id: oldOptions[index]?.id || `option-${index}`, text, voterIds: oldOptions[index]?.voterIds || [] }));
+    transaction.update(messageRef, { poll: { ...message.poll, question: cleanQuestion, multiSelect, options }, updatedAt: serverTimestamp() });
+  });
+};
+
+export const setGroupPollClosed = async (groupId, messageId, uid, isClosed) => {
+  const messageRef = doc(db, 'groups', groupId, 'messages', messageId);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(messageRef);
+    if (!snapshot.exists() || snapshot.data().senderId !== uid || snapshot.data().type !== 'poll') throw new Error('Only the poll creator can manage it.');
+    transaction.update(messageRef, { poll: { ...snapshot.data().poll, isClosed: Boolean(isClosed) }, updatedAt: serverTimestamp() });
+  });
 };
 
 const messageCreatedAtMillis = (value) => {
@@ -564,7 +661,10 @@ export const deleteConversationForUser = async (conversationId, uid = auth.curre
 
 export async function deleteDirectMessage(conversationId, messageId, options = {}) {
   const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
-  await assertMessageOwnerWithinWindow(messageRef, auth.currentUser?.uid);
+  const message = await assertMessageOwnerWithinWindow(messageRef, auth.currentUser?.uid);
+  if (message.type === 'voice' && Date.now() - messageCreatedAtMillis(message.createdAt) > VOICE_MESSAGE_DELETE_WINDOW_MS) {
+    throw new Error('Voice messages can only be deleted within 30 minutes of sending.');
+  }
   if (options.voice) {
     try {
       const token = await auth.currentUser?.getIdToken();

@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useMemo, useRef, useState, useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated, PanResponder, Modal } from 'react-native';
+import { ActivityIndicator, View, Text, Pressable, StyleSheet, Animated, PanResponder, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
@@ -27,7 +27,7 @@ const WAVE_BARS = 5;
  * Hold to record, release to send, swipe left to cancel.
  * Recording is a premium feature; existing voice messages can be played by everyone.
  */
-const VoiceRecorderBar = memo(({ conversationId, onVoiceSent }) => {
+const VoiceRecorderBar = memo(({ conversationId, onVoiceSent, onStateChange, expanded = false }) => {
   const router = useRouter();
   const { profile } = useAuth();
   const isPremium = isPremiumActive(profile);
@@ -55,9 +55,19 @@ const VoiceRecorderBar = memo(({ conversationId, onVoiceSent }) => {
     Array.from({ length: WAVE_BARS }, () => new Animated.Value(0.3))
   ).current;
 
-  // Animate wave bars during recording
+  const recorderState = isUploading || isSending ? 'uploading' : isRecording ? 'recording' : 'idle';
+
+  // Keep the containing composer in sync so it can swap the text input for
+  // a dedicated recorder surface instead of squeezing both into one row.
   useEffect(() => {
-    if (!isRecording) {
+    onStateChange?.(recorderState);
+  }, [onStateChange, recorderState]);
+
+  useEffect(() => () => onStateChange?.('idle'), [onStateChange]);
+
+  // Animate the waveform while recording and while the file is uploading.
+  useEffect(() => {
+    if (!isRecording && !isUploading) {
       waveAnims.forEach((anim) => anim.setValue(0.3));
       return;
     }
@@ -85,7 +95,7 @@ const VoiceRecorderBar = memo(({ conversationId, onVoiceSent }) => {
       waveLoops.forEach((loop) => loop.stop());
       waveAnims.forEach((anim) => anim.stopAnimation());
     };
-  }, [isRecording, waveAnims]);
+  }, [isRecording, isUploading, isSending, waveAnims]);
 
   const finalizeAndSend = useCallback(async () => {
     if (sendingRef.current) return;
@@ -212,7 +222,7 @@ const VoiceRecorderBar = memo(({ conversationId, onVoiceSent }) => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, expanded && styles.containerExpanded]}>
       {isRecording ? (
         <Animated.View
           style={[
@@ -297,12 +307,20 @@ const VoiceRecorderBar = memo(({ conversationId, onVoiceSent }) => {
             />
           </Pressable>
         </Animated.View>
-      ) : isUploading ? (
-        <View style={styles.uploadingContainer}>
+      ) : isUploading || isSending ? (
+        <View style={[styles.uploadingContainer, expanded && styles.uploadingContainerExpanded]}>
           <View style={styles.uploadingSpinner}>
-            <Ionicons name="sync-outline" size={16} color={COLORS.indigo} />
+            <ActivityIndicator size="small" color={COLORS.indigo} />
           </View>
-          <Text style={styles.uploadingText}>Uploading voice...</Text>
+          <View style={styles.uploadingWaveform} accessibilityLabel="Voice message waveform is loading">
+            {waveAnims.map((anim, index) => (
+              <Animated.View
+                key={index}
+                style={[styles.uploadingWaveBar, { transform: [{ scaleY: anim }] }]}
+              />
+            ))}
+          </View>
+          <Text style={styles.uploadingText}>{isUploading ? 'Uploading voice...' : 'Sending voice...'}</Text>
         </View>
       ) : (
         <Pressable
@@ -334,6 +352,7 @@ const styles = StyleSheet.create({
   container: {
     position: 'relative',
   },
+  containerExpanded: { width: '100%', alignSelf: 'stretch' },
   micButton: {
     width: 44,
     height: 44,
@@ -359,7 +378,8 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     paddingHorizontal: 6,
     paddingVertical: 4,
-    minWidth: 240,
+    minWidth: 0,
+    width: '100%',
     borderWidth: 1.5,
     borderColor: COLORS.indigoSoft,
     shadowColor: COLORS.indigo,
@@ -476,6 +496,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
+  uploadingContainerExpanded: {
+    minHeight: 44,
+    width: '100%',
+    borderRadius: 22,
+    paddingHorizontal: 12,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1.5,
+    borderColor: COLORS.indigoSoft,
+  },
   uploadingSpinner: {
     width: 24,
     height: 24,
@@ -489,6 +518,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.inkSoft,
   },
+  uploadingWaveform: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, height: 26 },
+  uploadingWaveBar: { width: 3, height: 20, borderRadius: 2, backgroundColor: COLORS.indigo },
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',

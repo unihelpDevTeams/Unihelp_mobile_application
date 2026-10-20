@@ -20,10 +20,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import ScreenShell from '../../src/shared/components/ScreenShell';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import EmptyState from '../../src/shared/components/EmptyState';
 import StickerPicker from '../../src/shared/components/StickerPicker';
 import StickerMessage from '../../src/shared/components/StickerMessage';
@@ -32,23 +33,31 @@ import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { useAuth } from '../../context/AuthContext';
 import {
   approveGroupJoinRequest,
+  createGroupPost,
   formatShortTime,
   getGroup,
   getMembership,
   joinPublicGroup,
   leaveGroup,
+  listGroupMembers,
   listGroupJoinRequests,
   listenGroupMessages,
+  listenGroupPosts,
   loadOlderGroupMessages,
   loadRecentGroupMessages,
   MESSAGE_PAGE_SIZE,
   rejectGroupJoinRequest,
   requestJoinGroup,
   sendGroupMessage,
+  createGroupPoll,
+  editGroupPoll,
+  setGroupPollClosed,
+  voteGroupPoll,
   updateGroupMessage,
   deleteGroupMessage,
   startConversation,
   toggleMessageReaction,
+  reactToGroupPost,
   updateGroup,
 } from '../../src/shared/services/community';
 import { uploadFeatureMedia } from '../../src/shared/services/backend';
@@ -337,6 +346,15 @@ function useDraggableSheet(onDismiss) {
 const createStyles = (c) => ({
   screen: { flex: 1, backgroundColor: c.background },
   flex: { flex: 1 },
+  conversationHeader: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, backgroundColor: c.surface, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.borderDefault },
+  conversationBack: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  conversationAvatar: { width: 40, height: 40, borderRadius: 20, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: c.brand },
+  conversationAvatarImage: { width: '100%', height: '100%' },
+  conversationAvatarText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
+  conversationIdentity: { flex: 1, minWidth: 0 },
+  conversationName: { color: c.textPrimary, fontSize: 16, fontWeight: '800' },
+  conversationStatus: { color: c.textSecondary, fontSize: 11.5, marginTop: 2 },
+  conversationAction: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surfaceSecondary },
   chatArea: { flex: 1 },
   composerOuter: { backgroundColor: c.surface, borderTopWidth: StyleSheet.hairlineWidth, borderColor: c.borderDefault },
   chatContent: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 14 },
@@ -348,20 +366,44 @@ const createStyles = (c) => ({
   toast: { position: 'absolute', top: 10, alignSelf: 'center', backgroundColor: c.textPrimary, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8, maxWidth: '90%', zIndex: 30 },
   toastText: { color: c.surface, fontSize: 13, fontWeight: '700' },
 
-  compactHero: { backgroundColor: c.surface, borderRadius: 18, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: c.borderDefault },
-  heroActionsRowInline: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 'auto' },
-  heroIconButton: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brandLight },
-  heroTopRow: { flexDirection: 'row', alignItems: 'center' },
-  heroAvatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center', marginRight: 10, overflow: 'hidden' },
-  heroAvatarImage: { width: 46, height: 46 },
-  heroAvatarText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16 },
-  heroTextWrap: { flex: 1, justifyContent: 'center', paddingRight: 8 },
-  heroTitle: { color: c.textPrimary, fontSize: 16, fontWeight: '800', marginBottom: 2 },
-  heroText: { color: c.textSecondary, fontSize: 12 },
-  heroMetaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
-  heroPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: c.surfaceSecondary, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
-  heroPillText: { color: c.textSecondary, fontSize: 11, fontWeight: '700' },
-  heroDescription: { color: c.textTertiary, fontSize: 12, lineHeight: 17, marginTop: 10, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.borderDefault },
+  groupTabs: { backgroundColor: c.surface, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.borderDefault },
+  groupTabsContent: { paddingHorizontal: 8 },
+  groupTab: { minHeight: 50, paddingHorizontal: 10, gap: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  groupTabActive: { borderBottomColor: c.brand },
+  groupTabText: { color: c.textSecondary, fontSize: 13, fontWeight: '700' },
+  groupTabTextActive: { color: c.brand },
+  tabCount: { color: c.textTertiary, fontSize: 11, fontWeight: '800' },
+  tabContent: { flex: 1 },
+  tabContentInner: { padding: 12, paddingBottom: 30, gap: 12 },
+  postComposer: { backgroundColor: c.surface, borderRadius: 18, borderWidth: 1, borderColor: c.borderDefault, padding: 12 },
+  postInput: { minHeight: 70, color: c.textPrimary, fontSize: 15, textAlignVertical: 'top' },
+  postComposerActions: { flexDirection: 'row', alignItems: 'center', gap: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.borderDefault, paddingTop: 9 },
+  postMediaButton: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brandLight },
+  postAttachmentChip: { flex: 1, color: c.textSecondary, fontSize: 12, fontWeight: '700' },
+  publishButton: { backgroundColor: c.brand, borderRadius: 999, paddingHorizontal: 15, paddingVertical: 9 },
+  publishText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  postCard: { backgroundColor: c.surface, borderRadius: 18, borderWidth: 1, borderColor: c.borderDefault, padding: 12 },
+  postAuthor: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  postAvatar: { width: 36, height: 36, borderRadius: 18, overflow: 'hidden', backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
+  postAvatarImage: { width: '100%', height: '100%' },
+  postAvatarText: { color: c.brandDark, fontSize: 12, fontWeight: '800' },
+  postAuthorName: { color: c.textPrimary, fontSize: 13.5, fontWeight: '800' },
+  postTime: { color: c.textTertiary, fontSize: 11, marginTop: 2 },
+  postText: { color: c.textPrimary, fontSize: 14.5, lineHeight: 21, marginTop: 10 },
+  postImage: { width: '100%', aspectRatio: 1.45, borderRadius: 12, marginTop: 10, backgroundColor: c.skeleton },
+  postFile: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: c.surfaceSecondary, borderRadius: 12, padding: 10, marginTop: 10 },
+  postFileName: { flex: 1, color: c.textPrimary, fontSize: 12.5, fontWeight: '700' },
+  postFooter: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 11, paddingTop: 9, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.borderDefault },
+  postReaction: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 999, backgroundColor: c.surfaceSecondary, paddingHorizontal: 10, paddingVertical: 6 },
+  postReactionActive: { backgroundColor: c.brandLight },
+  postReactionText: { color: c.textSecondary, fontSize: 12, fontWeight: '700' },
+  memberRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.surface, borderRadius: 15, padding: 11, borderWidth: 1, borderColor: c.borderDefault },
+  memberAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: c.brandLight, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  memberName: { color: c.textPrimary, fontSize: 14, fontWeight: '800' },
+  memberRole: { color: c.textSecondary, fontSize: 12, marginTop: 2 },
+  aboutCard: { backgroundColor: c.surface, borderRadius: 18, borderWidth: 1, borderColor: c.borderDefault, padding: 14, gap: 10 },
+  aboutTitle: { color: c.textPrimary, fontSize: 15, fontWeight: '800' },
+  aboutText: { color: c.textSecondary, fontSize: 13.5, lineHeight: 20 },
 
   joinButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: c.brand, borderRadius: 14, paddingVertical: 13, marginBottom: 16 },
   joinButtonMuted: { backgroundColor: c.skeleton },
@@ -444,6 +486,14 @@ const createStyles = (c) => ({
   actionSheetCard: { backgroundColor: c.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 12, paddingTop: 4, paddingBottom: 24 },
   actionSheetHandleWrap: { paddingVertical: 10, alignItems: 'center' },
   actionSheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: c.borderDefault },
+  reactionViewerCard: { backgroundColor: c.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 30, maxHeight: '72%' },
+  reactionViewerTitle: { color: c.textPrimary, fontSize: 18, fontWeight: '800', marginBottom: 12 },
+  reactorRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
+  reactorAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  reactorAvatarImage: { width: '100%', height: '100%' },
+  reactorAvatarText: { color: c.brandDark, fontWeight: '800', fontSize: 13 },
+  reactorName: { flex: 1, color: c.textPrimary, fontSize: 14, fontWeight: '700' },
+  reactorEmojis: { color: c.textSecondary, fontSize: 16 },
   sheetReactions: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: c.surfaceSecondary, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 6, marginBottom: 8 },
   sheetReactionBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   sheetReactionBtnActive: { backgroundColor: c.brandLight, borderWidth: 1, borderColor: c.brand },
@@ -628,8 +678,12 @@ const MessageRow = React.memo(function MessageRow({
   onLongPress,
   onSwipeReply,
   onToggleReaction,
+  onOpenReactions,
   onRetry,
   onOpenProfile,
+  onVotePoll,
+  onEditPoll,
+  onTogglePollClosed,
 }) {
   const swipeX = useMemo(() => new Animated.Value(0), []);
   const scaleAnim = useMemo(() => new Animated.Value(1), []);
@@ -799,6 +853,20 @@ const MessageRow = React.memo(function MessageRow({
             <View style={sending ? styles.pendingDim : null}>
               <StickerMessage message={message} isMine={mine} onLongPress={() => onLongPress(message)} />
             </View>
+          ) : message.type === 'poll' && message.poll ? (
+            <View style={{ gap: 8 }}>
+              <Text style={[styles.messageBody, mine && styles.messageBodyMine, { fontWeight: '800' }]}>{message.poll.question}</Text>
+              {(() => {
+                const participants = new Set(message.poll.options.flatMap((item) => item.voterIds || [])).size;
+                return message.poll.options.map((option) => {
+                  const count = option.voterIds?.length || 0;
+                  const selected = option.voterIds?.includes(uid);
+                  return <Pressable key={option.id} disabled={message.poll.isClosed} onPress={() => onVotePoll(message, option.id)} style={{ overflow: 'hidden', borderWidth: 1, borderColor: mine ? 'rgba(255,255,255,0.35)' : colors.borderDefault, borderRadius: 10, padding: 9, opacity: message.poll.isClosed ? 0.8 : 1, backgroundColor: selected ? (mine ? 'rgba(255,255,255,0.18)' : colors.brandLight) : 'transparent' }}><Text style={[styles.messageBody, mine && styles.messageBodyMine]}>{selected ? '✓ ' : ''}{option.text} · {participants ? Math.round((count / participants) * 100) : 0}%</Text></Pressable>;
+                });
+              })()}
+              <Text style={[styles.messageTime, mine && styles.messageTimeMine]}>{message.poll.isClosed ? 'Poll closed' : message.poll.multiSelect ? 'Multiple answers allowed' : 'One answer'}</Text>
+              {mine ? <View style={{ flexDirection: 'row', gap: 10 }}><Pressable onPress={() => onEditPoll(message)}><Text style={[styles.messageTime, mine && styles.messageTimeMine, { fontWeight: '800' }]}>Edit</Text></Pressable><Pressable onPress={() => onTogglePollClosed(message)}><Text style={[styles.messageTime, mine && styles.messageTimeMine, { fontWeight: '800' }]}>{message.poll.isClosed ? 'Reopen' : 'Close'}</Text></Pressable></View> : null}
+            </View>
           ) : (
             <Text style={[styles.messageBody, mine && styles.messageBodyMine]}>
               {message.text ? renderLinkedText(message.text, mine, colors) : '📎 Attachment'}
@@ -817,9 +885,10 @@ const MessageRow = React.memo(function MessageRow({
                   key={emoji}
                   style={[styles.reactionPill, reactedByMe && styles.reactionPillActive]}
                   onPress={() => onToggleReaction(message, emoji)}
+                  onLongPress={() => onOpenReactions(message.reactions, 'Message reactions')}
                   hitSlop={4}
                   accessibilityRole="button"
-                  accessibilityLabel={`${emoji} ${uids.length}${reactedByMe ? ', you reacted' : ''}`}
+                  accessibilityLabel={`${emoji} ${uids.length}${reactedByMe ? ', you reacted' : ''}. Long press to see who reacted.`}
                 >
                   <Text style={styles.reactionEmoji}>{emoji}</Text>
                   <Text style={[styles.reactionCount, reactedByMe && styles.reactionCountActive]}>{uids.length}</Text>
@@ -876,11 +945,23 @@ function GroupDetailScreen({ groupId }) {
   const [editingMessage, setEditingMessage] = useState(null);
   const [editText, setEditText] = useState('');
   const [toast, setToast] = useState('');
+  const [pollVisible, setPollVisible] = useState(false);
+  const [pollEditing, setPollEditing] = useState(null);
+  const [pollQuestion, setPollQuestion] = useState('');
+  const [pollOptions, setPollOptions] = useState(['', '']);
+  const [pollMultiSelect, setPollMultiSelect] = useState(false);
+  const [activeTab, setActiveTab] = useState('Feed');
+  const [posts, setPosts] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [postDraft, setPostDraft] = useState('');
+  const [postAttachment, setPostAttachment] = useState(null);
+  const [posting, setPosting] = useState(false);
 
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [newBelow, setNewBelow] = useState(0);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [activeMessage, setActiveMessage] = useState(null);
+  const [reactionViewer, setReactionViewer] = useState(null);
   const [groupOptionsVisible, setGroupOptionsVisible] = useState(false);
 
   const [editVisible, setEditVisible] = useState(false);
@@ -929,6 +1010,25 @@ function GroupDetailScreen({ groupId }) {
   const canSubmit = Boolean(activeText.trim()) && canSendMessages;
   const nearLimit = activeText.length > MAX_LENGTH * 0.85;
 
+  const groupTabs = useMemo(() => [
+    { key: 'Feed', icon: 'newspaper-outline', label: 'Feed' },
+    { key: 'Chat', icon: 'chatbubble-outline', label: 'Chat' },
+    { key: 'Members', icon: 'people-outline', label: 'Members', count: Number(group?.memberCount || members.length || 0) },
+    { key: 'Media', icon: 'images-outline', label: 'Media' },
+    { key: 'Files', icon: 'document-text-outline', label: 'Files' },
+    { key: 'About', icon: 'information-circle-outline', label: 'About' },
+  ], [group?.memberCount, members.length]);
+
+  useEffect(() => {
+    if (!groupId || !isMember || !['Feed', 'Media', 'Files'].includes(activeTab)) return undefined;
+    return listenGroupPosts(groupId, setPosts);
+  }, [groupId, isMember, activeTab]);
+
+  useEffect(() => {
+    if (!groupId || !isMember || activeTab !== 'Members') return;
+    listGroupMembers(groupId).then(setMembers).catch(() => setMembers([]));
+  }, [groupId, isMember, activeTab]);
+
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
@@ -971,6 +1071,30 @@ function GroupDetailScreen({ groupId }) {
     });
     return out;
   }, [displayMessages, isMember, uid]);
+
+  const reactionPeople = useMemo(() => {
+    if (!reactionViewer) return [];
+    const people = new Map();
+    const addPerson = (id, person = {}) => {
+      if (!id) return;
+      people.set(String(id), {
+        id: String(id),
+        name: person.name || person.displayName || person.fullName || person.senderName || 'Group member',
+        avatar: person.avatar || person.avatarUrl || person.photoURL || person.senderAvatar || '',
+      });
+    };
+    addPerson(uid, { name: profile?.displayName || profile?.name || user?.displayName || 'You', avatar: profile?.avatar || profile?.photoURL || user?.photoURL });
+    members.forEach((member) => addPerson(member.uid || member.id, member));
+    messages.forEach((message) => addPerson(message.senderId, message));
+    posts.forEach((post) => addPerson(post.authorId, post));
+
+    return reactionViewer.reactorIds.map((id) => {
+      const emojis = Object.entries(reactionViewer.reactions || {})
+        .filter(([, ids]) => Array.isArray(ids) && ids.includes(id))
+        .map(([emoji]) => emoji);
+      return { ...(people.get(String(id)) || { id: String(id), name: 'Group member', avatar: '' }), emojis };
+    });
+  }, [reactionViewer, uid, profile, user, members, messages, posts]);
 
   /* ------------------------------- Utilities ------------------------------ */
 
@@ -1356,6 +1480,31 @@ function GroupDetailScreen({ groupId }) {
     );
   };
 
+  const submitPoll = async () => {
+    try {
+      if (pollEditing) await editGroupPoll(groupId, pollEditing.id, uid, { question: pollQuestion, options: pollOptions, multiSelect: pollMultiSelect });
+      else await createGroupPoll(groupId, user, profile || {}, { question: pollQuestion, options: pollOptions, multiSelect: pollMultiSelect });
+      setPollVisible(false); setPollEditing(null); setPollQuestion(''); setPollOptions(['', '']); setPollMultiSelect(false);
+    } catch (error) { showToast(error?.message || 'Could not create poll.'); }
+  };
+
+  const votePoll = useCallback(async (message, optionId) => {
+    try { await voteGroupPoll(groupId, message.id, optionId, uid); }
+    catch (error) { showToast(error?.message || 'Could not record your vote.'); }
+  }, [groupId, showToast, uid]);
+
+  const openPollEditor = (message = null) => {
+    setPollEditing(message);
+    setPollQuestion(message?.poll?.question || '');
+    setPollOptions(message?.poll?.options?.map((option) => option.text) || ['', '']);
+    setPollMultiSelect(Boolean(message?.poll?.multiSelect));
+    setPollVisible(true);
+  };
+  const togglePollClosed = useCallback(async (message) => {
+    try { await setGroupPollClosed(groupId, message.id, uid, !message.poll?.isClosed); }
+    catch (error) { showToast(error?.message || 'Could not update poll.'); }
+  }, [groupId, showToast, uid]);
+
   const retryPending = useCallback((message) => {
     if (message?.localStatus !== 'failed') return;
     deliver(message);
@@ -1400,6 +1549,28 @@ function GroupDetailScreen({ groupId }) {
     },
     [groupId, isMember, showToast, uid]
   );
+
+  const openReactionViewer = useCallback(async (reactions = {}, title = 'Reactions') => {
+    // Messages store emoji -> user IDs; feed posts store user ID -> selected emoji.
+    const normalizedReactions = Object.values(reactions).some(Array.isArray)
+      ? reactions
+      : Object.entries(reactions).reduce((result, [reactorId, emoji]) => {
+        if (!emoji) return result;
+        result[emoji] = [...(result[emoji] || []), reactorId];
+        return result;
+      }, {});
+    const reactorIds = [...new Set(Object.values(normalizedReactions).flatMap((ids) => (Array.isArray(ids) ? ids : [])))];
+    if (!reactorIds.length) return;
+    setReactionViewer({ title, reactions: normalizedReactions, reactorIds });
+    if (!members.length) {
+      try {
+        const groupMembers = await listGroupMembers(groupId);
+        setMembers(groupMembers || []);
+      } catch {
+        // The reaction list still has a private fallback while the directory is unavailable.
+      }
+    }
+  }, [groupId, members.length]);
 
   const startEditingMessage = (message) => {
     if (!message || message.senderId !== uid || message.type === 'sticker' || !withinEditWindow(message)) return;
@@ -1459,6 +1630,65 @@ function GroupDetailScreen({ groupId }) {
     if (message?.text) {
       await Clipboard.setStringAsync(message.text);
       showToast('Copied to clipboard');
+    }
+  };
+
+  const pickPostImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return Alert.alert('Permission needed', 'Allow photo library access to add an image to the group feed.');
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: imageMediaTypes(), quality: 0.82 });
+    const asset = result.assets?.[0];
+    if (!result.canceled && asset?.uri) {
+      setPostAttachment({ uri: asset.uri, name: asset.fileName || `group-image-${Date.now()}.jpg`, type: asset.mimeType || 'image/jpeg', kind: 'image' });
+    }
+  };
+
+  const pickPostFile = async () => {
+    const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true, multiple: false });
+    const asset = result.assets?.[0];
+    if (!result.canceled && asset?.uri) {
+      setPostAttachment({ uri: asset.uri, name: asset.name || `group-file-${Date.now()}`, type: asset.mimeType || 'application/octet-stream', size: asset.size || 0, kind: 'file' });
+    }
+  };
+
+  const submitGroupPost = async () => {
+    if ((!postDraft.trim() && !postAttachment) || posting || !user || !isMember) return;
+    setPosting(true);
+    try {
+      let attachments = [];
+      if (postAttachment) {
+        const uploaded = await uploadFeatureMedia(postAttachment, {
+          feature: 'groups',
+          resourceType: postAttachment.kind === 'image' ? 'image' : 'raw',
+        });
+        const url = uploaded?.url || uploaded?.secure_url;
+        if (!url) throw new Error('Attachment upload failed. Please try again.');
+        attachments = [{
+          type: postAttachment.kind,
+          url,
+          key: uploaded?.key || uploaded?.publicId || '',
+          name: postAttachment.name,
+          mimeType: postAttachment.type,
+          size: postAttachment.size || 0,
+        }];
+      }
+      await createGroupPost(groupId, user, profile, { text: postDraft, attachments });
+      setPostDraft('');
+      setPostAttachment(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      Alert.alert('Could not publish post', error?.message || 'Please try again.');
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const togglePostReaction = async (post) => {
+    if (!uid || !isMember) return;
+    try {
+      await reactToGroupPost(groupId, post.id, '👍', uid);
+    } catch (error) {
+      showToast(error?.message || 'Could not react to that post.');
     }
   };
 
@@ -1566,7 +1796,7 @@ function GroupDetailScreen({ groupId }) {
             GROUP_CACHE.delete(cacheKey);
             MESSAGE_CACHE.delete(groupId);
             DRAFT_CACHE.delete(groupId);
-            router.replace('/community');
+            router.replace('/groups');
           } catch (error) {
             Alert.alert('Error', error?.message || 'Unable to leave group.');
           } finally {
@@ -1604,13 +1834,108 @@ function GroupDetailScreen({ groupId }) {
           onLongPress={openActions}
           onSwipeReply={setReplyFromSwipe}
           onToggleReaction={toggleReaction}
+          onOpenReactions={openReactionViewer}
           onRetry={retryPending}
           onOpenProfile={openProfile}
+          onVotePoll={votePoll}
+          onEditPoll={openPollEditor}
+          onTogglePollClosed={togglePollClosed}
         />
       );
     },
-    [styles, colors, uid, isMember, openActions, setReplyFromSwipe, toggleReaction, retryPending, openProfile]
+    [styles, colors, uid, isMember, openActions, setReplyFromSwipe, toggleReaction, openReactionViewer, retryPending, openProfile, votePoll, openPollEditor, togglePollClosed]
   );
+
+  const renderPostCard = (post) => {
+    const attachment = post.attachments?.[0];
+    const reacted = post.userReactions?.[uid] === '👍';
+    return (
+      <View key={post.id} style={styles.postCard}>
+        <View style={styles.postAuthor}>
+          <View style={styles.postAvatar}>
+            {post.authorAvatar ? <Image source={{ uri: post.authorAvatar }} style={styles.postAvatarImage} /> : <Text style={styles.postAvatarText}>{initialsForName(post.authorName)}</Text>}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.postAuthorName}>{post.authorName || 'Student'}</Text>
+            <Text style={styles.postTime}>{formatShortTime(post.createdAt) || 'Just now'}</Text>
+          </View>
+        </View>
+        {post.text ? <Text style={styles.postText}>{post.text}</Text> : null}
+        {attachment?.type === 'image' ? <Image source={{ uri: attachment.url }} style={styles.postImage} resizeMode="cover" /> : null}
+        {attachment?.type === 'file' ? (
+          <Pressable style={styles.postFile} onPress={() => Linking.openURL(attachment.url)} accessibilityRole="link">
+            <Ionicons name="document-text-outline" size={20} color={colors.brand} />
+            <Text style={styles.postFileName} numberOfLines={1}>{attachment.name || 'Download file'}</Text>
+            <Ionicons name="download-outline" size={18} color={colors.textSecondary} />
+          </Pressable>
+        ) : null}
+        <View style={styles.postFooter}>
+          <Pressable
+            style={[styles.postReaction, reacted && styles.postReactionActive]}
+            onPress={() => togglePostReaction(post)}
+            onLongPress={() => openReactionViewer(post.userReactions || {}, 'Post reactions')}
+            accessibilityRole="button"
+            accessibilityLabel={`Like post, ${post.reactionCount || 0} reactions. Long press to see who reacted.`}
+          >
+            <Text>👍</Text><Text style={styles.postReactionText}>{post.reactionCount || 0}</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  };
+
+  const renderWorkspaceTab = () => {
+    if (!isMember) return <View style={styles.tabContentInner}><EmptyState title="Join to unlock the group workspace" description="Members can use the feed, chat, directory, media, and files." /></View>;
+    if (activeTab === 'Feed') return (
+      <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentInner} keyboardShouldPersistTaps="handled">
+        <View style={styles.postComposer}>
+          <TextInput value={postDraft} onChangeText={setPostDraft} placeholder="Share something with the group" placeholderTextColor={colors.textTertiary} style={styles.postInput} multiline maxLength={2000} />
+          {postAttachment ? <Text style={styles.postAttachmentChip} numberOfLines={1}>{postAttachment.kind === 'image' ? 'Image: ' : 'File: '}{postAttachment.name}</Text> : null}
+          <View style={styles.postComposerActions}>
+            <Pressable style={styles.postMediaButton} onPress={pickPostImage} accessibilityLabel="Add image"><Ionicons name="image-outline" size={19} color={colors.brand} /></Pressable>
+            <Pressable style={styles.postMediaButton} onPress={pickPostFile} accessibilityLabel="Add file"><Ionicons name="attach-outline" size={19} color={colors.brand} /></Pressable>
+            {postAttachment ? <Pressable onPress={() => setPostAttachment(null)}><Ionicons name="close-circle" size={20} color={colors.textTertiary} /></Pressable> : <View style={{ flex: 1 }} />}
+            <Pressable style={[styles.publishButton, posting && { opacity: 0.65 }]} onPress={submitGroupPost} disabled={posting || (!postDraft.trim() && !postAttachment)}>
+              {posting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.publishText}>Publish</Text>}
+            </Pressable>
+          </View>
+        </View>
+        {posts.length ? posts.map(renderPostCard) : <EmptyState title="No posts yet" description="Start the group feed with an update, image, or file." />}
+      </ScrollView>
+    );
+    if (activeTab === 'Members') return (
+      <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentInner}>
+        {members.length ? members.map((member) => (
+          <Pressable key={member.id || member.uid} style={styles.memberRow} onPress={() => openProfile(member.uid)}>
+            <View style={styles.memberAvatar}>
+              {member.avatar ? <Image source={{ uri: member.avatar }} style={styles.postAvatarImage} /> : <Text style={styles.postAvatarText}>{initialsForName(member.name)}</Text>}
+            </View>
+            <View>
+              <Text style={styles.memberName}>{member.name || 'Student'}</Text>
+              <Text style={styles.memberRole}>{member.role === 'owner' ? 'Group owner' : member.role === 'moderator' ? 'Moderator' : 'Member'}</Text>
+            </View>
+          </Pressable>
+        )) : <EmptyState title="No members found" description="Members will appear here." />}
+      </ScrollView>
+    );
+    if (activeTab === 'Media' || activeTab === 'Files') {
+      const expectedType = activeTab === 'Media' ? 'image' : 'file';
+      const items = posts.flatMap((post) => (post.attachments || []).filter((attachment) => attachment.type === expectedType).map((attachment, index) => ({ ...attachment, id: `${post.id}-${index}`, authorName: post.authorName })));
+      return (
+        <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentInner}>
+          {items.length ? items.map((item) => item.type === 'image' ? (
+            <Pressable key={item.id} onPress={() => Linking.openURL(item.url)}><Image source={{ uri: item.url }} style={styles.postImage} /></Pressable>
+          ) : (
+            <Pressable key={item.id} style={styles.postFile} onPress={() => Linking.openURL(item.url)}>
+              <Ionicons name="document-text-outline" size={21} color={colors.brand} />
+              <Text style={styles.postFileName}>{item.name || 'Download file'}</Text>
+            </Pressable>
+          )) : <EmptyState title={`No ${activeTab.toLowerCase()} yet`} description={`Shared ${activeTab.toLowerCase()} will appear here.`} />}
+        </ScrollView>
+      );
+    }
+    return <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentInner}><View style={styles.aboutCard}><Text style={styles.aboutTitle}>About {group.name}</Text><Text style={styles.aboutText}>{group.description || 'No description has been added yet.'}</Text><Text style={styles.aboutText}>{group.privacy === 'private' ? 'Private group — join approval may be required.' : 'Public group — students can join and participate.'}</Text><Text style={styles.aboutText}>{pluralize(Number(group.memberCount || 0), 'member')} · {group.category || 'Community'}</Text></View></ScrollView>;
+  };
 
   const am = activeMessage;
   const activeMine = Boolean(am && uid && am.senderId === uid);
@@ -1648,50 +1973,6 @@ function GroupDetailScreen({ groupId }) {
 
   const listHeader = group ? (
     <>
-      <View style={styles.compactHero}>
-        <View style={styles.heroTopRow}>
-          <View style={styles.heroAvatar}>
-            {groupPhotoUrl ? <Image source={{ uri: groupPhotoUrl }} style={styles.heroAvatarImage} /> : <Text style={styles.heroAvatarText}>{initialsForName(group.name)}</Text>}
-          </View>
-          <View style={styles.heroTextWrap}>
-            <Text style={styles.heroTitle} numberOfLines={1}>{group.name}</Text>
-            <Text style={styles.heroText} numberOfLines={1}>{pluralize(Number(group.memberCount || 0), 'member')}</Text>
-          </View>
-          <View style={styles.heroActionsRowInline}>
-            {isAdmin ? (
-              <Pressable style={styles.heroIconButton} onPress={openEdit} hitSlop={8} accessibilityRole="button" accessibilityLabel="Edit group">
-                <Ionicons name="create-outline" size={18} color={colors.brand} />
-              </Pressable>
-            ) : null}
-            {isMember ? (
-              <Pressable style={styles.heroIconButton} onPress={() => setGroupOptionsVisible(true)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Group options">
-                <Ionicons name="ellipsis-vertical" size={18} color={colors.brand} />
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
-
-        <View style={styles.heroMetaRow}>
-          <View style={styles.heroPill}>
-            <Ionicons name={group.privacy === 'private' ? 'lock-closed' : 'globe-outline'} size={11} color={colors.textSecondary} />
-            <Text style={styles.heroPillText}>{group.privacy === 'private' ? 'Private' : 'Public'}</Text>
-          </View>
-          {group.category ? (
-            <View style={styles.heroPill}>
-              <Text style={styles.heroPillText}>{group.category}</Text>
-            </View>
-          ) : null}
-          {group.allowMemberMessages === false ? (
-            <View style={styles.heroPill}>
-              <Ionicons name="megaphone-outline" size={11} color={colors.textSecondary} />
-              <Text style={styles.heroPillText}>Announcements</Text>
-            </View>
-          ) : null}
-        </View>
-
-        {group.description ? <Text style={styles.heroDescription} numberOfLines={2}>{group.description}</Text> : null}
-      </View>
-
       {requestsCard}
 
       {!isMember ? (
@@ -1747,10 +2028,42 @@ function GroupDetailScreen({ groupId }) {
   ) : null;
 
   return (
-    <ScreenShell title="Group" subtitle={group?.name || groupId} showBack loading={loading} scrollable={false} headerScrollY={scrollY}>
+    <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
       {group ? (
         <View style={styles.screen}>
+          <View style={styles.conversationHeader}>
+            <Pressable style={styles.conversationBack} onPress={() => router.back()} hitSlop={8} accessibilityRole="button" accessibilityLabel="Back">
+              <Ionicons name="chevron-back" size={25} color={colors.textPrimary} />
+            </Pressable>
+            <Pressable style={styles.conversationAvatar} onPress={() => setActiveTab('About')} accessibilityRole="button" accessibilityLabel="View group information">
+              {groupPhotoUrl ? <Image source={{ uri: groupPhotoUrl }} style={styles.conversationAvatarImage} /> : <Text style={styles.conversationAvatarText}>{initialsForName(group.name)}</Text>}
+            </Pressable>
+            <Pressable style={styles.conversationIdentity} onPress={() => setActiveTab('About')} accessibilityRole="button" accessibilityLabel="View group information">
+              <Text style={styles.conversationName} numberOfLines={1}>{group.name}</Text>
+              <Text style={styles.conversationStatus} numberOfLines={1}>{group.allowMemberMessages === false ? 'Announcements' : `${pluralize(Number(group.memberCount || 0), 'member')} · Group chat`}</Text>
+            </Pressable>
+            {isAdmin ? (
+              <Pressable style={styles.conversationAction} onPress={openEdit} hitSlop={8} accessibilityRole="button" accessibilityLabel="Edit group">
+                <Ionicons name="create-outline" size={18} color={colors.brand} />
+              </Pressable>
+            ) : null}
+            {isMember ? (
+              <Pressable style={styles.conversationAction} onPress={() => setGroupOptionsVisible(true)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Group options">
+                <Ionicons name="ellipsis-vertical" size={19} color={colors.brand} />
+              </Pressable>
+            ) : null}
+          </View>
           <View style={styles.flex}>
+            {activeTab === 'Chat' && isMember ? null : listHeader}
+            <View style={styles.groupTabs}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.groupTabsContent}>
+                {groupTabs.map((tab) => {
+                  const active = activeTab === tab.key;
+                  return <Pressable key={tab.key} onPress={() => setActiveTab(tab.key)} style={[styles.groupTab, active && styles.groupTabActive]} accessibilityRole="tab" accessibilityState={{ selected: active }}><Ionicons name={tab.icon} size={17} color={active ? colors.brand : colors.textSecondary} /><Text style={[styles.groupTabText, active && styles.groupTabTextActive]}>{tab.label}</Text>{tab.count ? <Text style={styles.tabCount}>{tab.count}</Text> : null}</Pressable>;
+                })}
+              </ScrollView>
+            </View>
+            {activeTab === 'Chat' ? <>
             <View style={styles.chatArea}>
               <FlatList
                 ref={scrollRef}
@@ -1769,7 +2082,6 @@ function GroupDetailScreen({ groupId }) {
                 initialNumToRender={20}
                 maxToRenderPerBatch={12}
                 windowSize={11}
-                ListHeaderComponent={listHeader}
                 ListEmptyComponent={listEmpty}
               />
 
@@ -1834,6 +2146,9 @@ function GroupDetailScreen({ groupId }) {
                     </View>
                   ) : (
                     <View style={styles.composerInputRow}>
+                      <Pressable accessibilityRole="button" accessibilityLabel="Create poll" style={styles.stickerButton} onPress={() => openPollEditor()} disabled={Boolean(editingMessage)}>
+                        <Ionicons name="bar-chart-outline" size={21} color={editingMessage ? colors.textTertiary : colors.brand} />
+                      </Pressable>
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel="Open sticker picker"
@@ -1877,13 +2192,50 @@ function GroupDetailScreen({ groupId }) {
                 </View>
               </View>
             ) : null}
+            </> : <View style={styles.flex}>{renderWorkspaceTab()}</View>}
           </View>
 
           <StickerPicker visible={stickerPickerVisible} onClose={() => setStickerPickerVisible(false)} onSelect={sendSticker} />
+          <Modal visible={pollVisible} transparent animationType="fade" onRequestClose={() => setPollVisible(false)}>
+            <Pressable style={styles.actionSheetBackdrop} onPress={() => setPollVisible(false)}>
+              <Pressable style={[styles.actionSheetCard, { gap: 10 }]} onPress={(event) => event.stopPropagation()}>
+                <Text style={{ color: colors.textPrimary, fontSize: 18, fontWeight: '800' }}>{pollEditing ? 'Edit poll' : 'Create poll'}</Text>
+                <TextInput value={pollQuestion} onChangeText={setPollQuestion} style={styles.fieldInput} placeholder="Ask a question" placeholderTextColor={colors.textTertiary} />
+                {pollOptions.map((option, index) => <TextInput key={index} value={option} onChangeText={(value) => setPollOptions((items) => items.map((item, i) => i === index ? value : item))} style={styles.fieldInput} placeholder={`Option ${index + 1}`} placeholderTextColor={colors.textTertiary} />)}
+                {pollOptions.length < 6 ? <Pressable onPress={() => setPollOptions((items) => [...items, ''])}><Text style={{ color: colors.brand, fontWeight: '800' }}>Add option</Text></Pressable> : null}
+                <Pressable onPress={() => setPollMultiSelect((value) => !value)} style={[styles.fieldInput, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}><Text style={{ color: colors.textPrimary, fontWeight: '700' }}>Allow multiple answers</Text><Ionicons name={pollMultiSelect ? 'checkbox' : 'square-outline'} size={22} color={colors.brand} /></Pressable>
+                <Pressable style={styles.saveButton} onPress={submitPoll}><Text style={styles.saveButtonText}>{pollEditing ? 'Save poll' : 'Post poll'}</Text></Pressable>
+              </Pressable>
+            </Pressable>
+          </Modal>
         </View>
       ) : (
-        <EmptyState title="Group not found" description="This group may have been deleted or is unavailable." />
+        <View style={styles.centerFill}>
+          {loading ? <ActivityIndicator size="large" color={colors.brand} /> : <EmptyState title="Group not found" description="This group may have been deleted or is unavailable." />}
+        </View>
       )}
+
+      <Modal visible={Boolean(reactionViewer)} transparent animationType="fade" onRequestClose={() => setReactionViewer(null)}>
+        <Pressable style={styles.actionSheetBackdrop} onPress={() => setReactionViewer(null)}>
+          <Pressable style={styles.reactionViewerCard} onPress={(event) => event.stopPropagation()}>
+            <View style={styles.actionSheetHandleWrap}>
+              <View style={styles.actionSheetHandle} />
+            </View>
+            <Text style={styles.reactionViewerTitle}>{reactionViewer?.title || 'Reactions'} · {reactionPeople.length}</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {reactionPeople.map((person) => (
+                <Pressable key={person.id} style={styles.reactorRow} onPress={() => { setReactionViewer(null); openProfile(person.id); }} accessibilityRole="button" accessibilityLabel={`Open ${person.name}'s profile`}>
+                  <View style={styles.reactorAvatar}>
+                    {person.avatar ? <Image source={{ uri: person.avatar }} style={styles.reactorAvatarImage} /> : <Text style={styles.reactorAvatarText}>{initialsForName(person.name)}</Text>}
+                  </View>
+                  <Text style={styles.reactorName} numberOfLines={1}>{person.id === uid ? 'You' : person.name}</Text>
+                  <Text style={styles.reactorEmojis}>{person.emojis.join(' ')}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Message actions: reactions + actions, opened with a long-press */}
       <Modal visible={Boolean(activeMessage)} transparent animationType="fade" onRequestClose={() => setActiveMessage(null)}>
@@ -2105,6 +2457,6 @@ function GroupDetailScreen({ groupId }) {
           </Animated.View>
         </KeyboardAvoidingView>
       </Modal>
-    </ScreenShell>
+    </SafeAreaView>
   );
 }

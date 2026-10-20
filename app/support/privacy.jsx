@@ -35,8 +35,8 @@ export default function PrivacyPolicyPage() {
           text: "Messages, study group discussions, posts, and uploaded materials are stored to deliver UniHelp's communication and collaboration features. We may review reported content to keep the community safe.",
         },
         {
-          title: "7. Marketplace & Hostel Listings",
-          text: "Information you publish in marketplace or hostel listings is visible to other users. Please avoid sharing sensitive personal information publicly.",
+          title: "7. Marketplace Listings",
+          text: "Information you publish in marketplace listings is visible to other users. Please avoid sharing sensitive personal information publicly.",
         },
         {
           title: "8. AI Assistant",

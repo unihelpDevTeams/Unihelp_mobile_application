@@ -10,6 +10,7 @@ import EmptyState from '../../src/shared/components/EmptyState';
 import ConfirmDialog from '../../src/shared/components/ConfirmDialog';
 import { deleteNotification, fetchNotificationsPage, markNotificationRead } from '../../services/firestoreSync';
 import { markConversationRead } from '../../src/shared/services/community';
+import { handleNotificationAction, NOTIFICATION_ACTION_IDS } from '../../src/shared/services/notificationActions';
 
 const PAGE_SIZE = 30;
 const BANNER_DURATION_MS = 5000;
@@ -112,7 +113,7 @@ const resolveNotificationRoute = (item) => {
   }
 
   // Group types are checked first so "group_join_request" doesn't fall into the friends bucket.
-  if (type.startsWith('group')) return '/community';
+  if (type.startsWith('group')) return '/groups';
   if (type === 'direct_message' || type === 'message') return '/messages';
   if (type.includes('friend') || type.includes('request') || type.includes('blocked')) return '/friends';
   if (type === 'premium') return '/premium';
@@ -130,6 +131,7 @@ const NotificationRow = memo(function NotificationRow({
   colors,
   onOpen,
   onReply,
+  onMute,
   onMarkRead,
   onRequestDelete,
 }) {
@@ -192,6 +194,17 @@ const NotificationRow = memo(function NotificationRow({
           >
             <Ionicons name="checkmark-done-outline" size={15} color={colors.grey} />
             <Text style={styles.rowActionSecondaryText}>Mark as read</Text>
+          </Pressable>
+        ) : null}
+        {canReply ? (
+          <Pressable
+            onPress={() => onMute(item)}
+            style={({ pressed }) => [styles.rowActionButton, pressed && styles.deleteButtonPressed]}
+            accessibilityRole="button"
+            accessibilityLabel={`Mute notifications from ${title}`}
+          >
+            <Ionicons name="volume-mute-outline" size={15} color={colors.grey} />
+            <Text style={styles.rowActionSecondaryText}>Mute</Text>
           </Pressable>
         ) : null}
         <Pressable
@@ -310,7 +323,12 @@ export default function NotificationsPage() {
   }, []);
 
   useEffect(() => {
-    fetchPage('initial');
+    // Start the request after this render commits. This avoids synchronously
+    // scheduling state updates while React is still processing the effect.
+    const initialLoad = setTimeout(() => {
+      fetchPage('initial');
+    }, 0);
+    return () => clearTimeout(initialLoad);
   }, [fetchPage]);
 
   const onRefresh = useCallback(() => {
@@ -327,8 +345,12 @@ export default function NotificationsPage() {
   // If the "Unread" tab is empty but more pages exist, keep fetching until something shows up.
   useEffect(() => {
     if (filter === 'unread' && !loading && unreadCount === 0 && hasMore && !loadingMore && !loadMoreError) {
-      fetchPage('more');
+      const nextPage = setTimeout(() => {
+        fetchPage('more');
+      }, 0);
+      return () => clearTimeout(nextPage);
     }
+    return undefined;
   }, [filter, loading, unreadCount, hasMore, loadingMore, loadMoreError, fetchPage]);
 
   const sections = useMemo(() => {
@@ -389,6 +411,28 @@ export default function NotificationsPage() {
     if (route) router.navigate(route);
   }, [markOneRead, router]);
 
+  const muteNotificationThread = useCallback(async (item) => {
+    const route = resolveNotificationRoute(item) || '';
+    const directMatch = route.match(/^\/messages\/(.+)$/) || route.match(/[?&]conversationId=([^&#]+)/);
+    const groupMatch = route.match(/^\/community\/([^/?#]+)/);
+    try {
+      await handleNotificationAction({
+        actionIdentifier: NOTIFICATION_ACTION_IDS.MUTE,
+        currentUserId: userId,
+        notification: { data: {
+          notificationId: item.id,
+          conversationId: item.conversationId || item.data?.conversationId || directMatch?.[1] || '',
+          groupId: item.groupId || item.data?.groupId || groupMatch?.[1] || '',
+          route,
+        } },
+      });
+      setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, read: true } : entry));
+      setBanner('Conversation muted. You can change this later from the chat settings.');
+    } catch (error) {
+      setBanner(error?.message || 'Could not mute this conversation.');
+    }
+  }, [userId]);
+
   const requestDelete = useCallback((item) => setPendingDelete(item), []);
 
   const markAllRead = useCallback(async () => {
@@ -444,10 +488,11 @@ export default function NotificationsPage() {
       colors={colors}
       onOpen={openNotification}
       onReply={replyToNotification}
+      onMute={muteNotificationThread}
       onMarkRead={markOneRead}
       onRequestDelete={requestDelete}
     />
-  ), [typeMeta, styles, colors, openNotification, replyToNotification, markOneRead, requestDelete]);
+  ), [typeMeta, styles, colors, openNotification, replyToNotification, muteNotificationThread, markOneRead, requestDelete]);
 
   const renderSectionHeader = useCallback(({ section }) => (
     <View style={styles.sectionHeaderRow}>
@@ -460,7 +505,7 @@ export default function NotificationsPage() {
     if (loadMoreError) {
       return (
         <Pressable style={styles.footerLoader} onPress={loadMore} accessibilityRole="button">
-          <Text style={styles.footerRetryText}>Couldn't load more. Tap to retry</Text>
+          <Text style={styles.footerRetryText}>Couldn&apos;t load more. Tap to retry</Text>
         </Pressable>
       );
     }

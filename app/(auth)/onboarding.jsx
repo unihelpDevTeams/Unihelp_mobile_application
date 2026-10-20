@@ -30,7 +30,7 @@ const ONBOARDING_DATA = [
     id: '3',
     image: onboardingMarket,
     title: 'Student Marketplace',
-    description: 'Buy and sell hostels, textbooks, and other student essentials right in the app.',
+    description: 'Buy and sell textbooks and other student essentials right in the app.',
   },
   {
     id: '4',

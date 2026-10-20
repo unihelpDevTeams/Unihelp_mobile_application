@@ -26,7 +26,7 @@ import { blockUser, unblockUser } from '../../services/firestoreSync';
 import MarketingSourcesManager from '../../src/admin/MarketingSourcesManager';
 import PromoSpotlightManager from '../../src/admin/PromoSpotlightManager';
 import StickerManager from '../../src/admin/StickerManager';
-import PastQuestionReviewManager from '../../src/admin/PastQuestionReviewManager';
+import PastQuestionModerationManager from '../../src/admin/PastQuestionModerationManager';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import {
   ADMIN_PREMIUM_GIFT_DAYS,
@@ -61,14 +61,14 @@ const ADMIN_NAV_SECTIONS = [
   {
     label: 'Content',
     items: [
-      { key: 'pastQuestions', label: 'Past Questions', icon: 'clipboard-outline', description: 'Review uploaded past questions before they go live.' },
+      { key: 'pastQuestions', label: 'Past Questions', icon: 'clipboard-outline', description: 'Remove inappropriate past-question documents.' },
       { key: 'mediaSources', label: 'Media Sources', icon: 'megaphone-outline', description: 'Manage where new students say they heard about UniHelp.' },
     ],
   },
   {
     label: 'Marketplace',
     items: [
-      { key: 'listings', label: 'Listings', icon: 'storefront-outline', description: 'Search, inspect and remove marketplace and hostel listings.' },
+      { key: 'listings', label: 'Listings', icon: 'storefront-outline', description: 'Search, inspect and remove marketplace listings.' },
       { key: 'sponsorships', label: 'Sponsorships', icon: 'ribbon-outline', description: 'Paid listing promotions and their payment status.' },
     ],
   },
@@ -105,7 +105,6 @@ const ADMIN_COLLECTION_MAP = {
 
 const LISTING_TYPES = [
   { key: 'marketplace', label: 'Marketplace', icon: 'pricetag-outline' },
-  { key: 'hostels', label: 'Hostels', icon: 'home-outline' },
 ];
 
 /* ============================================================================
@@ -594,7 +593,7 @@ export default function AdminPanelPage() {
       case 'stickers':
         return <StickerManager colors={colors} />;
       case 'pastQuestions':
-        return <PastQuestionReviewManager />;
+        return <PastQuestionModerationManager />;
       case 'access':
         return <AdminAccessPage colors={colors} profile={profile} user={user} viaFlag={hasAdminFlag} viaEmail={isAllowlisted} />;
       case 'revenue':

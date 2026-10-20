@@ -12,12 +12,10 @@ export const headerMenuSections = [
   {
     title: 'Campus',
     items: [
-      { label: 'Groups', route: '/community' },
+      { label: 'Groups', route: '/groups' },
       { label: 'Friends', route: '/friends' },
       { label: 'Find Friends', route: '/find-friends' },
       { label: 'Messages', route: '/messages' },
-      { label: 'Stories', route: '/stories' },
-      { label: 'My Stories', route: '/mystories', icon: 'book-outline', requiresUpload: 'stories' },
     ],
   },
   {
@@ -31,9 +29,7 @@ export const headerMenuSections = [
   {
     title: 'Marketplace',
     items: [
-      { label: 'Find Hostels', route: '/hostelmarketplace' },
       { label: 'Student Product Listings', route: '/studentmarketplace' },
-      { label: 'My Hostels', route: '/myhostels', icon: 'home-outline', requiresUpload: 'hostels' },
       { label: 'My Listings', route: '/myproducts', icon: 'storefront-outline', requiresUpload: 'listings' },
     ],
   },

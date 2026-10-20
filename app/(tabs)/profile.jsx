@@ -417,7 +417,7 @@ export default function ProfileScreen() {
   const [initialForm, setInitialForm] = useState(emptyForm);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [coverUploading, setCoverUploading] = useState(false);
-  const [stats, setStats] = useState({ listings: 0, hostelListings: 0, groups: 0, stories: 0 });
+  const [stats, setStats] = useState({ listings: 0, groups: 0 });
   const [friendCount, setFriendCount] = useState(0);
   const [statsLoading, setStatsLoading] = useState(true);
   const [streakCount, setStreakCount] = useState(0);
@@ -750,14 +750,12 @@ export default function ProfileScreen() {
   const loadStats = useCallback(async () => {
     if (!user?.uid) return;
     try {
-      const [listingsSnap, hostelsSnap, groupsSnap, storiesSnap] = await Promise.all([
+      const [listingsSnap, groupsSnap] = await Promise.all([
         getDocs(query(collection(db, COLLECTIONS.studentMarketplace), where('userId', '==', user.uid))),
-        getDocs(query(collection(db, COLLECTIONS.hostels), where('userId', '==', user.uid))),
         getDocs(query(collection(db, COLLECTIONS.groups), where('ownerId', '==', user.uid))),
-        getDocs(query(collection(db, COLLECTIONS.stories), where('authorId', '==', user.uid))),
       ]);
       if (!isMountedRef.current) return;
-      setStats({ listings: listingsSnap.size, hostelListings: hostelsSnap.size, groups: groupsSnap.size, stories: storiesSnap.size });
+      setStats({ listings: listingsSnap.size, groups: groupsSnap.size });
     } catch {
       /* silent — stats are non-critical */
     } finally {
@@ -833,7 +831,7 @@ export default function ProfileScreen() {
   const isAdmin =
     profile?.admin === true ||
     user?.email?.trim().toLowerCase() === 'iadejuwon77@gmail.com';
-  const totalUploads = stats.listings + stats.hostelListings + stats.stories;
+  const totalUploads = stats.listings;
 
   // Profile completeness meter
   const completion = useMemo(() => {
@@ -1038,8 +1036,6 @@ export default function ProfileScreen() {
 
   const uploadStatCards = [
     { label: 'Listings', value: stats.listings, icon: 'storefront-outline', color: colors.orange, bg: colors.orangeLight, path: '/manage/listings' },
-    { label: 'Hostels', value: stats.hostelListings, icon: 'home-outline', color: colors.blue, bg: colors.blueLight, path: '/manage/hostels' },
-    { label: 'Stories', value: stats.stories, icon: 'book-outline', color: colors.purple, bg: colors.purpleLight, path: '/manage/stories' },
     { label: 'Groups', value: stats.groups, icon: 'people-outline', color: colors.teal, bg: colors.tealLight, path: '/groups' },
   ];
 

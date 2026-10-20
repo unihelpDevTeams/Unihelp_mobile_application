@@ -13,7 +13,7 @@ import {
   Platform,
   StyleSheet,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
@@ -21,6 +21,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { PageLoader } from '../../src/shared/components/AILoaders';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
+import { isPremiumActive } from '../../src/shared/services/premium';
+import { listResourceBookmarks, toggleResourceBookmark } from '../../src/shared/services/resourceBookmarks';
 
 /* -------------------------------------------------------------------------- */
 /*                                  Constants                                 */
@@ -541,7 +544,7 @@ function ChoiceChip({ label, active, onPress, s }) {
   );
 }
 
-const CourseCard = React.memo(function CourseCard({ course, best, onPress, s, T }) {
+const CourseCard = React.memo(function CourseCard({ course, best, onPress, onToggleSaved, saved, saving, isPremium, s, T }) {
   const good = best != null && best >= PASS_MARK;
   return (
     <TouchableOpacity
@@ -554,6 +557,14 @@ const CourseCard = React.memo(function CourseCard({ course, best, onPress, s, T 
       <View style={s.courseIcon}>
         <MaterialCommunityIcons name="file-document-edit-outline" size={22} color={T.indigo} />
       </View>
+      <Pressable
+        onPress={(event) => { event.stopPropagation?.(); onToggleSaved(course); }}
+        style={{ position: 'absolute', right: 10, top: 10, width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: saved ? T.indigoTint : T.chip }}
+        accessibilityRole="button"
+        accessibilityLabel={saved ? `Remove ${course.title} from saved CBT papers` : `Save ${course.title} for later`}
+      >
+        <Ionicons name={saving ? 'hourglass-outline' : saved ? 'bookmark' : isPremium ? 'bookmark-outline' : 'lock-closed-outline'} size={17} color={saved ? T.indigo : T.textSecondary} />
+      </Pressable>
       <Text style={s.courseTitle} numberOfLines={2}>{course.title}</Text>
       <Text style={s.courseMeta}>{course.question_count} questions</Text>
       {best != null ? (
@@ -572,6 +583,9 @@ const CourseCard = React.memo(function CourseCard({ course, best, onPress, s, T 
 
 export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
   const router = useRouter();
+  const { courseId: rawCourseId } = useLocalSearchParams();
+  const courseId = Array.isArray(rawCourseId) ? rawCourseId[0] : rawCourseId;
+  const { user, profile } = useAuth();
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
   const T = useCbtTheme(colors, isDark);
@@ -589,6 +603,9 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [history, setHistory] = useState([]);
   const [resumable, setResumable] = useState(null);
+  const [savedCourseIds, setSavedCourseIds] = useState(new Set());
+  const [savingCourseId, setSavingCourseId] = useState(null);
+  const premiumActive = isPremiumActive(profile);
 
   // Setup
   const [setupCourse, setSetupCourse] = useState(null);
@@ -685,6 +702,17 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
     loadCourses();
     return () => abortRef.current?.abort();
   }, [loadCourses]);
+
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+    let cancelled = false;
+    listResourceBookmarks(user.uid)
+      .then((bookmarks) => {
+        if (!cancelled) setSavedCourseIds(new Set(bookmarks.filter((item) => item.resourceType === 'cbt').map((item) => String(item.resourceId))));
+      })
+      .catch(() => { if (!cancelled) setSavedCourseIds(new Set()); });
+    return () => { cancelled = true; };
+  }, [user?.uid]);
 
   /* ------------------------------ Derived data ----------------------------- */
 
@@ -801,6 +829,35 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
     setTimeTouched(false);
     setStage('setup');
   }, []);
+
+  useEffect(() => {
+    if (!courseId || !courses.length || stage !== 'browse') return;
+    const course = courses.find((item) => String(item.id) === String(courseId));
+    if (course) beginSetup(course);
+  }, [courseId, courses, stage, beginSetup]);
+
+  const toggleSavedCourse = async (course) => {
+    if (!premiumActive) {
+      setDialog({ icon: 'lock-closed', title: 'Premium study library', message: 'Save individual CBT papers alongside your notes and past questions with UniHelp Premium.', actions: [{ key: 'cancel', label: 'Not now', variant: 'secondary', onPress: closeDialog }, { key: 'premium', label: 'Explore Premium', onPress: () => { closeDialog(); router.navigate('/premium'); } }] });
+      return;
+    }
+    const id = String(course.id);
+    if (savingCourseId) return;
+    setSavingCourseId(id);
+    try {
+      const result = await toggleResourceBookmark({ type: 'cbt', resource: { ...course, id, title: course.title }, saved: savedCourseIds.has(id), uid: user?.uid });
+      setSavedCourseIds((current) => {
+        const next = new Set(current);
+        if (result.saved) next.add(id); else next.delete(id);
+        return next;
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } catch (error) {
+      setDialog({ icon: 'alert-circle-outline', iconColor: T.rose, title: 'Could not save paper', message: error?.message || 'Please try again.', actions: [{ key: 'close', label: 'Close', onPress: closeDialog }] });
+    } finally {
+      setSavingCourseId(null);
+    }
+  };
 
   const changeQuantity = (value) => {
     const clean = digitsOnly(value);
@@ -1413,7 +1470,17 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
               </View>
             }
             renderItem={({ item }) => (
-              <CourseCard course={item} best={bestByCourse[item.id] ?? bestByCourse[item.title]} onPress={beginSetup} s={s} T={T} />
+              <CourseCard
+                course={item}
+                best={bestByCourse[item.id] ?? bestByCourse[item.title]}
+                onPress={beginSetup}
+                onToggleSaved={toggleSavedCourse}
+                saved={savedCourseIds.has(String(item.id))}
+                saving={savingCourseId === String(item.id)}
+                isPremium={premiumActive}
+                s={s}
+                T={T}
+              />
             )}
             contentContainerStyle={[s.screenPad, { paddingBottom: bottomPad }]}
             keyboardShouldPersistTaps="handled"

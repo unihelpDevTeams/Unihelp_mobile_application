@@ -23,6 +23,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ScreenShell from '../../../src/shared/components/ScreenShell';
@@ -39,6 +40,7 @@ import { getDownloadRecord, saveResourceForOffline } from '../../../src/shared/o
 import { getApiUrl } from '../../../src/shared/services/backend';
 import FriendRequestModal from '../../../src/shared/components/FriendRequestModal';
 import { isPremiumActive } from '../../../src/shared/services/premium';
+import { listResourceBookmarks, toggleResourceBookmark } from '../../../src/shared/services/resourceBookmarks';
 import {
   fetchMarketplaceSponsorshipPlans,
   formatSponsorshipPrice,
@@ -961,6 +963,8 @@ export default function RecordViewPage() {
   const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false);
 
   const [savingOffline, setSavingOffline] = useState(false);
+  const [bookmarkSaved, setBookmarkSaved] = useState(false);
+  const [bookmarkSaving, setBookmarkSaving] = useState(false);
   const [offlineRecord, setOfflineRecord] = useState(null);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
 
@@ -1035,6 +1039,7 @@ export default function RecordViewPage() {
   const isPremiumUser = isPremiumActive(profile);
   // UX gate only: the offline endpoint stays the authority for entitlement.
   const canSaveOffline = Boolean(isPremiumUser && (['note', 'studyMaterial'].includes(type) ? asset?.hasDocumentUrl : (type === 'question' && (asset?.hasDocumentUrl || Array.isArray(item?.content)))));
+  const canBookmarkResource = ['note', 'question'].includes(type);
 
   const title = item?.title || item?.name || 'Untitled';
   const description = item?.description || item?.body || item?.summary || '';
@@ -1139,6 +1144,22 @@ export default function RecordViewPage() {
       if (isMounted.current) setReviewsLoading(false);
     }
   }, [id, type]);
+
+  useEffect(() => {
+    if (!user?.uid || !id || !canBookmarkResource) {
+      setBookmarkSaved(false);
+      return undefined;
+    }
+    let cancelled = false;
+    listResourceBookmarks(user.uid)
+      .then((bookmarks) => {
+        if (!cancelled) setBookmarkSaved(bookmarks.some((bookmark) => bookmark.resourceType === type && String(bookmark.resourceId) === String(id)));
+      })
+      .catch(() => {
+        if (!cancelled) setBookmarkSaved(false);
+      });
+    return () => { cancelled = true; };
+  }, [user?.uid, id, type, canBookmarkResource]);
 
   useEffect(() => {
     loadReviews();
@@ -1288,6 +1309,24 @@ export default function RecordViewPage() {
       Alert.alert('Save failed', error?.message || 'We could not save this resource right now.');
     } finally {
       if (isMounted.current) setSavingOffline(false);
+    }
+  };
+
+  const toggleSavedResource = async () => {
+    if (!isPremiumUser) {
+      promptPremium('Saving notes and past questions to your study library is available with UniHelp Premium.');
+      return;
+    }
+    if (!item || bookmarkSaving) return;
+    setBookmarkSaving(true);
+    try {
+      const result = await toggleResourceBookmark({ type, resource: item, saved: bookmarkSaved });
+      setBookmarkSaved(result.saved);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } catch (error) {
+      Alert.alert('Could not update saved resources', error?.message || 'Please try again.');
+    } finally {
+      if (isMounted.current) setBookmarkSaving(false);
     }
   };
 
@@ -1543,6 +1582,18 @@ export default function RecordViewPage() {
         <Text style={styles.typeBadgeText}>{typeMeta.label}</Text>
       </View>
       <View style={styles.topActions}>
+        {canBookmarkResource ? (
+          <Pressable
+            style={({ pressed }) => [styles.iconButton, pressed && styles.pressedSubtle]}
+            onPress={toggleSavedResource}
+            hitSlop={8}
+            disabled={bookmarkSaving}
+            accessibilityRole="button"
+            accessibilityLabel={bookmarkSaved ? 'Remove from saved resources' : 'Save resource'}
+          >
+            {bookmarkSaving ? <ActivityIndicator size="small" color={colors.icon} /> : <Ionicons name={bookmarkSaved ? 'bookmark' : 'bookmark-outline'} size={18} color={bookmarkSaved ? colors.brand : colors.icon} />}
+          </Pressable>
+        ) : null}
         {canManageCurrentResource ? (
           <Pressable
             style={({ pressed }) => [styles.iconButton, pressed && styles.pressedSubtle]}

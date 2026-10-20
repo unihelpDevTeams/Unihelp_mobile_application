@@ -9,7 +9,7 @@ import { spacing, borderRadius } from '../../src/shared/theme';
 const FAQ_DATA = [
   {
     q: 'What is UniHelp?',
-    a: 'UniHelp is an all-in-one student platform built for university students. It combines lecture notes, past questions, study groups, messaging, a student marketplace, hostel listings, AI learning tools, and more in one app.',
+    a: 'UniHelp is an all-in-one student platform built for university students. It combines lecture notes, past questions, study groups, messaging, a student marketplace, AI learning tools, and more in one app.',
   },
   {
     q: 'Is UniHelp free to use?',
@@ -50,10 +50,6 @@ const FAQ_DATA = [
   {
     q: 'How do I contact a seller?',
     a: 'Open the listing and tap the Contact button to start a conversation with the seller through UniHelp messaging.',
-  },
-  {
-    q: 'Are hostel listings verified?',
-    a: 'While many listings are genuine, always inspect any hostel in person and confirm details before making payments.',
   },
   {
     q: 'What can the AI Assistant do?',

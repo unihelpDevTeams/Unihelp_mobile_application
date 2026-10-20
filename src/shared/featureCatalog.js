@@ -35,11 +35,11 @@ export const featureCatalog = [
     key: 'community',
     title: 'Community',
     description: 'Groups, messages, and notifications that match the website data model.',
-    route: '/community',
+    route: '/groups',
     accent: '#0EA5E9',
     icon: 'people-outline',
     items: [
-      { title: 'Study Groups', route: '/community' },
+      { title: 'Study Groups', route: '/groups' },
       { title: 'Messages', route: '/messages' },
       { title: 'Notifications', route: '/notifications' },
       { title: 'Community Settings', route: '/help-center' },
@@ -48,25 +48,12 @@ export const featureCatalog = [
   {
     key: 'marketplace',
     title: 'Marketplace',
-    description: 'Hostels and student listings shared from the same content source.',
+    description: 'Student listings shared from the same content source.',
     route: '/marketplace',
     accent: '#10B981',
     icon: 'storefront-outline',
     items: [
-      { title: 'Hostels', route: '/hostelmarketplace' },
       { title: 'Student Listings', route: '/studentmarketplace' },
-    ],
-  },
-  {
-    key: 'stories',
-    title: 'Stories',
-    description: 'Read, publish, and bookmark stories with the same structure as the website.',
-    route: '/stories',
-    accent: '#F97316',
-    icon: 'book-outline',
-    items: [
-      { title: 'Story Feed', route: '/stories' },
-      { title: 'Create Story', route: '/create-story' },
     ],
   },
   {

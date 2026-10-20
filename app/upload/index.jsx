@@ -27,12 +27,10 @@ import { ACADEMIC_LEVELS } from '../../src/signup/validation';
 import { useAuth } from '../../context/AuthContext';
 import {
   countUserUploads,
-  createHostelListing,
   createNote,
   createQuestion,
   createStudentListing,
   fetchRecord,
-  updateHostelListing,
   updateNote,
   updateQuestion,
   updateStudentListing,
@@ -83,7 +81,6 @@ const PDF_TYPES = ['application/pdf'];
 const RESOURCE_UPLOAD_TYPES = ['note', 'question'];
 const EDIT_COLLECTIONS = {
   marketplace: 'studentMarketplace',
-  hostel: 'hostels',
   note: 'notes',
   question: 'questions',
 };
@@ -265,35 +262,6 @@ const CONFIGS = {
     ],
     defaultForm: { title: '', category: '', condition: '', price: '', location: '', availability: '', phone: '', description: '' },
   },
-  hostel: {
-    key: 'hostel',
-    title: 'Upload Hostel Listing',
-    subtitle: 'Add photos, rent, location, amenities, and inspection/contact details.',
-    cardTitle: 'Hostel details',
-    cardIcon: 'home-outline',
-    submitLabel: 'Upload hostel',
-    successMessage: 'Hostel uploaded successfully.',
-    routeAfter: '/hostelmarketplace',
-    pickerTypes: IMAGE_TYPES,
-    multiple: true,
-    attachmentLabel: 'Photos',
-    uploadHint: 'Show the room, bathroom and compound. The first photo is your cover.',
-    dropHint: 'Tap to add photos',
-    formats: ['JPG', 'PNG', 'HEIC'],
-    fileKind: 'images',
-    fields: [
-      { key: 'title', label: 'Title', placeholder: 'e.g. 2-bedroom self-contained', icon: 'create-outline', type: 'text' },
-      { key: 'location', label: 'Location', placeholder: 'e.g. Behind Main Gate', icon: 'location-outline', type: 'text' },
-      { key: 'roomType', label: 'Room type', placeholder: 'Select room type...', icon: 'bed-outline', type: 'select', options: ROOM_TYPE_OPTIONS },
-      { key: 'price', label: 'Price (per year)', placeholder: 'e.g. 350000', icon: 'cash-outline', type: 'text' },
-      { key: 'distance', label: 'Distance to campus (optional)', placeholder: 'e.g. 5 min walk, 10 min bike', icon: 'walk-outline', type: 'text' },
-      { key: 'amenities', label: 'Amenities (optional)', placeholder: 'Select amenities...', icon: 'grid-outline', type: 'chips', options: AMENITY_OPTIONS },
-      { key: 'availability', label: 'Availability (optional)', placeholder: 'Select availability...', icon: 'checkmark-circle-outline', type: 'select', options: HOSTEL_AVAILABILITY_OPTIONS },
-      { key: 'phone', label: 'Phone', placeholder: 'e.g. 080XXXXXXXX', icon: 'call-outline', type: 'text' },
-      { key: 'description', label: 'Description (optional)', placeholder: 'Add amenities, distance to campus, etc.', icon: 'document-text-outline', multiline: true, type: 'text' },
-    ],
-    defaultForm: { title: '', location: '', roomType: '', price: '', distance: '', amenities: '', availability: '', phone: '', description: '' },
-  },
 };
 
 const MAX_SIZE = {
@@ -304,7 +272,7 @@ const MAX_SIZE = {
 
 const normalizeType = (value) => {
   const input = Array.isArray(value) ? value[0] : value;
-  if (input === 'note' || input === 'marketplace' || input === 'hostel') return input;
+  if (input === 'note' || input === 'marketplace') return input;
   return 'question';
 };
 

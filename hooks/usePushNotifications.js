@@ -100,6 +100,12 @@ export function PushNotificationBootstrap() {
         if (clearStoredResponse) await clearLastNotificationResponse();
         return;
       }
+      // Reply, mute and mark-read are tray actions. They should complete silently
+      // and never fall through to opening the app's destination screen.
+      if (result?.handled) {
+        if (clearStoredResponse) await clearLastNotificationResponse();
+        return;
+      }
     }
 
     const isPomodoroRoute = target === '/pomodoroScreen' || target?.pathname === '/pomodoroScreen';

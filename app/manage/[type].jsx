@@ -2,7 +2,7 @@ import React from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import ManageUploadsScreen from '../../src/shared/screens/ManageUploadsScreen';
 
-const VALID_TYPES = ['hostels', 'listings', 'stories'];
+const VALID_TYPES = ['listings'];
 
 export default function ManageTypeScreen() {
   const params = useLocalSearchParams();

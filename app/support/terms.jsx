@@ -46,8 +46,8 @@ const TERMS_SECTIONS = [
   },
   {
     id: '7',
-    title: "7. Marketplace & Hostel Listings",
-    text: "Marketplace items and hostel listings are created by individual users. UniHelp does not own, inspect, or guarantee these listings. Always verify details before making payments or entering agreements.",
+    title: "7. Marketplace Listings",
+    text: "Marketplace items are created by individual users. UniHelp does not own, inspect, or guarantee these listings. Always verify details before making payments or entering agreements.",
   },
   {
     id: '8',
@@ -72,7 +72,7 @@ const TERMS_SECTIONS = [
   {
     id: '12',
     title: "12. Limitation of Liability",
-    text: "UniHelp is provided 'as is'. We are not responsible for losses arising from service interruptions, user-generated content, marketplace transactions, hostel agreements, or reliance on AI-generated responses.",
+    text: "UniHelp is provided 'as is'. We are not responsible for losses arising from service interruptions, user-generated content, marketplace transactions, or reliance on AI-generated responses.",
   },
   {
     id: '13',

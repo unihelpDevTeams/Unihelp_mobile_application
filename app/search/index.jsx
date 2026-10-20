@@ -9,7 +9,7 @@ import ScreenShell from '../../src/shared/components/ScreenShell';
 import { ShimmerListItem } from '../../src/shared/components/ShimmerSkeleton';
 import EmptyState from '../../src/shared/components/EmptyState';
 import { Chip } from '../../src/shared/components/Button';
-import { fetchNotes, fetchQuestions, fetchHostels, fetchStudentListings, fetchFormulas } from '../../services/firestoreSync';
+import { fetchNotes, fetchQuestions, fetchStudentListings, fetchFormulas } from '../../services/firestoreSync';
 
 const SEARCH_HISTORY_KEY = '@unihelp_search_history';
 
@@ -38,7 +38,6 @@ const SUGGESTED_SEARCHES = [
   'GST past questions',
   'Physics formulas',
   'Chemistry notes',
-  'Hostels near campus',
   'Calculus',
 ];
 
@@ -64,7 +63,6 @@ export default function SearchScreen() {
     notes: { label: 'Notes', icon: 'book-outline', color: colors.brand },
     questions: { label: 'Questions', icon: 'clipboard-outline', color: colors.blue },
     formulas: { label: 'Formulas', icon: 'calculator-outline', color: colors.purple },
-    hostels: { label: 'Hostels', icon: 'home-outline', color: colors.orange },
     products: { label: 'Products', icon: 'pricetag-outline', color: colors.green },
   }), [colors]);
 
@@ -191,11 +189,10 @@ export default function SearchScreen() {
     const term = searchTerm.toLowerCase();
 
     try {
-      const [notes, questions, formulas, hostels, products] = await Promise.all([
+      const [notes, questions, formulas, products] = await Promise.all([
         fetchNotes(),
         fetchQuestions(),
         fetchFormulas(),
-        fetchHostels(),
         fetchStudentListings(),
       ]);
 
@@ -220,13 +217,6 @@ export default function SearchScreen() {
           resultType: 'formulas',
           title: item.title || item.name || 'Formula',
           subtitle: `${item.subject || item.category || 'Formula'}`,
-        })),
-        ...(hostels || []).map((item) => ({
-          ...item,
-          type: 'hostel',
-          resultType: 'hostels',
-          title: item.title || item.name || 'Hostel',
-          subtitle: `${item.location || item.school || 'Hostel'} • ${formatPrice(item.price)}`,
         })),
         ...(products || []).map((item) => ({
           ...item,

@@ -58,26 +58,20 @@ export function parseDeepLink(rawUrl) {
       return { pathname: '/studentmarketplace', params: {} };
     }
 
-    if (pathname === '/hostelmarketplace' || pathname === '/hostels' || pathname === '/hostel') {
-      const hostelId = pickValue(query.listing, query.id, query.hostelId, query.hostel);
-      if (hostelId) return { pathname: '/view/[type]/[id]', params: { type: 'hostel', id: hostelId } };
-      return { pathname: '/hostelmarketplace', params: {} };
-    }
-
     if (pathname === '/resources') {
       const resourceId = pickValue(query.id, query.resourceId, query.item);
       if (resourceId) return { pathname: '/view/[type]/[id]', params: { type: 'studyMaterial', id: resourceId } };
       return { pathname: '/resources', params: {} };
     }
 
+    // `/groups` is the canonical list tab. Keep legacy `/community` links working.
+    if (pathname === '/groups' || pathname === '/community') {
+      return { pathname: '/groups', params: {} };
+    }
+
     if (pathname.startsWith('/community/')) {
       const groupId = pickValue(query.groupId, pathname.split('/').filter(Boolean)[1]);
       if (groupId) return { pathname: '/community/[groupId]', params: { groupId } };
-    }
-
-    if (pathname.startsWith('/stories/')) {
-      const storyId = pickValue(query.storyId, pathname.split('/').filter(Boolean)[1]);
-      if (storyId) return { pathname: '/stories/[storyId]', params: { storyId } };
     }
 
     if (pathname.startsWith('/view/')) {

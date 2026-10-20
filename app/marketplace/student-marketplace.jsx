@@ -55,7 +55,6 @@ const CATEGORY_ICONS = {
   fashion: 'shirt-outline',
   clothing: 'shirt-outline',
   furniture: 'bed-outline',
-  hostel: 'home-outline',
   food: 'fast-food-outline',
   beauty: 'sparkles-outline',
   default: 'cube-outline',
@@ -1013,7 +1012,7 @@ export default function StudentMarketplacePage() {
           <TextInput
             value={search}
             onChangeText={setSearch}
-            placeholder="Search books, gadgets, hostel items…"
+            placeholder="Search books, gadgets, and student items…"
             placeholderTextColor={colors.greyLight}
             style={styles.searchInput}
             returnKeyType="search"

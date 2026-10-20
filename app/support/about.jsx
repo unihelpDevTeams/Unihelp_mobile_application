@@ -45,8 +45,8 @@ const FEATURES = [
   },
   {
     icon: 'home-outline',
-    title: 'Hostel Finder',
-    text: 'Discover nearby hostel listings and connect directly with landlords or agents before making your choice.',
+    title: 'Campus Community',
+    text: 'Connect with fellow students, share ideas, and find support across your campus.',
     color: '#3B82F6', // Blue
   },
   {

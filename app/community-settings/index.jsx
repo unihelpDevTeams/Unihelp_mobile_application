@@ -205,7 +205,7 @@ export default function CommunitySettingsPage() {
     setMessage('');
     try {
       await deleteGroup(groupId, user.uid);
-      router.replace('/community');
+      router.replace('/groups');
     } catch (error) {
       setMessage(error?.message || 'Unable to delete this group.');
       setMessageType('error');
@@ -229,7 +229,7 @@ export default function CommunitySettingsPage() {
     setMessage('');
     try {
       await leaveGroup(group, user.uid);
-      router.replace('/community');
+      router.replace('/groups');
     } catch (error) {
       setMessage(error?.message || 'Unable to leave this group.');
       setMessageType('error');

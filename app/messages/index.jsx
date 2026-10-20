@@ -6,6 +6,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   RefreshControl,
@@ -292,7 +293,7 @@ export default function MessagesPage() {
     chipText: { fontSize: 12.5, fontWeight: '700', color: c.textSecondary },
     chipTextActive: { color: c.brandText },
 
-    tabContent: { flex: 1 },
+    tabContent: { flex: 1, minHeight: 0 },
     listContent: { paddingBottom: 96 },
     listHint: { textAlign: 'center', color: c.textTertiary, fontSize: 12, paddingVertical: 12 },
     sectionLabel: { fontSize: 12, fontWeight: '800', color: c.textSecondary, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10, marginTop: 6 },
@@ -588,10 +589,25 @@ export default function MessagesPage() {
 
   /* -------------------------------- Actions ------------------------------- */
 
-  const switchTab = (key) => {
+  const switchTab = useCallback((key) => {
     setActiveTab(key);
     setQuery('');
-  };
+  }, []);
+
+  // Let students move through Chats, Friends, and Requests naturally without
+  // stealing normal vertical scrolling from the lists inside each tab.
+  const tabSwipeResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gesture) => (
+      Math.abs(gesture.dx) > 14 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.4
+    ),
+    onPanResponderRelease: (_, gesture) => {
+      if (Math.abs(gesture.dx) < 56) return;
+      const currentIndex = TABS.findIndex((tab) => tab.key === activeTab);
+      const nextIndex = gesture.dx < 0 ? currentIndex + 1 : currentIndex - 1;
+      const nextTab = TABS[nextIndex];
+      if (nextTab) switchTab(nextTab.key);
+    },
+  }), [activeTab, switchTab]);
 
   const openConversation = useCallback((item) => router.navigate(`/messages/${item.id}`), [router]);
 
@@ -1291,26 +1307,28 @@ export default function MessagesPage() {
         })}
       </View>
 
-      {activeTab !== 'requests'
-        ? renderSearchBar(query, setQuery, activeTab === 'chats' ? 'Search chats' : 'Search friends')
-        : null}
+      <View style={styles.tabContent} {...tabSwipeResponder.panHandlers}>
+        {activeTab !== 'requests'
+          ? renderSearchBar(query, setQuery, activeTab === 'chats' ? 'Search chats' : 'Search friends')
+          : null}
 
-      {activeTab === 'chats' ? (
-        <View style={styles.chipRow}>
-          <Pressable style={[styles.chip, !unreadOnly && styles.chipActive]} onPress={() => setUnreadOnly(false)} accessibilityRole="button">
-            <Text style={[styles.chipText, !unreadOnly && styles.chipTextActive]}>All</Text>
-          </Pressable>
-          <Pressable style={[styles.chip, unreadOnly && styles.chipActive]} onPress={() => setUnreadOnly(true)} accessibilityRole="button">
-            <Text style={[styles.chipText, unreadOnly && styles.chipTextActive]}>
-              Unread{unreadChats > 0 ? ` (${unreadChats})` : ''}
-            </Text>
-          </Pressable>
-        </View>
-      ) : null}
+        {activeTab === 'chats' ? (
+          <View style={styles.chipRow}>
+            <Pressable style={[styles.chip, !unreadOnly && styles.chipActive]} onPress={() => setUnreadOnly(false)} accessibilityRole="button">
+              <Text style={[styles.chipText, !unreadOnly && styles.chipTextActive]}>All</Text>
+            </Pressable>
+            <Pressable style={[styles.chip, unreadOnly && styles.chipActive]} onPress={() => setUnreadOnly(true)} accessibilityRole="button">
+              <Text style={[styles.chipText, unreadOnly && styles.chipTextActive]}>
+                Unread{unreadChats > 0 ? ` (${unreadChats})` : ''}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
 
-      {activeTab === 'chats' && renderChatsTab()}
-      {activeTab === 'friends' && renderFriendsTab()}
-      {activeTab === 'requests' && renderRequestsTab()}
+        {activeTab === 'chats' && renderChatsTab()}
+        {activeTab === 'friends' && renderFriendsTab()}
+        {activeTab === 'requests' && renderRequestsTab()}
+      </View>
 
       {renderFindFriendModal()}
       {renderNewChatModal()}

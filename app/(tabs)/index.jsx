@@ -28,7 +28,6 @@ import {
   fetchQuestions,
   fetchDailyStreak,
   recordDailyStreak,
-  fetchHostels,
   fetchStudentListings,
 } from '../../services/firestoreSync';
 import { useAuth } from '../../context/AuthContext';
@@ -38,9 +37,7 @@ import { isPremiumActive } from '../../src/shared/services/premium';
 
 // Curated high-res imagery for top-tier visual hierarchy
 const IMAGES = {
-  hostel: require('../../assets/images/campus_hostel.jpg'),
   marketplace: require('../../assets/images/campus_marketplace.jpg'),
-  stories: require('../../assets/images/campus_stories.jpg'),
   community: require('../../assets/images/campus_community.jpg'),
 };
 
@@ -290,9 +287,9 @@ function PremiumMarquee({ onPress }) {
 
 const HERO_ACCENTS = {
   'latest-announcement': { tint: '#EEF2FF', fg: '#4F46E5', image: IMAGES.community, soft: 'rgba(79,70,229,0.12)' },
-  'latest-resource': { tint: '#ECFDF5', fg: '#10B981', image: IMAGES.stories, soft: 'rgba(16,185,129,0.13)' },
+  'latest-resource': { tint: '#ECFDF5', fg: '#10B981', image: IMAGES.community, soft: 'rgba(16,185,129,0.13)' },
   'latest-question': { tint: '#F3E8FF', fg: '#9333EA', image: IMAGES.marketplace, soft: 'rgba(147,51,234,0.13)' },
-  'study-streak': { tint: '#FFF7ED', fg: '#F97316', image: IMAGES.hostel, soft: 'rgba(249,115,22,0.14)' },
+  'study-streak': { tint: '#FFF7ED', fg: '#F97316', image: IMAGES.marketplace, soft: 'rgba(249,115,22,0.14)' },
 };
 
 // A flat, bordered card that matches the toolCard/discoveryCard language
@@ -667,14 +664,12 @@ export default function HomeScreen() {
   const [avatarFailures, setAvatarFailures] = useState({});
   const avatarFailed = Boolean(avatarFailures[avatarKey]);
   const [discoverData, setDiscoverData] = useState({
-    hostels: [],
     friends: [],
     products: [],
     loading: true,
     error: null,
   });
   const [visibleCounts, setVisibleCounts] = useState({
-    hostels: DISCOVER_PAGE,
     friends: DISCOVER_PAGE,
     products: DISCOVER_PAGE,
   });
@@ -1349,12 +1344,11 @@ export default function HomeScreen() {
     let isActive = true;
     const loadDiscover = async () => {
       setDiscoverData((current) => ({ ...current, loading: true, error: null }));
-      setVisibleCounts({ hostels: DISCOVER_PAGE, friends: DISCOVER_PAGE, products: DISCOVER_PAGE });
+      setVisibleCounts({ friends: DISCOVER_PAGE, products: DISCOVER_PAGE });
       friendFetchSizeRef.current = FRIEND_FETCH_START;
       try {
         const currentProfile = profileRef.current;
-        const [hostelRows, productRows, friendRows] = await Promise.all([
-          fetchHostels().catch(() => []),
+        const [productRows, friendRows] = await Promise.all([
           fetchStudentListings().catch(() => []),
           currentProfile?.uid
             ? listSuggestedFriends({ uid: currentProfile.uid, profile: currentProfile, pageSize: FRIEND_FETCH_START }).catch(() => [])
@@ -1365,19 +1359,16 @@ export default function HomeScreen() {
 
         // No more 12-item cap or 4-item sample: keep everything, shuffle once so the order
         // is varied but stays stable while the user scrolls, and reveal it a page at a time.
-        const hostels = shuffleSample(
-          (hostelRows || []).filter((item) => item && (item.title || item.name || item.location))
-        );
         const products = shuffleSample(
           (productRows || []).filter((item) => item && (item.title || item.name))
         );
         const friends = Array.isArray(friendRows) ? friendRows.filter(Boolean) : [];
 
         setFriendsMayHaveMore(friends.length >= FRIEND_FETCH_START);
-        setDiscoverData({ hostels, friends, products, loading: false, error: null });
+        setDiscoverData({ friends, products, loading: false, error: null });
       } catch (error) {
         if (!isActive) return;
-        setDiscoverData({ hostels: [], friends: [], products: [], loading: false, error: error?.message || 'Discover feed unavailable.' });
+        setDiscoverData({ friends: [], products: [], loading: false, error: error?.message || 'Discover feed unavailable.' });
       }
     };
 
@@ -1441,32 +1432,6 @@ export default function HomeScreen() {
   const renderDiscoveryCard = (item, type) => {
     const s = discoverySectionStyles;
 
-    if (type === 'hostel') {
-      const price = formatPrice(item?.price || item?.rent) || 'Price available';
-      const imageUrl = resolveImage(item) || IMAGES.hostel;
-      return (
-        <View style={s.discoveryCardShadowWrap}>
-          <Pressable
-            style={s.discoveryCard}
-            onPress={() => router.navigate('/hostelmarketplace')}
-            accessibilityRole="button"
-            accessibilityLabel={`${item.title || item.name || 'Student hostel'}, ${price}`}
-          >
-            <Image source={typeof imageUrl === 'string' ? { uri: imageUrl } : imageUrl} style={s.discoveryMedia} resizeMode="cover" />
-            <View style={s.discoveryBody}>
-              <Text style={s.discoveryPrice}>{price}</Text>
-              <Text style={s.discoveryName} numberOfLines={1}>{item.title || item.name || 'Student hostel'}</Text>
-              <Text style={s.discoveryMeta} numberOfLines={2}>{item.location || item.area || 'Near campus'}</Text>
-              <View style={s.discoveryFooter}>
-                <Text style={s.miniLabel}>Hostel</Text>
-                <Ionicons name="arrow-forward" size={14} color={colors.brandText} />
-              </View>
-            </View>
-          </Pressable>
-        </View>
-      );
-    }
-
     if (type === 'friend') {
       const person = item || {};
       const personName = friendlyPersonName(person);
@@ -1529,14 +1494,9 @@ export default function HomeScreen() {
     );
   };
 
-  const renderHostel = useCallback((item) => renderDiscoveryCard(item, 'hostel'), [discoverySectionStyles, colors]); // eslint-disable-line react-hooks/exhaustive-deps
   const renderFriend = useCallback((item) => renderDiscoveryCard(item, 'friend'), [discoverySectionStyles, colors]); // eslint-disable-line react-hooks/exhaustive-deps
   const renderProduct = useCallback((item) => renderDiscoveryCard(item, 'product'), [discoverySectionStyles, colors]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const visibleHostels = useMemo(
-    () => discoverData.hostels.slice(0, visibleCounts.hostels),
-    [discoverData.hostels, visibleCounts.hostels]
-  );
   const visibleFriends = useMemo(
     () => discoverData.friends.slice(0, visibleCounts.friends),
     [discoverData.friends, visibleCounts.friends]
@@ -1557,22 +1517,16 @@ export default function HomeScreen() {
   ].filter((tool) => isRouteAllowedForRole(tool.route, profile?.role || 'university'));
 
   const exploreCards = [
-    { key: 'hostels', label: 'Hostels', image: IMAGES.hostel, route: '/hostelmarketplace' },
-    { key: 'marketplace', label: 'Marketplace', image: IMAGES.marketplace, route: '/studentmarketplace' },
-    { key: 'stories', label: 'Campus Stories', image: IMAGES.stories, route: '/stories' },
+    { key: 'community', label: 'Student Community', image: IMAGES.community, route: '/groups' },
     { key: 'friends', label: 'Find Friends', image: IMAGES.community, route: '/find-friends' },
   ];
 
-  const hostelsHaveMore = visibleCounts.hostels < discoverData.hostels.length;
   const productsHaveMore = visibleCounts.products < discoverData.products.length;
   const friendsHaveMore = visibleCounts.friends < discoverData.friends.length || friendsMayHaveMore;
 
   return (
     <View style={styles.root}>
       <ScreenShell showFooter={false}>
-        {/* PREMIUM MARQUEE: slim, scrolling, always visible without hogging space */}
-        {!premiumUnlocked ? <PremiumMarquee onPress={() => router.navigate('/premium')} /> : null}
-
         {/* HEADER BAR */}
         <View style={styles.headerBar}>
           <Pressable
@@ -1616,6 +1570,9 @@ export default function HomeScreen() {
         {/* SMART STUDY HERO: one message at a time, user-swipeable */}
         <HeroCarousel slides={heroSlides} router={router} />
 
+        {/* Premium is supportive, not the first thing a student sees on launch. */}
+        {!premiumUnlocked ? <PremiumMarquee onPress={() => router.navigate('/premium')} /> : null}
+
         {/* ACADEMIC TOOLKIT */}
         <View>
           <View style={styles.sectionHeaderRow}>
@@ -1654,45 +1611,6 @@ export default function HomeScreen() {
             ))}
           </View>
         </View>
-
-        <Pressable
-          style={({ pressed }) => [styles.flashBanner, pressed && { opacity: 0.92, transform: [{ scale: 0.99 }] }]}
-          onPress={() => router.navigate('/formula-hub/flashcards')}
-          accessibilityRole="button"
-          accessibilityLabel="Open formula flash cards"
-        >
-          <LinearGradient
-            colors={[colors.brand, colors.purple, colors.teal]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.flashBannerGradient}
-          >
-            <View style={styles.flashBannerHalo} />
-            <View style={styles.flashBannerOrbit} />
-            <View style={styles.flashBannerContent}>
-              <View style={styles.flashBannerCopy}>
-                <Text style={styles.flashBannerTitle}>Flash Card Sprint</Text>
-                <Text style={styles.flashBannerSubtitle}>
-                  Flip equations into fast memory before your next test.
-                </Text>
-                <View style={styles.flashBannerAction}>
-                  <Text style={styles.flashBannerActionText}>Start practice</Text>
-                  <Ionicons name="arrow-forward" size={14} color={colors.brandText} />
-                </View>
-              </View>
-
-              <View style={styles.flashDeck}>
-                <View style={[styles.flashMiniCard, styles.flashMiniCardBack]}>
-                  <Text style={styles.flashMiniFormulaLight}>V = IR</Text>
-                </View>
-                <View style={[styles.flashMiniCard, styles.flashMiniCardFront]}>
-                  <Ionicons name="albums-outline" size={19} color={colors.brand} />
-                  <Text style={styles.flashMiniFormulaDark}>x = -b/2a</Text>
-                </View>
-              </View>
-            </View>
-          </LinearGradient>
-        </Pressable>
 
         {/* EXPLORE CAMPUS */}
         <View style={{ marginBottom: layout.screenPadding }}>
@@ -1739,29 +1657,6 @@ export default function HomeScreen() {
             </View>
           ) : (
             <View style={{ gap: 18 }}>
-              <View>
-                <View style={discoverySectionStyles.sectionMeta}>
-                  <Text style={discoverySectionStyles.discoverySubtitle}>Hostels</Text>
-                  <Pressable onPress={() => router.navigate('/hostelmarketplace')} accessibilityRole="button">
-                    <Text style={discoverySectionStyles.metaText}>View all</Text>
-                  </Pressable>
-                </View>
-                {visibleHostels.length ? (
-                  <DiscoverRow
-                    data={visibleHostels}
-                    renderItem={renderHostel}
-                    hasMore={hostelsHaveMore}
-                    onEndReached={() => revealMore('hostels')}
-                    styles={discoverySectionStyles}
-                    colors={colors}
-                  />
-                ) : (
-                  <View style={discoverySectionStyles.discoveryPlaceholder}>
-                    <Text style={discoverySectionStyles.discoveryPlaceholderText}>No hostels are available right now.</Text>
-                  </View>
-                )}
-              </View>
-
               <View>
                 <View style={discoverySectionStyles.sectionMeta}>
                   <Text style={discoverySectionStyles.discoverySubtitle}>Friend suggestions</Text>

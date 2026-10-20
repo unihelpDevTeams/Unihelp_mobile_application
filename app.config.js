@@ -39,8 +39,10 @@ module.exports = {
     name: "UniHelp",
     slug: "unihelpteam",
     owner: "unihelpdevteam",
-    version: "1.0.7",
-    orientation: "portrait",
+    version: "1.0.9",
+    // Keep the activity resizable for tablets, Chromebooks, and foldables. Individual
+    // screens use responsive layouts rather than locking the whole app to portrait.
+    orientation: "default",
     icon: "./assets/images/icon-square.png",
     scheme: "unihelp",
     userInterfaceStyle: "automatic",
@@ -64,14 +66,14 @@ module.exports = {
       package: "com.zenithdev.unihelp",
       googleServicesFile,
       softwareKeyboardLayoutMode: "resize",
-      versionCode: 7,
+      versionCode: 9,
       permissions: ["RECORD_AUDIO", "POST_NOTIFICATIONS", "SCHEDULE_EXACT_ALARM"],
       adaptiveIcon: {
         foregroundImage: "./assets/images/icon-square.png",
         backgroundColor: "#ffffff",
       },
       edgeToEdgeEnabled: true,
-      predictiveBackGestureEnabled: false,
+      predictiveBackGestureEnabled: true,
       intentFilters: [
         {
           action: "VIEW",
@@ -93,6 +95,17 @@ module.exports = {
     plugins: [
       "expo-router",
       "expo-font",
+      [
+        "expo-build-properties",
+        {
+          android: {
+            // CNG writes these into the generated release Gradle configuration.
+            // R8 optimizes/obfuscates native DEX; resource shrinking runs with R8.
+            enableMinifyInReleaseBuilds: true,
+            enableShrinkResourcesInReleaseBuilds: true,
+          },
+        },
+      ],
       "expo-iap",
       [
         "expo-notifications",
