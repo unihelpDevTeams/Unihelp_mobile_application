@@ -751,11 +751,19 @@ service cloud.firestore {
         allow create: if groupMember(groupId) &&
           request.resource.data.authorId == request.auth.uid &&
           request.resource.data.createdAt == request.time;
-        allow update: if groupMember(groupId) &&
-          request.resource.data.authorId == resource.data.authorId &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'reactions', 'userReactions', 'reactionCount', 'updatedAt'
-          ]);
+        allow update: if groupMember(groupId) && request.resource.data.authorId == resource.data.authorId &&
+          (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'reactions', 'userReactions', 'reactionCount', 'updatedAt'
+            ]) ||
+            (resource.data.authorId == request.auth.uid &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'text', 'edited', 'editedAt', 'updatedAt'
+              ])) ||
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'viewedBy', 'viewCount', 'lastViewedAt'
+            ])
+          );
         allow delete: if resource.data.authorId == request.auth.uid || groupOwner(groupId) || groupAdmin(groupId);
       }
 
@@ -770,7 +778,6 @@ service cloud.firestore {
             (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']) &&
               request.resource.data.senderId == resource.data.senderId) ||
             (resource.data.type == 'poll' &&
-              request.resource.data.senderId == resource.data.senderId &&
               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['poll', 'updatedAt'])) ||
             (resource.data.senderId == request.auth.uid &&
               messageWithinEditWindow(resource.data.createdAt) &&

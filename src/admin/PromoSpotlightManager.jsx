@@ -299,8 +299,7 @@ export default function PromoSpotlightManager({ onEditStart }) {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      // New expo-image-picker uses ['images']; fall back for older SDKs without touching the deprecated enum
-      mediaTypes: ImagePicker.MediaType ? ['images'] : ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       quality: 0.92,
       allowsEditing: true,
       aspect: [4, 5],

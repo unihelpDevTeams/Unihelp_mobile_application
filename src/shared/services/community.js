@@ -28,6 +28,7 @@ export const CHAT_PAGE_SIZE = 20;
 export const MESSAGE_PAGE_SIZE = CHAT_PAGE_SIZE;
 export const MESSAGE_EDIT_WINDOW_MS = 60 * 60 * 1000;
 export const VOICE_MESSAGE_DELETE_WINDOW_MS = 30 * 60 * 1000;
+export const GROUP_POST_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 const normalizeSearch = (value = '') => value.trim().toLowerCase();
 
@@ -432,6 +433,10 @@ export const createGroupPost = async (groupId, user, profile, payload = {}) => {
     userReactions: {},
     reactionCount: 0,
     commentCount: 0,
+    viewCount: 0,
+    viewedBy: {},
+    edited: false,
+    expiresAt: new Date(Date.now() + GROUP_POST_TTL_MS),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -440,10 +445,57 @@ export const createGroupPost = async (groupId, user, profile, payload = {}) => {
   return postRef.id;
 };
 
+const timestampMillis = (value) => {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  if (typeof value.seconds === 'number') return value.seconds * 1000;
+  return new Date(value).getTime() || 0;
+};
+
+const isExpiredGroupPost = (post) => {
+  const expiresAt = timestampMillis(post?.expiresAt);
+  return Boolean(expiresAt && expiresAt <= Date.now());
+};
+
 export const listenGroupPosts = (groupId, callback) => onSnapshot(
   query(collection(db, 'groups', groupId, 'posts'), orderBy('createdAt', 'desc'), limit(PAGE_SIZE)),
-  (snapshot) => callback(mapDocs(snapshot))
+  (snapshot) => callback(mapDocs(snapshot).filter((post) => !isExpiredGroupPost(post)))
 );
+
+export const updateGroupPost = async (groupId, postId, uid, payload = {}) => {
+  if (!groupId || !postId || !uid) throw new Error('Missing post information.');
+  const postRef = doc(db, 'groups', groupId, 'posts', postId);
+  const postSnap = await getDoc(postRef);
+  if (!postSnap.exists()) throw new Error('This post is no longer available.');
+  if (postSnap.data()?.authorId !== uid) throw new Error('You can only edit your own posts.');
+
+  const text = String(payload.text || '').replace(/[\u0000-\u001F\u007F]/g, '').trim();
+  if (!text && !postSnap.data()?.attachments?.length) throw new Error('A post needs text or an attachment.');
+  await updateDoc(postRef, { text, edited: true, editedAt: serverTimestamp(), updatedAt: serverTimestamp() });
+};
+
+export const recordGroupPostView = async (groupId, postId, uid) => {
+  if (!groupId || !postId || !uid) return;
+  const postRef = doc(db, 'groups', groupId, 'posts', postId);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(postRef);
+    if (!snapshot.exists()) return;
+    const post = snapshot.data();
+    if (isExpiredGroupPost(post) || post?.viewedBy?.[uid]) return;
+    transaction.update(postRef, {
+      [`viewedBy.${uid}`]: true,
+      viewCount: increment(1),
+      lastViewedAt: serverTimestamp(),
+    });
+  });
+};
+
+export const deleteGroupPost = async (groupId, postId) => {
+  if (!groupId || !postId) throw new Error('Missing post information.');
+  const { deleteGroupPostWithMedia } = await import('../../../services/mediaCleanup');
+  await deleteGroupPostWithMedia(groupId, postId);
+};
 
 export const reactToGroupPost = async (groupId, postId, emoji, uid) => {
   const postRef = doc(db, 'groups', groupId, 'posts', postId);
@@ -464,6 +516,9 @@ const normalizePollInput = ({ question, options, multiSelect = false } = {}) => 
   const cleanQuestion = String(question || '').trim();
   const cleanOptions = (options || []).map((option) => String(option || '').trim()).filter(Boolean).slice(0, 6);
   if (!cleanQuestion || cleanOptions.length < 2) throw new Error('Add a question and at least two options.');
+  if (new Set(cleanOptions.map((option) => option.toLowerCase())).size !== cleanOptions.length) {
+    throw new Error('Poll options must be different.');
+  }
   return { cleanQuestion, cleanOptions, multiSelect: Boolean(multiSelect) };
 };
 
@@ -499,6 +554,11 @@ export const editGroupPoll = async (groupId, messageId, uid, input) => {
     const message = snapshot.data();
     if (message.senderId !== uid) throw new Error('Only the poll creator can edit it.');
     const oldOptions = message.poll?.options || [];
+    const hasVotes = oldOptions.some((option) => (option.voterIds || []).length > 0);
+    const optionsChanged = oldOptions.length !== cleanOptions.length || oldOptions.some((option, index) => option.text !== cleanOptions[index]);
+    if (hasVotes && (optionsChanged || Boolean(message.poll?.multiSelect) !== multiSelect)) {
+      throw new Error('Options and answer mode cannot change after members have voted.');
+    }
     const options = cleanOptions.map((text, index) => ({ id: oldOptions[index]?.id || `option-${index}`, text, voterIds: oldOptions[index]?.voterIds || [] }));
     transaction.update(messageRef, { poll: { ...message.poll, question: cleanQuestion, multiSelect, options }, updatedAt: serverTimestamp() });
   });

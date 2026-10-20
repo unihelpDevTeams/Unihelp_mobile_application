@@ -23,6 +23,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import EmptyState from '../../src/shared/components/EmptyState';
@@ -34,6 +35,7 @@ import { useAuth } from '../../context/AuthContext';
 import {
   approveGroupJoinRequest,
   createGroupPost,
+  deleteGroupPost,
   formatShortTime,
   getGroup,
   getMembership,
@@ -58,7 +60,9 @@ import {
   startConversation,
   toggleMessageReaction,
   reactToGroupPost,
+  recordGroupPostView,
   updateGroup,
+  updateGroupPost,
 } from '../../src/shared/services/community';
 import { uploadFeatureMedia } from '../../src/shared/services/backend';
 
@@ -74,6 +78,7 @@ const NEAR_BOTTOM_PX = 140;
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const EDIT_WINDOW_MS = 60 * 60 * 1000;
 const MAX_LENGTH = 2000;
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const PENDING_MATCH_WINDOW_MS = 3 * 60 * 1000;
 const PENDING_SCAN_TAIL = 80; // optimistic messages can only match the newest server messages
 
@@ -201,6 +206,9 @@ const reactionSig = (m) =>
     .map((k) => `${k}:${(m.reactions[k] || []).join(',')}`)
     .join('|');
 
+const attachmentSig = (m) =>
+  (m?.attachments || []).map((attachment) => `${attachment?.url || ''}:${attachment?.type || attachment?.mimeType || ''}:${attachment?.name || ''}`).join('|');
+
 // Includes role + avatar fields so a promotion / new photo is never swallowed by the merge.
 const isSameMessage = (a, b) =>
   a.text === b.text &&
@@ -212,6 +220,7 @@ const isSameMessage = (a, b) =>
   a.senderRole === b.senderRole &&
   Boolean(a.senderPremium) === Boolean(b.senderPremium) &&
   (a.stickerId || a.sticker?.id) === (b.stickerId || b.sticker?.id) &&
+  attachmentSig(a) === attachmentSig(b) &&
   a.replyTo?.id === b.replyTo?.id &&
   getMillis(a) === getMillis(b) &&
   reactionSig(a) === reactionSig(b);
@@ -306,8 +315,81 @@ const messagePreview = (message) => {
   return text.length > 80 ? `${text.slice(0, 80).trim()}…` : text;
 };
 
-// expo-image-picker moved from MediaTypeOptions to string arrays; support both.
-const imageMediaTypes = () => (ImagePicker.MediaType ? ['images'] : ImagePicker.MediaTypeOptions?.Images);
+// expo-image-picker accepts these stable media-type strings. Using them avoids
+// the deprecated MediaTypeOptions enum, which is absent in newer SDK releases.
+const imageMediaTypes = () => ['images'];
+const chatMediaTypes = () => ['images', 'videos'];
+
+const isSafeAttachment = (file = {}) => {
+  const mimeType = String(file.mimeType || file.type || '').toLowerCase();
+  const name = String(file.name || file.fileName || '').toLowerCase();
+  const forbidden = /(?:^|\/)(?:x-msdownload|x-msdos-program|x-sh|javascript|html|xhtml)(?:$|;)/.test(mimeType)
+    || /\.(?:apk|bat|cmd|com|dll|exe|html?|jar|js|msi|php|ps1|sh|svg)$/i.test(name);
+  const allowed = mimeType.startsWith('image/')
+    || mimeType.startsWith('video/')
+    || /^(application\/(pdf|msword|vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet|presentationml\.presentation)|vnd\.ms-(excel|powerpoint))|text\/plain)$/i.test(mimeType);
+  return allowed && !forbidden && Number(file.size || 0) <= MAX_ATTACHMENT_BYTES;
+};
+
+const sanitizeMessageText = (value = '') => String(value).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim();
+const urlsInText = (value = '') => {
+  const matches = String(value).match(/https?:\/\/[^\s]+|www\.[^\s]+/gi) || [];
+  return matches.map((url) => url.replace(/[.,!?;:)}\]]+$/g, '')).filter(Boolean);
+};
+
+const attachmentKind = (attachment = {}) => {
+  const type = String(attachment.mimeType || attachment.type || '').toLowerCase();
+  if (type === 'image' || type.startsWith('image/')) return 'image';
+  if (type === 'video' || type.startsWith('video/')) return 'video';
+  return 'document';
+};
+
+const formatFileSize = (bytes) => {
+  const value = Number(bytes || 0);
+  if (!value) return '';
+  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+function GroupMediaViewer({ media, onClose }) {
+  const player = useVideoPlayer(media?.kind === 'video' && media?.url ? { uri: media.url } : null, (videoPlayer) => {
+    videoPlayer.loop = true;
+    videoPlayer.play();
+  });
+
+  if (!media) return null;
+  return (
+    <View style={{ flex: 1, backgroundColor: '#080B12' }}>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        {media.kind === 'image' ? (
+          <ScrollView
+            maximumZoomScale={3}
+            minimumZoomScale={1}
+            centerContent
+            contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Image source={{ uri: media.url }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
+          </ScrollView>
+        ) : media.kind === 'video' ? (
+          <VideoView player={player} style={{ width: '100%', aspectRatio: 16 / 9 }} nativeControls contentFit="contain" />
+        ) : (
+          <Pressable onPress={() => Linking.openURL(media.url)} style={{ alignItems: 'center', gap: 12, padding: 28 }}>
+            <Ionicons name="document-text-outline" size={48} color="#FFFFFF" />
+            <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '800', textAlign: 'center' }}>{media.name || 'Open document'}</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.68)', fontSize: 13 }}>Open in your device viewer</Text>
+          </Pressable>
+        )}
+      </View>
+      <View style={{ paddingHorizontal: 18, paddingTop: 12, paddingBottom: 28, backgroundColor: 'rgba(8,11,18,0.96)' }}>
+        <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }} numberOfLines={1}>{media.name || 'Shared media'}</Text>
+        <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12, marginTop: 3 }} numberOfLines={1}>{[media.authorName, formatFileSize(media.size)].filter(Boolean).join('  |  ')}</Text>
+      </View>
+      <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close media viewer" style={{ position: 'absolute', top: 56, right: 18, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' }}>
+        <Ionicons name="close" size={24} color="#FFFFFF" />
+      </Pressable>
+    </View>
+  );
+}
 
 // Drag-to-dismiss for bottom sheets. Attach panHandlers to the handle only.
 function useDraggableSheet(onDismiss) {
@@ -384,6 +466,7 @@ const createStyles = (c) => ({
   publishText: { color: '#fff', fontSize: 12, fontWeight: '800' },
   postCard: { backgroundColor: c.surface, borderRadius: 18, borderWidth: 1, borderColor: c.borderDefault, padding: 12 },
   postAuthor: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  postManageButton: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surfaceSecondary },
   postAvatar: { width: 36, height: 36, borderRadius: 18, overflow: 'hidden', backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
   postAvatarImage: { width: '100%', height: '100%' },
   postAvatarText: { color: c.brandDark, fontSize: 12, fontWeight: '800' },
@@ -397,6 +480,9 @@ const createStyles = (c) => ({
   postReaction: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 999, backgroundColor: c.surfaceSecondary, paddingHorizontal: 10, paddingVertical: 6 },
   postReactionActive: { backgroundColor: c.brandLight },
   postReactionText: { color: c.textSecondary, fontSize: 12, fontWeight: '700' },
+  postStat: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 'auto' },
+  postStatText: { color: c.textTertiary, fontSize: 11.5, fontWeight: '700' },
+  editedPostLabel: { color: c.textTertiary, fontSize: 10.5, fontStyle: 'italic', marginTop: 5 },
   memberRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.surface, borderRadius: 15, padding: 11, borderWidth: 1, borderColor: c.borderDefault },
   memberAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: c.brandLight, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   memberName: { color: c.textPrimary, fontSize: 14, fontWeight: '800' },
@@ -439,6 +525,7 @@ const createStyles = (c) => ({
   avatarBadge: { position: 'absolute', right: -3, bottom: -3, width: 14, height: 14, borderRadius: 7, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: c.background },
 
   bubbleColumn: { maxWidth: '78%' },
+  pollBubbleColumn: { width: '86%', maxWidth: 520 },
   pendingDim: { opacity: 0.6 },
   bubble: { paddingHorizontal: 14, paddingVertical: 9, shadowColor: c.shadow || '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 1, elevation: 1 },
   bubbleFailed: { borderWidth: 1, borderColor: c.danger },
@@ -459,6 +546,38 @@ const createStyles = (c) => ({
   messageBody: { color: c.inkLight, fontSize: 15, lineHeight: 21 },
   messageBodyMine: { color: '#FFFFFF' },
   messageDeleted: { fontStyle: 'italic', opacity: 0.75 },
+  pollCard: { gap: 10, minWidth: 220 },
+  pollHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  pollIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brandLight },
+  pollQuestion: { flex: 1, color: c.textPrimary, fontSize: 15, lineHeight: 21, fontWeight: '800' },
+  pollQuestionMine: { color: '#FFFFFF' },
+  pollOption: { minHeight: 48, overflow: 'hidden', borderWidth: 1, borderColor: c.borderDefault, borderRadius: 12, justifyContent: 'center', backgroundColor: c.inputBackground },
+  pollOptionMine: { borderColor: 'rgba(255,255,255,0.35)', backgroundColor: 'rgba(255,255,255,0.08)' },
+  pollOptionSelected: { borderColor: c.brand, backgroundColor: c.brandLight },
+  pollOptionSelectedMine: { borderColor: 'rgba(255,255,255,0.7)', backgroundColor: 'rgba(255,255,255,0.18)' },
+  pollProgress: { position: 'absolute', top: 0, bottom: 0, left: 0, width: '0%', backgroundColor: c.brandLight, opacity: 0.72 },
+  pollProgressMine: { backgroundColor: 'rgba(255,255,255,0.16)' },
+  pollOptionContent: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, paddingVertical: 9 },
+  pollChoice: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: c.textTertiary, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface },
+  pollChoiceMine: { borderColor: 'rgba(255,255,255,0.8)', backgroundColor: 'transparent' },
+  pollChoiceSelected: { borderColor: c.brand, backgroundColor: c.brand },
+  pollChoiceSelectedMine: { borderColor: '#FFFFFF', backgroundColor: '#FFFFFF' },
+  pollOptionText: { flex: 1, color: c.textPrimary, fontSize: 13.5, fontWeight: '700' },
+  pollOptionTextMine: { color: '#FFFFFF' },
+  pollPercent: { color: c.textSecondary, fontSize: 12, fontWeight: '800' },
+  pollPercentMine: { color: 'rgba(255,255,255,0.88)' },
+  pollFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 1 },
+  pollMeta: { color: c.textTertiary, fontSize: 11.5, fontWeight: '700', flex: 1 },
+  pollMetaMine: { color: 'rgba(255,255,255,0.76)' },
+  pollManage: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  pollManageText: { color: c.brand, fontSize: 11.5, fontWeight: '800' },
+  pollManageTextMine: { color: '#FFFFFF' },
+  chatAttachment: { width: 220, maxWidth: '100%', borderRadius: 12, overflow: 'hidden', marginBottom: 7, backgroundColor: c.surfaceSecondary },
+  chatAttachmentImage: { width: 220, height: 180, backgroundColor: c.skeleton },
+  chatAttachmentVideo: { width: 220, height: 150, alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: c.canvas },
+  chatAttachmentDocument: { flexDirection: 'row', alignItems: 'center', gap: 9, padding: 11, backgroundColor: c.surfaceSecondary },
+  chatAttachmentName: { flex: 1, color: c.textPrimary, fontSize: 12.5, fontWeight: '700' },
+  chatAttachmentMeta: { color: c.textSecondary, fontSize: 11, marginTop: 2 },
   bubbleFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 3 },
   messageTime: { color: c.textTertiary, fontSize: 10 },
   messageTimeMine: { color: 'rgba(255,255,255,0.75)' },
@@ -484,6 +603,21 @@ const createStyles = (c) => ({
 
   actionSheetBackdrop: { flex: 1, backgroundColor: c.overlay, justifyContent: 'flex-end' },
   actionSheetCard: { backgroundColor: c.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 12, paddingTop: 4, paddingBottom: 24 },
+  pollEditorCard: { width: '100%', maxWidth: 560, alignSelf: 'center', maxHeight: '90%', paddingHorizontal: 18 },
+  pollEditorScroll: { flexGrow: 0 },
+  pollEditorContent: { gap: 10, paddingBottom: 8 },
+  pollEditorSubtitle: { color: c.textSecondary, fontSize: 13, lineHeight: 19, marginTop: -4, marginBottom: 4 },
+  pollOptionField: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  pollOptionInput: { flex: 1, marginBottom: 0 },
+  pollRemoveOption: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19, backgroundColor: c.dangerLight },
+  pollAddOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderWidth: 1, borderStyle: 'dashed', borderColor: c.brand, borderRadius: 12, paddingVertical: 11 },
+  pollAddOptionText: { color: c.brand, fontWeight: '800', fontSize: 13 },
+  pollMode: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: c.borderDefault, borderRadius: 14, padding: 12, backgroundColor: c.inputBackground },
+  pollModeCopy: { flex: 1 },
+  pollModeTitle: { color: c.textPrimary, fontSize: 13.5, fontWeight: '800' },
+  pollModeHint: { color: c.textSecondary, fontSize: 11.5, marginTop: 2 },
+  pollLockedNotice: { flexDirection: 'row', gap: 7, alignItems: 'center', backgroundColor: c.surfaceSecondary, borderRadius: 10, padding: 10 },
+  pollLockedNoticeText: { flex: 1, color: c.textSecondary, fontSize: 12, lineHeight: 17 },
   actionSheetHandleWrap: { paddingVertical: 10, alignItems: 'center' },
   actionSheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: c.borderDefault },
   reactionViewerCard: { backgroundColor: c.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 30, maxHeight: '72%' },
@@ -532,6 +666,10 @@ const createStyles = (c) => ({
   replyPreviewLabel: { fontSize: 12, fontWeight: '800', color: c.textPrimary },
   replyPreviewText: { color: c.textSecondary, fontSize: 12, marginTop: 1 },
   composer: { flexDirection: 'column', gap: 8, paddingHorizontal: 12, paddingTop: 10, backgroundColor: c.surfacePrimary },
+  attachmentPreview: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, backgroundColor: c.surfaceSecondary, borderWidth: 1, borderColor: c.borderDefault },
+  attachmentPreviewThumb: { width: 32, height: 32, borderRadius: 7, backgroundColor: c.skeleton, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  attachmentPreviewImage: { width: '100%', height: '100%' },
+  attachmentPreviewName: { flex: 1, color: c.textPrimary, fontSize: 12, fontWeight: '700' },
   permissionNotice: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.purpleLight, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
   permissionNoticeText: { color: c.brandDark, fontSize: 12.5, fontWeight: '700', flex: 1 },
   composerInputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
@@ -543,6 +681,20 @@ const createStyles = (c) => ({
   counterLimit: { color: c.danger, fontWeight: '700' },
   sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center' },
   sendButtonDisabled: { backgroundColor: c.brandGlow, opacity: 0.7 },
+  composerToolsCard: { backgroundColor: c.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 14, paddingBottom: 28 },
+
+  mediaFilters: { flexDirection: 'row', gap: 8, paddingBottom: 10 },
+  mediaFilter: { borderWidth: 1, borderColor: c.borderDefault, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 7, backgroundColor: c.surface },
+  mediaFilterActive: { backgroundColor: c.brand, borderColor: c.brand },
+  mediaFilterText: { color: c.textSecondary, fontSize: 12, fontWeight: '700' },
+  mediaFilterTextActive: { color: '#FFFFFF' },
+  mediaGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  mediaTile: { width: '48%', aspectRatio: 1, borderRadius: 10, overflow: 'hidden', backgroundColor: c.surfaceSecondary, justifyContent: 'center' },
+  mediaTileImage: { width: '100%', height: '100%' },
+  mediaTileOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(8,11,18,0.28)', alignItems: 'center', justifyContent: 'center' },
+  mediaTileDoc: { alignItems: 'center', justifyContent: 'center', padding: 10, gap: 6 },
+  mediaTileName: { color: c.textPrimary, fontSize: 11, fontWeight: '700', textAlign: 'center' },
+  memberSearch: { height: 42, borderRadius: 12, borderWidth: 1, borderColor: c.borderDefault, backgroundColor: c.inputBackground, color: c.textPrimary, paddingHorizontal: 12, marginBottom: 10 },
 
   sheetBackdrop: { flex: 1, backgroundColor: c.overlay },
   sheetWrap: { justifyContent: 'flex-end' },
@@ -664,6 +816,66 @@ function RoleChip({ role, styles }) {
   );
 }
 
+function PollMessage({ message, mine, uid, styles, colors, voting, onVote, onEdit, onToggleClosed }) {
+  const poll = message.poll;
+  const participants = new Set((poll.options || []).flatMap((option) => option.voterIds || [])).size;
+  const totalVotes = (poll.options || []).reduce((total, option) => total + (option.voterIds?.length || 0), 0);
+  const answerLabel = poll.isClosed
+    ? 'Poll closed'
+    : poll.multiSelect
+      ? 'Select one or more answers'
+      : 'Select an answer';
+
+  return (
+    <View style={styles.pollCard}>
+      <View style={styles.pollHeader}>
+        <View style={styles.pollIcon}><Ionicons name="bar-chart-outline" size={16} color={colors.brand} /></View>
+        <Text style={[styles.pollQuestion, mine && styles.pollQuestionMine]}>{poll.question}</Text>
+      </View>
+      {poll.options.map((option) => {
+        const count = option.voterIds?.length || 0;
+        const selected = option.voterIds?.includes(uid);
+        const percent = participants ? Math.round((count / participants) * 100) : 0;
+        return (
+          <Pressable
+            key={option.id}
+            disabled={poll.isClosed || voting}
+            onPress={() => onVote(message, option.id)}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: poll.isClosed || voting, selected: Boolean(selected) }}
+            accessibilityLabel={`${option.text}, ${percent} percent, ${count} vote${count === 1 ? '' : 's'}${selected ? ', selected' : ''}`}
+            style={({ pressed }) => [
+              styles.pollOption,
+              mine && styles.pollOptionMine,
+              selected && styles.pollOptionSelected,
+              selected && mine && styles.pollOptionSelectedMine,
+              pressed && !poll.isClosed && !voting && { opacity: 0.82 },
+            ]}
+          >
+            <View style={[styles.pollProgress, { width: `${percent}%` }, mine && styles.pollProgressMine]} />
+            <View style={styles.pollOptionContent}>
+              <View style={[styles.pollChoice, mine && styles.pollChoiceMine, selected && styles.pollChoiceSelected, selected && mine && styles.pollChoiceSelectedMine]}>
+                {selected ? <Ionicons name="checkmark" size={14} color={mine ? colors.brand : '#FFFFFF'} /> : null}
+              </View>
+              <Text style={[styles.pollOptionText, mine && styles.pollOptionTextMine]}>{option.text}</Text>
+              <Text style={[styles.pollPercent, mine && styles.pollPercentMine]}>{percent}%</Text>
+            </View>
+          </Pressable>
+        );
+      })}
+      <View style={styles.pollFooter}>
+        <Text style={[styles.pollMeta, mine && styles.pollMetaMine]}>{participants} participant{participants === 1 ? '' : 's'} · {totalVotes} vote{totalVotes === 1 ? '' : 's'} · {answerLabel}</Text>
+        {mine ? (
+          <View style={styles.pollManage}>
+            <Pressable onPress={() => onEdit(message)} accessibilityRole="button" accessibilityLabel="Edit poll"><Text style={[styles.pollManageText, mine && styles.pollManageTextMine]}>Edit</Text></Pressable>
+            <Pressable onPress={() => onToggleClosed(message)} accessibilityRole="button" accessibilityLabel={poll.isClosed ? 'Reopen poll' : 'Close poll'}><Text style={[styles.pollManageText, mine && styles.pollManageTextMine]}>{poll.isClosed ? 'Reopen' : 'Close'}</Text></Pressable>
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
 // Memoised: typing in the composer no longer re-renders every bubble.
 const MessageRow = React.memo(function MessageRow({
   message,
@@ -681,9 +893,11 @@ const MessageRow = React.memo(function MessageRow({
   onOpenReactions,
   onRetry,
   onOpenProfile,
+  onOpenAttachment,
   onVotePoll,
   onEditPoll,
   onTogglePollClosed,
+  votingPollId,
 }) {
   const swipeX = useMemo(() => new Animated.Value(0), []);
   const scaleAnim = useMemo(() => new Animated.Value(1), []);
@@ -697,6 +911,7 @@ const MessageRow = React.memo(function MessageRow({
   const isSticker = message.type === 'sticker' && !isDeleted;
   const lightFooter = mine && !isSticker;
   const senderColor = useMemo(() => colorForName(message.senderName || 'Student'), [message.senderName]);
+  const attachments = Array.isArray(message.attachments) ? message.attachments.filter((attachment) => attachment?.url) : [];
 
   // Role styling applies to the avatar always, and to the bubble for real text messages only.
   const senderRole = roleOf(message);
@@ -802,7 +1017,7 @@ const MessageRow = React.memo(function MessageRow({
         </Pressable>
       ) : null}
 
-      <Animated.View style={[styles.bubbleColumn, { transform: [{ translateX: swipeX }, { scale: scaleAnim }] }]}>
+      <Animated.View style={[styles.bubbleColumn, message.type === 'poll' && styles.pollBubbleColumn, { transform: [{ translateX: swipeX }, { scale: scaleAnim }] }]}>
         <Pressable
           onLongPress={() => onLongPress(message)}
           onPressIn={() => Animated.spring(scaleAnim, { toValue: 0.98, useNativeDriver: true, speed: 40, bounciness: 4 }).start()}
@@ -854,24 +1069,24 @@ const MessageRow = React.memo(function MessageRow({
               <StickerMessage message={message} isMine={mine} onLongPress={() => onLongPress(message)} />
             </View>
           ) : message.type === 'poll' && message.poll ? (
-            <View style={{ gap: 8 }}>
-              <Text style={[styles.messageBody, mine && styles.messageBodyMine, { fontWeight: '800' }]}>{message.poll.question}</Text>
-              {(() => {
-                const participants = new Set(message.poll.options.flatMap((item) => item.voterIds || [])).size;
-                return message.poll.options.map((option) => {
-                  const count = option.voterIds?.length || 0;
-                  const selected = option.voterIds?.includes(uid);
-                  return <Pressable key={option.id} disabled={message.poll.isClosed} onPress={() => onVotePoll(message, option.id)} style={{ overflow: 'hidden', borderWidth: 1, borderColor: mine ? 'rgba(255,255,255,0.35)' : colors.borderDefault, borderRadius: 10, padding: 9, opacity: message.poll.isClosed ? 0.8 : 1, backgroundColor: selected ? (mine ? 'rgba(255,255,255,0.18)' : colors.brandLight) : 'transparent' }}><Text style={[styles.messageBody, mine && styles.messageBodyMine]}>{selected ? '✓ ' : ''}{option.text} · {participants ? Math.round((count / participants) * 100) : 0}%</Text></Pressable>;
-                });
-              })()}
-              <Text style={[styles.messageTime, mine && styles.messageTimeMine]}>{message.poll.isClosed ? 'Poll closed' : message.poll.multiSelect ? 'Multiple answers allowed' : 'One answer'}</Text>
-              {mine ? <View style={{ flexDirection: 'row', gap: 10 }}><Pressable onPress={() => onEditPoll(message)}><Text style={[styles.messageTime, mine && styles.messageTimeMine, { fontWeight: '800' }]}>Edit</Text></Pressable><Pressable onPress={() => onTogglePollClosed(message)}><Text style={[styles.messageTime, mine && styles.messageTimeMine, { fontWeight: '800' }]}>{message.poll.isClosed ? 'Reopen' : 'Close'}</Text></Pressable></View> : null}
-            </View>
+            <PollMessage message={message} mine={mine} uid={uid} styles={styles} colors={colors} voting={votingPollId === message.id} onVote={onVotePoll} onEdit={onEditPoll} onToggleClosed={onTogglePollClosed} />
           ) : (
             <Text style={[styles.messageBody, mine && styles.messageBodyMine]}>
               {message.text ? renderLinkedText(message.text, mine, colors) : '📎 Attachment'}
             </Text>
           )}
+
+          {!isDeleted && message.type !== 'sticker' && message.type !== 'poll' ? attachments.map((attachment, index) => {
+            const kind = attachmentKind(attachment);
+            const media = { ...attachment, kind, authorName: message.senderName };
+            if (kind === 'image') {
+              return <Pressable key={`${attachment.url}-${index}`} onPress={() => onOpenAttachment(media)} style={styles.chatAttachment} accessibilityRole="imagebutton" accessibilityLabel="Open image attachment"><Image source={{ uri: attachment.url }} style={styles.chatAttachmentImage} resizeMode="cover" /></Pressable>;
+            }
+            if (kind === 'video') {
+              return <Pressable key={`${attachment.url}-${index}`} onPress={() => onOpenAttachment(media)} style={[styles.chatAttachment, styles.chatAttachmentVideo]} accessibilityRole="button" accessibilityLabel="Play video attachment"><Ionicons name="play-circle" size={42} color={mine ? '#FFFFFF' : colors.brand} /><Text style={[styles.messageTime, mine && styles.messageTimeMine]} numberOfLines={1}>{attachment.name || 'Video'}</Text></Pressable>;
+            }
+            return <Pressable key={`${attachment.url}-${index}`} onPress={() => onOpenAttachment(media)} style={[styles.chatAttachment, styles.chatAttachmentDocument]} accessibilityRole="button" accessibilityLabel={`Open ${attachment.name || 'document'}`}><Ionicons name="document-text-outline" size={23} color={mine ? '#FFFFFF' : colors.brand} /><View style={{ flex: 1 }}><Text style={[styles.chatAttachmentName, mine && styles.messageBodyMine]} numberOfLines={1}>{attachment.name || 'Document'}</Text><Text style={[styles.chatAttachmentMeta, mine && styles.messageTimeMine]}>{formatFileSize(attachment.size) || 'Document'}</Text></View></Pressable>;
+          }) : null}
 
           {footer}
         </Pressable>
@@ -940,6 +1155,8 @@ function GroupDetailScreen({ groupId }) {
   const [requestSent, setRequestSent] = useState(() => REQUESTED_CACHE.has(`${uid || 'anon'}:${groupId}`));
   const [processingRequestId, setProcessingRequestId] = useState(null);
   const [draft, setDraft] = useState(() => DRAFT_CACHE.get(groupId) || '');
+  const [chatAttachment, setChatAttachment] = useState(null);
+  const [chatUploading, setChatUploading] = useState(false);
   const [stickerPickerVisible, setStickerPickerVisible] = useState(false);
   const [replyTo, setReplyTo] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
@@ -950,12 +1167,21 @@ function GroupDetailScreen({ groupId }) {
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
   const [pollMultiSelect, setPollMultiSelect] = useState(false);
+  const [pollSubmitting, setPollSubmitting] = useState(false);
+  const [votingPollId, setVotingPollId] = useState(null);
   const [activeTab, setActiveTab] = useState('Feed');
   const [posts, setPosts] = useState([]);
   const [members, setMembers] = useState([]);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [mediaFilter, setMediaFilter] = useState('all');
+  const [viewerMedia, setViewerMedia] = useState(null);
   const [postDraft, setPostDraft] = useState('');
   const [postAttachment, setPostAttachment] = useState(null);
   const [posting, setPosting] = useState(false);
+  const [editingPost, setEditingPost] = useState(null);
+  const [editPostText, setEditPostText] = useState('');
+  const [savingPostEdit, setSavingPostEdit] = useState(false);
+  const [composerToolsVisible, setComposerToolsVisible] = useState(false);
 
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [newBelow, setNewBelow] = useState(0);
@@ -995,6 +1221,7 @@ function GroupDetailScreen({ groupId }) {
   const scrollTimer = useRef(null);
   const olderTimer = useRef(null);
   const handleScrollRef = useRef(null);
+  const viewedPostsRef = useRef(new Set());
   const toastOpacity = useMemo(() => new Animated.Value(0), []);
   const sendScale = useMemo(() => new Animated.Value(1), []);
   const scrollY = useMemo(() => new Animated.Value(0), []);
@@ -1007,8 +1234,10 @@ function GroupDetailScreen({ groupId }) {
   const isAdmin = isOwnerOrAdmin;
   const canSendMessages = Boolean(isAdmin || (isMember && group?.allowMemberMessages !== false));
   const activeText = editingMessage ? editText : draft;
-  const canSubmit = Boolean(activeText.trim()) && canSendMessages;
+  const canSubmit = Boolean(activeText.trim() || chatAttachment) && canSendMessages && !chatUploading;
   const nearLimit = activeText.length > MAX_LENGTH * 0.85;
+  const pollHasVotes = Boolean(pollEditing?.poll?.options?.some((option) => (option.voterIds || []).length));
+  const canSubmitPoll = Boolean(pollQuestion.trim() && pollOptions.filter((option) => option.trim()).length >= 2) && !pollSubmitting;
 
   const groupTabs = useMemo(() => [
     { key: 'Feed', icon: 'newspaper-outline', label: 'Feed' },
@@ -1025,6 +1254,21 @@ function GroupDetailScreen({ groupId }) {
   }, [groupId, isMember, activeTab]);
 
   useEffect(() => {
+    viewedPostsRef.current = new Set();
+  }, [groupId]);
+
+  useEffect(() => {
+    if (activeTab !== 'Feed' || !groupId || !uid || !isMember || !posts.length) return;
+    posts.forEach((post) => {
+      if (!post?.id || viewedPostsRef.current.has(post.id)) return;
+      viewedPostsRef.current.add(post.id);
+      recordGroupPostView(groupId, post.id, uid).catch(() => {
+        viewedPostsRef.current.delete(post.id);
+      });
+    });
+  }, [activeTab, groupId, isMember, posts, uid]);
+
+  useEffect(() => {
     if (!groupId || !isMember || activeTab !== 'Members') return;
     listGroupMembers(groupId).then(setMembers).catch(() => setMembers([]));
   }, [groupId, isMember, activeTab]);
@@ -1039,6 +1283,38 @@ function GroupDetailScreen({ groupId }) {
     const live = pending.filter((p) => !hasServerEcho(p, messages));
     return live.length ? sortMessages([...messages, ...live]) : messages;
   }, [messages, pending]);
+
+  const sharedMedia = useMemo(() => {
+    const fromMessages = displayMessages.flatMap((message) =>
+      (message.attachments || []).filter((attachment) => attachment?.url).map((attachment, index) => ({
+        ...attachment,
+        id: `message-${message.id}-${index}`,
+        kind: attachmentKind(attachment),
+        authorName: message.senderName || 'Student',
+        createdAt: message.createdAt,
+      }))
+    );
+    const fromPosts = posts.flatMap((post) =>
+      (post.attachments || []).filter((attachment) => attachment?.url).map((attachment, index) => ({
+        ...attachment,
+        id: `post-${post.id}-${index}`,
+        kind: attachmentKind(attachment),
+        authorName: post.authorName || 'Student',
+        createdAt: post.createdAt,
+      }))
+    );
+    const links = displayMessages.flatMap((message) =>
+      urlsInText(message.text).map((url, index) => ({
+        id: `link-${message.id}-${index}`,
+        url: /^https?:\/\//i.test(url) ? url : `https://${url}`,
+        name: url,
+        kind: 'link',
+        authorName: message.senderName || 'Student',
+        createdAt: message.createdAt,
+      }))
+    );
+    return [...fromMessages, ...fromPosts, ...links].sort((left, right) => getMillis(right) - getMillis(left));
+  }, [displayMessages, posts]);
 
   // Drop optimistic copies once the real message has arrived.
   useEffect(() => {
@@ -1461,13 +1737,38 @@ function GroupDetailScreen({ groupId }) {
     deliver(local);
   };
 
-  const send = () => {
-    const text = draft.trim();
-    if (!text || !group || !isMember || !canSendMessages) return;
+  const send = async () => {
+    const text = sanitizeMessageText(draft);
+    if ((!text && !chatAttachment) || !group || !isMember || !canSendMessages || chatUploading) return;
     const replyPayload = buildReplyPayload();
+    let attachments = [];
+    if (chatAttachment) {
+      setChatUploading(true);
+      try {
+        const uploaded = await uploadFeatureMedia(chatAttachment, {
+          feature: 'groups',
+          resourceType: chatAttachment.kind === 'image' ? 'image' : chatAttachment.kind === 'video' ? 'video' : 'raw',
+        });
+        const url = uploaded?.secure_url || uploaded?.url;
+        if (!url) throw new Error('Attachment upload failed. Please try again.');
+        attachments = [{
+          url,
+          name: chatAttachment.name,
+          type: chatAttachment.kind,
+          mimeType: chatAttachment.mimeType || chatAttachment.type,
+          size: chatAttachment.size || 0,
+        }];
+      } catch (error) {
+        showToast(error?.message || 'Could not upload the attachment.');
+        setChatUploading(false);
+        return;
+      }
+      setChatUploading(false);
+      setChatAttachment(null);
+    }
     setDraft('');
     DRAFT_CACHE.delete(groupId);
-    queueMessage({ type: 'text', text, attachments: [] }, { text, attachments: [], replyTo: replyPayload });
+    queueMessage({ type: 'text', text, attachments }, { text, attachments, replyTo: replyPayload });
   };
 
   const sendSticker = (sticker) => {
@@ -1481,25 +1782,31 @@ function GroupDetailScreen({ groupId }) {
   };
 
   const submitPoll = async () => {
+    if (!canSubmitPoll) return;
+    setPollSubmitting(true);
     try {
       if (pollEditing) await editGroupPoll(groupId, pollEditing.id, uid, { question: pollQuestion, options: pollOptions, multiSelect: pollMultiSelect });
       else await createGroupPoll(groupId, user, profile || {}, { question: pollQuestion, options: pollOptions, multiSelect: pollMultiSelect });
       setPollVisible(false); setPollEditing(null); setPollQuestion(''); setPollOptions(['', '']); setPollMultiSelect(false);
     } catch (error) { showToast(error?.message || 'Could not create poll.'); }
+    finally { setPollSubmitting(false); }
   };
 
   const votePoll = useCallback(async (message, optionId) => {
+    if (!message?.id || votingPollId) return;
+    setVotingPollId(message.id);
     try { await voteGroupPoll(groupId, message.id, optionId, uid); }
     catch (error) { showToast(error?.message || 'Could not record your vote.'); }
-  }, [groupId, showToast, uid]);
+    finally { setVotingPollId(null); }
+  }, [groupId, showToast, uid, votingPollId]);
 
-  const openPollEditor = (message = null) => {
+  const openPollEditor = useCallback((message = null) => {
     setPollEditing(message);
     setPollQuestion(message?.poll?.question || '');
     setPollOptions(message?.poll?.options?.map((option) => option.text) || ['', '']);
     setPollMultiSelect(Boolean(message?.poll?.multiSelect));
     setPollVisible(true);
-  };
+  }, []);
   const togglePollClosed = useCallback(async (message) => {
     try { await setGroupPollClosed(groupId, message.id, uid, !message.poll?.isClosed); }
     catch (error) { showToast(error?.message || 'Could not update poll.'); }
@@ -1633,6 +1940,43 @@ function GroupDetailScreen({ groupId }) {
     }
   };
 
+  const setSelectedChatAttachment = (asset, fallbackName) => {
+    const candidate = {
+      uri: asset?.uri,
+      name: asset?.name || asset?.fileName || fallbackName,
+      type: asset?.mimeType || asset?.type || 'application/octet-stream',
+      mimeType: asset?.mimeType || asset?.type || 'application/octet-stream',
+      size: Number(asset?.size || asset?.fileSize || 0),
+    };
+    if (!candidate.uri) return;
+    if (!isSafeAttachment(candidate)) {
+      Alert.alert('Unsupported attachment', 'Use an image, video, PDF, Office document, or plain text file under 20 MB.');
+      return;
+    }
+    setChatAttachment({ ...candidate, kind: attachmentKind(candidate) });
+  };
+
+  const pickChatMedia = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Allow photo library access to share photos and videos in this group.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: chatMediaTypes(), quality: 0.82 });
+    const asset = result.assets?.[0];
+    if (!result.canceled && asset?.uri) setSelectedChatAttachment(asset, `group-media-${Date.now()}`);
+  };
+
+  const pickChatDocument = async () => {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'text/plain'],
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    const asset = result.assets?.[0];
+    if (!result.canceled && asset?.uri) setSelectedChatAttachment(asset, `group-file-${Date.now()}`);
+  };
+
   const pickPostImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) return Alert.alert('Permission needed', 'Allow photo library access to add an image to the group feed.');
@@ -1690,6 +2034,62 @@ function GroupDetailScreen({ groupId }) {
     } catch (error) {
       showToast(error?.message || 'Could not react to that post.');
     }
+  };
+
+  const openPostEditor = (post) => {
+    if (!post || post.authorId !== uid) return;
+    setEditingPost(post);
+    setEditPostText(post.text || '');
+  };
+
+  const savePostEdit = async () => {
+    const text = sanitizeMessageText(editPostText);
+    if (!editingPost || savingPostEdit) return;
+    if (!text && !(editingPost.attachments || []).length) {
+      showToast('Add text or keep an attachment on the post.');
+      return;
+    }
+    setSavingPostEdit(true);
+    try {
+      await updateGroupPost(groupId, editingPost.id, uid, { text });
+      setEditingPost(null);
+      setEditPostText('');
+      showToast('Post updated');
+    } catch (error) {
+      showToast(error?.message || 'Unable to update this post.');
+    } finally {
+      setSavingPostEdit(false);
+    }
+  };
+
+  const confirmDeletePost = (post) => {
+    if (!post || (post.authorId !== uid && !isAdmin)) return;
+    Alert.alert('Delete post?', 'This will permanently remove the post and its shared media.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteGroupPost(groupId, post.id);
+            showToast('Post deleted');
+          } catch (error) {
+            showToast(error?.message || 'Unable to delete this post.');
+          }
+        },
+      },
+    ]);
+  };
+
+  const openPostActions = (post) => {
+    const canEditPost = post?.authorId === uid;
+    const canDeletePost = canEditPost || isAdmin;
+    if (!canDeletePost) return;
+    const options = [];
+    if (canEditPost) options.push({ text: 'Edit post', onPress: () => openPostEditor(post) });
+    options.push({ text: 'Delete post', style: 'destructive', onPress: () => confirmDeletePost(post) });
+    options.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert('Manage post', 'Choose an action for this post.', options);
   };
 
   /* ------------------------------ Group editing --------------------------- */
@@ -1837,13 +2237,15 @@ function GroupDetailScreen({ groupId }) {
           onOpenReactions={openReactionViewer}
           onRetry={retryPending}
           onOpenProfile={openProfile}
+          onOpenAttachment={setViewerMedia}
           onVotePoll={votePoll}
           onEditPoll={openPollEditor}
           onTogglePollClosed={togglePollClosed}
+          votingPollId={votingPollId}
         />
       );
     },
-    [styles, colors, uid, isMember, openActions, setReplyFromSwipe, toggleReaction, openReactionViewer, retryPending, openProfile, votePoll, openPollEditor, togglePollClosed]
+    [styles, colors, uid, isMember, openActions, setReplyFromSwipe, toggleReaction, openReactionViewer, retryPending, openProfile, votePoll, openPollEditor, togglePollClosed, votingPollId]
   );
 
   const renderPostCard = (post) => {
@@ -1859,8 +2261,10 @@ function GroupDetailScreen({ groupId }) {
             <Text style={styles.postAuthorName}>{post.authorName || 'Student'}</Text>
             <Text style={styles.postTime}>{formatShortTime(post.createdAt) || 'Just now'}</Text>
           </View>
+          {post.authorId === uid || isAdmin ? <Pressable style={styles.postManageButton} onPress={() => openPostActions(post)} accessibilityRole="button" accessibilityLabel="Manage post"><Ionicons name="ellipsis-horizontal" size={18} color={colors.textSecondary} /></Pressable> : null}
         </View>
         {post.text ? <Text style={styles.postText}>{post.text}</Text> : null}
+        {post.edited ? <Text style={styles.editedPostLabel}>Edited</Text> : null}
         {attachment?.type === 'image' ? <Image source={{ uri: attachment.url }} style={styles.postImage} resizeMode="cover" /> : null}
         {attachment?.type === 'file' ? (
           <Pressable style={styles.postFile} onPress={() => Linking.openURL(attachment.url)} accessibilityRole="link">
@@ -1879,6 +2283,10 @@ function GroupDetailScreen({ groupId }) {
           >
             <Text>👍</Text><Text style={styles.postReactionText}>{post.reactionCount || 0}</Text>
           </Pressable>
+          <View style={styles.postStat} accessibilityLabel={`${post.viewCount || 0} views`}>
+            <Ionicons name="eye-outline" size={15} color={colors.textTertiary} />
+            <Text style={styles.postStatText}>{post.viewCount || 0}</Text>
+          </View>
         </View>
       </View>
     );
@@ -1905,32 +2313,33 @@ function GroupDetailScreen({ groupId }) {
     );
     if (activeTab === 'Members') return (
       <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentInner}>
-        {members.length ? members.map((member) => (
+        <TextInput value={memberSearch} onChangeText={setMemberSearch} placeholder="Search members" placeholderTextColor={colors.textTertiary} style={styles.memberSearch} accessibilityLabel="Search group members" />
+        {members.filter((member) => `${member.name || ''} ${member.email || ''}`.toLowerCase().includes(memberSearch.trim().toLowerCase())).length ? members.filter((member) => `${member.name || ''} ${member.email || ''}`.toLowerCase().includes(memberSearch.trim().toLowerCase())).map((member) => (
           <Pressable key={member.id || member.uid} style={styles.memberRow} onPress={() => openProfile(member.uid)}>
             <View style={styles.memberAvatar}>
               {member.avatar ? <Image source={{ uri: member.avatar }} style={styles.postAvatarImage} /> : <Text style={styles.postAvatarText}>{initialsForName(member.name)}</Text>}
             </View>
             <View>
-              <Text style={styles.memberName}>{member.name || 'Student'}</Text>
-              <Text style={styles.memberRole}>{member.role === 'owner' ? 'Group owner' : member.role === 'moderator' ? 'Moderator' : 'Member'}</Text>
+              <Text style={styles.memberName}>{member.uid === uid ? `${member.name || 'Student'} (You)` : member.name || 'Student'}</Text>
+              <Text style={styles.memberRole}>{member.role === 'owner' ? 'Group owner' : member.role === 'admin' ? 'Admin' : member.role === 'moderator' ? 'Moderator' : 'Member'}</Text>
             </View>
           </Pressable>
-        )) : <EmptyState title="No members found" description="Members will appear here." />}
+        )) : <EmptyState title={memberSearch ? 'No matching members' : 'No members found'} description={memberSearch ? 'Try a different name or email.' : 'Members will appear here.'} />}
       </ScrollView>
     );
     if (activeTab === 'Media' || activeTab === 'Files') {
-      const expectedType = activeTab === 'Media' ? 'image' : 'file';
-      const items = posts.flatMap((post) => (post.attachments || []).filter((attachment) => attachment.type === expectedType).map((attachment, index) => ({ ...attachment, id: `${post.id}-${index}`, authorName: post.authorName })));
+      const availableFilters = activeTab === 'Media' ? ['all', 'image', 'video', 'document', 'link'] : ['document'];
+      const items = sharedMedia.filter((item) => activeTab === 'Files' ? item.kind === 'document' : mediaFilter === 'all' || item.kind === mediaFilter);
       return (
         <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentInner}>
-          {items.length ? items.map((item) => item.type === 'image' ? (
-            <Pressable key={item.id} onPress={() => Linking.openURL(item.url)}><Image source={{ uri: item.url }} style={styles.postImage} /></Pressable>
+          {activeTab === 'Media' ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mediaFilters}>{availableFilters.map((filter) => <Pressable key={filter} onPress={() => setMediaFilter(filter)} style={[styles.mediaFilter, mediaFilter === filter && styles.mediaFilterActive]}><Text style={[styles.mediaFilterText, mediaFilter === filter && styles.mediaFilterTextActive]}>{filter[0].toUpperCase() + filter.slice(1)}</Text></Pressable>)}</ScrollView> : null}
+          {items.length ? <View style={styles.mediaGrid}>{items.map((item) => item.kind === 'image' ? (
+            <Pressable key={item.id} style={styles.mediaTile} onPress={() => setViewerMedia(item)} accessibilityRole="imagebutton" accessibilityLabel={`Open ${item.name || 'image'}`}><Image source={{ uri: item.url }} style={styles.mediaTileImage} /><View style={styles.mediaTileOverlay}><Ionicons name="expand-outline" size={20} color="#FFFFFF" /></View></Pressable>
+          ) : item.kind === 'video' ? (
+            <Pressable key={item.id} style={styles.mediaTile} onPress={() => setViewerMedia(item)} accessibilityRole="button" accessibilityLabel={`Play ${item.name || 'video'}`}><View style={styles.mediaTileDoc}><Ionicons name="play-circle-outline" size={34} color={colors.brand} /><Text style={styles.mediaTileName} numberOfLines={2}>{item.name || 'Video'}</Text></View></Pressable>
           ) : (
-            <Pressable key={item.id} style={styles.postFile} onPress={() => Linking.openURL(item.url)}>
-              <Ionicons name="document-text-outline" size={21} color={colors.brand} />
-              <Text style={styles.postFileName}>{item.name || 'Download file'}</Text>
-            </Pressable>
-          )) : <EmptyState title={`No ${activeTab.toLowerCase()} yet`} description={`Shared ${activeTab.toLowerCase()} will appear here.`} />}
+            <Pressable key={item.id} style={styles.postFile} onPress={() => setViewerMedia(item)} accessibilityRole="button"><Ionicons name="document-text-outline" size={21} color={colors.brand} /><Text style={styles.postFileName} numberOfLines={1}>{item.name || 'Document'}</Text><Text style={styles.chatAttachmentMeta}>{formatFileSize(item.size)}</Text></Pressable>
+          ))}</View> : <EmptyState title={`No ${activeTab.toLowerCase()} yet`} description={`Shared ${activeTab.toLowerCase()} will appear here.`} />}
         </ScrollView>
       );
     }
@@ -2145,9 +2554,19 @@ function GroupDetailScreen({ groupId }) {
                       <Text style={styles.permissionNoticeText}>Only admins can send messages in this group.</Text>
                     </View>
                   ) : (
+                    <>
+                    {chatAttachment ? (
+                      <View style={styles.attachmentPreview}>
+                        <View style={styles.attachmentPreviewThumb}>
+                          {chatAttachment.kind === 'image' ? <Image source={{ uri: chatAttachment.uri }} style={styles.attachmentPreviewImage} /> : <Ionicons name={chatAttachment.kind === 'video' ? 'videocam-outline' : 'document-text-outline'} size={18} color={colors.brand} />}
+                        </View>
+                        <Text style={styles.attachmentPreviewName} numberOfLines={1}>{chatAttachment.name}</Text>
+                        <Pressable onPress={() => setChatAttachment(null)} accessibilityRole="button" accessibilityLabel="Remove attachment"><Ionicons name="close-circle" size={21} color={colors.textTertiary} /></Pressable>
+                      </View>
+                    ) : null}
                     <View style={styles.composerInputRow}>
-                      <Pressable accessibilityRole="button" accessibilityLabel="Create poll" style={styles.stickerButton} onPress={() => openPollEditor()} disabled={Boolean(editingMessage)}>
-                        <Ionicons name="bar-chart-outline" size={21} color={editingMessage ? colors.textTertiary : colors.brand} />
+                      <Pressable accessibilityRole="button" accessibilityLabel="Open message tools" style={styles.stickerButton} onPress={() => setComposerToolsVisible(true)} disabled={Boolean(editingMessage) || chatUploading}>
+                        <Ionicons name="add" size={24} color={editingMessage || chatUploading ? colors.textTertiary : colors.brand} />
                       </Pressable>
                       <Pressable
                         accessibilityRole="button"
@@ -2184,10 +2603,11 @@ function GroupDetailScreen({ groupId }) {
                           accessibilityRole="button"
                           accessibilityLabel={editingMessage ? 'Save edit' : 'Send message'}
                         >
-                          <Ionicons name={editingMessage ? 'checkmark' : 'send'} size={18} color="#fff" />
+                          {chatUploading ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name={editingMessage ? 'checkmark' : 'send'} size={18} color="#fff" />}
                         </Pressable>
                       </Animated.View>
                     </View>
+                    </>
                   )}
                 </View>
               </View>
@@ -2196,16 +2616,58 @@ function GroupDetailScreen({ groupId }) {
           </View>
 
           <StickerPicker visible={stickerPickerVisible} onClose={() => setStickerPickerVisible(false)} onSelect={sendSticker} />
+          <Modal visible={Boolean(viewerMedia)} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setViewerMedia(null)}>
+            <GroupMediaViewer media={viewerMedia} onClose={() => setViewerMedia(null)} />
+          </Modal>
+          <Modal visible={composerToolsVisible} transparent animationType="slide" onRequestClose={() => setComposerToolsVisible(false)}>
+            <Pressable style={styles.actionSheetBackdrop} onPress={() => setComposerToolsVisible(false)}>
+              <Pressable style={styles.composerToolsCard} onPress={(event) => event.stopPropagation()}>
+                <View style={styles.actionSheetHandleWrap}><View style={styles.actionSheetHandle} /></View>
+                <SheetRow styles={styles} colors={colors} icon="image-outline" label="Photo or video" onPress={() => { setComposerToolsVisible(false); pickChatMedia(); }} />
+                <SheetRow styles={styles} colors={colors} icon="document-attach-outline" label="Document" onPress={() => { setComposerToolsVisible(false); pickChatDocument(); }} />
+                <SheetRow styles={styles} colors={colors} icon="bar-chart-outline" label="Create poll" onPress={() => { setComposerToolsVisible(false); openPollEditor(); }} />
+              </Pressable>
+            </Pressable>
+          </Modal>
+          <Modal visible={Boolean(editingPost)} transparent animationType="fade" onRequestClose={() => setEditingPost(null)}>
+            <Pressable style={styles.actionSheetBackdrop} onPress={() => setEditingPost(null)}>
+              <Pressable style={styles.actionSheetCard} onPress={(event) => event.stopPropagation()}>
+                <Text style={{ color: colors.textPrimary, fontSize: 18, fontWeight: '800', marginBottom: 12 }}>Edit post</Text>
+                <TextInput value={editPostText} onChangeText={setEditPostText} style={[styles.fieldInput, styles.fieldTextArea]} multiline maxLength={2000} placeholder="Share an update" placeholderTextColor={colors.textTertiary} accessibilityLabel="Edit group post" />
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <Pressable style={[styles.saveButton, { flex: 1, backgroundColor: colors.surfaceSecondary }]} onPress={() => setEditingPost(null)}><Text style={[styles.saveButtonText, { color: colors.textPrimary }]}>Cancel</Text></Pressable>
+                  <Pressable style={[styles.saveButton, { flex: 1 }, savingPostEdit && styles.saveButtonDisabled]} onPress={savePostEdit} disabled={savingPostEdit}>{savingPostEdit ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.saveButtonText}>Save</Text>}</Pressable>
+                </View>
+              </Pressable>
+            </Pressable>
+          </Modal>
           <Modal visible={pollVisible} transparent animationType="fade" onRequestClose={() => setPollVisible(false)}>
             <Pressable style={styles.actionSheetBackdrop} onPress={() => setPollVisible(false)}>
-              <Pressable style={[styles.actionSheetCard, { gap: 10 }]} onPress={(event) => event.stopPropagation()}>
-                <Text style={{ color: colors.textPrimary, fontSize: 18, fontWeight: '800' }}>{pollEditing ? 'Edit poll' : 'Create poll'}</Text>
-                <TextInput value={pollQuestion} onChangeText={setPollQuestion} style={styles.fieldInput} placeholder="Ask a question" placeholderTextColor={colors.textTertiary} />
-                {pollOptions.map((option, index) => <TextInput key={index} value={option} onChangeText={(value) => setPollOptions((items) => items.map((item, i) => i === index ? value : item))} style={styles.fieldInput} placeholder={`Option ${index + 1}`} placeholderTextColor={colors.textTertiary} />)}
-                {pollOptions.length < 6 ? <Pressable onPress={() => setPollOptions((items) => [...items, ''])}><Text style={{ color: colors.brand, fontWeight: '800' }}>Add option</Text></Pressable> : null}
-                <Pressable onPress={() => setPollMultiSelect((value) => !value)} style={[styles.fieldInput, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}><Text style={{ color: colors.textPrimary, fontWeight: '700' }}>Allow multiple answers</Text><Ionicons name={pollMultiSelect ? 'checkbox' : 'square-outline'} size={22} color={colors.brand} /></Pressable>
-                <Pressable style={styles.saveButton} onPress={submitPoll}><Text style={styles.saveButtonText}>{pollEditing ? 'Save poll' : 'Post poll'}</Text></Pressable>
-              </Pressable>
+              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%', justifyContent: 'flex-end' }}>
+                <Pressable style={[styles.actionSheetCard, styles.pollEditorCard]} onPress={(event) => event.stopPropagation()}>
+                  <View style={styles.actionSheetHandleWrap}><View style={styles.actionSheetHandle} /></View>
+                  <ScrollView style={styles.pollEditorScroll} contentContainerStyle={styles.pollEditorContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                    <Text style={{ color: colors.textPrimary, fontSize: 19, fontWeight: '800' }}>{pollEditing ? 'Edit poll' : 'Create poll'}</Text>
+                    <Text style={styles.pollEditorSubtitle}>{pollEditing ? 'Update the question or manage your poll.' : 'Ask your group and let everyone vote.'}</Text>
+                    {pollHasVotes ? <View style={styles.pollLockedNotice}><Ionicons name="lock-closed-outline" size={16} color={colors.textSecondary} /><Text style={styles.pollLockedNoticeText}>Voting has started, so options and answer mode are locked. You can still edit the question.</Text></View> : null}
+                    <TextInput value={pollQuestion} onChangeText={setPollQuestion} style={[styles.fieldInput, { marginBottom: 0 }]} placeholder="Ask a question" placeholderTextColor={colors.textTertiary} maxLength={200} accessibilityLabel="Poll question" />
+                    {pollOptions.map((option, index) => (
+                      <View key={index} style={styles.pollOptionField}>
+                        <TextInput value={option} editable={!pollHasVotes} onChangeText={(value) => setPollOptions((items) => items.map((item, i) => i === index ? value : item))} style={[styles.fieldInput, styles.pollOptionInput, pollHasVotes && { opacity: 0.62 }]} placeholder={`Option ${index + 1}`} placeholderTextColor={colors.textTertiary} maxLength={120} accessibilityLabel={`Poll option ${index + 1}`} />
+                        {pollOptions.length > 2 && !pollHasVotes ? <Pressable onPress={() => setPollOptions((items) => items.filter((_, i) => i !== index))} style={styles.pollRemoveOption} accessibilityRole="button" accessibilityLabel={`Remove option ${index + 1}`}><Ionicons name="close" size={18} color={colors.danger} /></Pressable> : null}
+                      </View>
+                    ))}
+                    {pollOptions.length < 6 && !pollHasVotes ? <Pressable onPress={() => setPollOptions((items) => [...items, ''])} style={styles.pollAddOption} accessibilityRole="button"><Ionicons name="add" size={18} color={colors.brand} /><Text style={styles.pollAddOptionText}>Add option</Text></Pressable> : null}
+                    <Pressable disabled={pollHasVotes} onPress={() => setPollMultiSelect((value) => !value)} style={[styles.pollMode, pollHasVotes && { opacity: 0.62 }]} accessibilityRole="checkbox" accessibilityState={{ checked: pollMultiSelect, disabled: pollHasVotes }} accessibilityLabel="Allow multiple answers">
+                      <View style={styles.pollModeCopy}><Text style={styles.pollModeTitle}>Allow multiple answers</Text><Text style={styles.pollModeHint}>Members can choose more than one option.</Text></View>
+                      <Ionicons name={pollMultiSelect ? 'checkbox' : 'square-outline'} size={24} color={colors.brand} />
+                    </Pressable>
+                    <Pressable style={[styles.saveButton, !canSubmitPoll && styles.saveButtonDisabled]} onPress={submitPoll} disabled={!canSubmitPoll} accessibilityRole="button">
+                      {pollSubmitting ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.saveButtonText}>{pollEditing ? 'Save changes' : 'Post poll'}</Text>}
+                    </Pressable>
+                  </ScrollView>
+                </Pressable>
+              </KeyboardAvoidingView>
             </Pressable>
           </Modal>
         </View>

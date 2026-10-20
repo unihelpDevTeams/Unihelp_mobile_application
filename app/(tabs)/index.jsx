@@ -929,6 +929,77 @@ export default function HomeScreen() {
       color: c.brandText,
     },
 
+    // Marketplace shortcut: a single, high-visibility route into student listings.
+    marketplaceShortcut: {
+      borderRadius: r['2xl'],
+      overflow: 'hidden',
+      marginBottom: s.xl,
+      shadowColor: '#0F766E',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.18,
+      shadowRadius: 16,
+      elevation: 5,
+    },
+    marketplaceShortcutBg: {
+      minHeight: screenWidth >= 720 ? 176 : 150,
+      justifyContent: 'center',
+    },
+    marketplaceShortcutOverlay: {
+      flex: 1,
+      justifyContent: 'center',
+      padding: s.lg,
+    },
+    marketplaceShortcutContent: {
+      maxWidth: screenWidth >= 720 ? '62%' : '76%',
+    },
+    marketplaceShortcutEyebrow: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 999,
+      backgroundColor: 'rgba(255,255,255,0.18)',
+      overflow: 'hidden',
+    },
+    marketplaceShortcutEyebrowText: {
+      color: '#FFFFFF',
+      fontSize: 10.5,
+      fontWeight: '800',
+      letterSpacing: 0.4,
+    },
+    marketplaceShortcutTitle: {
+      color: '#FFFFFF',
+      fontSize: screenWidth >= 720 ? 24 : 20,
+      fontWeight: '900',
+      letterSpacing: -0.35,
+      marginTop: s.sm,
+    },
+    marketplaceShortcutSubtitle: {
+      color: 'rgba(255,255,255,0.9)',
+      fontSize: 12.5,
+      fontWeight: '600',
+      lineHeight: 18,
+      marginTop: 3,
+    },
+    marketplaceShortcutCta: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: '#FFFFFF',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 999,
+      marginTop: s.md,
+    },
+    marketplaceShortcutCtaText: {
+      color: '#0F766E',
+      fontSize: 12,
+      fontWeight: '900',
+    },
+
     // Toolkit
     sectionHeaderRow: {
       flexDirection: 'row',
@@ -1572,6 +1643,27 @@ export default function HomeScreen() {
 
         {/* Premium is supportive, not the first thing a student sees on launch. */}
         {!premiumUnlocked ? <PremiumMarquee onPress={() => router.navigate('/premium')} /> : null}
+
+        <Pressable
+          style={({ pressed }) => [styles.marketplaceShortcut, pressed && { opacity: 0.94, transform: [{ scale: 0.992 }] }]}
+          onPress={() => router.navigate('/studentmarketplace')}
+          accessibilityRole="button"
+          accessibilityLabel="Open Student Marketplace to buy and sell on campus"
+        >
+          <ImageBackground source={IMAGES.marketplace} style={styles.marketplaceShortcutBg} resizeMode="cover">
+            <LinearGradient colors={['rgba(6,78,59,0.94)', 'rgba(15,118,110,0.76)', 'rgba(6,78,59,0.25)']} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.marketplaceShortcutOverlay}>
+              <View style={styles.marketplaceShortcutContent}>
+                <View style={styles.marketplaceShortcutEyebrow}><Ionicons name="storefront" size={12} color="#FFFFFF" /><Text style={styles.marketplaceShortcutEyebrowText}>STUDENT MARKETPLACE</Text></View>
+                <Text style={styles.marketplaceShortcutTitle}>Buy, sell & find campus essentials</Text>
+                <Text style={styles.marketplaceShortcutSubtitle}>Discover textbooks, gadgets, fashion, furniture and more from fellow students.</Text>
+                <View style={styles.marketplaceShortcutCta}>
+                  <Text style={styles.marketplaceShortcutCtaText}>Explore listings</Text>
+                  <Ionicons name="arrow-forward" size={15} color="#0F766E" />
+                </View>
+              </View>
+            </LinearGradient>
+          </ImageBackground>
+        </Pressable>
 
         {/* ACADEMIC TOOLKIT */}
         <View>

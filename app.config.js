@@ -96,6 +96,12 @@ module.exports = {
       "expo-router",
       "expo-font",
       [
+        "expo-image-picker",
+        {
+          photosPermission: "Allow UniHelp to access your photos so you can add images to your profile, groups, posts, and messages.",
+        },
+      ],
+      [
         "expo-build-properties",
         {
           android: {
