@@ -48,6 +48,7 @@ export default function ScreenShell({
   subtitle = '',
   showBack = false,
   scrollable = true,
+  contentPadding = true,
   loading = false,
   children,
   actions = null,
@@ -154,6 +155,7 @@ export default function ScreenShell({
     iconButtonPressed: { backgroundColor: c.borderDefault },
     scrollContent: { paddingHorizontal: layout.screenPadding, paddingTop: s.lg, paddingBottom: s['3xl'] },
     staticContent: { flex: 1, paddingHorizontal: layout.screenPadding, paddingTop: s.lg, paddingBottom: s['3xl'] },
+    noContentPadding: { paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 },
     overlay: { ...StyleSheet.absoluteFillObject },
 
     // ---- Menu drawer -----------------------------------------------------
@@ -390,14 +392,14 @@ export default function ScreenShell({
   }, []);
 
   const content = scrollable ? (
-    <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+    <ScrollView contentContainerStyle={[styles.scrollContent, !contentPadding && styles.noContentPadding]} showsVerticalScrollIndicator={false}>
       <OfflineNotice visible={isConnected === false} colors={colors} styles={styles} />
       {premiumExpiryNotice}
       {body}
       {footer}
     </ScrollView>
   ) : (
-    <View style={styles.staticContent}>
+    <View style={[styles.staticContent, !contentPadding && styles.noContentPadding]}>
       <OfflineNotice visible={isConnected === false} colors={colors} styles={styles} />
       {premiumExpiryNotice}
       {body}

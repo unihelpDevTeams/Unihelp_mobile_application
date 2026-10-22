@@ -66,6 +66,7 @@ async function persistProfileCache(profile) {
         subscriptionProvider: profile.subscriptionProvider,
         subscriptionBilling: profile.subscriptionBilling,
         usernameLower: profile.usernameLower,
+        chatBubbleAppearance: profile.chatBubbleAppearance,
       };
       await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(slim));
     }

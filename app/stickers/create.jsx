@@ -84,6 +84,7 @@ export default function CreateStickerScreen() {
   const savingRef = useRef(false);
   const savedRef = useRef(false);
   const uploadRef = useRef(null);
+  const originalMediaUriRef = useRef('');
   const dirtyRef = useRef(false);
 
   useEffect(() => {
@@ -101,6 +102,7 @@ export default function CreateStickerScreen() {
           height: sticker.height || 1,
           duration: Number(sticker.duration || 0) * 1000,
         });
+        originalMediaUriRef.current = sticker.originalAssetUrl || sticker.assetUrl || '';
         setName(sticker.name || '');
         setOverlayText(sticker.editor?.text || '');
         setEmoji(sticker.editor?.emoji || '');
@@ -126,11 +128,11 @@ export default function CreateStickerScreen() {
   const hasImage = !!media && !mediaIsVideo;
   const cropAspect = (CROPS.find((c) => c.key === cropKey) || CROPS[0]).aspect;
   useEffect(() => {
-    dirtyRef.current = !!media || !!overlayText.trim() || !!name.trim();
-  }, [media, name, overlayText]);
+    dirtyRef.current = !!media || !!overlayText.trim() || !!name.trim() || !!emoji || rotation !== 0 || removeBackground;
+  }, [media, name, overlayText, emoji, rotation, removeBackground]);
 
   const styles = useThemeStyles((c, s, r) => ({
-    preview: { width: '100%', aspectRatio: 1, borderRadius: r['2xl'], backgroundColor: c.surfaceSecondary, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: 1, borderColor: c.borderDefault },
+    preview: { width: '100%', aspectRatio: 1, borderRadius: r['2xl'], backgroundColor: '#101214', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: 1, borderColor: c.borderDefault, position: 'relative' },
     emptyWrap: { alignItems: 'center', justifyContent: 'center', gap: 8, padding: s.lg },
     emptyIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
     emptyTitle: { color: c.textPrimary, fontSize: 16, fontWeight: '800' },
@@ -150,6 +152,9 @@ export default function CreateStickerScreen() {
     tabActive: { backgroundColor: c.card, borderColor: c.borderDefault },
     tabText: { color: c.textSecondary, fontSize: 11, fontWeight: '800' },
     tabTextActive: { color: c.brandText },
+    workspaceTools: { position: 'absolute', right: 10, top: 10, gap: 8, padding: 6, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.52)' },
+    workspaceTool: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+    workspaceToolActive: { backgroundColor: c.brand },
     panel: { backgroundColor: c.card, borderRadius: 16, borderWidth: 1, borderColor: c.borderDefault, padding: s.md, marginBottom: s.md },
     label: { color: c.textPrimary, fontWeight: '800', marginBottom: 6, marginTop: s.sm },
     labelFirst: { color: c.textPrimary, fontWeight: '800', marginBottom: 6 },
@@ -206,7 +211,8 @@ export default function CreateStickerScreen() {
         return;
       }
       uploadRef.current = null;
-      setMedia(asset);
+    setMedia(asset);
+    if (!editingId) originalMediaUriRef.current = '';
       setRotation(0);
       if (!isImage) setRemoveBackground(false);
     } catch (_error) {
@@ -258,7 +264,17 @@ export default function CreateStickerScreen() {
     try {
       // Reuse a finished upload when retrying after a failed create, so we never upload twice.
       if (editingId) {
-        sticker = await updateSticker(editingId, { name: finalName, editor });
+        const replacement = media.uri !== originalMediaUriRef.current;
+        let uploadId;
+        if (replacement) {
+          const uploadKey = `${media.uri}|${rotation}`;
+          if (uploadRef.current?.key !== uploadKey) {
+            const uploaded = await uploadStickerMedia(media, (value) => setProgress(Number(value) || 0), { rotation });
+            uploadRef.current = { key: uploadKey, uploaded };
+          }
+          uploadId = uploadRef.current.uploaded.uploadId;
+        }
+        sticker = await updateSticker(editingId, { name: finalName, editor, ...(uploadId ? { uploadId } : {}) });
       } else {
         // Reuse a finished upload when retrying after a failed create, so we never upload twice.
         const uploadKey = `${media.uri}|${rotation}`;
@@ -489,6 +505,25 @@ export default function CreateStickerScreen() {
             <Ionicons name="close" size={20} color="#FFFFFF" />
           </Pressable>
         ) : null}
+        {media && !mediaIsVideo ? (
+          <View style={styles.workspaceTools}>
+            {TABS.map((tab) => {
+              const active = activeTab === tab.key;
+              return (
+                <Pressable
+                  key={tab.key}
+                  accessibilityRole="button"
+                  accessibilityLabel={tab.label}
+                  accessibilityState={{ selected: active }}
+                  style={[styles.workspaceTool, active && styles.workspaceToolActive]}
+                  onPress={() => setActiveTab(tab.key)}
+                >
+                  <Ionicons name={tab.icon} size={20} color={active ? colors.onBrand : '#FFFFFF'} />
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.metaRow}>
@@ -500,7 +535,7 @@ export default function CreateStickerScreen() {
         ))}
       </View>
 
-      {!editingId ? <View style={styles.sourceRow}>
+      <View style={styles.sourceRow}>
         <Pressable accessibilityRole="button" disabled={saving} style={[styles.source, hasImage && styles.sourceActive]} onPress={() => pickMedia('image')}>
           <Ionicons name="image-outline" size={19} color={colors.brand} />
           <Text style={styles.sourceText}>{hasImage ? 'Change photo' : 'Photo'}</Text>
@@ -509,18 +544,11 @@ export default function CreateStickerScreen() {
           <Ionicons name="videocam-outline" size={19} color={colors.brand} />
           <Text style={styles.sourceText}>{mediaIsVideo ? 'Change video' : 'Video'}</Text>
         </Pressable>
-      </View> : null}
+      </View>
 
-      <View style={styles.tabs}>
-        {TABS.map((tab) => {
-          const active = activeTab === tab.key;
-          return (
-            <Pressable key={tab.key} accessibilityRole="tab" accessibilityState={{ selected: active }} style={[styles.tab, active && styles.tabActive, mediaIsVideo && { opacity: 0.5 }]} onPress={() => setActiveTab(tab.key)}>
-              <Ionicons name={tab.icon} size={18} color={active ? colors.brand : colors.textSecondary} />
-              <Text style={[styles.tabText, active && styles.tabTextActive]}>{tab.label}</Text>
-            </Pressable>
-          );
-        })}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <Ionicons name="options-outline" size={16} color={colors.textSecondary} />
+        <Text style={styles.helper}>{mediaIsVideo ? 'Video stickers cannot use photo editing tools.' : `Editing: ${(TABS.find((tab) => tab.key === activeTab) || TABS[0]).label}`}</Text>
       </View>
 
       <View style={styles.panel}>{renderPanel()}</View>

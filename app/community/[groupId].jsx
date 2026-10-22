@@ -816,7 +816,7 @@ function RoleChip({ role, styles }) {
   );
 }
 
-function PollMessage({ message, mine, uid, styles, colors, voting, onVote, onEdit, onToggleClosed }) {
+function PollMessage({ message, mine, uid, styles, colors, voting, onVote, onViewVoters, onEdit, onToggleClosed }) {
   const poll = message.poll;
   const participants = new Set((poll.options || []).flatMap((option) => option.voterIds || [])).size;
   const totalVotes = (poll.options || []).reduce((total, option) => total + (option.voterIds?.length || 0), 0);
@@ -839,17 +839,20 @@ function PollMessage({ message, mine, uid, styles, colors, voting, onVote, onEdi
         return (
           <Pressable
             key={option.id}
-            disabled={poll.isClosed || voting}
-            onPress={() => onVote(message, option.id)}
+            disabled={voting}
+            onPress={() => { if (!poll.isClosed) onVote(message, option.id); }}
+            onLongPress={() => onViewVoters(option)}
+            delayLongPress={350}
             accessibilityRole="button"
-            accessibilityState={{ disabled: poll.isClosed || voting, selected: Boolean(selected) }}
+            accessibilityState={{ disabled: voting, selected: Boolean(selected) }}
             accessibilityLabel={`${option.text}, ${percent} percent, ${count} vote${count === 1 ? '' : 's'}${selected ? ', selected' : ''}`}
+            accessibilityHint="Long press to see voters"
             style={({ pressed }) => [
               styles.pollOption,
               mine && styles.pollOptionMine,
               selected && styles.pollOptionSelected,
               selected && mine && styles.pollOptionSelectedMine,
-              pressed && !poll.isClosed && !voting && { opacity: 0.82 },
+              pressed && !voting && { opacity: 0.82 },
             ]}
           >
             <View style={[styles.pollProgress, { width: `${percent}%` }, mine && styles.pollProgressMine]} />
@@ -895,6 +898,7 @@ const MessageRow = React.memo(function MessageRow({
   onOpenProfile,
   onOpenAttachment,
   onVotePoll,
+  onViewPollVoters,
   onEditPoll,
   onTogglePollClosed,
   votingPollId,
@@ -1069,7 +1073,7 @@ const MessageRow = React.memo(function MessageRow({
               <StickerMessage message={message} isMine={mine} onLongPress={() => onLongPress(message)} />
             </View>
           ) : message.type === 'poll' && message.poll ? (
-            <PollMessage message={message} mine={mine} uid={uid} styles={styles} colors={colors} voting={votingPollId === message.id} onVote={onVotePoll} onEdit={onEditPoll} onToggleClosed={onTogglePollClosed} />
+            <PollMessage message={message} mine={mine} uid={uid} styles={styles} colors={colors} voting={votingPollId === message.id} onVote={onVotePoll} onViewVoters={onViewPollVoters} onEdit={onEditPoll} onToggleClosed={onTogglePollClosed} />
           ) : (
             <Text style={[styles.messageBody, mine && styles.messageBodyMine]}>
               {message.text ? renderLinkedText(message.text, mine, colors) : '📎 Attachment'}
@@ -1169,6 +1173,7 @@ function GroupDetailScreen({ groupId }) {
   const [pollMultiSelect, setPollMultiSelect] = useState(false);
   const [pollSubmitting, setPollSubmitting] = useState(false);
   const [votingPollId, setVotingPollId] = useState(null);
+  const [pollVoterViewer, setPollVoterViewer] = useState(null);
   const [activeTab, setActiveTab] = useState('Feed');
   const [posts, setPosts] = useState([]);
   const [members, setMembers] = useState([]);
@@ -1371,6 +1376,19 @@ function GroupDetailScreen({ groupId }) {
       return { ...(people.get(String(id)) || { id: String(id), name: 'Group member', avatar: '' }), emojis };
     });
   }, [reactionViewer, uid, profile, user, members, messages, posts]);
+
+  const pollVoterPeople = useMemo(() => {
+    if (!pollVoterViewer) return [];
+    const directory = new Map(members.map((member) => [String(member.uid || member.id), member]));
+    return pollVoterViewer.voterIds.map((id) => {
+      const member = directory.get(String(id)) || {};
+      return {
+        id: String(id),
+        name: String(id) === uid ? 'You' : member.name || member.displayName || member.username || 'Group member',
+        avatar: member.avatar || member.avatarUrl || member.photoURL || '',
+      };
+    });
+  }, [pollVoterViewer, members, uid]);
 
   /* ------------------------------- Utilities ------------------------------ */
 
@@ -1774,7 +1792,7 @@ function GroupDetailScreen({ groupId }) {
   const sendSticker = (sticker) => {
     if (!sticker || !group || !user || !isMember || !canSendMessages) return;
     const replyPayload = buildReplyPayload();
-    const stickerFields = { id: sticker.id, type: sticker.type, assetUrl: sticker.assetUrl, thumbnailUrl: sticker.thumbnailUrl, name: sticker.name };
+    const stickerFields = { id: sticker.id, type: sticker.type, assetUrl: sticker.assetUrl, thumbnailUrl: sticker.thumbnailUrl, name: sticker.name, editor: sticker.editor || null };
     queueMessage(
       { type: 'sticker', stickerId: sticker.id, sticker: stickerFields },
       { type: 'sticker', stickerId: sticker.id, sticker: stickerFields, replyTo: replyPayload && { ...replyPayload, text: replyPayload.text || 'Sticker' } }
@@ -1799,6 +1817,11 @@ function GroupDetailScreen({ groupId }) {
     catch (error) { showToast(error?.message || 'Could not record your vote.'); }
     finally { setVotingPollId(null); }
   }, [groupId, showToast, uid, votingPollId]);
+
+  const openPollVoters = useCallback((option) => {
+    Haptics.selectionAsync();
+    setPollVoterViewer({ optionText: option?.text || 'Option', voterIds: [...new Set(option?.voterIds || [])] });
+  }, []);
 
   const openPollEditor = useCallback((message = null) => {
     setPollEditing(message);
@@ -2239,13 +2262,14 @@ function GroupDetailScreen({ groupId }) {
           onOpenProfile={openProfile}
           onOpenAttachment={setViewerMedia}
           onVotePoll={votePoll}
+          onViewPollVoters={openPollVoters}
           onEditPoll={openPollEditor}
           onTogglePollClosed={togglePollClosed}
           votingPollId={votingPollId}
         />
       );
     },
-    [styles, colors, uid, isMember, openActions, setReplyFromSwipe, toggleReaction, openReactionViewer, retryPending, openProfile, votePoll, openPollEditor, togglePollClosed, votingPollId]
+    [styles, colors, uid, isMember, openActions, setReplyFromSwipe, toggleReaction, openReactionViewer, retryPending, openProfile, votePoll, openPollVoters, openPollEditor, togglePollClosed, votingPollId]
   );
 
   const renderPostCard = (post) => {
@@ -2695,6 +2719,30 @@ function GroupDetailScreen({ groupId }) {
                 </Pressable>
               ))}
             </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={Boolean(pollVoterViewer)} transparent animationType="fade" onRequestClose={() => setPollVoterViewer(null)}>
+        <Pressable style={styles.actionSheetBackdrop} onPress={() => setPollVoterViewer(null)}>
+          <Pressable style={styles.reactionViewerCard} onPress={(event) => event.stopPropagation()}>
+            <View style={styles.actionSheetHandleWrap}>
+              <View style={styles.actionSheetHandle} />
+            </View>
+            <Text style={styles.reactionViewerTitle} numberOfLines={1}>{pollVoterViewer?.optionText || 'Option'} · {pollVoterPeople.length} vote{pollVoterPeople.length === 1 ? '' : 's'}</Text>
+            {pollVoterPeople.length ? (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {pollVoterPeople.map((person) => (
+                  <Pressable key={person.id} style={styles.reactorRow} onPress={() => { setPollVoterViewer(null); openProfile(person.id); }} accessibilityRole="button" accessibilityLabel={`Open ${person.name}'s profile`}>
+                    <View style={styles.reactorAvatar}>
+                      {person.avatar ? <Image source={{ uri: person.avatar }} style={styles.reactorAvatarImage} /> : <Text style={styles.reactorAvatarText}>{initialsForName(person.name)}</Text>}
+                    </View>
+                    <Text style={styles.reactorName} numberOfLines={1}>{person.name}</Text>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                  </Pressable>
+                ))}
+              </ScrollView>
+            ) : <Text style={[styles.pollMeta, { textAlign: 'center', paddingVertical: 18 }]}>No one has voted for this option yet.</Text>}
           </Pressable>
         </Pressable>
       </Modal>

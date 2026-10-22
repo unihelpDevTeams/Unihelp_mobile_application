@@ -1,9 +1,10 @@
-/* eslint-disable react-hooks/set-state-in-effect, react-hooks/purity, react-hooks/preserve-manual-memoization */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
   AppState,
+  AccessibilityInfo,
+  Easing,
   FlatList,
   Image,
   Keyboard,
@@ -13,6 +14,7 @@ import {
   PanResponder,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -20,7 +22,9 @@ import {
 } from 'react-native';
 import { useIsFocused, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
 import VoiceMessageBubble from '../../src/shared/components/VoiceMessageBubble';
@@ -55,6 +59,7 @@ import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { getSocket } from '../../src/shared/services/socket';
 import { getJson } from '../../src/shared/services/backend';
 import { submitReport } from '../../src/shared/services/support';
+import { clearConversationAppearance, getConversationAppearance, saveConversationAppearance } from '../../src/shared/services/chatAppearance';
 
 /* -------------------------------------------------------------------------- */
 /*                                  Constants                                 */
@@ -71,6 +76,7 @@ const REMOTE_TYPING_TIMEOUT_MS = 5000;
 const MARK_READ_DEBOUNCE_MS = 500;
 const RECONNECT_BANNER_DELAY_MS = 1500;
 const MIN_GAP_REFETCH_MS = 2500; // Don't refetch after a blip shorter than this.
+const FRIEND_GATE_MESSAGE = 'Become friends before chatting freely.';
 
 // --- In-memory caches (reduce reads when re-entering a chat) ----------------
 const MESSAGE_CACHE_TTL_MS = 20 * 1000; // Within this window we skip the network entirely.
@@ -93,6 +99,72 @@ const putCache = (map, key, value) => {
 const STATUS_RANK = { failed: 0, sending: 0, sent: 1, delivered: 2, read: 3 };
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '😮'];
 
+const BUBBLE_PRESETS = [
+  { key: 'brand', label: 'Classic', color: '#5B5CE2' },
+  { key: 'ocean', label: 'Ocean', color: '#0A84FF' },
+  { key: 'rose', label: 'Rose', color: '#E83E8C' },
+  { key: 'forest', label: 'Forest', color: '#1F9D6A' },
+  { key: 'cherry', label: 'Cherry', color: '#E53935' },
+  { key: 'amber', label: 'Amber', color: '#E59600' },
+  { key: 'mint', label: 'Mint', color: '#00A884' },
+  { key: 'midnight', label: 'Midnight', color: '#27374D' },
+  { key: 'sunset', label: 'Sunset', gradient: ['#FF7A18', '#AF002D'] },
+  { key: 'violet', label: 'Violet', gradient: ['#7F00FF', '#E100FF'] },
+  { key: 'aurora', label: 'Aurora', gradient: ['#00C6FF', '#0072FF'] },
+  { key: 'candy', label: 'Candy', gradient: ['#F953C6', '#B91D73'] },
+  { key: 'lime', label: 'Lime', gradient: ['#56AB2F', '#A8E063'] },
+  { key: 'ember', label: 'Ember', gradient: ['#F12711', '#F5AF19'] },
+];
+const CHAT_BACKGROUNDS = [
+  { key: 'default', label: 'Default', color: null },
+  { key: 'midnight-grid', label: 'Midnight grid', gradient: ['#E8E7FF', '#C8C6FF'], darkGradient: ['#12152B', '#25215A'], pattern: 'grid' },
+  { key: 'aurora', label: 'Aurora', gradient: ['#D9F5FF', '#DED9FF', '#F9D6ED'], darkGradient: ['#082F49', '#312E81', '#5B2167'], pattern: 'orb' },
+  { key: 'paper', label: 'Soft paper', gradient: ['#F8FAFC', '#E9EFFF'], darkGradient: ['#1E293B', '#273449'], pattern: 'dots' },
+  { key: 'campus', label: 'Campus dusk', gradient: ['#FFF1EB', '#ACE0F9'], darkGradient: ['#4A2C3B', '#244A66'], pattern: 'sun' },
+  { key: 'forest', label: 'Forest mist', gradient: ['#DDF7EA', '#BFE9D5'], darkGradient: ['#0F3D32', '#1C6E5A'], pattern: 'leaf' },
+  { key: 'rose', label: 'Rose haze', gradient: ['#FFE4E6', '#E9D5FF'], darkGradient: ['#492442', '#34264F'], pattern: 'orb' },
+  { key: 'mono', label: 'Monochrome', gradient: ['#F5F5F5', '#D4D4D8'], darkGradient: ['#19191D', '#36363E'], pattern: 'grid' },
+];
+const BUBBLE_SHAPES = [
+  { key: 'tail', label: 'Speech tail', radii: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderBottomLeftRadius: 22, borderBottomRightRadius: 5 } },
+  { key: 'ticket', label: 'Ticket', radii: { borderTopLeftRadius: 8, borderTopRightRadius: 24, borderBottomLeftRadius: 24, borderBottomRightRadius: 8 } },
+  { key: 'comet', label: 'Comet', radii: { borderTopLeftRadius: 30, borderTopRightRadius: 30, borderBottomLeftRadius: 30, borderBottomRightRadius: 4 } },
+  { key: 'pixel', label: 'Pixel', radii: { borderTopLeftRadius: 2, borderTopRightRadius: 18, borderBottomLeftRadius: 18, borderBottomRightRadius: 2 } },
+  { key: 'ribbon', label: 'Ribbon', radii: { borderTopLeftRadius: 26, borderTopRightRadius: 5, borderBottomLeftRadius: 5, borderBottomRightRadius: 26 } },
+  { key: 'orbit', label: 'Orbit', radii: { borderTopLeftRadius: 36, borderTopRightRadius: 12, borderBottomLeftRadius: 36, borderBottomRightRadius: 12 } },
+  { key: 'fold', label: 'Fold', radii: { borderTopLeftRadius: 4, borderTopRightRadius: 4, borderBottomLeftRadius: 26, borderBottomRightRadius: 26 } },
+];
+const DEFAULT_BUBBLE_APPEARANCE = {
+  preset: 'brand', shape: 'tail', animation: 'none', customColor: '#5B5CE2',
+  fontSize: 15.5, density: 'comfortable', width: 'standard', metadata: 'inline', wallpaper: 'default',
+};
+const isHexColor = (value) => /^#[0-9A-F]{6}$/i.test(String(value || '').trim());
+const APPEARANCE_FONT_SIZES = [14, 15.5, 17];
+const APPEARANCE_DENSITIES = ['compact', 'comfortable'];
+const APPEARANCE_WIDTHS = ['compact', 'standard', 'wide'];
+const APPEARANCE_ANIMATIONS = ['none', 'aurora-border', 'shimmer', 'float', 'pop'];
+const normalizeBubbleAppearance = (value = {}) => {
+  const candidate = { ...DEFAULT_BUBBLE_APPEARANCE, ...(value || {}) };
+  return {
+    ...candidate,
+    preset: [...BUBBLE_PRESETS.map((item) => item.key), 'custom'].includes(candidate.preset) ? candidate.preset : 'brand',
+    shape: BUBBLE_SHAPES.some((item) => item.key === candidate.shape) ? candidate.shape : 'tail',
+    animation: APPEARANCE_ANIMATIONS.includes(candidate.animation) ? candidate.animation : 'none',
+    customColor: isHexColor(candidate.customColor) ? candidate.customColor.toUpperCase() : DEFAULT_BUBBLE_APPEARANCE.customColor,
+    fontSize: APPEARANCE_FONT_SIZES.includes(Number(candidate.fontSize)) ? Number(candidate.fontSize) : DEFAULT_BUBBLE_APPEARANCE.fontSize,
+    density: APPEARANCE_DENSITIES.includes(candidate.density) ? candidate.density : 'comfortable',
+    width: APPEARANCE_WIDTHS.includes(candidate.width) ? candidate.width : 'standard',
+    metadata: candidate.metadata === 'below' ? 'below' : 'inline',
+    wallpaper: CHAT_BACKGROUNDS.some((item) => item.key === candidate.wallpaper) ? candidate.wallpaper : 'default',
+  };
+};
+const resolveBubbleFill = (appearance = {}) => {
+  if (appearance.preset === 'custom') return { color: isHexColor(appearance.customColor) ? appearance.customColor : DEFAULT_BUBBLE_APPEARANCE.customColor };
+  return BUBBLE_PRESETS.find((item) => item.key === appearance.preset) || BUBBLE_PRESETS[0];
+};
+const resolveChatBackground = (appearance = {}) =>
+  CHAT_BACKGROUNDS.find((item) => item.key === appearance.wallpaper) || CHAT_BACKGROUNDS[0];
+
 /* -------------------------------------------------------------------------- */
 /*                                   Helpers                                  */
 /* -------------------------------------------------------------------------- */
@@ -102,6 +174,16 @@ const emitSafe = (event, payload) => {
     getSocket().emit(event, payload);
   } catch (_error) {
     // Socket might not be ready yet; callers never depend on this.
+  }
+};
+
+/** Light haptic tick. Never throws, never blocks. */
+const tap = (style = 'Light') => {
+  try {
+    const result = Haptics.impactAsync(Haptics.ImpactFeedbackStyle[style]);
+    result?.catch?.(() => {});
+  } catch (_error) {
+    // Haptics unavailable (simulator, web).
   }
 };
 
@@ -277,6 +359,34 @@ const renderLinkedMessageText = (text, mine, colors) => {
   return parts;
 };
 
+/**
+ * One shared looping value for the "mine" bubble animation.
+ * - A fresh Animated.Value per animation type, so a node that has been moved to the
+ *   native driver is never re-driven by JS (aurora-border needs the JS driver).
+ * - Used once per screen instead of once per message row.
+ */
+function useBubbleLoop(animation, { enabled, reduceMotion }) {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const value = useMemo(() => new Animated.Value(0), [animation]);
+  useEffect(() => {
+    if (!enabled || reduceMotion || !animation || animation === 'none') {
+      value.setValue(0);
+      return undefined;
+    }
+    const loop = Animated.loop(
+      Animated.timing(value, {
+        toValue: 1,
+        duration: animation === 'pop' ? 1150 : 1800,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: animation !== 'aurora-border',
+      })
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [animation, enabled, reduceMotion, value]);
+  return value;
+}
+
 /* -------------------------------------------------------------------------- */
 /*                         Styles (module-level = stable)                     */
 /* -------------------------------------------------------------------------- */
@@ -284,12 +394,13 @@ const renderLinkedMessageText = (text, mine, colors) => {
 // Defined outside the component so the factory identity never changes and
 // `styles` stays referentially stable -> React.memo rows actually skip renders.
 const createStyles = (c) => ({
-  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.borderDefault, marginBottom: 4, paddingHorizontal: 4 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 8, marginBottom: 8, borderRadius: 20, backgroundColor: c.surfacePrimary, borderWidth: StyleSheet.hairlineWidth, borderColor: c.borderDefault, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
   backButton: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  avatarWrapper: { width: 44, height: 44, borderRadius: 22, overflow: 'hidden', backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
-  avatar: { width: 44, height: 44 },
+  avatarWrapper: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
+  avatar: { width: 44, height: 44, borderRadius: 22 },
   avatarFallback: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
   avatarInitial: { color: c.brandDark, fontWeight: '800', fontSize: 18 },
+  friendBadge: { position: 'absolute', right: -2, bottom: -2, width: 17, height: 17, borderRadius: 9, backgroundColor: c.brand, borderWidth: 2, borderColor: c.surfacePrimary, alignItems: 'center', justifyContent: 'center' },
   headerMeta: { flex: 1 },
   headerName: { fontSize: 16, fontWeight: '800', color: c.textPrimary },
   headerStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
@@ -328,11 +439,13 @@ const createStyles = (c) => ({
   rowHighlight: { backgroundColor: c.brandLight },
   rowSelected: { backgroundColor: c.brandLight },
   bubble: { paddingVertical: 9, paddingHorizontal: 13, maxWidth: '82%', borderRadius: 20, shadowColor: c.shadow || '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 1, elevation: 1 },
+  bubbleTail: { position: 'absolute', right: 1, bottom: 0, width: 14, height: 14, transform: [{ rotate: '45deg' }], opacity: 0.9 },
+  bubbleFold: { position: 'absolute', top: 0, right: 0, width: 18, height: 18, backgroundColor: 'rgba(255,255,255,0.26)', borderBottomLeftRadius: 12 },
   bubblePressed: { opacity: 0.9 },
   bubbleFailed: { borderWidth: 1, borderColor: c.error },
   pendingDim: { opacity: 0.6 },
   mine: { alignSelf: 'flex-end', backgroundColor: c.brand },
-  theirs: { alignSelf: 'flex-start', backgroundColor: c.surfacePrimary, borderWidth: 1, borderColor: c.borderDefault },
+  theirs: { alignSelf: 'flex-start', backgroundColor: c.surfacePrimary, borderWidth: StyleSheet.hairlineWidth, borderColor: c.borderDefault, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
   bubbleDeleted: { opacity: 0.75, backgroundColor: c.skeleton, borderWidth: 0 },
   text: { color: c.textPrimary, lineHeight: 22, fontSize: 15.5 },
   mineText: { color: c.onBrand },
@@ -384,15 +497,15 @@ const createStyles = (c) => ({
   skeletonMine: { alignSelf: 'flex-end' },
   skeletonTheirs: { alignSelf: 'flex-start' },
 
-  scrollFab: { position: 'absolute', right: 14, bottom: 12, width: 42, height: 42, borderRadius: 21, backgroundColor: c.surfacePrimary, borderWidth: 1, borderColor: c.borderDefault, alignItems: 'center', justifyContent: 'center', shadowColor: c.shadow || '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 4 },
-  scrollFabBadge: { position: 'absolute', top: -6, right: -4, minWidth: 20, height: 20, borderRadius: 10, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  scrollFabBadgeText: { color: c.onBrand, fontSize: 11, fontWeight: '800' },
+  scrollFab: { position: 'absolute', right: 14, bottom: 12, minWidth: 42, height: 42, borderRadius: 21, backgroundColor: c.surfacePrimary, borderWidth: 1, borderColor: c.borderDefault, alignItems: 'center', justifyContent: 'center', shadowColor: c.shadow || '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4, elevation: 4 },
+  scrollPill: { flexDirection: 'row', gap: 4, paddingHorizontal: 14, backgroundColor: c.brand, borderColor: c.brand },
+  scrollPillText: { color: c.onBrand, fontSize: 12.5, fontWeight: '800' },
 
   toast: { position: 'absolute', top: 10, alignSelf: 'center', backgroundColor: c.textPrimary, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8, maxWidth: '90%' },
   toastText: { color: c.surfacePrimary, fontSize: 13, fontWeight: '700' },
 
-  composerContainer: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.borderDefault, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 24 : 12},
-  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
+  composerContainer: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.borderDefault, paddingTop: 10, paddingHorizontal: 10, paddingBottom: Platform.OS === 'ios' ? 24 : 12 },
+  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
   recorderExpanded: { flex: 1, minWidth: 0 },
   stickerButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.surfaceSecondary, alignItems: 'center', justifyContent: 'center' },
   inputWrap: { flex: 1 },
@@ -400,7 +513,7 @@ const createStyles = (c) => ({
   inputEditing: { borderColor: c.brand },
   counter: { alignSelf: 'flex-end', marginTop: 3, marginRight: 8, fontSize: 11, color: c.textTertiary },
   counterLimit: { color: c.error, fontWeight: '700' },
-  button: { backgroundColor: c.brand, borderRadius: 22, width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  button: { backgroundColor: c.brand, borderRadius: 22, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', shadowColor: c.brand, shadowOpacity: 0.3, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
   buttonDisabled: { backgroundColor: c.brandGlow, opacity: 0.6 },
 
   composerBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.surfaceSecondary, borderRadius: 16, padding: 10, marginBottom: 8, borderLeftWidth: 4, borderLeftColor: c.brand },
@@ -418,6 +531,73 @@ const createStyles = (c) => ({
   sheetSubtitle: { fontSize: 13, color: c.textSecondary, textAlign: 'center', marginBottom: 10 },
   sheetPreview: { fontSize: 13, color: c.textSecondary, backgroundColor: c.surfaceSecondary, borderRadius: 12, padding: 12, marginBottom: 8 },
   sheetHint: { fontSize: 12, color: c.textTertiary, textAlign: 'center', marginTop: 4 },
+  bubbleStylePreview: { height: 58, alignSelf: 'flex-end', overflow: 'hidden', justifyContent: 'center', paddingHorizontal: 16, marginVertical: 10, minWidth: 180 },
+  bubbleStylePreviewText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  bubbleStyleLabel: { color: c.textPrimary, fontSize: 13, fontWeight: '800', marginTop: 8, marginBottom: 7 },
+  bubbleStyleRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
+  bubbleStyleSwatch: { width: 37, height: 37, borderRadius: 19, borderWidth: 2, borderColor: 'transparent' },
+  bubbleStyleSelected: { borderColor: c.textPrimary, transform: [{ scale: 1.12 }] },
+  bubbleStyleChoice: { borderWidth: 1, borderColor: c.borderDefault, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 8, backgroundColor: c.surfaceSecondary },
+  bubbleStyleChoiceSelected: { borderColor: c.brand, backgroundColor: c.brandLight },
+  bubbleStyleChoiceText: { color: c.textPrimary, fontSize: 12, fontWeight: '700' },
+  customColorRow: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 8 },
+  customColorPreview: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: c.borderDefault },
+  customColorInput: { flex: 1, height: 42, borderRadius: 12, borderWidth: 1, borderColor: c.borderDefault, backgroundColor: c.inputBackground, color: c.textPrimary, paddingHorizontal: 12, fontWeight: '800', letterSpacing: 1 },
+  customColorHint: { color: c.textTertiary, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
+  studioSheet: { flex: 1, backgroundColor: c.bottomSheetBackground, borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' },
+  studioTopbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
+  studioEyebrow: { color: c.brand, fontSize: 10, fontWeight: '900', letterSpacing: 1.5 },
+  studioTitle: { color: c.textPrimary, fontSize: 27, fontWeight: '900', letterSpacing: -0.8, marginTop: 1 },
+  studioClose: { width: 38, height: 38, borderRadius: 19, backgroundColor: c.surfaceSecondary, alignItems: 'center', justifyContent: 'center' },
+  studioSave: { minHeight: 38, paddingHorizontal: 13, borderRadius: 19, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center' },
+  studioSaveText: { color: c.onBrand, fontWeight: '900', fontSize: 12 },
+  studioScope: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  studioScopeOption: { flex: 1, borderWidth: 1, borderColor: c.borderDefault, borderRadius: 13, padding: 10, backgroundColor: c.surfaceSecondary },
+  studioScopeOptionSelected: { borderColor: c.brand, backgroundColor: c.brandLight },
+  studioScopeTitle: { color: c.textPrimary, fontSize: 11.5, fontWeight: '900' },
+  studioScopeText: { color: c.textSecondary, fontSize: 10.5, lineHeight: 14, marginTop: 2 },
+  studioReset: { alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 14 },
+  studioResetText: { color: c.textSecondary, fontSize: 12, fontWeight: '800' },
+  wallpaperGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
+  wallpaperCard: { width: '30%', minWidth: 88, borderRadius: 14, borderWidth: 1, borderColor: c.borderDefault, padding: 5, backgroundColor: c.surfaceSecondary },
+  wallpaperCardSelected: { borderColor: c.brand, backgroundColor: c.brandLight },
+  wallpaperArt: { height: 54, borderRadius: 10, overflow: 'hidden' },
+  wallpaperName: { color: c.textPrimary, fontSize: 10, fontWeight: '800', textAlign: 'center', marginTop: 6, marginBottom: 2 },
+  wallpaperDot: { position: 'absolute', width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(255,255,255,0.22)', top: -12, right: -10 },
+  wallpaperLine: { position: 'absolute', height: 1, left: 0, right: 0, top: 18, backgroundColor: 'rgba(255,255,255,0.16)' },
+  studioScroll: { paddingHorizontal: 16, paddingBottom: 36 },
+  studioStage: { height: 218, borderRadius: 26, backgroundColor: '#131529', overflow: 'hidden', padding: 16, marginBottom: 18, justifyContent: 'center' },
+  studioOrbOne: { position: 'absolute', width: 190, height: 190, borderRadius: 95, backgroundColor: '#6D28D9', opacity: 0.54, top: -94, right: -48 },
+  studioOrbTwo: { position: 'absolute', width: 170, height: 170, borderRadius: 85, backgroundColor: '#00B7FF', opacity: 0.32, bottom: -106, left: -45 },
+  studioStageHint: { position: 'absolute', top: 14, left: 16, color: 'rgba(255,255,255,0.55)', fontSize: 10, fontWeight: '900', letterSpacing: 1.3 },
+  studioBubbleFrame: { alignSelf: 'flex-end', marginTop: 22 },
+  studioBubble: { overflow: 'hidden', paddingHorizontal: 16, paddingVertical: 11, minWidth: 178, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 9, elevation: 4 },
+  studioBubbleText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
+  studioBubbleMeta: { color: 'rgba(255,255,255,0.74)', fontSize: 10.5, marginTop: 3, textAlign: 'right' },
+  studioIncoming: { alignSelf: 'flex-start', marginTop: 15, backgroundColor: 'rgba(255,255,255,0.92)', paddingHorizontal: 13, paddingVertical: 8, borderRadius: 14 },
+  studioIncomingText: { color: '#24243A', fontSize: 12.5, fontWeight: '700' },
+  studioSection: { marginBottom: 22 },
+  studioSectionTitle: { color: c.textPrimary, fontSize: 17, fontWeight: '900', letterSpacing: -0.2 },
+  studioSectionCaption: { color: c.textSecondary, fontSize: 12, marginTop: 2, marginBottom: 11 },
+  moodGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  moodCard: { width: 61, alignItems: 'center', paddingVertical: 5, borderRadius: 12, borderWidth: 1, borderColor: 'transparent' },
+  moodCardSelected: { borderColor: c.brand, backgroundColor: c.brandLight },
+  moodArtwork: { width: 43, height: 43, borderRadius: 15, overflow: 'hidden', justifyContent: 'flex-end', padding: 6 },
+  moodArtworkDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.7)' },
+  moodName: { color: c.textSecondary, fontSize: 9.5, fontWeight: '800', marginTop: 4 },
+  moodCheck: { position: 'absolute', top: 3, right: 5, width: 16, height: 16, borderRadius: 8, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center' },
+  shapeGallery: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  shapeTile: { width: '23%', minWidth: 70, alignItems: 'center', borderRadius: 14, borderWidth: 1, borderColor: c.borderDefault, backgroundColor: c.surfaceSecondary, paddingVertical: 10 },
+  shapeTileSelected: { borderColor: c.brand, backgroundColor: c.brandLight },
+  shapeMini: { width: 44, height: 27, position: 'relative' },
+  shapeTail: { position: 'absolute', right: 2, bottom: -3, width: 10, height: 10, transform: [{ rotate: '45deg' }] },
+  shapeFold: { position: 'absolute', right: 0, top: 0, width: 11, height: 11, backgroundColor: 'rgba(255,255,255,0.42)', borderBottomLeftRadius: 7 },
+  shapeName: { color: c.textPrimary, fontSize: 10, fontWeight: '800', marginTop: 7, textAlign: 'center' },
+  motionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  motionTile: { width: '31%', minWidth: 92, minHeight: 68, alignItems: 'center', justifyContent: 'center', gap: 5, borderRadius: 16, borderWidth: 1, borderColor: c.borderDefault, backgroundColor: c.surfaceSecondary, padding: 8 },
+  motionTileSelected: { backgroundColor: c.brand, borderColor: c.brand },
+  motionName: { color: c.textPrimary, fontSize: 10.5, fontWeight: '800', textAlign: 'center' },
+  motionNameSelected: { color: c.onBrand },
   sheetReactions: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: c.surfaceSecondary, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 8 },
   sheetReactionBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   sheetReactionBtnActive: { backgroundColor: c.brandLight, borderWidth: 1, borderColor: c.brand },
@@ -466,8 +646,10 @@ const createStyles = (c) => ({
 
 function SwipeToReply({ children, disabled, onReply, color }) {
   const translateX = useMemo(() => new Animated.Value(0), []);
+  const firedRef = useRef(false);
 
   const reset = useCallback(() => {
+    firedRef.current = false;
     Animated.spring(translateX, { toValue: 0, useNativeDriver: true, friction: 7, tension: 90 }).start();
   }, [translateX]);
 
@@ -475,7 +657,14 @@ function SwipeToReply({ children, disabled, onReply, color }) {
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponder: (_, g) => !disabled && g.dx > 12 && g.dx > Math.abs(g.dy) * 1.5,
-        onPanResponderMove: (_, g) => translateX.setValue(Math.max(0, Math.min(72, g.dx))),
+        onPanResponderMove: (_, g) => {
+          translateX.setValue(Math.max(0, Math.min(72, g.dx)));
+          // Tick once when the gesture crosses the reply threshold.
+          if (g.dx >= 60 && !firedRef.current) {
+            firedRef.current = true;
+            tap('Light');
+          }
+        },
         onPanResponderRelease: (_, g) => {
           if (g.dx >= 60) onReply?.();
           reset();
@@ -503,10 +692,11 @@ function SwipeToReply({ children, disabled, onReply, color }) {
   );
 }
 
-function TypingBubble({ styles }) {
-  const dots = useMemo(() => [0, 1, 2].map(() => new Animated.Value(0.3)), []);
+function TypingBubble({ styles, reduceMotion }) {
+  const dots = useMemo(() => [0, 1, 2].map(() => new Animated.Value(reduceMotion ? 0.7 : 0.3)), [reduceMotion]);
 
   useEffect(() => {
+    if (reduceMotion) return undefined;
     const loops = dots.map((value, index) =>
       Animated.loop(
         Animated.sequence([
@@ -519,7 +709,7 @@ function TypingBubble({ styles }) {
     );
     loops.forEach((loop) => loop.start());
     return () => loops.forEach((loop) => loop.stop());
-  }, [dots]);
+  }, [dots, reduceMotion]);
 
   return (
     <View style={styles.typingRow}>
@@ -647,6 +837,241 @@ function AttachmentImage({ uri, styles, colors, spaced, onPress, onLongPress }) 
   );
 }
 
+function ChatBackground({ appearance, colors, isDark, preview = false, styles }) {
+  const wallpaper = resolveChatBackground(appearance);
+  if (wallpaper.key === 'default') return preview ? <View style={[styles.wallpaperArt, { backgroundColor: colors.background }]} /> : null;
+  const gradient = isDark && wallpaper.darkGradient ? wallpaper.darkGradient : wallpaper.gradient;
+  const decoration = (
+    <>
+      {wallpaper.pattern === 'orb' || wallpaper.pattern === 'sun' ? <View style={styles.wallpaperDot} /> : null}
+      {wallpaper.pattern === 'grid' ? (
+        <>
+          <View style={styles.wallpaperLine} />
+          <View style={[styles.wallpaperLine, { top: 36 }]} />
+        </>
+      ) : null}
+      {wallpaper.pattern === 'dots' ? <View style={[styles.wallpaperDot, { width: 8, height: 8, top: 12, right: 20, opacity: 0.7 }]} /> : null}
+      {wallpaper.pattern === 'leaf' ? (
+        <View style={[styles.wallpaperDot, { width: 72, height: 38, borderRadius: 40, top: 7, right: -16, transform: [{ rotate: '-35deg' }] }]} />
+      ) : null}
+    </>
+  );
+  if (preview) {
+    return (
+      <View style={[styles.wallpaperArt, { backgroundColor: gradient?.[0] }]}>
+        <LinearGradient colors={gradient} style={StyleSheet.absoluteFill} />
+        {decoration}
+      </View>
+    );
+  }
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <LinearGradient colors={gradient} style={StyleSheet.absoluteFill} />
+      {decoration}
+    </View>
+  );
+}
+
+function StudioSection({ title, caption, children, styles }) {
+  return (
+    <View style={styles.studioSection}>
+      <Text style={styles.studioSectionTitle}>{title}</Text>
+      <Text style={styles.studioSectionCaption}>{caption}</Text>
+      {children}
+    </View>
+  );
+}
+
+const MOTION_OPTIONS = [
+  ['none', 'Still', 'pause-outline'],
+  ['aurora-border', 'Aurora edge', 'color-wand-outline'],
+  ['shimmer', 'Light sweep', 'sparkles-outline'],
+  ['float', 'Cloud drift', 'cloud-outline'],
+  ['pop', 'Soft bounce', 'radio-outline'],
+];
+
+function BubbleStudio({ appearance, scope, saving, onChange, onDraftChange, onScopeChange, onReset, onSave, onDone, styles, colors, isDark, reduceMotion }) {
+  const motion = useBubbleLoop(appearance.animation, { enabled: true, reduceMotion });
+  const fill = resolveBubbleFill(appearance);
+  const shape = BUBBLE_SHAPES.find((item) => item.key === appearance.shape) || BUBBLE_SHAPES[0];
+  const solidPreview = fill.gradient ? fill.gradient[0] : fill.color;
+
+  const borderTone = motion.interpolate({ inputRange: [0, 0.33, 0.66, 1], outputRange: ['#00D2FF', '#8B5CF6', '#FF4DA6', '#00D2FF'] });
+  const drift = motion.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, -5, 0] });
+  const pulse = motion.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.03, 1] });
+  const shimmerX = motion.interpolate({ inputRange: [0, 1], outputRange: [-180, 290] });
+  const customValid = isHexColor(appearance.customColor);
+
+  const frameMotion = [
+    appearance.animation === 'aurora-border' && { padding: 2, backgroundColor: borderTone },
+    appearance.animation === 'float' && { transform: [{ translateY: drift }] },
+    appearance.animation === 'pop' && { transform: [{ scale: pulse }] },
+  ];
+
+  return (
+    <View style={styles.studioSheet}>
+      <View style={styles.studioTopbar}>
+        <View>
+          <Text style={styles.studioEyebrow}>PERSONAL MESSAGE LAB</Text>
+          <Text style={styles.studioTitle}>Bubble Studio</Text>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Pressable style={styles.studioSave} onPress={onSave} disabled={saving} accessibilityRole="button" accessibilityLabel="Save bubble appearance">
+            {saving ? <ActivityIndicator size="small" color={colors.onBrand} /> : <Text style={styles.studioSaveText}>Save</Text>}
+          </Pressable>
+          <Pressable style={styles.studioClose} onPress={onDone} accessibilityRole="button" accessibilityLabel="Close bubble studio">
+            <Ionicons name="close" size={20} color={colors.textPrimary} />
+          </Pressable>
+        </View>
+      </View>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.studioScroll} keyboardShouldPersistTaps="handled">
+        <StudioSection title="Where this applies" caption="Appearance is private; the other person never sees it." styles={styles}>
+          <View style={styles.studioScope}>
+            <Pressable onPress={() => onScopeChange('global')} style={[styles.studioScopeOption, scope === 'global' && styles.studioScopeOptionSelected]} accessibilityRole="button">
+              <Text style={styles.studioScopeTitle}>All my chats</Text>
+              <Text style={styles.studioScopeText}>Synced with your UniHelp profile.</Text>
+            </Pressable>
+            <Pressable onPress={() => onScopeChange('conversation')} style={[styles.studioScopeOption, scope === 'conversation' && styles.studioScopeOptionSelected]} accessibilityRole="button">
+              <Text style={styles.studioScopeTitle}>This chat only</Text>
+              <Text style={styles.studioScopeText}>Saved locally on this device.</Text>
+            </Pressable>
+          </View>
+        </StudioSection>
+
+        <View style={styles.studioStage}>
+          <View style={styles.studioOrbOne} />
+          <View style={styles.studioOrbTwo} />
+          <Text style={styles.studioStageHint}>LIVE COMPOSITION</Text>
+          <Animated.View style={[styles.studioBubbleFrame, shape.radii, ...frameMotion]}>
+            <View style={[styles.studioBubble, shape.radii, { backgroundColor: fill.gradient ? 'transparent' : fill.color }]}>
+              {fill.gradient ? <LinearGradient colors={fill.gradient} style={StyleSheet.absoluteFill} /> : null}
+              {appearance.animation === 'shimmer' ? (
+                <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { transform: [{ translateX: shimmerX }] }]}>
+                  <LinearGradient colors={['transparent', 'rgba(255,255,255,0.35)', 'transparent']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ width: 120, height: '100%' }} />
+                </Animated.View>
+              ) : null}
+              <Text style={[styles.studioBubbleText, { fontSize: appearance.fontSize }]}>This is so you ✦</Text>
+              <Text style={styles.studioBubbleMeta}>Delivered · now</Text>
+            </View>
+          </Animated.View>
+          <View style={styles.studioIncoming}>
+            <Text style={styles.studioIncomingText}>Make it unmistakable.</Text>
+          </View>
+        </View>
+
+        <StudioSection title="Choose a mood" caption="Color, gradient and atmosphere" styles={styles}>
+          <View style={styles.moodGrid}>
+            {BUBBLE_PRESETS.map((preset) => {
+              const selected = appearance.preset === preset.key;
+              return (
+                <Pressable key={preset.key} onPress={() => onChange({ ...appearance, preset: preset.key })} style={[styles.moodCard, selected && styles.moodCardSelected]} accessibilityRole="button" accessibilityLabel={`Use ${preset.label} mood`}>
+                  <View style={[styles.moodArtwork, { backgroundColor: preset.gradient ? 'transparent' : preset.color }]}>
+                    {preset.gradient ? <LinearGradient colors={preset.gradient} style={StyleSheet.absoluteFill} /> : null}
+                    <View style={styles.moodArtworkDot} />
+                  </View>
+                  <Text style={styles.moodName}>{preset.label}</Text>
+                  {selected ? (
+                    <View style={styles.moodCheck}>
+                      <Ionicons name="checkmark" size={11} color="#FFFFFF" />
+                    </View>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={styles.customColorRow}>
+            <Pressable
+              onPress={() => onChange({ ...appearance, preset: 'custom' })}
+              style={[styles.customColorPreview, { backgroundColor: customValid ? appearance.customColor : '#FFFFFF' }, appearance.preset === 'custom' && styles.bubbleStyleSelected]}
+              accessibilityRole="button"
+              accessibilityLabel="Use a custom color"
+            />
+            <TextInput
+              value={appearance.customColor || ''}
+              onChangeText={(value) =>
+                onDraftChange({ ...appearance, preset: 'custom', customColor: `#${value.replace(/[^0-9a-f]/gi, '').slice(0, 6).toUpperCase()}` })
+              }
+              onEndEditing={() => onChange({ ...appearance, preset: 'custom' })}
+              placeholder="#6C63FF"
+              placeholderTextColor={colors.textTertiary}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              maxLength={7}
+              style={styles.customColorInput}
+              accessibilityLabel="Custom bubble HEX color"
+            />
+            <Text style={styles.customColorHint}>CUSTOM</Text>
+          </View>
+        </StudioSection>
+
+        <StudioSection title="Sculpt the silhouette" caption="Designed shapes, not rounded rectangles" styles={styles}>
+          <View style={styles.shapeGallery}>
+            {BUBBLE_SHAPES.map((item) => (
+              <Pressable key={item.key} onPress={() => onChange({ ...appearance, shape: item.key })} style={[styles.shapeTile, appearance.shape === item.key && styles.shapeTileSelected]} accessibilityRole="button" accessibilityLabel={`Use ${item.label} shape`}>
+                <View style={[styles.shapeMini, item.radii, { backgroundColor: solidPreview }]}>
+                  {item.key === 'fold' ? <View style={styles.shapeFold} /> : null}
+                  {item.key === 'tail' ? <View style={[styles.shapeTail, { backgroundColor: solidPreview }]} /> : null}
+                </View>
+                <Text style={styles.shapeName}>{item.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </StudioSection>
+
+        <StudioSection title="Motion lab" caption="A subtle loop applied to your bubbles" styles={styles}>
+          <View style={styles.motionGrid}>
+            {MOTION_OPTIONS.map(([key, label, icon]) => (
+              <Pressable key={key} onPress={() => onChange({ ...appearance, animation: key })} style={[styles.motionTile, appearance.animation === key && styles.motionTileSelected]} accessibilityRole="button" accessibilityLabel={`Use ${label} animation`}>
+                <Ionicons name={icon} size={19} color={appearance.animation === key ? colors.onBrand : colors.brand} />
+                <Text style={[styles.motionName, appearance.animation === key && styles.motionNameSelected]}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {reduceMotion ? <Text style={[styles.studioSectionCaption, { marginTop: 8, marginBottom: 0 }]}>Reduce Motion is on, so animations stay still on this device.</Text> : null}
+        </StudioSection>
+
+        <StudioSection title="Reading comfort" caption="Tuned for comfortable everyday messaging" styles={styles}>
+          <View style={styles.motionGrid}>
+            {APPEARANCE_FONT_SIZES.map((size) => (
+              <Pressable key={size} onPress={() => onChange({ ...appearance, fontSize: size })} style={[styles.motionTile, appearance.fontSize === size && styles.motionTileSelected]} accessibilityRole="button">
+                <Text style={[styles.motionName, appearance.fontSize === size && styles.motionNameSelected]}>
+                  {size === 14 ? 'Small type' : size === 17 ? 'Large type' : 'Standard type'}
+                </Text>
+              </Pressable>
+            ))}
+            <Pressable onPress={() => onChange({ ...appearance, density: appearance.density === 'compact' ? 'comfortable' : 'compact' })} style={styles.motionTile} accessibilityRole="button">
+              <Text style={styles.motionName}>{appearance.density === 'compact' ? 'Compact spacing' : 'Comfortable spacing'}</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => onChange({ ...appearance, width: appearance.width === 'standard' ? 'wide' : appearance.width === 'wide' ? 'compact' : 'standard' })}
+              style={styles.motionTile}
+              accessibilityRole="button"
+            >
+              <Text style={styles.motionName}>{appearance.width === 'wide' ? 'Wide bubbles' : appearance.width === 'compact' ? 'Narrow bubbles' : 'Standard width'}</Text>
+            </Pressable>
+          </View>
+        </StudioSection>
+
+        <StudioSection title="Chat wallpaper" caption="Creative, lightweight backgrounds only you can see" styles={styles}>
+          <View style={styles.wallpaperGrid}>
+            {CHAT_BACKGROUNDS.map((wallpaper) => (
+              <Pressable key={wallpaper.key} onPress={() => onChange({ ...appearance, wallpaper: wallpaper.key })} style={[styles.wallpaperCard, appearance.wallpaper === wallpaper.key && styles.wallpaperCardSelected]} accessibilityRole="button" accessibilityLabel={`Use ${wallpaper.label} chat wallpaper`}>
+                <ChatBackground appearance={{ wallpaper: wallpaper.key }} colors={colors} isDark={isDark} preview styles={styles} />
+                <Text style={styles.wallpaperName}>{wallpaper.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </StudioSection>
+
+        <Pressable style={styles.studioReset} onPress={onReset} accessibilityRole="button">
+          <Text style={styles.studioResetText}>Restore default appearance</Text>
+        </Pressable>
+      </ScrollView>
+    </View>
+  );
+}
+
 function SheetOption({ icon, label, onPress, danger, styles, colors }) {
   return (
     <Pressable style={styles.sheetOption} onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>
@@ -677,6 +1102,8 @@ const MessageRow = React.memo(function MessageRow({
   onJumpToReply,
   onToggleReaction,
   onOpenImage,
+  bubbleAppearance,
+  bubbleMotion,
 }) {
   const deleted = !!message.deleted;
   const isVoice = message.type === 'voice';
@@ -696,10 +1123,33 @@ const MessageRow = React.memo(function MessageRow({
 
   const handleLongPress = useCallback(() => onLongPress?.(message), [onLongPress, message]);
   const handleReply = useCallback(() => onReply(message), [onReply, message]);
+  const chosenShape = BUBBLE_SHAPES.find((item) => item.key === bubbleAppearance?.shape) || BUBBLE_SHAPES[0];
+  const bubbleFill = resolveBubbleFill(bubbleAppearance);
+  const animation = bubbleAppearance?.animation || 'none';
+
+  const floatY = bubbleMotion.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, -3, 0] });
+  const popScale = bubbleMotion.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.025, 1] });
+  const shimmerX = bubbleMotion.interpolate({ inputRange: [0, 1], outputRange: [-150, 230] });
+  const auroraBorder = bubbleMotion.interpolate({ inputRange: [0, 0.33, 0.66, 1], outputRange: ['#00D2FF', '#7F00FF', '#FF4D9D', '#00D2FF'] });
 
   const radius = mine
     ? { borderTopRightRadius: groupStart ? 20 : 6, borderBottomRightRadius: groupEnd ? 4 : 6 }
     : { borderTopLeftRadius: groupStart ? 20 : 6, borderBottomLeftRadius: groupEnd ? 4 : 6 };
+
+  // Custom shape radii, but grouped bubbles keep their tight inner corners.
+  const mineRadii = mine
+    ? {
+        ...chosenShape.radii,
+        ...(groupStart ? null : { borderTopRightRadius: 6 }),
+        ...(groupEnd ? null : { borderBottomRightRadius: 6 }),
+      }
+    : null;
+  const showTail = mine && groupEnd;
+
+  const fontSize = bubbleAppearance?.fontSize || DEFAULT_BUBBLE_APPEARANCE.fontSize;
+  const densityStyle = mine && bubbleAppearance?.density === 'compact' ? { paddingVertical: 6, paddingHorizontal: 10 } : null;
+  const widthStyle = mine && bubbleAppearance?.width === 'compact' ? { maxWidth: '68%' } : mine && bubbleAppearance?.width === 'wide' ? { maxWidth: '90%' } : null;
+  const textStyle = mine ? { fontSize, lineHeight: fontSize + 6 } : null;
 
   const replyBlock = message.replyTo ? (
     <Pressable
@@ -779,40 +1229,69 @@ const MessageRow = React.memo(function MessageRow({
   } else {
     const attachments = Array.isArray(message.attachments) ? message.attachments : [];
     const hasText = Boolean(message.text || message.body || message.caption);
+    const needsClipLayer = mine && (bubbleFill.gradient || animation === 'shimmer' || chosenShape.key === 'fold');
+
     body = (
-      <Pressable
-        onLongPress={handleLongPress}
-        delayLongPress={220}
-        style={({ pressed }) => [
-          styles.bubble,
-          mine ? styles.mine : styles.theirs,
-          radius,
-          failed && styles.bubbleFailed,
-          sending && styles.pendingDim,
-          pressed && styles.bubblePressed,
+      <Animated.View
+        style={[
+          { alignSelf: mine ? 'flex-end' : 'flex-start' },
+          mine && animation === 'float' ? { transform: [{ translateY: floatY }] } : null,
+          mine && animation === 'pop' ? { transform: [{ scale: popScale }] } : null,
+          mine && animation === 'aurora-border' ? { padding: 2, ...chosenShape.radii, backgroundColor: auroraBorder } : null,
         ]}
       >
-        {replyBlock}
-        {attachments.map((att, i) =>
-          att?.type === 'image' && att.url ? (
-            <AttachmentImage
-              key={att.url || i}
-              uri={att.url}
-              styles={styles}
-              colors={colors}
-              spaced={hasText}
-              onPress={onOpenImage}
-              onLongPress={handleLongPress}
-            />
-          ) : null
-        )}
-        {hasText ? (
-          <Text style={[styles.text, mine && styles.mineText]}>
-            {renderLinkedMessageText(message.text || message.body || message.caption, mine, colors)}
-          </Text>
-        ) : null}
-        {footer}
-      </Pressable>
+        <Pressable
+          onLongPress={handleLongPress}
+          delayLongPress={220}
+          style={({ pressed }) => [
+            styles.bubble,
+            mine ? styles.mine : styles.theirs,
+            !mine && radius,
+            mine && { backgroundColor: bubbleFill.gradient ? 'transparent' : bubbleFill.color, ...mineRadii },
+            densityStyle,
+            widthStyle,
+            failed && styles.bubbleFailed,
+            sending && styles.pendingDim,
+            pressed && styles.bubblePressed,
+          ]}
+        >
+          {/* Fill, shimmer and fold are clipped to the bubble shape; the tail is not, so it can overhang. */}
+          {needsClipLayer ? (
+            <View pointerEvents="none" style={[StyleSheet.absoluteFill, mineRadii, { overflow: 'hidden' }]}>
+              {bubbleFill.gradient ? <LinearGradient colors={bubbleFill.gradient} style={StyleSheet.absoluteFill} /> : null}
+              {animation === 'shimmer' ? (
+                <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ translateX: shimmerX }] }]}>
+                  <LinearGradient colors={['transparent', 'rgba(255,255,255,0.33)', 'transparent']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ width: 100, height: '100%' }} />
+                </Animated.View>
+              ) : null}
+              {chosenShape.key === 'fold' ? <View style={styles.bubbleFold} /> : null}
+            </View>
+          ) : null}
+          {showTail && chosenShape.key === 'tail' ? (
+            <View pointerEvents="none" style={[styles.bubbleTail, { backgroundColor: bubbleFill.gradient ? bubbleFill.gradient[1] : bubbleFill.color }]} />
+          ) : null}
+          {replyBlock}
+          {attachments.map((att, i) =>
+            att?.type === 'image' && att.url ? (
+              <AttachmentImage
+                key={att.url || i}
+                uri={att.url}
+                styles={styles}
+                colors={colors}
+                spaced={hasText}
+                onPress={onOpenImage}
+                onLongPress={handleLongPress}
+              />
+            ) : null
+          )}
+          {hasText ? (
+            <Text style={[styles.text, mine && styles.mineText, textStyle]}>
+              {renderLinkedMessageText(message.text || message.body || message.caption, mine, colors)}
+            </Text>
+          ) : null}
+          {footer}
+        </Pressable>
+      </Animated.View>
     );
   }
 
@@ -844,6 +1323,8 @@ const MessageRow = React.memo(function MessageRow({
                       onPress={() => onToggleReaction?.(message, emoji)}
                       style={[styles.reactionPill, isActive && styles.reactionPillActive]}
                       hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${emoji} ${uids.length}`}
                     >
                       <Text style={styles.reactionEmoji}>{emoji}</Text>
                       <Text style={[styles.reactionCount, isActive && styles.reactionCountActive]}>{uids.length}</Text>
@@ -881,14 +1362,15 @@ export default function ConversationPage() {
 function ConversationScreen({ conversationId }) {
   const router = useRouter();
   const isFocused = useIsFocused();
-  const { user, profile } = useAuth();
-  const { colors } = useTheme();
+  const { user, profile, updateProfile } = useAuth();
+  const { colors, isDark } = useTheme();
   const styles = useThemeStyles(createStyles);
 
   const cachedMessages = MESSAGE_CACHE.get(conversationId);
   const cachedConversation = CONVERSATION_CACHE.get(conversationId);
 
   const [conversation, setConversation] = useState(cachedConversation?.data || null);
+  const [conversationError, setConversationError] = useState(false);
   const [messages, setMessages] = useState(cachedMessages?.messages || []);
   const [lastVisibleMessageId, setLastVisibleMessageId] = useState(cachedMessages?.cursor || null);
   const [hasMoreMessages, setHasMoreMessages] = useState(cachedMessages ? cachedMessages.hasMore : true);
@@ -918,6 +1400,13 @@ function ConversationScreen({ conversationId }) {
   const [stickerPickerVisible, setStickerPickerVisible] = useState(false);
   const [friendRequestVisible, setFriendRequestVisible] = useState(false);
   const [showOptionsSheet, setShowOptionsSheet] = useState(false);
+  const [bubbleCustomizerVisible, setBubbleCustomizerVisible] = useState(false);
+  const [bubbleAppearance, setBubbleAppearance] = useState(() => normalizeBubbleAppearance(profile?.chatBubbleAppearance));
+  const [bubbleDraft, setBubbleDraft] = useState(() => normalizeBubbleAppearance(profile?.chatBubbleAppearance));
+  const [bubbleScope, setBubbleScope] = useState('global'); // what is actually saved
+  const [scopeDraft, setScopeDraft] = useState('global'); // what the studio is editing
+  const [appearanceSaving, setAppearanceSaving] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(false);
   const [dialogConfig, setDialogConfig] = useState(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [newBelow, setNewBelow] = useState(0);
@@ -926,6 +1415,12 @@ function ConversationScreen({ conversationId }) {
   const [imagePreview, setImagePreview] = useState(null);
   const [voiceState, setVoiceState] = useState('idle'); // idle | recording | uploading
   const [unread, setUnread] = useState(null); // { id, count } -> "N new messages" divider
+
+  const openBubbleStudio = useCallback(() => {
+    setBubbleDraft(bubbleAppearance);
+    setScopeDraft(bubbleScope);
+    setBubbleCustomizerVisible(true);
+  }, [bubbleAppearance, bubbleScope]);
 
   const listRef = useRef(null);
   const inputRef = useRef(null);
@@ -939,6 +1434,8 @@ function ConversationScreen({ conversationId }) {
   const highlightTimer = useRef(null);
   const toastTimer = useRef(null);
   const scrollTimer = useRef(null);
+  const blockTimer = useRef(null);
+  const olderGuardTimer = useRef(null);
   const toastOpacity = useMemo(() => new Animated.Value(0), []);
   const sendScale = useMemo(() => new Animated.Value(1), []);
   const hasConnectedOnce = useRef(false);
@@ -951,6 +1448,9 @@ function ConversationScreen({ conversationId }) {
   const markedReadRef = useRef(null);
   const unreadComputedRef = useRef(false);
 
+  // One shared animation loop for every "mine" bubble (instead of one per row).
+  const bubbleMotion = useBubbleLoop(bubbleAppearance.animation, { enabled: isFocused, reduceMotion });
+
   /* ---------------------------- Derived values --------------------------- */
 
   const currentUid = user?.uid || profile?.uid;
@@ -958,6 +1458,38 @@ function ConversationScreen({ conversationId }) {
   useEffect(() => {
     currentUidRef.current = currentUid;
   }, [currentUid]);
+
+  // Depend on the appearance *content*, not the profile object's identity.
+  const globalAppearanceKey = JSON.stringify(profile?.chatBubbleAppearance || null);
+  useEffect(() => {
+    let active = true;
+    getConversationAppearance(currentUid, conversationId)
+      .then((saved) => {
+        if (!active) return;
+        if (saved) {
+          setBubbleScope('conversation');
+          setBubbleAppearance(normalizeBubbleAppearance(saved));
+        } else {
+          setBubbleScope('global');
+          setBubbleAppearance(normalizeBubbleAppearance(profile?.chatBubbleAppearance));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, currentUid, globalAppearanceKey]);
+
+  useEffect(() => {
+    let active = true;
+    AccessibilityInfo.isReduceMotionEnabled().then((enabled) => active && setReduceMotion(Boolean(enabled))).catch(() => {});
+    const subscription = AccessibilityInfo.addEventListener?.('reduceMotionChanged', (enabled) => setReduceMotion(Boolean(enabled)));
+    return () => {
+      active = false;
+      subscription?.remove?.();
+    };
+  }, []);
 
   const otherId = conversation?.memberIds?.find((id) => id !== currentUid);
   const otherUser = conversation?.memberInfo?.[otherId] || {};
@@ -1097,18 +1629,25 @@ function ConversationScreen({ conversationId }) {
     let cancelled = false;
     fetchRecord('conversations', conversationId)
       .then((data) => {
-        if (cancelled || !data) return;
+        if (cancelled) return;
+        if (!data) {
+          if (!CONVERSATION_CACHE.get(conversationId)) setConversationError(true);
+          return;
+        }
         putCache(CONVERSATION_CACHE, conversationId, { data, ts: Date.now() });
         setConversation(data);
+        setConversationError(false);
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!cancelled && !CONVERSATION_CACHE.get(conversationId)) setConversationError(true);
+      })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [conversationId]);
+  }, [conversationId, reloadKey]);
 
   // Keep the conversation cache in sync with local changes (clear chat, unread...), preserving its age.
   useEffect(() => {
@@ -1120,8 +1659,9 @@ function ConversationScreen({ conversationId }) {
   // Persist the last page of messages so re-entering the chat is instant and read-free.
   useEffect(() => {
     if (messagesLoading && !messages.length) return;
-    const persisted = messages.filter((m) => m.status !== 'sending').slice(-MESSAGE_CACHE_LIMIT);
-    const trimmed = persisted.length < messages.filter((m) => m.status !== 'sending').length;
+    const settled = messages.filter((m) => m.status !== 'sending');
+    const persisted = settled.slice(-MESSAGE_CACHE_LIMIT);
+    const trimmed = persisted.length < settled.length;
     putCache(MESSAGE_CACHE, conversationId, {
       messages: persisted,
       cursor: trimmed ? persisted.find((m) => !isLocalId(m.id))?.id || null : lastVisibleMessageId,
@@ -1150,7 +1690,8 @@ function ConversationScreen({ conversationId }) {
     } finally {
       setLoadingOlderMessages(false);
       // Hold the guard briefly so the auto-stick-to-bottom logic doesn't fight the prepend.
-      setTimeout(() => {
+      clearTimeout(olderGuardTimer.current);
+      olderGuardTimer.current = setTimeout(() => {
         loadingOlderRef.current = false;
       }, 350);
     }
@@ -1208,7 +1749,13 @@ function ConversationScreen({ conversationId }) {
       const wasGone = disconnectedAtRef.current ? Date.now() - disconnectedAtRef.current : 0;
       disconnectedAtRef.current = 0;
       // Only gap-fill after a meaningful outage; short blips are covered by the live socket.
-      if (hasConnectedOnce.current && wasGone > MIN_GAP_REFETCH_MS) fetchLatest(false);
+      if (hasConnectedOnce.current && wasGone > MIN_GAP_REFETCH_MS) {
+        fetchLatest(false);
+        // Messages that failed while offline get another go. Friend-gate failures can never succeed, so skip them.
+        messagesRef.current
+          .filter((m) => m.status === 'failed' && m.failedReason !== FRIEND_GATE_MESSAGE)
+          .forEach((m) => retryRef.current?.(m));
+      }
       hasConnectedOnce.current = true;
     };
     const handleDisconnect = () => {
@@ -1303,6 +1850,8 @@ function ConversationScreen({ conversationId }) {
       clearTimeout(highlightTimer.current);
       clearTimeout(toastTimer.current);
       clearTimeout(scrollTimer.current);
+      clearTimeout(blockTimer.current);
+      clearTimeout(olderGuardTimer.current);
       if (typingSentAt.current) emitSafe('typing', { conversationId, userId: currentUidRef.current, isTyping: false });
     },
     [conversationId]
@@ -1463,7 +2012,7 @@ function ConversationScreen({ conversationId }) {
   };
 
   const showSendError = (error) => {
-    if (error?.message === 'Become friends before chatting freely.') {
+    if (error?.message === FRIEND_GATE_MESSAGE) {
       setFriendRequestVisible(true);
       return;
     }
@@ -1508,6 +2057,7 @@ function ConversationScreen({ conversationId }) {
     const nextText = draft.trim();
     if (!nextText || !conversation || !user || !canChat) return;
 
+    tap('Medium');
     const clientId = createMessageClientId();
     const reply = buildReplyPayload(replyTo);
     const optimistic = { ...baseOptimistic(clientId), type: 'text', text: nextText, attachments: [], replyTo: reply };
@@ -1579,7 +2129,8 @@ function ConversationScreen({ conversationId }) {
     if (!sticker || !conversation || !user || !canChat) return;
     const clientId = createMessageClientId();
     const reply = buildReplyPayload(replyTo);
-    const optimistic = { ...baseOptimistic(clientId), type: 'sticker', stickerId: sticker.id, replyTo: reply };
+    const stickerFields = { id: sticker.id, type: sticker.type, assetUrl: sticker.assetUrl, thumbnailUrl: sticker.thumbnailUrl, name: sticker.name, editor: sticker.editor || null };
+    const optimistic = { ...baseOptimistic(clientId), type: 'sticker', stickerId: sticker.id, sticker: stickerFields, replyTo: reply };
 
     setMessages((prev) => reconcileIncomingMessage(prev, optimistic));
     setReplyTo(null);
@@ -1608,6 +2159,7 @@ function ConversationScreen({ conversationId }) {
   /* ------------------------------- Message sheet -------------------------- */
 
   const openSheet = useCallback((message) => {
+    tap('Light');
     setConfirmingDelete(false);
     setActiveMessage(message);
   }, []);
@@ -1627,7 +2179,8 @@ function ConversationScreen({ conversationId }) {
     if (!message || message.deleted) return;
     const prev = selectedIdsRef.current;
     const next = prev.includes(message.id) ? prev.filter((id) => id !== message.id) : [...prev, message.id];
-    setSelection(next, next.length > 0);
+    // Keep selection mode open even at zero selected, so the bar's hint stays and Cancel is the explicit exit.
+    setSelection(next, true);
   }, [setSelection]);
 
   const clearMessageSelection = useCallback(() => setSelection([], false), [setSelection]);
@@ -1636,6 +2189,46 @@ function ConversationScreen({ conversationId }) {
     const sentAt = toMillis(message?.createdAt);
     return Boolean(sentAt && Date.now() - sentAt <= EDIT_WINDOW_MS);
   };
+
+  const saveBubbleAppearance = useCallback(async () => {
+    const next = normalizeBubbleAppearance(bubbleDraft);
+    setAppearanceSaving(true);
+    try {
+      if (scopeDraft === 'conversation') await saveConversationAppearance(currentUid, conversationId, next);
+      else {
+        // A global choice is meant to apply to this chat too. Remove any
+        // previously saved local override so it cannot reappear on remount.
+        await updateProfile({ chatBubbleAppearance: next });
+        await clearConversationAppearance(currentUid, conversationId);
+      }
+      setBubbleScope(scopeDraft);
+      setBubbleAppearance(next);
+      setBubbleCustomizerVisible(false);
+      showToast(scopeDraft === 'conversation' ? 'Appearance saved for this chat' : 'Appearance saved for all your chats');
+    } catch (error) {
+      showAlertDialog('Appearance not saved', error?.message || 'Please try again when you are connected.');
+    } finally {
+      setAppearanceSaving(false);
+    }
+  }, [bubbleDraft, scopeDraft, conversationId, currentUid, showAlertDialog, showToast, updateProfile]);
+
+  const resetBubbleAppearance = useCallback(async () => {
+    const globalAppearance = normalizeBubbleAppearance(profile?.chatBubbleAppearance);
+    if (scopeDraft !== 'conversation') {
+      setBubbleDraft(DEFAULT_BUBBLE_APPEARANCE);
+      return;
+    }
+    try {
+      await clearConversationAppearance(currentUid, conversationId);
+      setBubbleScope('global');
+      setScopeDraft('global');
+      setBubbleAppearance(globalAppearance);
+      setBubbleDraft(globalAppearance);
+      showToast('This chat now uses your global appearance');
+    } catch {
+      showAlertDialog('Could not reset appearance', 'Please try again.');
+    }
+  }, [scopeDraft, conversationId, currentUid, profile?.chatBubbleAppearance, showAlertDialog, showToast]);
 
   const withinVoiceDeleteWindow = (message) => {
     const sentAt = toMillis(message?.createdAt);
@@ -1712,7 +2305,7 @@ function ConversationScreen({ conversationId }) {
     const failedIds = new Set(targets.filter((_, i) => results[i].status === 'rejected').map((m) => m.id));
     if (failedIds.size) {
       setMessages((prev) => prev.map((m) => (failedIds.has(m.id) ? { ...m, deleted: false } : m)));
-      showAlertDialog('Some messages weren\'t deleted', `${failedIds.size} message${failedIds.size > 1 ? 's' : ''} couldn't be deleted. Please try again.`);
+      showAlertDialog("Some messages weren't deleted", `${failedIds.size} message${failedIds.size > 1 ? 's' : ''} couldn't be deleted. Please try again.`);
     } else {
       showToast(`${targets.length} message${targets.length > 1 ? 's' : ''} deleted`);
     }
@@ -1783,12 +2376,14 @@ function ConversationScreen({ conversationId }) {
     setRoomBusy('clear');
     try {
       await clearConversationForUser(conversationId, currentUid);
+      // Use the newest message's own timestamp instead of the device clock, so clock skew can't hide or leak messages.
+      const clearedAt = new Date(toMillis(lastMessage?.createdAt) || Date.now());
       setReplyTo(null);
       setActiveMessage(null);
       setUnread(null);
       setConversation((current) => ({
         ...current,
-        clearedFor: { ...(current?.clearedFor || {}), [currentUid]: new Date() },
+        clearedFor: { ...(current?.clearedFor || {}), [currentUid]: clearedAt },
         unread: { ...(current?.unread || {}), [currentUid]: 0 },
       }));
       showToast('Chat cleared');
@@ -1807,6 +2402,7 @@ function ConversationScreen({ conversationId }) {
       DRAFT_CACHE.delete(conversationId);
       MESSAGE_CACHE.delete(conversationId);
       CONVERSATION_CACHE.delete(conversationId);
+      RELATIONSHIP_CACHE.delete(conversationId);
       router.back();
     } catch (error) {
       showAlertDialog('Delete chat failed', error?.message || 'Unable to delete this chat.');
@@ -1959,7 +2555,8 @@ function ConversationScreen({ conversationId }) {
             });
             setRelationship({ state: RELATIONSHIP.BLOCKED, blockedByMe: true });
             showToast(`${headerTitle} has been blocked`);
-            setTimeout(() => router.back(), 500);
+            clearTimeout(blockTimer.current);
+            blockTimer.current = setTimeout(() => router.back(), 500);
           } catch (error) {
             showAlertDialog('Could not block user', error?.message || 'Please try again.');
           } finally {
@@ -1976,7 +2573,7 @@ function ConversationScreen({ conversationId }) {
     setTimeout(() => {
       showConfirmDialog({
         title: 'Unblock this user?',
-        subtitle: `You will be able to view their profile and send a request again.`,
+        subtitle: 'You will be able to view their profile and send a request again.',
         icon: 'ban-outline',
         iconBgColor: colors.brandLight,
         iconColor: colors.brand,
@@ -2051,6 +2648,7 @@ function ConversationScreen({ conversationId }) {
   const toggleReaction = useCallback(
     async (message, emoji) => {
       if (!message || !emoji || !conversationId || !user?.uid || isLocalId(message.id)) return;
+      tap('Light');
       const uid = user.uid;
       const apply = (m) => (m.id === message.id ? { ...m, reactions: toggleReactionLocal(m.reactions, emoji, uid) } : m);
       setMessages((prev) => prev.map(apply));
@@ -2109,10 +2707,12 @@ function ConversationScreen({ conversationId }) {
           onJumpToReply={jumpToMessage}
           onToggleReaction={toggleReaction}
           onOpenImage={setImagePreview}
+          bubbleAppearance={bubbleAppearance}
+          bubbleMotion={bubbleMotion}
         />
       );
     },
-    [styles, colors, currentUid, highlightId, multiSelectMode, selectedSet, openSheet, startReply, handleRetry, jumpToMessage, toggleMessageSelection, toggleReaction]
+    [styles, colors, currentUid, highlightId, multiSelectMode, selectedSet, openSheet, startReply, handleRetry, jumpToMessage, toggleMessageSelection, toggleReaction, bubbleAppearance, bubbleMotion]
   );
 
   /* ------------------------------- Renderers ------------------------------ */
@@ -2164,17 +2764,17 @@ function ConversationScreen({ conversationId }) {
         </View>
         {hasIntroRequest ? (
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Pressable style={styles.relationshipButton} onPress={handleAcceptMessageRequest} disabled={relationshipBusy}>
+            <Pressable style={styles.relationshipButton} onPress={handleAcceptMessageRequest} disabled={relationshipBusy} accessibilityRole="button">
               {busyIcon('checkmark', colors.onBrand)}
               <Text style={styles.relationshipButtonText}>Accept</Text>
             </Pressable>
-            <Pressable style={[styles.relationshipButton, styles.relationshipButtonMuted]} onPress={handleDeclineMessageRequest} disabled={relationshipBusy}>
+            <Pressable style={[styles.relationshipButton, styles.relationshipButtonMuted]} onPress={handleDeclineMessageRequest} disabled={relationshipBusy} accessibilityRole="button">
               {busyIcon('close', colors.textSecondary)}
               <Text style={[styles.relationshipButtonText, styles.relationshipButtonTextMuted]}>Decline</Text>
             </Pressable>
           </View>
         ) : isReceived ? (
-          <Pressable style={styles.relationshipButton} onPress={handleAcceptFriend} disabled={relationshipBusy}>
+          <Pressable style={styles.relationshipButton} onPress={handleAcceptFriend} disabled={relationshipBusy} accessibilityRole="button">
             {busyIcon('checkmark', colors.onBrand)}
             <Text style={styles.relationshipButtonText}>Accept</Text>
           </Pressable>
@@ -2183,7 +2783,7 @@ function ConversationScreen({ conversationId }) {
             <Text style={[styles.relationshipButtonText, styles.relationshipButtonTextMuted]}>{isSent ? 'Pending' : 'Blocked'}</Text>
           </View>
         ) : (
-          <Pressable style={styles.relationshipButton} onPress={handleAddFriend} disabled={relationshipBusy}>
+          <Pressable style={styles.relationshipButton} onPress={handleAddFriend} disabled={relationshipBusy} accessibilityRole="button">
             {busyIcon('person-add-outline', colors.onBrand)}
             <Text style={styles.relationshipButtonText}>Add</Text>
           </Pressable>
@@ -2258,6 +2858,7 @@ function ConversationScreen({ conversationId }) {
   /* --------------------------------- Render -------------------------------- */
 
   const nearLimit = activeText.length > MAX_LENGTH * 0.85;
+  const showSend = canSubmit || Boolean(editingMessage);
 
   const statusText = isTyping
     ? `${typingName || 'Student'} is typing…`
@@ -2277,224 +2878,247 @@ function ConversationScreen({ conversationId }) {
     isTyping || voiceUploading ? (
       <>
         {voiceUploading ? <VoicePendingBubble styles={styles} colors={colors} /> : null}
-        {isTyping ? <TypingBubble styles={styles} /> : null}
+        {isTyping ? <TypingBubble styles={styles} reduceMotion={reduceMotion} /> : null}
       </>
     ) : null;
 
+  // The conversation itself couldn't be loaded and nothing is cached: say so, and offer a retry.
+  if (conversationError && !conversation) {
+    return (
+      <ScreenShell showHeader={false} loading={false} scrollable={false} contentPadding={false}>
+        <View style={styles.centerFill}>
+          <EmptyState title="Couldn't open this chat" description="Check your connection and try again." />
+          <Pressable
+            style={styles.retryButton}
+            onPress={() => {
+              setConversationError(false);
+              setLoading(true);
+              setReloadKey((key) => key + 1);
+            }}
+            accessibilityRole="button"
+          >
+            <Ionicons name="refresh" size={16} color={colors.onBrand} />
+            <Text style={styles.retryButtonText}>Try again</Text>
+          </Pressable>
+          <Pressable onPress={() => router.back()} accessibilityRole="button" hitSlop={8}>
+            <Text style={styles.sheetCancelText}>Go back</Text>
+          </Pressable>
+        </View>
+      </ScreenShell>
+    );
+  }
+
   return (
-    <ScreenShell showHeader={false} loading={loading} scrollable={false}>
-      <FriendRequestModal
-        visible={friendRequestVisible}
-        person={{ ...otherUser, uid: otherId }}
-        onClose={() => setFriendRequestVisible(false)}
-        onAdd={() =>
-          sendFriendRequest({
-            currentUid,
-            targetUid: otherId,
-            currentProfile: profile,
-            targetProfile: { ...otherUser, uid: otherId },
-          })
-        }
-      />
+    <ScreenShell showHeader={false} loading={loading} scrollable={false} contentPadding={false}>
+      <View style={{ flex: 1 }}>
+        <ChatBackground appearance={bubbleAppearance} colors={colors} isDark={isDark} styles={styles} />
+        <FriendRequestModal
+          visible={friendRequestVisible}
+          person={{ ...otherUser, uid: otherId }}
+          onClose={() => setFriendRequestVisible(false)}
+          onAdd={() =>
+            sendFriendRequest({
+              currentUid,
+              targetUid: otherId,
+              currentProfile: profile,
+              targetProfile: { ...otherUser, uid: otherId },
+            })
+          }
+        />
 
-      <View style={styles.headerRow}>
-        <Pressable onPress={() => router.back()} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Go back">
-          <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
-        </Pressable>
-        <Pressable
-          style={styles.avatarWrapper}
-          onPress={() => otherId && router.navigate(`/view-user-profile/${otherId}`)}
-          disabled={!otherId}
-          accessibilityRole="button"
-          accessibilityLabel={`View ${headerTitle}'s profile`}
-        >
-          {otherUser.avatar && !avatarFailed ? (
-            <Image source={{ uri: otherUser.avatar }} style={styles.avatar} onError={() => setAvatarFailed(true)} />
-          ) : (
-            <View style={styles.avatarFallback}>
-              <Text style={styles.avatarInitial}>{(otherUser.name || 'S')[0].toUpperCase()}</Text>
+        <View style={styles.headerRow}>
+          <Pressable onPress={() => router.back()} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Go back">
+            <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+          </Pressable>
+          <Pressable
+            style={styles.avatarWrapper}
+            onPress={() => otherId && router.navigate(`/view-user-profile/${otherId}`)}
+            disabled={!otherId}
+            accessibilityRole="button"
+            accessibilityLabel={`View ${headerTitle}'s profile`}
+          >
+            {otherUser.avatar && !avatarFailed ? (
+              <Image source={{ uri: otherUser.avatar }} style={styles.avatar} onError={() => setAvatarFailed(true)} />
+            ) : (
+              <View style={styles.avatarFallback}>
+                <Text style={styles.avatarInitial}>{(otherUser.name || 'S')[0].toUpperCase()}</Text>
+              </View>
+            )}
+            {areFriends ? (
+              <View style={styles.friendBadge}>
+                <Ionicons name="people" size={9} color={colors.onBrand} />
+              </View>
+            ) : null}
+          </Pressable>
+          <View style={styles.headerMeta}>
+            <Text style={styles.headerName} numberOfLines={1}>{headerTitle}</Text>
+            <View style={styles.headerStatusRow}>
+              {isTyping ? <View style={styles.headerStatusDot} /> : null}
+              <Text style={[styles.headerHint, isTyping && styles.headerHintActive]} numberOfLines={1}>{statusText}</Text>
             </View>
-          )}
-        </Pressable>
-        <View style={styles.headerMeta}>
-          <Text style={styles.headerName} numberOfLines={1}>{headerTitle}</Text>
-          <View style={styles.headerStatusRow}>
-            {isTyping ? <View style={styles.headerStatusDot} /> : null}
-            <Text style={[styles.headerHint, isTyping && styles.headerHintActive]} numberOfLines={1}>{statusText}</Text>
           </View>
+          <Pressable
+            style={({ pressed }) => [styles.headerAction, pressed && styles.headerActionPressed]}
+            onPress={showChatOptions}
+            disabled={!!roomBusy}
+            accessibilityRole="button"
+            accessibilityLabel="Open chat options"
+          >
+            {roomBusy ? <ActivityIndicator size="small" color={colors.brand} /> : <Ionicons name="ellipsis-vertical" size={18} color={colors.textPrimary} />}
+          </Pressable>
         </View>
-        <Pressable
-          style={({ pressed }) => [styles.headerAction, pressed && styles.headerActionPressed]}
-          onPress={showChatOptions}
-          disabled={!!roomBusy}
-          accessibilityRole="button"
-          accessibilityLabel="Open chat options"
+
+        {showReconnect && !messagesLoading ? (
+          <View style={styles.banner}>
+            <ActivityIndicator size="small" color={colors.textSecondary} />
+            <Text style={styles.bannerText}>Reconnecting… messages will still send</Text>
+          </View>
+        ) : null}
+
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+          style={{ flex: 1 }}
         >
-          {roomBusy ? <ActivityIndicator size="small" color={colors.brand} /> : <Ionicons name="ellipsis-vertical" size={18} color={colors.textPrimary} />}
-        </Pressable>
-      </View>
+          <View style={styles.messagesPane}>
+            {messagesLoading && !messages.length ? (
+              <MessageSkeleton styles={styles} />
+            ) : loadError && !messages.length ? (
+              <View style={styles.centerFill}>
+                <EmptyState title="Couldn't load messages" description="Check your connection and try again." />
+                <Pressable
+                  style={styles.retryButton}
+                  onPress={() => {
+                    setLoadError(false);
+                    setMessagesLoading(true);
+                    setReloadKey((key) => key + 1);
+                  }}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="refresh" size={16} color={colors.onBrand} />
+                  <Text style={styles.retryButtonText}>Try again</Text>
+                </Pressable>
+              </View>
+            ) : listData.length || voiceUploading ? (
+              <FlatList
+                ref={listRef}
+                data={listData}
+                keyExtractor={(item) => item.key}
+                renderItem={renderItem}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
+                onContentSizeChange={handleContentSizeChange}
+                onScrollToIndexFailed={handleScrollToIndexFailed}
+                maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
+                ListHeaderComponent={listHeader}
+                ListFooterComponent={listFooter}
+                contentContainerStyle={styles.listContent}
+                showsVerticalScrollIndicator={false}
+                keyboardDismissMode="on-drag"
+                keyboardShouldPersistTaps="handled"
+                initialNumToRender={20}
+                windowSize={11}
+                maxToRenderPerBatch={12}
+                updateCellsBatchingPeriod={40}
+                removeClippedSubviews={Platform.OS === 'android'}
+              />
+            ) : (
+              <EmptyState
+                title="No messages yet"
+                description={canChat ? 'Say hello and start the conversation.' : 'Messages will show up here once you are connected.'}
+              />
+            )}
 
-      {showReconnect && !messagesLoading ? (
-        <View style={styles.banner}>
-          <ActivityIndicator size="small" color={colors.textSecondary} />
-          <Text style={styles.bannerText}>Reconnecting… messages will still send</Text>
-        </View>
-      ) : null}
-
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-        style={{ flex: 1 }}
-      >
-        <View style={styles.messagesPane}>
-          {messagesLoading && !messages.length ? (
-            <MessageSkeleton styles={styles} />
-          ) : loadError && !messages.length ? (
-            <View style={styles.centerFill}>
-              <EmptyState title="Couldn't load messages" description="Check your connection and try again." />
+            {showScrollDown && !multiSelectMode ? (
               <Pressable
-                style={styles.retryButton}
+                style={[styles.scrollFab, newBelow > 0 && styles.scrollPill]}
                 onPress={() => {
-                  setLoadError(false);
-                  setMessagesLoading(true);
-                  setReloadKey((key) => key + 1);
+                  setNewBelow(0);
+                  scrollToBottom(true);
                 }}
                 accessibilityRole="button"
+                accessibilityLabel={newBelow > 0 ? `Scroll to latest, ${newBelow} new messages` : 'Scroll to latest message'}
               >
-                <Ionicons name="refresh" size={16} color={colors.onBrand} />
-                <Text style={styles.retryButtonText}>Try again</Text>
+                <Ionicons name="chevron-down" size={20} color={newBelow > 0 ? colors.onBrand : colors.textPrimary} />
+                {newBelow > 0 ? <Text style={styles.scrollPillText}>{newBelow > 99 ? '99+' : newBelow} new</Text> : null}
               </Pressable>
-            </View>
-          ) : listData.length || voiceUploading ? (
-            <FlatList
-              ref={listRef}
-              data={listData}
-              keyExtractor={(item) => item.key}
-              renderItem={renderItem}
-              onScroll={handleScroll}
-              scrollEventThrottle={64}
-              onContentSizeChange={handleContentSizeChange}
-              onScrollToIndexFailed={handleScrollToIndexFailed}
-              maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
-              ListHeaderComponent={listHeader}
-              ListFooterComponent={listFooter}
-              contentContainerStyle={styles.listContent}
-              showsVerticalScrollIndicator={false}
-              keyboardDismissMode="on-drag"
-              keyboardShouldPersistTaps="handled"
-              initialNumToRender={20}
-              windowSize={11}
-            />
-          ) : (
-            <EmptyState
-              title="No messages yet"
-              description={canChat ? 'Say hello and start the conversation.' : 'Messages will show up here once you are connected.'}
-            />
-          )}
+            ) : null}
 
-          {showScrollDown && !multiSelectMode ? (
-            <Pressable
-              style={styles.scrollFab}
-              onPress={() => {
-                setNewBelow(0);
-                scrollToBottom(true);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Scroll to latest message"
-            >
-              <Ionicons name="chevron-down" size={22} color={colors.textPrimary} />
-              {newBelow > 0 ? (
-                <View style={styles.scrollFabBadge}>
-                  <Text style={styles.scrollFabBadgeText}>{newBelow > 99 ? '99+' : newBelow}</Text>
+            {multiSelectMode ? (
+              <View style={styles.selectionBar}>
+                <Text style={styles.selectionTitle}>
+                  {selectedMessageIds.length ? `${selectedMessageIds.length} selected` : 'Tap messages to select them'}
+                </Text>
+                <View style={styles.selectionActions}>
+                  <Pressable
+                    style={[styles.selectionButton, !selectedMessageIds.length && styles.selectionButtonDisabled]}
+                    onPress={handleCopySelectedMessages}
+                    disabled={!selectedMessageIds.length}
+                    accessibilityRole="button"
+                  >
+                    <Ionicons name="copy-outline" size={16} color={colors.textPrimary} />
+                    <Text style={styles.selectionButtonText}>Copy</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.selectionButton, styles.selectionButtonDanger, !selectionCanDelete && styles.selectionButtonDisabled]}
+                    onPress={handleDeleteSelectedMessages}
+                    disabled={!selectionCanDelete}
+                    accessibilityRole="button"
+                  >
+                    <Ionicons name="trash-outline" size={16} color={colors.error} />
+                    <Text style={[styles.selectionButtonText, { color: colors.error }]}>Delete</Text>
+                  </Pressable>
+                  <Pressable style={styles.selectionButton} onPress={clearMessageSelection} accessibilityRole="button">
+                    <Text style={styles.selectionButtonText}>Cancel</Text>
+                  </Pressable>
                 </View>
-              ) : null}
-            </Pressable>
-          ) : null}
-
-          {multiSelectMode ? (
-            <View style={styles.selectionBar}>
-              <Text style={styles.selectionTitle}>
-                {selectedMessageIds.length ? `${selectedMessageIds.length} selected` : 'Tap messages to select them'}
-              </Text>
-              <View style={styles.selectionActions}>
-                <Pressable
-                  style={[styles.selectionButton, !selectedMessageIds.length && styles.selectionButtonDisabled]}
-                  onPress={handleCopySelectedMessages}
-                  disabled={!selectedMessageIds.length}
-                >
-                  <Ionicons name="copy-outline" size={16} color={colors.textPrimary} />
-                  <Text style={styles.selectionButtonText}>Copy</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.selectionButton, styles.selectionButtonDanger, !selectionCanDelete && styles.selectionButtonDisabled]}
-                  onPress={handleDeleteSelectedMessages}
-                  disabled={!selectionCanDelete}
-                >
-                  <Ionicons name="trash-outline" size={16} color={colors.error} />
-                  <Text style={[styles.selectionButtonText, { color: colors.error }]}>Delete</Text>
-                </Pressable>
-                <Pressable style={styles.selectionButton} onPress={clearMessageSelection}>
-                  <Text style={styles.selectionButtonText}>Cancel</Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : null}
-
-          {toast ? (
-            <Animated.View pointerEvents="none" style={[styles.toast, { opacity: toastOpacity }]}>
-              <Text style={styles.toastText}>{toast}</Text>
-            </Animated.View>
-          ) : null}
-        </View>
-
-        {renderRelationshipPrompt()}
-
-        {canChat ? (
-          <View style={styles.composerContainer}>
-            {editingMessage ? (
-              <View style={styles.composerBanner}>
-                <Ionicons name="create-outline" size={18} color={colors.brand} />
-                <View style={styles.composerBannerBody}>
-                  <Text style={styles.composerBannerLabel}>Editing message</Text>
-                  <Text style={styles.composerBannerText} numberOfLines={1}>{editingMessage.text || ''}</Text>
-                </View>
-                <Pressable style={styles.composerBannerClose} onPress={cancelEditingMessage} accessibilityRole="button" accessibilityLabel="Cancel editing">
-                  <Ionicons name="close" size={16} color={colors.textSecondary} />
-                </Pressable>
-              </View>
-            ) : replyTo ? (
-              <View style={styles.composerBanner}>
-                <Ionicons name="arrow-undo" size={18} color={colors.brand} />
-                <View style={styles.composerBannerBody}>
-                  <Text style={styles.composerBannerLabel}>Replying to {replyTo.senderName || 'Student'}</Text>
-                  <Text style={styles.composerBannerText} numberOfLines={1}>{previewOf(replyTo)}</Text>
-                </View>
-                <Pressable style={styles.composerBannerClose} onPress={() => setReplyTo(null)} accessibilityRole="button" accessibilityLabel="Cancel reply">
-                  <Ionicons name="close" size={16} color={colors.textSecondary} />
-                </Pressable>
               </View>
             ) : null}
 
-            <View style={styles.composer}>
-              {!editingMessage ? (
-                <>
-                  {!voiceBusy ? (
-                    <Pressable style={styles.stickerButton} onPress={() => setStickerPickerVisible(true)} accessibilityRole="button" accessibilityLabel="Open sticker picker">
-                      <Ionicons name="happy-outline" size={22} color={colors.brand} />
-                    </Pressable>
-                  ) : null}
-                  <View style={voiceBusy ? styles.recorderExpanded : null}>
-                    <VoiceRecorderBar
-                      conversationId={conversationId}
-                      onVoiceSent={sendVoiceMessage}
-                      onStateChange={setVoiceState}
-                      expanded={voiceBusy}
-                    />
+            {toast ? (
+              <Animated.View pointerEvents="none" style={[styles.toast, { opacity: toastOpacity }]}>
+                <Text style={styles.toastText}>{toast}</Text>
+              </Animated.View>
+            ) : null}
+          </View>
+
+          {renderRelationshipPrompt()}
+
+          {canChat ? (
+            <View style={styles.composerContainer}>
+              {editingMessage ? (
+                <View style={styles.composerBanner}>
+                  <Ionicons name="create-outline" size={18} color={colors.brand} />
+                  <View style={styles.composerBannerBody}>
+                    <Text style={styles.composerBannerLabel}>Editing message</Text>
+                    <Text style={styles.composerBannerText} numberOfLines={1}>{editingMessage.text || ''}</Text>
                   </View>
-                </>
+                  <Pressable style={styles.composerBannerClose} onPress={cancelEditingMessage} accessibilityRole="button" accessibilityLabel="Cancel editing">
+                    <Ionicons name="close" size={16} color={colors.textSecondary} />
+                  </Pressable>
+                </View>
+              ) : replyTo ? (
+                <View style={styles.composerBanner}>
+                  <Ionicons name="arrow-undo" size={18} color={colors.brand} />
+                  <View style={styles.composerBannerBody}>
+                    <Text style={styles.composerBannerLabel}>Replying to {replyTo.senderName || 'Student'}</Text>
+                    <Text style={styles.composerBannerText} numberOfLines={1}>{previewOf(replyTo)}</Text>
+                  </View>
+                  <Pressable style={styles.composerBannerClose} onPress={() => setReplyTo(null)} accessibilityRole="button" accessibilityLabel="Cancel reply">
+                    <Ionicons name="close" size={16} color={colors.textSecondary} />
+                  </Pressable>
+                </View>
               ) : null}
-              {!voiceBusy ? (
-                <>
+
+              {/* Smart composer: sticker + input + (send when there is text, mic when there isn't). */}
+              <View style={styles.composer}>
+                {!editingMessage && !voiceBusy ? (
+                  <Pressable style={styles.stickerButton} onPress={() => setStickerPickerVisible(true)} accessibilityRole="button" accessibilityLabel="Open sticker picker">
+                    <Ionicons name="happy-outline" size={22} color={colors.brand} />
+                  </Pressable>
+                ) : null}
+
+                {!voiceBusy ? (
                   <View style={styles.inputWrap}>
                     <TextInput
                       ref={inputRef}
@@ -2505,6 +3129,7 @@ function ConversationScreen({ conversationId }) {
                       style={[styles.input, editingMessage && styles.inputEditing]}
                       maxLength={MAX_LENGTH}
                       multiline
+                      accessibilityLabel="Message input"
                     />
                     {nearLimit ? (
                       <Text style={[styles.counter, activeText.length >= MAX_LENGTH && styles.counterLimit]}>
@@ -2512,159 +3137,193 @@ function ConversationScreen({ conversationId }) {
                       </Text>
                     ) : null}
                   </View>
+                ) : null}
+
+                {showSend && !voiceBusy ? (
                   <Animated.View style={{ transform: [{ scale: sendScale }] }}>
                     <Pressable
-                      style={[styles.button, !canSubmit && styles.buttonDisabled]}
+                      style={styles.button}
                       onPress={editingMessage ? saveEditedMessage : send}
-                      disabled={!canSubmit}
                       accessibilityRole="button"
                       accessibilityLabel={editingMessage ? 'Save edited message' : 'Send message'}
                     >
                       <Ionicons name={editingMessage ? 'checkmark' : 'arrow-up'} size={20} color={colors.onBrand} />
                     </Pressable>
                   </Animated.View>
-                </>
-              ) : null}
-            </View>
-          </View>
-        ) : null}
-      </KeyboardAvoidingView>
+                ) : null}
 
-      <StickerPicker visible={stickerPickerVisible} onClose={() => setStickerPickerVisible(false)} onSelect={sendSticker} />
-
-      {/* Full-screen photo viewer */}
-      <Modal visible={!!imagePreview} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setImagePreview(null)}>
-        <View style={styles.viewerOverlay}>
-          {imagePreview ? <Image source={{ uri: imagePreview }} style={styles.viewerImage} resizeMode="contain" /> : null}
-          <Pressable style={styles.viewerClose} onPress={() => setImagePreview(null)} accessibilityRole="button" accessibilityLabel="Close photo">
-            <Ionicons name="close" size={24} color="#fff" />
-          </Pressable>
-        </View>
-      </Modal>
-
-      {/* Message actions */}
-      <Modal visible={!!activeMessage} transparent animationType="fade" statusBarTranslucent onRequestClose={closeSheet}>
-        <Pressable style={styles.modalOverlay} onPress={closeSheet}>
-          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.sheetHandle} />
-            {!confirmingDelete ? (
-              <>
-                {renderSheetActions()}
-                <Pressable style={styles.sheetCancel} onPress={closeSheet}>
-                  <Text style={styles.sheetCancelText}>Cancel</Text>
-                </Pressable>
-              </>
-            ) : (
-              <>
-                <View style={styles.confirmIconWrap}>
-                  <Ionicons name="trash" size={22} color={colors.error} />
-                </View>
-                <Text style={styles.confirmTitle}>Delete this message?</Text>
-                <Text style={styles.confirmSubtitle}>
-                  It will be replaced with &#34;This message was deleted&#34; for everyone in this chat.
-                </Text>
-                <Pressable style={styles.confirmDeleteButton} onPress={handleConfirmDelete}>
-                  <Text style={styles.confirmDeleteText}>Delete</Text>
-                </Pressable>
-                <Pressable style={styles.sheetCancel} onPress={() => setConfirmingDelete(false)}>
-                  <Text style={styles.sheetCancelText}>Cancel</Text>
-                </Pressable>
-              </>
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* Chat options */}
-      <Modal visible={showOptionsSheet} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setShowOptionsSheet(false)}>
-        <Pressable style={styles.modalOverlay} onPress={() => setShowOptionsSheet(false)}>
-          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>Chat options</Text>
-            <Text style={styles.sheetSubtitle}>Changes only affect your side of this chat.</Text>
-
-            {otherId ? <SheetOption styles={styles} colors={colors} icon="person-outline" label="View profile" onPress={handleViewProfile} /> : null}
-            <SheetOption
-              styles={styles}
-              colors={colors}
-              icon="settings-outline"
-              label="Conversation settings"
-              onPress={() => {
-                setShowOptionsSheet(false);
-                router.navigate({ pathname: '/messages/[conversationId]/settings', params: { conversationId } });
-              }}
-            />
-            {otherId ? <SheetOption styles={styles} colors={colors} icon="flag-outline" label="Report user" onPress={handleReportUser} /> : null}
-            {otherId ? (
-              isBlocked ? (
-                <SheetOption
-                  styles={styles}
-                  colors={colors}
-                  icon="ban-outline"
-                  label="Unblock user"
-                  onPress={handlePromptUnblockUser}
-                />
-              ) : (
-                <SheetOption
-                  styles={styles}
-                  colors={colors}
-                  icon="ban"
-                  label="Block user"
-                  danger
-                  onPress={handlePromptBlockUser}
-                />
-              )
-            ) : null}
-            <SheetOption
-              styles={styles}
-              colors={colors}
-              icon="checkbox-outline"
-              label="Select messages"
-              onPress={() => {
-                setShowOptionsSheet(false);
-                setSelection([], true);
-              }}
-            />
-            <SheetOption styles={styles} colors={colors} icon="brush-outline" label="Clear chat" onPress={handlePromptClearChat} />
-            <SheetOption styles={styles} colors={colors} icon="trash-outline" label="Delete chat" danger onPress={handlePromptDeleteChat} />
-
-            <Pressable style={styles.sheetCancel} onPress={() => setShowOptionsSheet(false)}>
-              <Text style={styles.sheetCancelText}>Cancel</Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* Universal confirmation / error dialog */}
-      <Modal visible={!!dialogConfig} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setDialogConfig(null)}>
-        <Pressable
-          style={styles.dialogOverlay}
-          onPress={() => (dialogConfig?.onSecondary ? dialogConfig.onSecondary() : setDialogConfig(null))}
-        >
-          <Pressable style={styles.dialogCard} onPress={(e) => e.stopPropagation()}>
-            {dialogConfig?.icon ? (
-              <View style={[styles.confirmIconWrap, { backgroundColor: dialogConfig.iconBgColor }]}>
-                <Ionicons name={dialogConfig.icon} size={24} color={dialogConfig.iconColor} />
+                {!editingMessage && (!showSend || voiceBusy) ? (
+                  <View style={voiceBusy ? styles.recorderExpanded : null}>
+                    <VoiceRecorderBar
+                      conversationId={conversationId}
+                      onVoiceSent={sendVoiceMessage}
+                      onStateChange={setVoiceState}
+                      expanded={voiceBusy}
+                    />
+                  </View>
+                ) : null}
               </View>
-            ) : null}
-            {dialogConfig?.title ? <Text style={styles.confirmTitle}>{dialogConfig.title}</Text> : null}
-            {dialogConfig?.subtitle ? <Text style={styles.confirmSubtitle}>{dialogConfig.subtitle}</Text> : null}
+            </View>
+          ) : null}
+        </KeyboardAvoidingView>
 
-            <Pressable
-              style={[styles.dialogPrimaryBtn, { backgroundColor: dialogConfig?.primaryStyle === 'danger' ? colors.error : colors.brand }]}
-              onPress={dialogConfig?.onPrimary}
-            >
-              <Text style={styles.dialogPrimaryText}>{dialogConfig?.primaryText || 'OK'}</Text>
+        <StickerPicker visible={stickerPickerVisible} onClose={() => setStickerPickerVisible(false)} onSelect={sendSticker} />
+
+        {/* Full-screen photo viewer */}
+        <Modal visible={!!imagePreview} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setImagePreview(null)}>
+          <View style={styles.viewerOverlay}>
+            {imagePreview ? <Image source={{ uri: imagePreview }} style={styles.viewerImage} resizeMode="contain" /> : null}
+            <Pressable style={styles.viewerClose} onPress={() => setImagePreview(null)} accessibilityRole="button" accessibilityLabel="Close photo">
+              <Ionicons name="close" size={24} color="#fff" />
             </Pressable>
+          </View>
+        </Modal>
 
-            {dialogConfig?.secondaryText ? (
-              <Pressable style={styles.sheetCancel} onPress={dialogConfig.onSecondary}>
-                <Text style={styles.sheetCancelText}>{dialogConfig.secondaryText}</Text>
-              </Pressable>
-            ) : null}
+        {/* Message actions */}
+        <Modal visible={!!activeMessage} transparent animationType="fade" statusBarTranslucent onRequestClose={closeSheet}>
+          <Pressable style={styles.modalOverlay} onPress={closeSheet}>
+            <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+              <View style={styles.sheetHandle} />
+              {!confirmingDelete ? (
+                <>
+                  {renderSheetActions()}
+                  <Pressable style={styles.sheetCancel} onPress={closeSheet} accessibilityRole="button">
+                    <Text style={styles.sheetCancelText}>Cancel</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <View style={styles.confirmIconWrap}>
+                    <Ionicons name="trash" size={22} color={colors.error} />
+                  </View>
+                  <Text style={styles.confirmTitle}>Delete this message?</Text>
+                  <Text style={styles.confirmSubtitle}>
+                    It will be replaced with &#34;This message was deleted&#34; for everyone in this chat.
+                  </Text>
+                  <Pressable style={styles.confirmDeleteButton} onPress={handleConfirmDelete} accessibilityRole="button">
+                    <Text style={styles.confirmDeleteText}>Delete</Text>
+                  </Pressable>
+                  <Pressable style={styles.sheetCancel} onPress={() => setConfirmingDelete(false)} accessibilityRole="button">
+                    <Text style={styles.sheetCancelText}>Cancel</Text>
+                  </Pressable>
+                </>
+              )}
+            </Pressable>
           </Pressable>
-        </Pressable>
-      </Modal>
+        </Modal>
+
+        {/* Chat options */}
+        <Modal visible={showOptionsSheet} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setShowOptionsSheet(false)}>
+          <Pressable style={styles.modalOverlay} onPress={() => setShowOptionsSheet(false)}>
+            <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+              <View style={styles.sheetHandle} />
+              <Text style={styles.sheetTitle}>Chat options</Text>
+              <Text style={styles.sheetSubtitle}>Changes only affect your side of this chat.</Text>
+
+              {otherId ? <SheetOption styles={styles} colors={colors} icon="person-outline" label="View profile" onPress={handleViewProfile} /> : null}
+              <SheetOption
+                styles={styles}
+                colors={colors}
+                icon="color-palette-outline"
+                label="Chat bubble style"
+                onPress={() => {
+                  setShowOptionsSheet(false);
+                  openBubbleStudio();
+                }}
+              />
+              <SheetOption
+                styles={styles}
+                colors={colors}
+                icon="settings-outline"
+                label="Conversation settings"
+                onPress={() => {
+                  setShowOptionsSheet(false);
+                  router.navigate({ pathname: '/messages/[conversationId]/settings', params: { conversationId } });
+                }}
+              />
+              {otherId ? <SheetOption styles={styles} colors={colors} icon="flag-outline" label="Report user" onPress={handleReportUser} /> : null}
+              {otherId ? (
+                isBlocked ? (
+                  <SheetOption styles={styles} colors={colors} icon="ban-outline" label="Unblock user" onPress={handlePromptUnblockUser} />
+                ) : (
+                  <SheetOption styles={styles} colors={colors} icon="ban" label="Block user" danger onPress={handlePromptBlockUser} />
+                )
+              ) : null}
+              <SheetOption
+                styles={styles}
+                colors={colors}
+                icon="checkbox-outline"
+                label="Select messages"
+                onPress={() => {
+                  setShowOptionsSheet(false);
+                  setSelection([], true);
+                }}
+              />
+              <SheetOption styles={styles} colors={colors} icon="brush-outline" label="Clear chat" onPress={handlePromptClearChat} />
+              <SheetOption styles={styles} colors={colors} icon="trash-outline" label="Delete chat" danger onPress={handlePromptDeleteChat} />
+
+              <Pressable style={styles.sheetCancel} onPress={() => setShowOptionsSheet(false)} accessibilityRole="button">
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        {/* Bubble Studio: the inner Pressable owns the 88% height so the sheet can actually fill it. */}
+        <Modal visible={bubbleCustomizerVisible} transparent animationType="slide" statusBarTranslucent onRequestClose={() => setBubbleCustomizerVisible(false)}>
+          <Pressable style={styles.modalOverlay} onPress={() => setBubbleCustomizerVisible(false)}>
+            <Pressable style={{ height: '88%' }} onPress={(e) => e.stopPropagation()}>
+              <BubbleStudio
+                appearance={bubbleDraft}
+                scope={scopeDraft}
+                saving={appearanceSaving}
+                onChange={(next) => setBubbleDraft(normalizeBubbleAppearance(next))}
+                onDraftChange={(next) => setBubbleDraft((current) => ({ ...current, ...next }))}
+                onScopeChange={setScopeDraft}
+                onReset={resetBubbleAppearance}
+                onSave={saveBubbleAppearance}
+                onDone={() => setBubbleCustomizerVisible(false)}
+                styles={styles}
+                colors={colors}
+                isDark={isDark}
+                reduceMotion={reduceMotion}
+              />
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        {/* Universal confirmation / error dialog */}
+        <Modal visible={!!dialogConfig} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setDialogConfig(null)}>
+          <Pressable
+            style={styles.dialogOverlay}
+            onPress={() => (dialogConfig?.onSecondary ? dialogConfig.onSecondary() : setDialogConfig(null))}
+          >
+            <Pressable style={styles.dialogCard} onPress={(e) => e.stopPropagation()}>
+              {dialogConfig?.icon ? (
+                <View style={[styles.confirmIconWrap, { backgroundColor: dialogConfig.iconBgColor }]}>
+                  <Ionicons name={dialogConfig.icon} size={24} color={dialogConfig.iconColor} />
+                </View>
+              ) : null}
+              {dialogConfig?.title ? <Text style={styles.confirmTitle}>{dialogConfig.title}</Text> : null}
+              {dialogConfig?.subtitle ? <Text style={styles.confirmSubtitle}>{dialogConfig.subtitle}</Text> : null}
+
+              <Pressable
+                style={[styles.dialogPrimaryBtn, { backgroundColor: dialogConfig?.primaryStyle === 'danger' ? colors.error : colors.brand }]}
+                onPress={dialogConfig?.onPrimary}
+                accessibilityRole="button"
+              >
+                <Text style={styles.dialogPrimaryText}>{dialogConfig?.primaryText || 'OK'}</Text>
+              </Pressable>
+
+              {dialogConfig?.secondaryText ? (
+                <Pressable style={styles.sheetCancel} onPress={dialogConfig.onSecondary} accessibilityRole="button">
+                  <Text style={styles.sheetCancelText}>{dialogConfig.secondaryText}</Text>
+                </Pressable>
+              ) : null}
+            </Pressable>
+          </Pressable>
+        </Modal>
+      </View>
     </ScreenShell>
   );
 }

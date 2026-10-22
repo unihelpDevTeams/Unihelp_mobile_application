@@ -941,16 +941,17 @@ export default function HomeScreen() {
       elevation: 5,
     },
     marketplaceShortcutBg: {
-      minHeight: screenWidth >= 720 ? 176 : 150,
+      minHeight: screenWidth >= 720 ? 196 : 220,
       justifyContent: 'center',
     },
     marketplaceShortcutOverlay: {
       flex: 1,
+      minHeight: screenWidth >= 720 ? 196 : 220,
       justifyContent: 'center',
       padding: s.lg,
     },
     marketplaceShortcutContent: {
-      maxWidth: screenWidth >= 720 ? '62%' : '76%',
+      maxWidth: screenWidth >= 720 ? '62%' : '100%',
     },
     marketplaceShortcutEyebrow: {
       alignSelf: 'flex-start',

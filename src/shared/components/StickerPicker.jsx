@@ -110,6 +110,7 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
   const [packsLoading, setPacksLoading] = useState(false);
   const [packsError, setPacksError] = useState('');
   const [stickers, setStickers] = useState([]);
+  const [favoriteIds, setFavoriteIds] = useState(() => new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [retryKey, setRetryKey] = useState(0);
@@ -166,6 +167,20 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
     return () => { cancelled = true; };
   }, [visible, retryKey]);
 
+  // Keep hearts accurate in every tab, not only after a user taps one in the
+  // current session. This also means people can build a real collection of
+  // favorites, just like WhatsApp's starred stickers.
+  useEffect(() => {
+    if (!visible) return undefined;
+    let cancelled = false;
+    fetchFavoriteStickers()
+      .then((data) => {
+        if (!cancelled) setFavoriteIds(new Set((data || []).map((item) => item.id)));
+      })
+      .catch((loadError) => console.error('[StickerPicker] Failed to load favorite stickers:', loadError));
+    return () => { cancelled = true; };
+  }, [visible, retryKey]);
+
   // Stickers for the active tab. The "packs" list tab needs no stickers.
   useEffect(() => {
     if (!visible || tab === 'packs') return undefined;
@@ -194,8 +209,8 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
   }, [visible, tab, selectedPackId, retryKey]);
 
   const isFavorite = useCallback(
-    (item) => Boolean(item.favorite || item.isFavorite || tab === 'favorites'),
-    [tab],
+    (item) => favoriteIds.has(item.id) || Boolean(item.favorite || item.isFavorite || tab === 'favorites'),
+    [favoriteIds, tab],
   );
 
   const handleSelect = useCallback((sticker) => {
@@ -214,6 +229,12 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
     favoriteBusyRef.current.add(sticker.id);
 
     const next = !isFavorite(sticker);
+    setFavoriteIds((current) => {
+      const updated = new Set(current);
+      if (next) updated.add(sticker.id);
+      else updated.delete(sticker.id);
+      return updated;
+    });
     // Optimistic update.
     setStickers((current) => current.flatMap((item) => {
       if (item.id !== sticker.id) return [item];
@@ -232,6 +253,12 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
           item.id === sticker.id ? { ...item, favorite: !next, isFavorite: !next } : item
         )));
       }
+      setFavoriteIds((current) => {
+        const updated = new Set(current);
+        if (next) updated.delete(sticker.id);
+        else updated.add(sticker.id);
+        return updated;
+      });
       showToast(favoriteError?.message || 'Could not update favorite. Please try again.', 'error');
     } finally {
       favoriteBusyRef.current.delete(sticker.id);
@@ -363,6 +390,7 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
       <FlatList
         key={`sticker-grid-${COLUMNS}`}
         data={stickers}
+        extraData={favoriteIds}
         numColumns={COLUMNS}
         columnWrapperStyle={styles.gridRow}
         keyExtractor={(item) => String(item.id)}
@@ -551,7 +579,7 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
             accessibilityRole="button"
           >
             <Ionicons name={premium ? 'add-circle-outline' : 'lock-closed-outline'} size={18} color={colors.gold} />
-            <Text style={styles.createText}>{premium ? 'Create Sticker' : 'Create Sticker with Premium'}</Text>
+            <Text style={styles.createText}>{premium ? 'Create sticker' : 'Create stickers with Premium'}</Text>
           </Pressable>
 
           {toast ? (
