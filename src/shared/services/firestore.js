@@ -309,6 +309,17 @@ export async function getCurrentUserProfile(uid = auth.currentUser?.uid) {
     if (error?.status === 404 && error?.responseData?.error === 'User not found') {
       return null;
     }
+
+    // The mobile session and entitlement listener use Firestore. A temporary
+    // profile-API/database failure must not turn an otherwise valid signed-in
+    // user into a missing profile.
+    try {
+      const firestoreProfile = await readFirestoreUserProfile(uid);
+      if (firestoreProfile) return firestoreProfile;
+    } catch (firestoreError) {
+      console.warn('Firestore profile fallback failed:', firestoreError?.message || firestoreError);
+    }
+
     console.error('Failed to get user profile', error);
     throw error;
   }
@@ -318,11 +329,17 @@ export async function syncCurrentUserProfile(payload = {}) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
   try {
     const uid = auth.currentUser.uid;
-    const res = await putJson('/api/users', toUserApiPayload(payload));
+    const normalizedPayload = normalizeProfilePayload(payload);
+    const res = await putJson('/api/users', toUserApiPayload(normalizedPayload));
     if (!res?.data || typeof res.data !== 'object' || Array.isArray(res.data)) {
       throw new Error('User profile sync returned an invalid response.');
     }
-    return normalizeUserProfile({ ...payload, ...res.data }, uid);
+    await setDoc(doc(db, COLLECTIONS.users, uid), {
+      ...normalizedPayload,
+      uid,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    return normalizeUserProfile({ ...normalizedPayload, ...res.data }, uid);
   } catch (error) {
     console.error('Failed to sync user profile', error);
     throw error;
@@ -349,7 +366,16 @@ export async function ensureCurrentUserProfile(overrides = {}) {
     } catch (error) {
       const isMissingPostgresProfile =
         error?.status === 404 && error?.responseData?.error === 'User not found';
-      if (!isMissingPostgresProfile) throw error;
+      if (!isMissingPostgresProfile) {
+        // Do not discard a valid Firestore profile merely because the optional
+        // PostgreSQL mirror cannot be reached.
+        const firestoreProfile = await readFirestoreUserProfile(uid);
+        if (hasMeaningfulUserProfile(firestoreProfile)) {
+          profileCacheRef = firestoreProfile;
+          return profileCacheRef;
+        }
+        throw error;
+      }
     }
 
     const hasExistingProfile = hasMeaningfulUserProfile(existingData);
@@ -398,6 +424,20 @@ export async function ensureCurrentUserProfile(overrides = {}) {
             }
           : {}),
       }, uid);
+
+      // Keep the primary mobile profile document in sync from first sign-in.
+      // Previously a fresh account existed only in PostgreSQL, so Firestore
+      // profile reads/listeners could report that the profile was missing.
+      try {
+        await setDoc(doc(db, COLLECTIONS.users, uid), {
+          ...defaultProfile,
+          uid,
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      } catch (firestoreError) {
+        console.warn('Created server profile but could not seed Firestore profile:', firestoreError?.message || firestoreError);
+      }
+
       return profileCacheRef;
     }
 

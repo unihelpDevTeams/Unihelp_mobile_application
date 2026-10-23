@@ -11,7 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -406,6 +406,7 @@ const formatPostDate = (value) => {
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const { edit } = useLocalSearchParams();
   const { user, profile, refreshProfile, logout } = useAuth();
   const { colors, isDark, themeMode, setTheme } = useTheme();
   const [saving, setSaving] = useState(false);
@@ -731,11 +732,21 @@ export default function ProfileScreen() {
     Promise.resolve(refreshProfileRef.current?.()).catch(() => {});
   }, []);
 
-  // Sync the form from the server profile whenever no sheet is open and there are no pending edits.
+  // Used by the app-level incomplete-profile redirect after sign-in.
   useEffect(() => {
-    if (sheet !== SHEET.NONE || isDirty) return;
+    if (String(edit) !== '1') return undefined;
+    const timer = setTimeout(() => setSheet(SHEET.EDIT_PROFILE), 0);
+    return () => clearTimeout(timer);
+  }, [edit]);
+
+  // The Firestore profile can arrive just after this screen (or its edit sheet)
+  // opens following sign-up. Keep hydrating the form until the user starts an
+  // edit; otherwise the sheet remains blank even though signup saved the data.
+  useEffect(() => {
+    if (isDirty) return;
+    const signupName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim();
     const next = {
-      username: profile?.username || profile?.displayName || user?.displayName || '',
+      username: signupName || profile?.displayName || user?.displayName || profile?.username || '',
       school: profile?.school || profile?.universityName || profile?.university || '',
       schoolId: profile?.schoolId || profile?.universityId || '',
       department: profile?.department || profile?.departmentName || '',
@@ -750,7 +761,7 @@ export default function ProfileScreen() {
     };
     setForm(next);
     setInitialForm(next);
-  }, [isDirty, profile, sheet, user]);
+  }, [isDirty, profile, user]);
 
   const showStatus = useCallback((next) => {
     if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
@@ -1001,15 +1012,23 @@ export default function ProfileScreen() {
       showStatus({ type: 'error', text: 'Please enter a valid date of birth that is not in the future.' });
       return;
     }
+    const normalizedDateOfBirth = form.dateOfBirth
+      ? formatDateOfBirth(parseDateOfBirth(form.dateOfBirth))
+      : '';
     try {
       setSaving(true);
       setStatus(null);
+      const [firstName, ...lastNameParts] = trimmedName.split(/\s+/);
       await saveUserProfile({
-        username: trimmedName, school: form.school.trim(), department: form.department.trim(),
+        username: profile?.username || trimmedName,
+        displayName: trimmedName,
+        firstName,
+        lastName: lastNameParts.join(' '),
+        school: form.school.trim(), department: form.department.trim(),
         level: form.level.trim(), location: form.location.trim(), bio: form.bio.trim(), role: form.role,
         schoolId: form.schoolId || '', universityId: form.schoolId || '', universityName: form.school.trim(),
         departmentId: form.departmentId || '', departmentName: form.department.trim(), faculty: form.faculty || '',
-        gender: form.gender || '', dateOfBirth: form.dateOfBirth || '',
+        gender: form.gender || '', dateOfBirth: normalizedDateOfBirth,
       });
       initialFormRef.current = form;
       setInitialForm(form);
@@ -1737,6 +1756,7 @@ export default function ProfileScreen() {
         onClose={() => closeSheet()}
         title={activeMeta.title}
         subtitle={activeMeta.subtitle}
+        keyboardAvoiding={sheet === SHEET.EDIT_PROFILE || sheet === SHEET.EDIT_FIELD}
         onBack={sheet === SHEET.EDIT_FIELD ? backToEditProfile : undefined}
       >
         {sheet === SHEET.MORE && renderMoreSheet()}

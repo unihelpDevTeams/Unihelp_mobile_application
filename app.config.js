@@ -39,7 +39,7 @@ module.exports = {
     name: "UniHelp",
     slug: "unihelpteam",
     owner: "unihelpdevteam",
-    version: "1.0.9",
+    version: "1.1.0",
     // Keep the activity resizable for tablets, Chromebooks, and foldables. Individual
     // screens use responsive layouts rather than locking the whole app to portrait.
     orientation: "default",
@@ -66,7 +66,7 @@ module.exports = {
       package: "com.zenithdev.unihelp",
       googleServicesFile,
       softwareKeyboardLayoutMode: "resize",
-      versionCode: 9,
+      versionCode: 10,
       permissions: ["RECORD_AUDIO", "POST_NOTIFICATIONS", "SCHEDULE_EXACT_ALARM"],
       adaptiveIcon: {
         foregroundImage: "./assets/images/icon-square.png",

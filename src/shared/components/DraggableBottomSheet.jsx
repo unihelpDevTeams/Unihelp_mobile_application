@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Dimensions, Modal as RNModal, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Dimensions, KeyboardAvoidingView, Modal as RNModal, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
@@ -9,7 +9,7 @@ const SCREEN_HEIGHT = Dimensions.get('window').height;
 const DISMISS_DIST = 110;
 const DISMISS_VEL = 0.75;
 
-export default function DraggableBottomSheet({ visible, onClose, title, subtitle, children, footer }) {
+export default function DraggableBottomSheet({ visible, onClose, title, subtitle, children, footer, keyboardAvoiding = false }) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
@@ -69,24 +69,31 @@ export default function DraggableBottomSheet({ visible, onClose, title, subtitle
         <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
           <Pressable style={{ flex: 1 }} onPress={dismiss} accessibilityRole="button" accessibilityLabel="Close dialog" />
         </Animated.View>
-        <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
-          <View style={styles.handleArea} {...panResponder.panHandlers}>
-            <View style={styles.handle} />
-          </View>
-          <View style={styles.header}>
-            <View style={styles.headerTextWrap}>
-              <Text style={styles.headerTitle}>{title}</Text>
-              {subtitle ? <Text style={styles.headerSubtitle}>{subtitle}</Text> : null}
+        <KeyboardAvoidingView
+          enabled={keyboardAvoiding}
+          pointerEvents="box-none"
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
+            <View style={styles.handleArea} {...panResponder.panHandlers}>
+              <View style={styles.handle} />
             </View>
-            <Pressable onPress={dismiss} style={styles.closeButton} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close dialog">
-              <Ionicons name="close" size={18} color={colors.ink} />
-            </Pressable>
-          </View>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-            {children}
-          </ScrollView>
-          {footer ? <View style={styles.footer}>{footer}</View> : null}
-        </Animated.View>
+            <View style={styles.header}>
+              <View style={styles.headerTextWrap}>
+                <Text style={styles.headerTitle}>{title}</Text>
+                {subtitle ? <Text style={styles.headerSubtitle}>{subtitle}</Text> : null}
+              </View>
+              <Pressable onPress={dismiss} style={styles.closeButton} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close dialog">
+                <Ionicons name="close" size={18} color={colors.ink} />
+              </Pressable>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+              {children}
+            </ScrollView>
+            {footer ? <View style={styles.footer}>{footer}</View> : null}
+          </Animated.View>
+        </KeyboardAvoidingView>
       </View>
     </RNModal>
   );

@@ -37,6 +37,18 @@ function GlobalPreloader({ navigationReady }) {
   return <SplashScreen />;
 }
 
+const hasRequiredProfileDetails = (profile = {}) => {
+  const text = (value) => String(value || '').trim();
+  return Boolean(
+    text(profile.username || profile.displayName || profile.firstName) &&
+    text(profile.school || profile.universityName || profile.university) &&
+    text(profile.department || profile.departmentName) &&
+    text(profile.level) &&
+    text(profile.bio) &&
+    text(profile.photo || profile.photoURL || profile.photoThumb)
+  );
+};
+
 function AppContent() {
   const { colors, isDark, themeLoaded } = useTheme();
   const { profile, user } = useAuth();
@@ -53,6 +65,22 @@ function AppContent() {
   const [reportError, setReportError] = useState('');
   const lastShakeRef = useRef(0);
   const shakeMagnitudeRef = useRef(0);
+  const profileRedirectedUidRef = useRef(null);
+
+  useEffect(() => {
+    if (!user?.uid || !profile || profile._offline) return;
+
+    if (hasRequiredProfileDetails(profile)) {
+      profileRedirectedUidRef.current = null;
+      return;
+    }
+
+    // Redirect once per signed-in session. The profile screen receives the
+    // parameter and opens its edit sheet directly.
+    if (profileRedirectedUidRef.current === user.uid) return;
+    profileRedirectedUidRef.current = user.uid;
+    router.replace({ pathname: '/profile', params: { edit: '1' } });
+  }, [profile, router, user?.uid]);
 
   useEffect(() => {
     const handleInitialUrl = async () => {
