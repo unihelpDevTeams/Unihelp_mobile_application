@@ -637,8 +637,8 @@ export default function PremiumPage() {
       ? `Your gifted Premium access is active until ${expiryLabel}.`
       : `You have ${daysLeft} days of gifted Premium. Your access stays active until ${expiryLabel}.`
     : countdownParts
-      ? `Your Premium plan is active until ${expiryLabel}. Keep using up to ${COMMERCE_UPLOAD_LIMITS.premium} hostel and ${COMMERCE_UPLOAD_LIMITS.premium} product uploads.`
-      : `Premium is active - up to ${COMMERCE_UPLOAD_LIMITS.premium} hostel and ${COMMERCE_UPLOAD_LIMITS.premium} product uploads`;
+      ? `Your Premium plan is active until ${expiryLabel}. Keep using up to ${COMMERCE_UPLOAD_LIMITS.premium} product uploads.`
+      : `Premium is active - up to ${COMMERCE_UPLOAD_LIMITS.premium} product uploads`;
   const progressPct = useMemo(() => {
     if (!countdownParts) return null;
     const totalDays = isAdminGift ? ADMIN_PREMIUM_GIFT_DAYS : (PREMIUM_PLAN?.durationDays || 30);
