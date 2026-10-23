@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
 const POLL_INTERVAL = 200;
+let activePlaybackStop = null;
 
 /**
  * Custom hook for voice message playback.
@@ -18,15 +19,36 @@ export function useAudioPlayback() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const finishedRef = useRef(false);
+  const loadingTimeoutRef = useRef(null);
   const player = useAudioPlayer(null, { updateInterval: POLL_INTERVAL });
   const status = useAudioPlayerStatus(player);
+
+  const clearLoading = useCallback(() => {
+    clearTimeout(loadingTimeoutRef.current);
+    loadingTimeoutRef.current = null;
+    setIsLoading(false);
+  }, []);
+
+  const stopActivePlayback = useCallback(async () => {
+    clearLoading();
+    try {
+      player.pause();
+      await player.seekTo(0);
+    } catch (_error) {
+      // A player can be replaced or disposed while another note begins.
+    }
+    setIsPlaying(false);
+    setPosition(0);
+    setDuration(0);
+    finishedRef.current = false;
+  }, [clearLoading, player]);
 
   useEffect(() => {
     setIsLoaded(status.isLoaded);
     setIsPlaying(status.playing);
 
     if (status.isLoaded) {
-      setIsLoading(false);
+      clearLoading();
       setPosition(status.currentTime * 1000);
       setDuration(status.duration * 1000);
     }
@@ -35,7 +57,12 @@ export function useAudioPlayback() {
       finishedRef.current = true;
       setPosition(status.duration * 1000);
     }
-  }, [status.currentTime, status.didJustFinish, status.duration, status.isLoaded, status.playing]);
+  }, [clearLoading, status.currentTime, status.didJustFinish, status.duration, status.isLoaded, status.playing]);
+
+  useEffect(() => () => {
+    clearTimeout(loadingTimeoutRef.current);
+    if (activePlaybackStop === stopActivePlayback) activePlaybackStop = null;
+  }, [stopActivePlayback]);
 
   const play = useCallback(async (audioUrl, messageDuration) => {
     if (!audioUrl) {
@@ -44,6 +71,10 @@ export function useAudioPlayback() {
     }
 
     try {
+      if (activePlaybackStop && activePlaybackStop !== stopActivePlayback) {
+        await activePlaybackStop();
+      }
+      activePlaybackStop = stopActivePlayback;
       setIsLoading(true);
       setError(null);
       finishedRef.current = false;
@@ -64,13 +95,21 @@ export function useAudioPlayback() {
       setPosition(0);
       player.replace({ uri: audioUrl });
       player.play();
+
+      // replace() loads remotely in the background; retain visual feedback until
+      // expo-audio reports readiness, with a network timeout for recovery.
+      clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = setTimeout(() => {
+        setIsLoading(false);
+        setError('Audio is taking too long to load. Tap to try again.');
+      }, 10000);
     } catch (err) {
       console.error('[useAudioPlayback] Play failed:', err);
       setError('Failed to play voice message.');
-    } finally {
-      setIsLoading(false);
+      if (activePlaybackStop === stopActivePlayback) activePlaybackStop = null;
+      clearLoading();
     }
-  }, [player]);
+  }, [clearLoading, player, stopActivePlayback]);
 
   const pause = useCallback(async () => {
     if (!isLoaded) return;
@@ -107,18 +146,9 @@ export function useAudioPlayback() {
   }, [isLoaded, player]);
 
   const stop = useCallback(async () => {
-    if (!isLoaded) return;
-    try {
-      player.pause();
-      await player.seekTo(0);
-      setIsPlaying(false);
-      setPosition(0);
-      setDuration(0);
-      finishedRef.current = false;
-    } catch (err) {
-      console.error('[useAudioPlayback] Stop failed:', err);
-    }
-  }, [isLoaded, player]);
+    await stopActivePlayback();
+    if (activePlaybackStop === stopActivePlayback) activePlaybackStop = null;
+  }, [stopActivePlayback]);
 
   const formatTime = useCallback((millis) => {
     if (!millis || millis < 0) return '0:00';

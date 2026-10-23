@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Animated,
   Platform,
   Pressable,
   RefreshControl,
@@ -47,6 +46,7 @@ import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 import { isPremiumActive } from '../../src/shared/services/premium';
 import { fetchFriendStats } from '../../src/shared/services/friendships';
 import { deleteProfileMedia, getJson, uploadFeatureMedia } from '../../src/shared/services/backend';
+import { getMediaDownloadPreferences, setMediaDownloadPreferences } from '../../src/shared/services/mediaCache';
 
 const BIO_MAX_LENGTH = 160;
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
@@ -391,6 +391,7 @@ const SHEET = {
   UPLOADS: 'uploads',
   MORE: 'more',               // the vertical-ellipsis overflow menu
   APPEARANCE: 'appearance',
+  MEDIA: 'media',
 };
 
 const formatShortDate = (value) => {
@@ -429,8 +430,7 @@ export default function ProfileScreen() {
   const [profileView, setProfileView] = useState('profile');
   const [profilePosts, setProfilePosts] = useState([]);
   const [profilePostsLoading, setProfilePostsLoading] = useState(false);
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const headerFade = useRef(new Animated.Value(0)).current;
+  const [mediaDownloadPrefs, setMediaDownloadPrefs] = useState({ wifi: true, mobileData: false });
   const isMountedRef = useRef(true);
   const statusTimerRef = useRef(null);
   const adminTapCountRef = useRef(0);
@@ -439,9 +439,11 @@ export default function ProfileScreen() {
   const profileRef = useRef(profile);
   const refreshProfileRef = useRef(refreshProfile);
 
-  initialFormRef.current = initialForm;
-  profileRef.current = profile;
-  refreshProfileRef.current = refreshProfile;
+  useEffect(() => {
+    initialFormRef.current = initialForm;
+    profileRef.current = profile;
+    refreshProfileRef.current = refreshProfile;
+  }, [initialForm, profile, refreshProfile]);
 
   // FIX: `isDirty` was read by an effect declared above its `const` (temporal dead zone → ReferenceError on render).
   // It now lives here, before anything that depends on it.
@@ -491,6 +493,31 @@ export default function ProfileScreen() {
   useEffect(() => {
     if (profileView === 'posts') loadProfilePosts();
   }, [loadProfilePosts, profileView]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const prefs = await getMediaDownloadPreferences();
+        if (active) setMediaDownloadPrefs(prefs);
+      } catch {
+        // Fallback to defaults silently.
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleMediaDownloadToggle = useCallback(async (key) => {
+    const next = { ...mediaDownloadPrefs, [key]: !mediaDownloadPrefs[key] };
+    setMediaDownloadPrefs(next);
+    try {
+      await setMediaDownloadPreferences(next);
+    } catch {
+      // Best effort; the UI already reflects the latest local choice.
+    }
+  }, [mediaDownloadPrefs]);
 
   const styles = useThemeStyles((c, s, r) => ({
     scrollContent: { paddingBottom: 32 },
@@ -732,20 +759,11 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     if (!status) return undefined;
-    fadeAnim.setValue(0);
-    Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
     statusTimerRef.current = setTimeout(() => {
-      Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
-        if (isMountedRef.current) setStatus(null);
-      });
+      if (isMountedRef.current) setStatus(null);
     }, 3000);
     return () => clearTimeout(statusTimerRef.current);
-  }, [status, fadeAnim]);
-
-  useEffect(() => {
-    if (!profile) return;
-    Animated.timing(headerFade, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-  }, [profile, headerFade]);
+  }, [status]);
 
   const loadStats = useCallback(async () => {
     if (!user?.uid) return;
@@ -1043,6 +1061,11 @@ export default function ProfileScreen() {
 
   const renderMoreSheet = () => (
     <View>
+      <Pressable onPress={() => setSheet(SHEET.MEDIA)} style={({ pressed }) => [styles.sheetRow, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="Media download settings">
+        <View style={styles.sheetIconWrap}><Ionicons name="download-outline" size={16} color={colors.ink} /></View>
+        <Text style={styles.sheetRowTitle}>Media download settings</Text>
+      </Pressable>
+      <View style={styles.sheetDivider} />
       <Pressable onPress={() => goTo('/notifications')} style={({ pressed }) => [styles.sheetRow, pressed && styles.rowPressed]} accessibilityRole="button" accessibilityLabel="Notifications">
         <View style={styles.sheetIconWrap}><Ionicons name="notifications-outline" size={16} color={colors.ink} /></View>
         <Text style={styles.sheetRowTitle}>Notifications</Text>
@@ -1102,6 +1125,35 @@ export default function ProfileScreen() {
           </Pressable>
         );
       })}
+    </View>
+  );
+
+  const renderMediaPreferencesSheet = () => (
+    <View style={{ gap: 12 }}>
+      <Pressable
+        onPress={() => handleMediaDownloadToggle('wifi')}
+        style={({ pressed }) => [styles.sheetRow, pressed && styles.rowPressed]}
+        accessibilityRole="switch"
+        accessibilityState={{ checked: mediaDownloadPrefs.wifi }}
+      >
+        <View style={styles.sheetIconWrap}><Ionicons name="wifi-outline" size={16} color={colors.ink} /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.sheetRowTitle}>Automatic downloads on Wi‑Fi</Text>
+        </View>
+        <Ionicons name={mediaDownloadPrefs.wifi ? 'toggle' : 'toggle-outline'} size={24} color={mediaDownloadPrefs.wifi ? colors.brand : colors.greyLight} />
+      </Pressable>
+      <Pressable
+        onPress={() => handleMediaDownloadToggle('mobileData')}
+        style={({ pressed }) => [styles.sheetRow, pressed && styles.rowPressed]}
+        accessibilityRole="switch"
+        accessibilityState={{ checked: mediaDownloadPrefs.mobileData }}
+      >
+        <View style={styles.sheetIconWrap}><Ionicons name="cellular-outline" size={16} color={colors.ink} /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.sheetRowTitle}>Automatic downloads on mobile data</Text>
+        </View>
+        <Ionicons name={mediaDownloadPrefs.mobileData ? 'toggle' : 'toggle-outline'} size={24} color={mediaDownloadPrefs.mobileData ? colors.brand : colors.greyLight} />
+      </Pressable>
     </View>
   );
 
@@ -1364,6 +1416,7 @@ export default function ProfileScreen() {
   const sheetMeta = {
     [SHEET.MORE]: { title: 'More', subtitle: 'Account & app settings' },
     [SHEET.APPEARANCE]: { title: 'Appearance', subtitle: 'Choose how UniHelp looks' },
+    [SHEET.MEDIA]: { title: 'Media downloads', subtitle: 'Control automatic attachments' },
     [SHEET.PLAN]: { title: 'My Plan', subtitle: premiumActive ? 'Premium member' : 'Standard member' },
     [SHEET.PROGRESS]: { title: 'My Progress', subtitle: 'Challenge stats & streak' },
     [SHEET.UPLOADS]: { title: 'My Uploads', subtitle: `${totalUploads} item${totalUploads === 1 ? '' : 's'} across UniHelp` },
@@ -1420,7 +1473,8 @@ export default function ProfileScreen() {
         </View>
 
         {/* IDENTITY HEADER */}
-        <Animated.View style={[styles.identity, { opacity: headerFade }]}>
+        <View style={[styles.identity, { opacity: profile ? 1 : 0 }]}>
+
           <Pressable
             style={styles.coverWrap}
             onPress={() => pickImage('cover')}
@@ -1514,14 +1568,14 @@ export default function ProfileScreen() {
               ))}
             </View>
           ) : null}
-        </Animated.View>
+        </View>
 
         {/* FIX: toast moved above the tabs so errors (e.g. photo upload) are visible in both views. */}
         {status ? (
-          <Animated.View style={[styles.toast, status.type === 'error' ? styles.toastError : styles.toastSuccess, { opacity: fadeAnim }]} accessibilityRole="alert">
+          <View style={[styles.toast, status.type === 'error' ? styles.toastError : styles.toastSuccess, { opacity: 1 }]} accessibilityRole="alert">
             <Ionicons name={status.type === 'error' ? 'alert-circle' : 'checkmark-circle'} size={16} color={status.type === 'error' ? colors.rose : colors.teal} />
             <Text style={[styles.toastText, status.type === 'error' ? styles.toastTextError : styles.toastTextSuccess]}>{status.text}</Text>
-          </Animated.View>
+          </View>
         ) : null}
 
         <View style={styles.profileTabs}>
@@ -1687,6 +1741,7 @@ export default function ProfileScreen() {
       >
         {sheet === SHEET.MORE && renderMoreSheet()}
         {sheet === SHEET.APPEARANCE && renderAppearanceSheet()}
+        {sheet === SHEET.MEDIA && renderMediaPreferencesSheet()}
         {sheet === SHEET.PLAN && renderPlanSheet()}
         {sheet === SHEET.PROGRESS && renderProgressSheet()}
         {sheet === SHEET.UPLOADS && renderUploadsSheet()}

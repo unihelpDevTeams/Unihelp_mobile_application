@@ -64,7 +64,8 @@ import {
   updateGroup,
   updateGroupPost,
 } from '../../src/shared/services/community';
-import { uploadFeatureMedia } from '../../src/shared/services/backend';
+import { uploadChatAttachment, uploadFeatureMedia } from '../../src/shared/services/backend';
+import { DOCUMENT_MIME_TYPES, prepareChatAttachment } from '../../src/shared/services/chatAttachments';
 
 /* -------------------------------------------------------------------------- */
 /*                                  Constants                                 */
@@ -1763,18 +1764,20 @@ function GroupDetailScreen({ groupId }) {
     if (chatAttachment) {
       setChatUploading(true);
       try {
-        const uploaded = await uploadFeatureMedia(chatAttachment, {
-          feature: 'groups',
-          resourceType: chatAttachment.kind === 'image' ? 'image' : chatAttachment.kind === 'video' ? 'video' : 'raw',
-        });
+        const uploaded = await uploadChatAttachment(chatAttachment, { targetType: 'group', targetId: groupId });
         const url = uploaded?.secure_url || uploaded?.url;
         if (!url) throw new Error('Attachment upload failed. Please try again.');
         attachments = [{
           url,
+          fileName: chatAttachment.name,
           name: chatAttachment.name,
           type: chatAttachment.kind,
           mimeType: chatAttachment.mimeType || chatAttachment.type,
-          size: chatAttachment.size || 0,
+          originalSize: chatAttachment.originalSize || chatAttachment.size || 0,
+          uploadedSize: uploaded.uploadedSize || chatAttachment.uploadedSize || chatAttachment.size || 0,
+          size: uploaded.uploadedSize || chatAttachment.uploadedSize || chatAttachment.size || 0,
+          compressionStatus: chatAttachment.compressionStatus || 'original',
+          key: uploaded.key || '',
         }];
       } catch (error) {
         showToast(error?.message || 'Could not upload the attachment.');
@@ -1963,7 +1966,7 @@ function GroupDetailScreen({ groupId }) {
     }
   };
 
-  const setSelectedChatAttachment = (asset, fallbackName) => {
+  const setSelectedChatAttachment = async (asset, fallbackName) => {
     const candidate = {
       uri: asset?.uri,
       name: asset?.name || asset?.fileName || fallbackName,
@@ -1976,7 +1979,11 @@ function GroupDetailScreen({ groupId }) {
       Alert.alert('Unsupported attachment', 'Use an image, video, PDF, Office document, or plain text file under 20 MB.');
       return;
     }
-    setChatAttachment({ ...candidate, kind: attachmentKind(candidate) });
+    try {
+      setChatAttachment(await prepareChatAttachment({ ...candidate, fileName: candidate.name }));
+    } catch (error) {
+      Alert.alert('Unsupported attachment', error?.message || 'Unable to prepare this file.');
+    }
   };
 
   const pickChatMedia = async () => {
@@ -1987,17 +1994,17 @@ function GroupDetailScreen({ groupId }) {
     }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: chatMediaTypes(), quality: 0.82 });
     const asset = result.assets?.[0];
-    if (!result.canceled && asset?.uri) setSelectedChatAttachment(asset, `group-media-${Date.now()}`);
+    if (!result.canceled && asset?.uri) await setSelectedChatAttachment(asset, `group-media-${Date.now()}`);
   };
 
   const pickChatDocument = async () => {
     const result = await DocumentPicker.getDocumentAsync({
-      type: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'text/plain'],
+      type: DOCUMENT_MIME_TYPES,
       copyToCacheDirectory: true,
       multiple: false,
     });
     const asset = result.assets?.[0];
-    if (!result.canceled && asset?.uri) setSelectedChatAttachment(asset, `group-file-${Date.now()}`);
+    if (!result.canceled && asset?.uri) await setSelectedChatAttachment(asset, `group-file-${Date.now()}`);
   };
 
   const pickPostImage = async () => {

@@ -245,6 +245,14 @@ export async function uploadFeatureMedia(file, { feature = 'stories', resourceTy
   return data;
 }
 
+export async function uploadChatAttachment(file, { targetType, targetId, onProgress } = {}) {
+  if (!targetId || !['conversation', 'group'].includes(targetType)) throw new Error('A valid conversation is required.');
+  if (!file?.uri) throw new Error('The selected file is unavailable.');
+  const data = await uploadLocalFileMultipart('/api/uploads/message', file.uri, 'file', file.mimeType || file.type || 'application/octet-stream', { targetType, targetId });
+  onProgress?.(100);
+  return data;
+}
+
 export async function deleteProfileMedia(key) {
   if (typeof key !== 'string' || !key.startsWith('unihelp/profile/')) {
     throw new Error('Invalid profile media key.');

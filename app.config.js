@@ -94,11 +94,13 @@ module.exports = {
     },
     plugins: [
       "expo-router",
+      "expo-sharing",
       "expo-font",
       [
         "expo-image-picker",
         {
           photosPermission: "Allow UniHelp to access your photos so you can add images to your profile, groups, posts, and messages.",
+          cameraPermission: "Allow UniHelp to use your camera so you can take photos to share in messages.",
         },
       ],
       [

@@ -25,6 +25,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
 import VoiceMessageBubble from '../../src/shared/components/VoiceMessageBubble';
@@ -58,6 +60,8 @@ import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { getSocket } from '../../src/shared/services/socket';
 import { getJson } from '../../src/shared/services/backend';
+import { uploadChatAttachment } from '../../src/shared/services/backend';
+import { DOCUMENT_MIME_TYPES, humanSize, prepareChatAttachment } from '../../src/shared/services/chatAttachments';
 import { submitReport } from '../../src/shared/services/support';
 import { clearConversationAppearance, getConversationAppearance, saveConversationAppearance } from '../../src/shared/services/chatAppearance';
 
@@ -133,6 +137,14 @@ const BUBBLE_SHAPES = [
   { key: 'ribbon', label: 'Ribbon', radii: { borderTopLeftRadius: 26, borderTopRightRadius: 5, borderBottomLeftRadius: 5, borderBottomRightRadius: 26 } },
   { key: 'orbit', label: 'Orbit', radii: { borderTopLeftRadius: 36, borderTopRightRadius: 12, borderBottomLeftRadius: 36, borderBottomRightRadius: 12 } },
   { key: 'fold', label: 'Fold', radii: { borderTopLeftRadius: 4, borderTopRightRadius: 4, borderBottomLeftRadius: 26, borderBottomRightRadius: 26 } },
+  { key: 'capsule', label: 'Capsule', radii: { borderTopLeftRadius: 999, borderTopRightRadius: 999, borderBottomLeftRadius: 999, borderBottomRightRadius: 999 } },
+  { key: 'pebble', label: 'Pebble', radii: { borderTopLeftRadius: 34, borderTopRightRadius: 34, borderBottomLeftRadius: 34, borderBottomRightRadius: 14 } },
+  { key: 'leaf', label: 'Leaf', radii: { borderTopLeftRadius: 32, borderTopRightRadius: 8, borderBottomLeftRadius: 32, borderBottomRightRadius: 32 } },
+  { key: 'postcard', label: 'Postcard', radii: { borderTopLeftRadius: 4, borderTopRightRadius: 18, borderBottomLeftRadius: 18, borderBottomRightRadius: 4 } },
+  { key: 'droplet', label: 'Droplet', radii: { borderTopLeftRadius: 30, borderTopRightRadius: 30, borderBottomLeftRadius: 30, borderBottomRightRadius: 2 } },
+  { key: 'arch', label: 'Arch', radii: { borderTopLeftRadius: 32, borderTopRightRadius: 32, borderBottomLeftRadius: 8, borderBottomRightRadius: 8 } },
+  { key: 'soft-square', label: 'Soft square', radii: { borderTopLeftRadius: 12, borderTopRightRadius: 12, borderBottomLeftRadius: 12, borderBottomRightRadius: 12 } },
+  { key: 'cut-corner', label: 'Cut corner', radii: { borderTopLeftRadius: 2, borderTopRightRadius: 24, borderBottomLeftRadius: 2, borderBottomRightRadius: 24 } },
 ];
 const DEFAULT_BUBBLE_APPEARANCE = {
   preset: 'brand', shape: 'tail', animation: 'none', customColor: '#5B5CE2',
@@ -464,6 +476,8 @@ const createStyles = (c) => ({
   attachmentImage: { width: 210, height: 210 },
   attachmentOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: c.skeleton },
   attachmentOverlayText: { fontSize: 12, color: c.textSecondary, fontWeight: '600' },
+  attachmentFile: { flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 190, padding: 10, borderRadius: 12, marginBottom: 5, backgroundColor: c.surfaceSecondary },
+  attachmentFileName: { flex: 1, color: c.textPrimary, fontSize: 12, fontWeight: '700' },
 
   replyBlock: { borderLeftWidth: 3, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 10, marginBottom: 6 },
   replyBlockMine: { backgroundColor: 'rgba(255,255,255,0.18)', borderLeftColor: c.onBrand },
@@ -521,6 +535,10 @@ const createStyles = (c) => ({
   composerBannerLabel: { fontWeight: '800', color: c.brand, fontSize: 12.5 },
   composerBannerText: { color: c.textPrimary, fontSize: 13.5, marginTop: 2 },
   composerBannerClose: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: c.skeleton },
+  attachmentPreviewRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 8, marginBottom: 7, borderRadius: 12, backgroundColor: c.surfaceSecondary },
+  attachmentPreviewThumb: { width: 34, height: 34, borderRadius: 8, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: c.skeleton },
+  attachmentPreviewImage: { width: '100%', height: '100%' },
+  attachmentPreviewText: { flex: 1, color: c.textPrimary, fontSize: 12, fontWeight: '700' },
 
   modalOverlay: { flex: 1, backgroundColor: c.overlay, justifyContent: 'flex-end' },
   dialogOverlay: { flex: 1, backgroundColor: c.overlay, justifyContent: 'center', paddingHorizontal: 28 },
@@ -1221,7 +1239,12 @@ const MessageRow = React.memo(function MessageRow({
       <View>
         {replyBlock}
         <View style={sending ? styles.pendingDim : null}>
-          <VoiceMessageBubble message={message} isMine={mine} onLongPress={handleLongPress} />
+          <VoiceMessageBubble
+            message={message}
+            isMine={mine}
+            onLongPress={handleLongPress}
+            bubbleColor={bubbleFill.gradient ? bubbleFill.gradient[0] : bubbleFill.color}
+          />
         </View>
         {footer ? <View style={styles.outsideFooter}>{footer}</View> : null}
       </View>
@@ -1282,6 +1305,14 @@ const MessageRow = React.memo(function MessageRow({
                 onPress={onOpenImage}
                 onLongPress={handleLongPress}
               />
+            ) : null
+          )}
+          {attachments.map((att, i) =>
+            att?.type !== 'image' && att.url ? (
+              <Pressable key={`file-${att.url || i}`} style={styles.attachmentFile} onPress={() => Linking.openURL(att.url).catch(() => {})} accessibilityRole="link" accessibilityLabel={`Open ${att.fileName || 'attachment'}`}>
+                <Ionicons name={att.type === 'video' ? 'play-circle-outline' : 'document-text-outline'} size={24} color={mine ? '#fff' : colors.brand} />
+                <View style={{ flex: 1 }}><Text style={[styles.attachmentFileName, mine && styles.mineText]} numberOfLines={1}>{att.fileName || att.name || (att.type === 'video' ? 'Video' : 'Document')}</Text><Text style={[styles.metaText, mine && styles.mineMeta]}>{att.duration ? `${Math.round(att.duration / 1000)} sec · ` : ''}{att.uploadedSize ? humanSize(att.uploadedSize) : att.size ? humanSize(att.size) : ''}</Text></View>
+              </Pressable>
             ) : null
           )}
           {hasText ? (
@@ -1414,6 +1445,9 @@ function ConversationScreen({ conversationId }) {
   const [toast, setToast] = useState('');
   const [imagePreview, setImagePreview] = useState(null);
   const [voiceState, setVoiceState] = useState('idle'); // idle | recording | uploading
+  const [pendingAttachments, setPendingAttachments] = useState([]);
+  const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
   const [unread, setUnread] = useState(null); // { id, count } -> "N new messages" divider
 
   const openBubbleStudio = useCallback(() => {
@@ -1958,7 +1992,7 @@ function ConversationScreen({ conversationId }) {
 
   // Little "pop" on the send button when it becomes active.
   const activeText = editingMessage ? editText : draft;
-  const canSubmit = Boolean(activeText.trim());
+  const canSubmit = Boolean(activeText.trim() || pendingAttachments.length) && !attachmentUploading;
   useEffect(() => {
     Animated.spring(sendScale, { toValue: canSubmit ? 1 : 0.92, useNativeDriver: true, friction: 6, tension: 160 }).start();
   }, [canSubmit, sendScale]);
@@ -2053,23 +2087,51 @@ function ConversationScreen({ conversationId }) {
     status: 'sending',
   });
 
+  const addPickedAttachments = async (assets = []) => {
+    try {
+      const prepared = await Promise.all(assets.slice(0, 5).map(prepareChatAttachment));
+      setPendingAttachments((current) => [...current, ...prepared].slice(0, 5));
+    } catch (error) { showToast(error?.message || 'Unable to prepare that attachment.'); }
+  };
+  const pickPhotos = async (camera = false) => {
+    setAttachmentMenuVisible(false);
+    const permission = camera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return showToast(camera ? 'Camera permission is needed to take a photo.' : 'Photo-library permission is needed to share media.');
+    const result = camera ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 }) : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], allowsMultipleSelection: true, selectionLimit: 5, quality: 1 });
+    if (!result.canceled) await addPickedAttachments(result.assets || []);
+  };
+  const pickDocument = async () => {
+    setAttachmentMenuVisible(false);
+    const result = await DocumentPicker.getDocumentAsync({ type: DOCUMENT_MIME_TYPES, copyToCacheDirectory: true, multiple: true });
+    if (!result.canceled) await addPickedAttachments(result.assets || []);
+  };
   const send = async () => {
     const nextText = draft.trim();
-    if (!nextText || !conversation || !user || !canChat) return;
+    if ((!nextText && !pendingAttachments.length) || !conversation || !user || !canChat || attachmentUploading) return;
 
     tap('Medium');
     const clientId = createMessageClientId();
     const reply = buildReplyPayload(replyTo);
-    const optimistic = { ...baseOptimistic(clientId), type: 'text', text: nextText, attachments: [], replyTo: reply };
+    let attachments;
+    try {
+      setAttachmentUploading(true);
+      attachments = await Promise.all(pendingAttachments.map(async (attachment) => {
+        const uploaded = await uploadChatAttachment(attachment, { targetType: 'conversation', targetId: conversationId });
+        return { id: uploaded.key || `${clientId}-${attachment.name}`, url: uploaded.url || uploaded.secure_url, key: uploaded.key || '', type: attachment.kind, fileName: attachment.name, mimeType: attachment.mimeType, originalSize: attachment.originalSize, uploadedSize: Number(uploaded.uploadedSize || attachment.uploadedSize), size: Number(uploaded.uploadedSize || attachment.uploadedSize), compressionStatus: attachment.compressionStatus, duration: attachment.duration || 0 };
+      }));
+    } catch (error) { setAttachmentUploading(false); showSendError(error); return; }
+    setAttachmentUploading(false);
+    const optimistic = { ...baseOptimistic(clientId), type: 'text', text: nextText, attachments, replyTo: reply };
 
     setMessages((prev) => reconcileIncomingMessage(prev, optimistic));
     setDraft('');
+    setPendingAttachments([]);
     DRAFT_CACHE.delete(conversationId);
     setReplyTo(null);
     stopTyping();
     scrollToBottom();
 
-    await deliver(clientId, { type: 'text', text: nextText, attachments: [], replyTo: reply }, optimistic);
+    await deliver(clientId, { type: 'text', text: nextText, attachments, replyTo: reply }, optimistic);
   };
 
   const sendVoiceMessage = useCallback(
@@ -3086,6 +3148,13 @@ function ConversationScreen({ conversationId }) {
 
           {canChat ? (
             <View style={styles.composerContainer}>
+              {!editingMessage && pendingAttachments.length ? pendingAttachments.map((attachment, index) => (
+                <View key={`${attachment.uri}-${index}`} style={styles.attachmentPreviewRow}>
+                  <View style={styles.attachmentPreviewThumb}>{attachment.kind === 'image' ? <Image source={{ uri: attachment.uri }} style={styles.attachmentPreviewImage} /> : <Ionicons name={attachment.kind === 'video' ? 'videocam-outline' : 'document-text-outline'} size={19} color={colors.brand} />}</View>
+                  <Text style={styles.attachmentPreviewText} numberOfLines={2}>{attachment.name}{attachment.compressionStatus === 'optimized' ? `\nOptimized: ${humanSize(attachment.originalSize)} → ${humanSize(attachment.uploadedSize)}` : `\n${humanSize(attachment.originalSize)}`}</Text>
+                  <Pressable onPress={() => setPendingAttachments((all) => all.filter((_, itemIndex) => itemIndex !== index))} accessibilityLabel="Remove attachment"><Ionicons name="close-circle" size={22} color={colors.textTertiary} /></Pressable>
+                </View>
+              )) : null}
               {editingMessage ? (
                 <View style={styles.composerBanner}>
                   <Ionicons name="create-outline" size={18} color={colors.brand} />
@@ -3112,6 +3181,12 @@ function ConversationScreen({ conversationId }) {
 
               {/* Smart composer: sticker + input + (send when there is text, mic when there isn't). */}
               <View style={styles.composer}>
+                {!editingMessage && !voiceBusy ? (
+                  <Pressable style={styles.stickerButton} onPress={() => setAttachmentMenuVisible(true)} accessibilityRole="button" accessibilityLabel="Add attachment">
+                    <Ionicons name="add" size={25} color={colors.brand} />
+                  </Pressable>
+                ) : null}
+
                 {!editingMessage && !voiceBusy ? (
                   <Pressable style={styles.stickerButton} onPress={() => setStickerPickerVisible(true)} accessibilityRole="button" accessibilityLabel="Open sticker picker">
                     <Ionicons name="happy-outline" size={22} color={colors.brand} />
@@ -3168,6 +3243,9 @@ function ConversationScreen({ conversationId }) {
         </KeyboardAvoidingView>
 
         <StickerPicker visible={stickerPickerVisible} onClose={() => setStickerPickerVisible(false)} onSelect={sendSticker} />
+        <Modal visible={attachmentMenuVisible} transparent animationType="fade" onRequestClose={() => setAttachmentMenuVisible(false)}>
+          <Pressable style={styles.modalOverlay} onPress={() => setAttachmentMenuVisible(false)}><Pressable style={styles.sheet} onPress={(event) => event.stopPropagation()}><View style={styles.sheetHandle} /><SheetOption styles={styles} colors={colors} icon="images-outline" label="Photos and videos" onPress={() => pickPhotos(false)} /><SheetOption styles={styles} colors={colors} icon="camera-outline" label="Camera" onPress={() => pickPhotos(true)} /><SheetOption styles={styles} colors={colors} icon="document-attach-outline" label="Document" onPress={pickDocument} /></Pressable></Pressable>
+        </Modal>
 
         {/* Full-screen photo viewer */}
         <Modal visible={!!imagePreview} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setImagePreview(null)}>

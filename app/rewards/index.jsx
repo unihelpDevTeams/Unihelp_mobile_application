@@ -27,6 +27,7 @@ export default function RewardsScreen() {
   const [errorMessage, setErrorMessage] = useState('');
   const rotation = useRef(new Animated.Value(0)).current;
   const pop = useRef(new Animated.Value(0)).current;
+  const spinKeysRef = useRef(new Map());
 
   const availableRewards = useMemo(() => inventory.rewards.filter((reward) => reward.status === 'available'), [inventory.rewards]);
   const claimedRewards = useMemo(() => inventory.rewards.filter((reward) => reward.status !== 'available'), [inventory.rewards]);
@@ -97,7 +98,11 @@ export default function RewardsScreen() {
     setWheelSegments([]);
     setSpinning(true);
     try {
-      const result = await spinStreakReward(reward.id, `${reward.id}-${Date.now()}`);
+      // Keep this key until the server answers. A retry after a dropped response
+      // must replay the same secure server outcome, never create another spin.
+      const idempotencyKey = spinKeysRef.current.get(reward.id) || `${reward.id}-${Date.now()}`;
+      spinKeysRef.current.set(reward.id, idempotencyKey);
+      const result = await spinStreakReward(reward.id, idempotencyKey);
       const nextSegments = result.wheelSegments || [];
       setWheelSegments(nextSegments);
       const slot = Math.max(0, Number(result.wheelIndex || 0));
@@ -112,6 +117,7 @@ export default function RewardsScreen() {
         setSelectedReward(result.reward);
         setSpinning(false);
         setActiveReward(null);
+        spinKeysRef.current.delete(reward.id);
         celebrate();
         load();
       });
@@ -119,7 +125,10 @@ export default function RewardsScreen() {
       setSpinning(false);
       setActiveReward(null);
       setErrorMessage(error.message || 'Your reward is safe. Please reconnect and try again.');
-      if (/already claimed/i.test(error.message)) load();
+      if (/already claimed/i.test(error.message)) {
+        spinKeysRef.current.delete(reward.id);
+        load();
+      }
     }
   };
 

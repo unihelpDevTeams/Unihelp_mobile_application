@@ -94,16 +94,8 @@ const groupTitle = (group) => group?.name || group?.title || 'Untitled group';
 const groupDescription = (group) => group?.description || group?.summary || '';
 const normalize = (value = '') => String(value).trim().toLowerCase();
 const getMemberCount = (group = {}) => Number(group.memberCount || group.members?.length || 0);
-const pluralize = (count, one, many) => `${count} ${count === 1 ? one : many}`;
 
-const toTime = (value) => {
-  if (!value) return 0;
-  const raw = value?.toDate ? value.toDate() : value?.seconds ? new Date(value.seconds * 1000) : new Date(value);
-  const time = raw instanceof Date ? raw.getTime() : NaN;
-  return Number.isNaN(time) ? 0 : time;
-};
-
-// Stable per-user jitter so the "For you" order feels personal but doesn't reshuffle on each render.
+// Stable per-user jitter so the order feels personal but doesn't reshuffle on each render.
 const personalizedGroupRandom = (uid, groupId) => {
   const value = `${uid || 'guest'}:${groupId}`;
   let hash = 5381;
@@ -130,6 +122,13 @@ const getGroupState = (group, user, userGroupsById, joinStates) => {
   return { role, isJoined, isRequested, isPrivate, needsApproval };
 };
 
+const toTime = (value) => {
+  if (!value) return 0;
+  const raw = value?.toDate ? value.toDate() : value?.seconds ? new Date(value.seconds * 1000) : new Date(value);
+  const time = raw instanceof Date ? raw.getTime() : NaN;
+  return Number.isNaN(time) ? 0 : time;
+};
+
 const forYouScore = (entry, uid) =>
   Number(entry.group.friendMemberCount || 0) * 100 +
   Math.log1p(entry.memberCount) * 6 +
@@ -153,12 +152,13 @@ export default function Groups() {
   const [userGroupsById, setUserGroupsById] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [, setReloadKey] = useState(0);
+  const [reloadKey, setReloadKey] = useState(0);
   const [joiningId, setJoiningId] = useState(null);
   const [joinStates, setJoinStates] = useState({});
   const [joinError, setJoinError] = useState('');
   const [shareMessage, setShareMessage] = useState('');
   const [query, setQuery] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [membershipFilter, setMembershipFilter] = useState('all');
   const [sortKey, setSortKey] = useState('forYou');
@@ -167,99 +167,91 @@ export default function Groups() {
   const hasLoadedRef = useRef(false);
 
   const styles = useThemeStyles((c, s, r) => ({
-    container: { gap: s.md, paddingBottom: s['2xl'] },
+    container: { gap: s.lg, paddingBottom: s['2xl'] },
 
     /* notices */
     errorBox: {
       flexDirection: 'row', alignItems: 'center', gap: s.sm, backgroundColor: c.redLight,
       borderRadius: r.xl, padding: s.md, borderWidth: 1, borderColor: c.redBorder,
     },
-    errorText: { flex: 1, color: c.red, fontSize: 13, fontWeight: '700' },
+    errorText: { flex: 1, color: c.red, fontSize: 13, fontWeight: '600' },
     retryButton: {
       flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.red,
       borderRadius: r.md, paddingHorizontal: s.md, paddingVertical: 8,
     },
-    retryText: { color: c.onBrand, fontSize: 12, fontWeight: '800' },
+    retryText: { color: c.onBrand, fontSize: 12, fontWeight: '700' },
     noticeBox: { flexDirection: 'row', alignItems: 'center', gap: s.sm, borderRadius: r.lg, padding: s.md, borderWidth: 1 },
     noticeError: { backgroundColor: c.redLight, borderColor: c.redBorder },
     noticeSuccess: { backgroundColor: c.greenLight, borderColor: c.green },
     noticeText: { flex: 1, fontSize: 13, fontWeight: '600' },
 
-    /* header */
-    headerBanner: {
-      backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault,
-      borderRadius: r['2xl'], padding: s.md, gap: s.md,
-    },
+    /* toolbar */
     searchRow: { flexDirection: 'row', alignItems: 'center', gap: s.sm },
     searchContainer: {
       flex: 1, flexDirection: 'row', alignItems: 'center', gap: s.sm, backgroundColor: c.inputBackground,
-      borderWidth: 1, borderColor: c.inputBorder, borderRadius: r.xl, paddingHorizontal: s.md, height: 46,
+      borderWidth: 1, borderColor: c.inputBorder, borderRadius: r.xl, paddingHorizontal: s.md, height: 48,
     },
     searchInput: { flex: 1, color: c.textPrimary, fontSize: 14, fontWeight: '500', paddingVertical: 0 },
     clearButton: { padding: 2 },
+    filterToggle: {
+      width: 48, height: 48, borderRadius: r.xl, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault,
+    },
+    filterToggleActive: { backgroundColor: c.brandLight, borderColor: c.brand },
+    filterDot: {
+      position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: 4,
+      backgroundColor: c.brand, borderWidth: 1.5, borderColor: c.card,
+    },
     createButton: {
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, height: 46,
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, height: 48,
       paddingHorizontal: s.md, borderRadius: r.xl, backgroundColor: c.brand,
     },
-    createButtonText: { color: c.onBrand, fontSize: 13, fontWeight: '800' },
-    statsGrid: {
-      flexDirection: 'row', backgroundColor: c.surfaceSecondary, borderRadius: r.xl,
-      padding: s.xs, borderWidth: 1, borderColor: c.borderDefault,
-    },
-    statCard: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: s.xs },
-    statDivider: { width: 1, backgroundColor: c.borderDefault, marginVertical: 4 },
-    statValue: { color: c.textPrimary, fontSize: 16, fontWeight: '800' },
-    statLabel: { color: c.textTertiary, fontSize: 11, fontWeight: '600', marginTop: 1 },
+    createButtonText: { color: c.onBrand, fontSize: 14, fontWeight: '700' },
 
-    /* filters */
-    filterSection: { gap: s.xs },
+    /* filter panel */
+    filterPanel: {
+      backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault,
+      borderRadius: r['2xl'], padding: s.md, gap: s.md,
+    },
+    filterGroup: { gap: s.xs },
+    filterLabel: { color: c.textTertiary, fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' },
     chipsScroll: { flexGrow: 0 },
-    chipsContainer: { gap: s.xs, paddingVertical: 2, paddingRight: s.md },
+    chipsContainer: { gap: s.xs, paddingRight: s.md },
     chip: {
       flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: s.md, height: 36,
-      borderRadius: r.full, backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault,
+      borderRadius: r.full, backgroundColor: c.surfaceSecondary, borderWidth: 1, borderColor: c.borderDefault,
     },
     chipActive: { backgroundColor: c.brand, borderColor: c.brand },
-    chipText: { color: c.textSecondary, fontSize: 12, fontWeight: '700' },
+    chipText: { color: c.textSecondary, fontSize: 12.5, fontWeight: '600' },
     chipTextActive: { color: c.onBrand },
-    chipCount: { color: c.textTertiary, fontSize: 11, fontWeight: '800' },
-    chipCountActive: { color: c.onBrand, opacity: 0.85 },
-    sortRow: { flexDirection: 'row', alignItems: 'center', gap: s.xs },
-    sortLabel: { color: c.textTertiary, fontSize: 12, fontWeight: '700', marginRight: 2 },
+    sortRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: s.xs },
     sortPill: {
-      flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: s.sm, paddingVertical: 6,
+      flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: s.sm, paddingVertical: 7,
       borderRadius: r.full,
     },
     sortPillActive: { backgroundColor: c.brandLight },
-    sortPillText: { color: c.textSecondary, fontSize: 12, fontWeight: '700' },
+    sortPillText: { color: c.textSecondary, fontSize: 12.5, fontWeight: '600' },
     sortPillTextActive: { color: c.brand },
+    panelFooter: { flexDirection: 'row', justifyContent: 'flex-end' },
+    clearFiltersText: { color: c.brand, fontSize: 13, fontWeight: '700' },
 
     /* sections */
-    sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: s.xs },
-    sectionTitle: { color: c.textPrimary, fontSize: 16, fontWeight: '800' },
-    sectionSubtitle: { color: c.textTertiary, fontSize: 12, marginTop: 1 },
-    sectionActions: { flexDirection: 'row', alignItems: 'center', gap: s.sm },
-    clearFiltersText: { color: c.brand, fontSize: 12, fontWeight: '800' },
-    resultBadge: {
-      backgroundColor: c.surfaceSecondary, paddingHorizontal: s.sm, paddingVertical: 4,
-      borderRadius: r.full, borderWidth: 1, borderColor: c.borderDefault,
-    },
-    resultCount: { color: c.textSecondary, fontSize: 11, fontWeight: '700' },
-    clearFiltersButton: {
-      alignSelf: 'center', paddingHorizontal: s.md, paddingVertical: s.sm, borderRadius: r.full,
-      borderWidth: 1, borderColor: c.borderDefault, backgroundColor: c.card,
-    },
+    section: { gap: s.sm },
+    sectionHeader: { gap: 2 },
+    sectionTitle: { color: c.textPrimary, fontSize: 17, fontWeight: '700', letterSpacing: -0.2 },
+    sectionSubtitle: { color: c.textTertiary, fontSize: 13 },
 
     /* your-groups rail */
     rail: { gap: s.sm, paddingRight: s.md },
     railCard: {
-      width: 150, backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault,
-      borderRadius: r['2xl'], padding: s.md, gap: s.sm,
+      width: 148, backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault,
+      borderRadius: r['2xl'], padding: s.md, gap: s.md,
     },
-    railName: { color: c.textPrimary, fontSize: 13.5, fontWeight: '800' },
-    railMeta: { color: c.textTertiary, fontSize: 11.5, fontWeight: '600' },
+    railName: { color: c.textPrimary, fontSize: 14, fontWeight: '700' },
+    railRole: { color: c.textTertiary, fontSize: 12, fontWeight: '500', marginTop: 2 },
 
     /* cards */
+    list: { gap: s.sm },
     card: {
       backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault,
       borderRadius: r['2xl'], padding: s.md, gap: s.md,
@@ -270,57 +262,39 @@ export default function Groups() {
     avatarSmall: { width: 40, height: 40, borderRadius: r.lg, overflow: 'hidden', backgroundColor: c.brandLight },
     avatarImage: { width: '100%', height: '100%' },
     avatarFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brandLight },
-    avatarFallbackText: { color: c.brand, fontSize: 20, fontWeight: '800' },
+    avatarFallbackText: { color: c.brand, fontSize: 20, fontWeight: '700' },
     cardContent: { flex: 1, gap: 4 },
     cardTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: s.xs },
-    cardTitle: { flex: 1, color: c.textPrimary, fontSize: 15, fontWeight: '800' },
+    cardTitle: { flex: 1, color: c.textPrimary, fontSize: 15.5, fontWeight: '700', letterSpacing: -0.1 },
     badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: r.full },
     joinedBadge: { backgroundColor: c.greenLight },
     privateBadge: { backgroundColor: c.amberLight },
-    badgeText: { fontSize: 10, fontWeight: '800' },
-    cardDescription: { color: c.textSecondary, fontSize: 12.5, lineHeight: 18 },
+    badgeText: { fontSize: 11, fontWeight: '700' },
+    cardDescription: { color: c.textSecondary, fontSize: 13, lineHeight: 19 },
     metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: s.md, rowGap: 4, paddingTop: 2 },
     metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-    metaText: { color: c.textTertiary, fontSize: 11.5, fontWeight: '600' },
-    friendsRow: {
-      flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
-      backgroundColor: c.brandLight, borderRadius: r.full, paddingHorizontal: 9, paddingVertical: 4,
-    },
-    friendsText: { color: c.brand, fontSize: 11.5, fontWeight: '800' },
-    cardFooter: {
-      flexDirection: 'row', alignItems: 'center', gap: s.xs, paddingTop: s.md,
-      borderTopWidth: 1, borderTopColor: c.borderDefault,
-    },
+    metaText: { color: c.textTertiary, fontSize: 12, fontWeight: '500' },
+    cardFooter: { flexDirection: 'row', alignItems: 'center', gap: s.xs },
     iconActionButton: {
-      width: 40, height: 40, borderRadius: r.xl, backgroundColor: c.surfaceSecondary,
+      width: 42, height: 42, borderRadius: r.xl, backgroundColor: c.surfaceSecondary,
       borderWidth: 1, borderColor: c.borderDefault, alignItems: 'center', justifyContent: 'center',
     },
-    actionBase: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 40, borderRadius: r.xl },
+    actionBase: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 42, borderRadius: r.xl },
     actionPrimary: { backgroundColor: c.brand },
-    actionJoined: { backgroundColor: c.greenLight, borderWidth: 1, borderColor: c.green },
+    actionJoined: { backgroundColor: c.surfaceSecondary, borderWidth: 1, borderColor: c.borderDefault },
     actionRequested: { backgroundColor: c.amberLight, borderWidth: 1, borderColor: c.amber },
-    actionText: { fontSize: 12.5, fontWeight: '800' },
+    actionText: { fontSize: 13, fontWeight: '700' },
 
-    /* skeleton */
+    /* misc */
+    clearSearchButton: {
+      alignSelf: 'center', paddingHorizontal: s.md, paddingVertical: s.sm, borderRadius: r.full,
+      borderWidth: 1, borderColor: c.borderDefault, backgroundColor: c.card,
+    },
+    clearSearchText: { color: c.brand, fontSize: 13, fontWeight: '700' },
     skeletonBlock: { backgroundColor: c.borderDefault, borderRadius: r.md },
   }));
 
   /* ------------------------------ derived data ----------------------------- */
-
-  const categories = useMemo(() => {
-    const values = groups.map((group) => group.category).filter(Boolean);
-    return ['All', ...Array.from(new Set(values)).sort((a, b) => String(a).localeCompare(String(b)))];
-  }, [groups]);
-
-  const categoryCounts = useMemo(() => {
-    const map = { All: groups.length };
-    groups.forEach((group) => {
-      if (group.category) map[group.category] = (map[group.category] || 0) + 1;
-    });
-    return map;
-  }, [groups]);
-
-  const resolvedCategoryFilter = categoryFilter === 'All' || categories.includes(categoryFilter) ? categoryFilter : 'All';
 
   const entries = useMemo(
     () =>
@@ -332,19 +306,17 @@ export default function Groups() {
     [groups, joinStates, user, userGroupsById],
   );
 
-  const counts = useMemo(
-    () => ({
-      all: entries.length,
-      joined: entries.filter((e) => e.isJoined).length,
-      available: entries.filter((e) => !e.isJoined && !e.isRequested).length,
-      private: entries.filter((e) => e.isPrivate).length,
-      open: entries.filter((e) => !e.isPrivate).length,
-    }),
-    [entries],
-  );
+  const categories = useMemo(() => {
+    const values = groups.map((group) => group.category).filter(Boolean);
+    return ['All', ...Array.from(new Set(values)).sort((a, b) => String(a).localeCompare(String(b)))];
+  }, [groups]);
+
+  const resolvedCategoryFilter = categoryFilter === 'All' || categories.includes(categoryFilter) ? categoryFilter : 'All';
 
   const searchTerm = normalize(query);
-  const hasActiveFilters = Boolean(searchTerm) || resolvedCategoryFilter !== 'All' || membershipFilter !== 'all';
+  const isSearching = Boolean(searchTerm);
+  const hasActiveFilters = resolvedCategoryFilter !== 'All' || membershipFilter !== 'all';
+  const isRefined = isSearching || hasActiveFilters || sortKey !== 'forYou';
 
   const filteredEntries = useMemo(() => {
     const compare = sorters[sortKey](user?.uid);
@@ -363,9 +335,10 @@ export default function Groups() {
       .sort(compare);
   }, [entries, membershipFilter, resolvedCategoryFilter, searchTerm, sortKey, user?.uid]);
 
-  // With no filters applied, show "Your groups" as a quick-access rail and
-  // keep the main list focused on discovery. Any filter switches to one flat list.
-  const showSplitView = !hasActiveFilters && counts.joined > 0;
+  // With nothing applied, "Your groups" is a quick-access rail and the main
+  // list focuses on discovery. Any search or filter switches to one flat list.
+  const hasJoined = useMemo(() => entries.some((entry) => entry.isJoined), [entries]);
+  const showSplitView = !isSearching && !hasActiveFilters && hasJoined;
   const myGroups = useMemo(
     () => (showSplitView ? filteredEntries.filter((entry) => entry.isJoined) : []),
     [filteredEntries, showSplitView],
@@ -374,14 +347,6 @@ export default function Groups() {
     () => (showSplitView ? filteredEntries.filter((entry) => !entry.isJoined) : filteredEntries),
     [filteredEntries, showSplitView],
   );
-
-  const resetFilters = () => {
-    haptic.select();
-    animateNext();
-    setQuery('');
-    setCategoryFilter('All');
-    setMembershipFilter('all');
-  };
 
   /* ------------------------------ data loading ----------------------------- */
 
@@ -428,7 +393,7 @@ export default function Groups() {
       return () => {
         active = false;
       };
-    }, [user]),
+    }, [user, reloadKey]),
   );
 
   /* -------------------------------- actions -------------------------------- */
@@ -504,14 +469,32 @@ export default function Groups() {
     setReloadKey((key) => key + 1);
   };
 
+  const toggleFilters = () => {
+    haptic.select();
+    animateNext();
+    setShowFilters((value) => !value);
+  };
+
+  const resetFilters = () => {
+    haptic.select();
+    animateNext();
+    setQuery('');
+    setCategoryFilter('All');
+    setMembershipFilter('all');
+    setSortKey('forYou');
+  };
+
   const openGroup = (group) => router.navigate(`/community/${group.id}`);
 
   const hasNothingToShow = Boolean(error) && !groups.length;
+  const listTitle = showSplitView ? 'Discover' : isSearching || hasActiveFilters ? 'Results' : 'Recommended for you';
+  const listSubtitle = showSplitView
+    ? 'Communities you might like'
+    : isSearching || hasActiveFilters
+      ? 'Matching your search and filters'
+      : 'Based on your campus and connections';
 
   /* -------------------------------- render --------------------------------- */
-
-  const listTitle = showSplitView ? 'Discover groups' : hasActiveFilters ? 'Results' : 'Picked for you';
-  const listCount = listEntries.length;
 
   return (
     <ScreenShell title="Study Groups" subtitle="Find, join, and share campus communities." showBack>
@@ -541,113 +524,131 @@ export default function Groups() {
 
         {hasNothingToShow ? null : (
           <>
-            {/* Search, create, stats */}
-            <View style={[styles.headerBanner, shadows.sm]}>
-              <View style={styles.searchRow}>
-                <View style={styles.searchContainer}>
-                  <Ionicons name="search-outline" size={18} color={colors.iconSecondary} />
-                  <TextInput
-                    value={query}
-                    onChangeText={setQuery}
-                    placeholder="Search groups or topics..."
-                    placeholderTextColor={colors.inputPlaceholder}
-                    style={styles.searchInput}
-                    autoCorrect={false}
-                    autoCapitalize="none"
-                    returnKeyType="search"
-                    accessibilityLabel="Search groups"
-                  />
-                  {query ? (
-                    <Pressable style={styles.clearButton} onPress={() => setQuery('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
-                      <Ionicons name="close-circle" size={18} color={colors.iconSecondary} />
-                    </Pressable>
-                  ) : null}
-                </View>
-                <Pressable
-                  style={({ pressed }) => [styles.createButton, pressed && { opacity: 0.9 }]}
-                  onPress={() => router.navigate('/create')}
-                  accessibilityRole="button"
-                  accessibilityLabel="Create group"
-                >
-                  <Ionicons name="add" size={18} color={colors.onBrand} />
-                  <Text style={styles.createButtonText}>Create</Text>
-                </Pressable>
+            {/* Search + create */}
+            <View style={styles.searchRow}>
+              <View style={styles.searchContainer}>
+                <Ionicons name="search-outline" size={18} color={colors.iconSecondary} />
+                <TextInput
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Search groups or topics"
+                  placeholderTextColor={colors.inputPlaceholder}
+                  style={styles.searchInput}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  returnKeyType="search"
+                  accessibilityLabel="Search groups"
+                />
+                {query ? (
+                  <Pressable style={styles.clearButton} onPress={() => setQuery('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
+                    <Ionicons name="close-circle" size={18} color={colors.iconSecondary} />
+                  </Pressable>
+                ) : null}
               </View>
-
-              <View style={styles.statsGrid}>
-                <Stat value={counts.all} label="Groups" styles={styles} />
-                <View style={styles.statDivider} />
-                <Stat value={counts.joined} label="Joined" styles={styles} />
-                <View style={styles.statDivider} />
-                <Stat value={counts.open} label="Public" styles={styles} />
-              </View>
+              <Pressable
+                onPress={toggleFilters}
+                accessibilityRole="button"
+                accessibilityLabel={showFilters ? 'Hide filters' : 'Show filters'}
+                accessibilityState={{ expanded: showFilters }}
+                style={({ pressed }) => [styles.filterToggle, showFilters && styles.filterToggleActive, pressed && { opacity: 0.85 }]}
+              >
+                <Ionicons
+                  name={showFilters ? 'options' : 'options-outline'}
+                  size={20}
+                  color={showFilters ? colors.brand : colors.textSecondary}
+                />
+                {!showFilters && (hasActiveFilters || sortKey !== 'forYou') ? <View style={styles.filterDot} /> : null}
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.createButton, pressed && { opacity: 0.9 }]}
+                onPress={() => router.navigate('/create')}
+                accessibilityRole="button"
+                accessibilityLabel="Create group"
+              >
+                <Ionicons name="add" size={18} color={colors.onBrand} />
+                <Text style={styles.createButtonText}>Create</Text>
+              </Pressable>
             </View>
 
-            {/* Filters + sort */}
-            {loading ? null : (
-              <View style={styles.filterSection}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chipsContainer} keyboardShouldPersistTaps="handled">
-                  {MEMBERSHIP_FILTERS.map((item) => (
-                    <FilterChip
-                      key={item.key}
-                      item={item}
-                      count={counts[item.key]}
-                      active={membershipFilter === item.key}
-                      onPress={() => {
-                        haptic.select();
-                        animateNext();
-                        setMembershipFilter(item.key);
-                      }}
-                      styles={styles}
-                      colors={colors}
-                    />
-                  ))}
-                </ScrollView>
-
-                {categories.length > 2 ? (
+            {/* Collapsible filters + sort */}
+            {showFilters && !loading ? (
+              <View style={styles.filterPanel}>
+                <View style={styles.filterGroup}>
+                  <Text style={styles.filterLabel}>Show</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chipsContainer} keyboardShouldPersistTaps="handled">
-                    {categories.map((category) => (
+                    {MEMBERSHIP_FILTERS.map((item) => (
                       <FilterChip
-                        key={category}
-                        item={{ key: category, label: category, icon: category === 'All' ? 'grid-outline' : 'pricetag-outline' }}
-                        count={categoryCounts[category]}
-                        active={categoryFilter === category}
+                        key={item.key}
+                        item={item}
+                        active={membershipFilter === item.key}
                         onPress={() => {
                           haptic.select();
                           animateNext();
-                          setCategoryFilter(category);
+                          setMembershipFilter(item.key);
                         }}
                         styles={styles}
                         colors={colors}
                       />
                     ))}
                   </ScrollView>
+                </View>
+
+                {categories.length > 2 ? (
+                  <View style={styles.filterGroup}>
+                    <Text style={styles.filterLabel}>Category</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chipsContainer} keyboardShouldPersistTaps="handled">
+                      {categories.map((category) => (
+                        <FilterChip
+                          key={category}
+                          item={{ key: category, label: category, icon: category === 'All' ? 'grid-outline' : 'pricetag-outline' }}
+                          active={resolvedCategoryFilter === category}
+                          onPress={() => {
+                            haptic.select();
+                            animateNext();
+                            setCategoryFilter(category);
+                          }}
+                          styles={styles}
+                          colors={colors}
+                        />
+                      ))}
+                    </ScrollView>
+                  </View>
                 ) : null}
 
-                <View style={styles.sortRow}>
-                  <Text style={styles.sortLabel}>Sort</Text>
-                  {SORT_OPTIONS.map((option) => {
-                    const active = sortKey === option.key;
-                    return (
-                      <Pressable
-                        key={option.key}
-                        onPress={() => {
-                          haptic.select();
-                          animateNext();
-                          setSortKey(option.key);
-                        }}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: active }}
-                        style={[styles.sortPill, active && styles.sortPillActive]}
-                      >
-                        <Ionicons name={option.icon} size={13} color={active ? colors.brand : colors.iconSecondary} />
-                        <Text style={[styles.sortPillText, active && styles.sortPillTextActive]}>{option.label}</Text>
-                      </Pressable>
-                    );
-                  })}
+                <View style={styles.filterGroup}>
+                  <Text style={styles.filterLabel}>Sort by</Text>
+                  <View style={styles.sortRow}>
+                    {SORT_OPTIONS.map((option) => {
+                      const active = sortKey === option.key;
+                      return (
+                        <Pressable
+                          key={option.key}
+                          onPress={() => {
+                            haptic.select();
+                            animateNext();
+                            setSortKey(option.key);
+                          }}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                          style={[styles.sortPill, active && styles.sortPillActive]}
+                        >
+                          <Ionicons name={option.icon} size={14} color={active ? colors.brand : colors.iconSecondary} />
+                          <Text style={[styles.sortPillText, active && styles.sortPillTextActive]}>{option.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
                 </View>
+
+                {isRefined ? (
+                  <View style={styles.panelFooter}>
+                    <Pressable onPress={resetFilters} hitSlop={8} accessibilityRole="button">
+                      <Text style={styles.clearFiltersText}>Reset all</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
               </View>
-            )}
+            ) : null}
 
             {loading ? (
               <GroupSkeletons styles={styles} />
@@ -655,15 +656,10 @@ export default function Groups() {
               <>
                 {/* Your groups rail */}
                 {myGroups.length ? (
-                  <View style={{ gap: 12 }}>
+                  <View style={styles.section}>
                     <View style={styles.sectionHeader}>
-                      <View>
-                        <Text style={styles.sectionTitle}>Your groups</Text>
-                        <Text style={styles.sectionSubtitle}>Jump back into the conversation</Text>
-                      </View>
-                      <View style={styles.resultBadge}>
-                        <Text style={styles.resultCount}>{myGroups.length}</Text>
-                      </View>
+                      <Text style={styles.sectionTitle}>Your groups</Text>
+                      <Text style={styles.sectionSubtitle}>Jump back into the conversation</Text>
                     </View>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
                       {myGroups.map((entry) => (
@@ -674,60 +670,55 @@ export default function Groups() {
                 ) : null}
 
                 {/* Main list */}
-                <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>{listTitle}</Text>
-                  <View style={styles.sectionActions}>
-                    {hasActiveFilters ? (
-                      <Pressable onPress={resetFilters} hitSlop={8} accessibilityRole="button">
-                        <Text style={styles.clearFiltersText}>Clear filters</Text>
-                      </Pressable>
-                    ) : null}
-                    <View style={styles.resultBadge}>
-                      <Text style={styles.resultCount}>{pluralize(listCount, 'group', 'groups')}</Text>
-                    </View>
+                <View style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionTitle}>{listTitle}</Text>
+                    <Text style={styles.sectionSubtitle}>{listSubtitle}</Text>
                   </View>
-                </View>
 
-                {listEntries.length ? (
-                  listEntries.map((entry) => (
-                    <GroupCard
-                      key={entry.group.id}
-                      entry={entry}
-                      joining={joiningId === entry.group.id}
-                      onOpen={() => openGroup(entry.group)}
-                      onJoin={() => handleJoin(entry)}
-                      onShare={() => handleShare(entry.group)}
-                      styles={styles}
-                      colors={colors}
-                    />
-                  ))
-                ) : showSplitView && !groups.length ? null : (
-                  <>
-                    <EmptyState
-                      title={
-                        showSplitView
-                          ? "You've joined every group"
-                          : groups.length
-                            ? 'No groups found'
-                            : 'No groups yet'
-                      }
-                      description={
-                        showSplitView
-                          ? 'Start a new community for your course or hostel.'
-                          : groups.length
-                            ? 'Try a different search or adjust your filters.'
-                            : 'Study groups created on UniHelp will show up here.'
-                      }
-                      actionLabel={!groups.length || showSplitView ? 'Create group' : undefined}
-                      onAction={!groups.length || showSplitView ? () => router.navigate('/create') : undefined}
-                    />
-                    {groups.length && hasActiveFilters ? (
-                      <Pressable onPress={resetFilters} style={({ pressed }) => [styles.clearFiltersButton, pressed && { opacity: 0.85 }]} accessibilityRole="button">
-                        <Text style={styles.clearFiltersText}>Clear all filters</Text>
-                      </Pressable>
-                    ) : null}
-                  </>
-                )}
+                  {listEntries.length ? (
+                    <View style={styles.list}>
+                      {listEntries.map((entry) => (
+                        <GroupCard
+                          key={entry.group.id}
+                          entry={entry}
+                          joining={joiningId === entry.group.id}
+                          onOpen={() => openGroup(entry.group)}
+                          onJoin={() => handleJoin(entry)}
+                          onShare={() => handleShare(entry.group)}
+                          styles={styles}
+                          colors={colors}
+                        />
+                      ))}
+                    </View>
+                  ) : showSplitView && !groups.length ? null : (
+                    <>
+                      <EmptyState
+                        title={
+                          showSplitView
+                            ? "You've joined every group"
+                            : groups.length
+                              ? 'No groups found'
+                              : 'No groups yet'
+                        }
+                        description={
+                          showSplitView
+                            ? 'Start a new community for your course or hostel.'
+                            : groups.length
+                              ? 'Try a different search or adjust your filters.'
+                              : 'Study groups created on UniHelp will show up here.'
+                        }
+                        actionLabel={!groups.length || showSplitView ? 'Create group' : undefined}
+                        onAction={!groups.length || showSplitView ? () => router.navigate('/create') : undefined}
+                      />
+                      {groups.length && (isSearching || hasActiveFilters) ? (
+                        <Pressable onPress={resetFilters} style={({ pressed }) => [styles.clearSearchButton, pressed && { opacity: 0.85 }]} accessibilityRole="button">
+                          <Text style={styles.clearSearchText}>Clear all filters</Text>
+                        </Pressable>
+                      ) : null}
+                    </>
+                  )}
+                </View>
               </>
             )}
           </>
@@ -757,16 +748,7 @@ function Notice({ icon, color, text, styles, variant, onClose }) {
   );
 }
 
-function Stat({ value, label, styles }) {
-  return (
-    <View style={styles.statCard}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function FilterChip({ item, count, active, onPress, styles, colors }) {
+function FilterChip({ item, active, onPress, styles, colors }) {
   return (
     <Pressable
       onPress={onPress}
@@ -777,7 +759,6 @@ function FilterChip({ item, count, active, onPress, styles, colors }) {
     >
       <Ionicons name={item.icon} size={14} color={active ? colors.onBrand : colors.iconSecondary} />
       <Text style={[styles.chipText, active && styles.chipTextActive]}>{item.label}</Text>
-      {typeof count === 'number' ? <Text style={[styles.chipCount, active && styles.chipCountActive]}>{count}</Text> : null}
     </Pressable>
   );
 }
@@ -785,7 +766,7 @@ function FilterChip({ item, count, active, onPress, styles, colors }) {
 function Meta({ icon, text, styles, colors }) {
   return (
     <View style={styles.metaItem}>
-      <Ionicons name={icon} size={12} color={colors.iconSecondary} />
+      <Ionicons name={icon} size={13} color={colors.iconSecondary} />
       <Text style={styles.metaText}>{text}</Text>
     </View>
   );
@@ -816,7 +797,7 @@ function GroupAvatar({ group, style, styles, textSize = 20 }) {
 }
 
 function RailCard({ entry, onOpen, styles, colors }) {
-  const { group, role, memberCount } = entry;
+  const { group, role } = entry;
   const isAdmin = role === 'owner' || role === 'admin';
   return (
     <Pressable
@@ -829,19 +810,18 @@ function RailCard({ entry, onOpen, styles, colors }) {
         <GroupAvatar group={group} style={styles.avatarSmall} styles={styles} textSize={16} />
         {isAdmin ? <Ionicons name="shield-checkmark" size={16} color={colors.green} /> : null}
       </View>
-      <View style={{ gap: 2 }}>
+      <View>
         <Text style={styles.railName} numberOfLines={1}>{groupTitle(group)}</Text>
-        <Text style={styles.railMeta}>{pluralize(memberCount, 'member', 'members')}</Text>
+        <Text style={styles.railRole}>{isAdmin ? 'Admin' : 'Member'}</Text>
       </View>
     </Pressable>
   );
 }
 
 function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) {
-  const { group, role, isJoined, isRequested, isPrivate, needsApproval, memberCount } = entry;
+  const { group, role, isJoined, isRequested, isPrivate, needsApproval } = entry;
   const title = groupTitle(group);
   const description = groupDescription(group);
-  const friendMemberCount = Number(group.friendMemberCount || 0);
   const isAdmin = role === 'owner' || role === 'admin';
   const joinLabel = needsApproval ? 'Request access' : 'Join group';
 
@@ -849,7 +829,7 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
     <Pressable
       onPress={onOpen}
       accessibilityRole="button"
-      accessibilityLabel={`${title}, ${pluralize(memberCount, 'member', 'members')}`}
+      accessibilityLabel={title}
       style={({ pressed }) => [styles.card, shadows.sm, pressed && styles.cardPressed]}
     >
       <View style={styles.cardHeader}>
@@ -873,9 +853,7 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
           {description ? <Text style={styles.cardDescription} numberOfLines={2}>{description}</Text> : null}
 
           <View style={styles.metaRow}>
-            <Meta icon="people-outline" text={pluralize(memberCount, 'member', 'members')} styles={styles} colors={colors} />
             {group.category ? <Meta icon="pricetag-outline" text={group.category} styles={styles} colors={colors} /> : null}
-            {group.isPopular ? <Meta icon="flame-outline" text="Popular" styles={styles} colors={colors} /> : null}
             <Meta
               icon={isPrivate ? 'lock-closed-outline' : 'globe-outline'}
               text={needsApproval ? 'Approval required' : isPrivate ? 'Private' : 'Public'}
@@ -883,13 +861,6 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
               colors={colors}
             />
           </View>
-
-          {friendMemberCount > 0 ? (
-            <View style={styles.friendsRow}>
-              <Ionicons name="heart" size={12} color={colors.brand} />
-              <Text style={styles.friendsText}>{pluralize(friendMemberCount, 'friend', 'friends')} here</Text>
-            </View>
-          ) : null}
         </View>
       </View>
 
@@ -903,7 +874,7 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
           accessibilityRole="button"
           accessibilityLabel={`Share ${title}`}
         >
-          <Ionicons name="share-social-outline" size={16} color={colors.textSecondary} />
+          <Ionicons name="share-social-outline" size={17} color={colors.textSecondary} />
         </Pressable>
 
         {isJoined ? (
@@ -913,14 +884,15 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
               onOpen();
             }}
             accessibilityRole="button"
+            accessibilityLabel={`Open ${title}`}
             style={({ pressed }) => [styles.actionBase, styles.actionJoined, pressed && { opacity: 0.85 }]}
           >
-            <Ionicons name="chatbubbles-outline" size={15} color={colors.green} />
-            <Text style={[styles.actionText, { color: colors.green }]}>Open discussion</Text>
+            <Ionicons name="chatbubbles-outline" size={16} color={colors.textPrimary} />
+            <Text style={[styles.actionText, { color: colors.textPrimary }]}>Open discussion</Text>
           </Pressable>
         ) : isRequested ? (
           <View style={[styles.actionBase, styles.actionRequested]} accessibilityRole="text">
-            <Ionicons name="time-outline" size={15} color={colors.amber} />
+            <Ionicons name="time-outline" size={16} color={colors.amber} />
             <Text style={[styles.actionText, { color: colors.amber }]}>Request pending</Text>
           </View>
         ) : (
@@ -931,6 +903,7 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
               onJoin();
             }}
             accessibilityRole="button"
+            accessibilityLabel={joinLabel}
             accessibilityState={{ disabled: joining, busy: joining }}
             style={({ pressed }) => [styles.actionBase, styles.actionPrimary, joining && { opacity: 0.7 }, pressed && !joining && { opacity: 0.9 }]}
           >
@@ -938,7 +911,7 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
               <ActivityIndicator size="small" color={colors.onBrand} />
             ) : (
               <>
-                <Ionicons name={needsApproval ? 'key-outline' : 'person-add-outline'} size={15} color={colors.onBrand} />
+                <Ionicons name={needsApproval ? 'key-outline' : 'person-add-outline'} size={16} color={colors.onBrand} />
                 <Text style={[styles.actionText, { color: colors.onBrand }]}>{joinLabel}</Text>
               </>
             )}
@@ -974,7 +947,7 @@ function GroupSkeletons({ styles }) {
               {bar({ width: '40%', height: 11 })}
             </View>
           </View>
-          {bar({ width: '100%', height: 40, borderRadius: 14 })}
+          {bar({ width: '100%', height: 42, borderRadius: 14 })}
         </View>
       ))}
     </View>

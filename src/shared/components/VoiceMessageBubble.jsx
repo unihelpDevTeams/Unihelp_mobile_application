@@ -14,14 +14,15 @@ const COLORS = {
   surface: '#F8FAFC',
 };
 
-const WAVE_BARS = 4;
+const WAVE_BARS = 18;
+const WAVE_PATTERN = [0.34, 0.56, 0.82, 0.46, 0.67, 0.94, 0.53, 0.72, 0.4, 0.88, 0.61, 0.76, 0.48, 0.96, 0.58, 0.37, 0.7, 0.45];
 
 /**
  * Voice message bubble component with waveform visualization.
  * Shows play/pause controls, animated waveform, progress bar, and remaining time.
  */
-const VoiceMessageBubble = memo(({ message, isMine, onLongPress }) => {
-  const { isPlaying, isLoading, progress, remaining, duration, error, formatTime, play, pause, resume } =
+const VoiceMessageBubble = memo(({ message, isMine, onLongPress, bubbleColor }) => {
+  const { isPlaying, isLoading, position, progress, remaining, duration, error, formatTime, play, pause, resume } =
     useAudioPlayback();
 
   const [isPaused, setIsPaused] = useState(false);
@@ -36,9 +37,9 @@ const VoiceMessageBubble = memo(({ message, isMine, onLongPress }) => {
       return;
     }
 
-    const waveLoops = waveAnims.map((anim) => {
-      const randomDuration = 150 + Math.random() * 300;
-      const randomHeight = 0.3 + Math.random() * 0.7;
+    const waveLoops = waveAnims.map((anim, index) => {
+      const randomDuration = 190 + (index % 5) * 55;
+      const randomHeight = WAVE_PATTERN[index] || 0.55;
       const loop = Animated.loop(Animated.sequence([
         Animated.timing(anim, {
           toValue: randomHeight,
@@ -97,19 +98,32 @@ const VoiceMessageBubble = memo(({ message, isMine, onLongPress }) => {
   const displayTime = isPlaying || isPaused || remaining > 0
     ? formatTime(remaining)
     : formatTime(totalDurationMs);
+  const elapsedTime = formatTime(position);
+  const statusLabel = isLoading ? 'Loading audio' : error ? 'Tap to retry' : isPlaying ? 'Playing now' : isPaused ? 'Paused' : 'Voice message';
 
   return (
     <Pressable
       onPress={handlePlayPause}
       onLongPress={onLongPress}
       disabled={isLoading}
+      accessibilityRole="button"
+      accessibilityLabel={isLoading ? 'Loading voice message' : isPlaying ? 'Pause voice message' : 'Play voice message'}
+      accessibilityState={{ busy: isLoading, disabled: isLoading }}
       style={({ pressed }) => [
         styles.container,
         isMine ? styles.mine : styles.theirs,
+        isMine && bubbleColor ? { backgroundColor: bubbleColor } : null,
         pressed && styles.pressed,
       ]}
     >
       <View style={styles.content}>
+        <View style={styles.headerRow}>
+          <View style={[styles.statusPill, isMine && styles.statusPillMine]}>
+            <Ionicons name={isLoading ? 'cloud-download-outline' : isPlaying ? 'volume-high-outline' : 'mic-outline'} size={12} color={isMine ? COLORS.white : COLORS.indigoDark} />
+            <Text style={[styles.statusText, isMine && styles.statusTextMine]}>{statusLabel}</Text>
+          </View>
+          <Text style={[styles.elapsedText, isMine && styles.elapsedTextMine]}>{isPlaying || isPaused ? elapsedTime : formatTime(totalDurationMs)}</Text>
+        </View>
         <View style={styles.controlsRow}>
           <View style={[styles.playButton, isMine && styles.playButtonMine]}>
             {isLoading ? (
@@ -126,7 +140,12 @@ const VoiceMessageBubble = memo(({ message, isMine, onLongPress }) => {
           {/* Waveform visualization */}
           <View style={styles.waveSection}>
             <View style={styles.waveformRow}>
-              {isPlaying || isPaused ? (
+              {isLoading ? (
+                <View style={styles.loadingWaveform}>
+                  <ActivityIndicator size="small" color={isMine ? COLORS.white : COLORS.indigo} />
+                  <Text style={[styles.loadingText, isMine && styles.loadingTextMine]}>Loading audio…</Text>
+                </View>
+              ) : isPlaying || isPaused ? (
                 waveAnims.map((anim, index) => (
                   <Animated.View
                     key={index}
@@ -135,7 +154,7 @@ const VoiceMessageBubble = memo(({ message, isMine, onLongPress }) => {
                       {
                         height: anim.interpolate({
                           inputRange: [0, 1],
-                          outputRange: [3, 20],
+                          outputRange: [4, 26],
                         }),
                         backgroundColor: isMine
                           ? 'rgba(255,255,255,0.7)'
@@ -147,10 +166,7 @@ const VoiceMessageBubble = memo(({ message, isMine, onLongPress }) => {
                 ))
               ) : (
                 <View style={styles.waveformStatic}>
-                  <View style={[styles.waveBar, styles.waveBarStatic, isMine && styles.waveBarStaticMine]} />
-                  <View style={[styles.waveBar, styles.waveBarStatic, styles.waveBarStaticMd, isMine && styles.waveBarStaticMine]} />
-                  <View style={[styles.waveBar, styles.waveBarStatic, styles.waveBarStaticLg, isMine && styles.waveBarStaticMine]} />
-                  <View style={[styles.waveBar, styles.waveBarStatic, styles.waveBarStaticMd, isMine && styles.waveBarStaticMine]} />
+                  {WAVE_PATTERN.map((height, index) => <View key={index} style={[styles.waveBar, styles.waveBarStatic, { height: 4 + height * 22 }, isMine && styles.waveBarStaticMine]} />)}
                 </View>
               )}
             </View>
@@ -164,6 +180,7 @@ const VoiceMessageBubble = memo(({ message, isMine, onLongPress }) => {
                   isMine && styles.progressFillMine,
                 ]}
               />
+              {progress > 0 && progress < 1 ? <View style={[styles.progressDot, { left: `${Math.min(progress * 100, 100)}%` }, isMine && styles.progressDotMine]} /> : null}
             </View>
           </View>
 
@@ -202,20 +219,19 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     padding: 12,
     marginBottom: 10,
-    maxWidth: '82%',
-    minWidth: '55%',
+    width: '78%',
+    maxWidth: '88%',
+    minWidth: 235,
   },
   mine: {
     alignSelf: 'flex-end',
     backgroundColor: COLORS.indigo,
-    marginLeft: 48,
   },
   theirs: {
     alignSelf: 'flex-start',
     backgroundColor: COLORS.white,
     borderWidth: 1,
     borderColor: COLORS.border,
-    marginRight: 48,
   },
   pressed: {
     opacity: 0.85,
@@ -223,15 +239,49 @@ const styles = StyleSheet.create({
   content: {
     gap: 6,
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: COLORS.indigoSoft,
+  },
+  statusPillMine: {
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  statusText: {
+    color: COLORS.indigoDark,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  statusTextMine: {
+    color: COLORS.white,
+  },
+  elapsedText: {
+    color: COLORS.inkSoft,
+    fontSize: 10.5,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  elapsedTextMine: {
+    color: 'rgba(255,255,255,0.72)',
+  },
   controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
   playButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: 'rgba(0,0,0,0.06)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -246,14 +296,28 @@ const styles = StyleSheet.create({
   waveformRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    height: 20,
+    gap: 2,
+    height: 26,
   },
   waveformStatic: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    height: 20,
+    gap: 2,
+    height: 26,
+  },
+  loadingWaveform: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 26,
+  },
+  loadingText: {
+    color: COLORS.indigoDark,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  loadingTextMine: {
+    color: COLORS.white,
   },
   waveBar: {
     width: 3,
@@ -274,7 +338,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.4)',
   },
   progressTrack: {
-    height: 3,
+    height: 4,
     backgroundColor: 'rgba(0,0,0,0.08)',
     borderRadius: 2,
     overflow: 'hidden',
@@ -288,6 +352,18 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   progressFillMine: {
+    backgroundColor: COLORS.white,
+  },
+  progressDot: {
+    position: 'absolute',
+    top: -3,
+    width: 10,
+    height: 10,
+    marginLeft: -5,
+    borderRadius: 5,
+    backgroundColor: COLORS.indigo,
+  },
+  progressDotMine: {
     backgroundColor: COLORS.white,
   },
   time: {
