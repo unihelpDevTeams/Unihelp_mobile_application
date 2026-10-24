@@ -80,7 +80,7 @@ const profileSummary = (uid, profile = {}) => ({
 export const getUserProfileById = async (uid) => {
   if (!uid) return null;
   const userRef = doc(db, COLLECTIONS.users, uid);
-  let snap;
+  let snap = null;
   try {
     snap = await getDoc(userRef);
   } catch (error) {
@@ -91,10 +91,49 @@ export const getUserProfileById = async (uid) => {
       }
     } catch (cacheError) {
       console.warn('Could not load user profile from Firestore cache:', cacheError?.message || cacheError);
-      throw error;
     }
   }
-  return snap.exists() ? { id: snap.id, uid: snap.id, ...snap.data() } : null;
+
+  if (snap?.exists()) {
+    const data = snap.data() || {};
+    return {
+      id: snap.id,
+      uid: snap.id,
+      ...data,
+      username: data.username || data.usernameLower || '',
+      displayName: data.displayName || data.firstName || data.username || data.name || '',
+    };
+  }
+
+  // Fallback to PostgreSQL server API if not found in Firestore
+  try {
+    const res = await getJson(`/api/users/${uid}`);
+    if (res?.data) {
+      const row = res.data;
+      return {
+        id: row.id || uid,
+        uid: row.id || uid,
+        username: row.username || row.username_lower || '',
+        displayName: row.display_name || row.username || '',
+        school: row.university || '',
+        department: row.department || '',
+        level: row.level || '',
+        bio: row.bio || '',
+        photo: row.avatar || '',
+        photoURL: row.avatar || '',
+        photoAsset: row.photo_asset || null,
+        cover: row.cover_url || '',
+        coverPhoto: row.cover_url || '',
+        coverAsset: row.cover_asset || null,
+        totalPoints: row.total_points || 0,
+        rankName: row.rank_name || '',
+      };
+    }
+  } catch {
+    // Non-fatal fallback
+  }
+
+  return null;
 };
 
 const findSharedFriendIds = async (uidA, uidB, max = 3) => {

@@ -485,6 +485,19 @@ export async function ensureCurrentUserProfile(overrides = {}) {
       console.warn('Could not supplement the PostgreSQL profile from Firebase:', error?.message || error);
     }
     profileCacheRef = mergePostgresAndFirestoreProfiles(existingRow, existingData, firestoreProfile, uid);
+
+    // If PostgreSQL is missing the username or key details that Firestore has,
+    // automatically sync them to PostgreSQL in the background so the user never
+    // has to manually open or edit their profile to fix it.
+    if (
+      profileCacheRef?.username &&
+      (!existingData?.username || existingData?.username !== profileCacheRef.username)
+    ) {
+      putJson('/api/users', toUserApiPayload(profileCacheRef)).catch((syncErr) => {
+        console.warn('[FirestoreSync] Automatic background sync to PostgreSQL failed:', syncErr?.message || syncErr);
+      });
+    }
+
     return profileCacheRef;
   } catch (error) {
     console.error('Failed to ensure user profile', error);
