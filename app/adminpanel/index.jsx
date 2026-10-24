@@ -25,6 +25,7 @@ import { getJson, postJson, putJson, deleteJson } from '../../src/shared/service
 import { blockUser, unblockUser } from '../../services/firestoreSync';
 import MarketingSourcesManager from '../../src/admin/MarketingSourcesManager';
 import PromoSpotlightManager from '../../src/admin/PromoSpotlightManager';
+import HomeHeroCarouselManager from '../../src/admin/HomeHeroCarouselManager';
 import StickerManager from '../../src/admin/StickerManager';
 import PastQuestionModerationManager from '../../src/admin/PastQuestionModerationManager';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
@@ -79,6 +80,7 @@ const ADMIN_NAV_SECTIONS = [
   {
     label: 'Growth',
     items: [
+      { key: 'homeHero', label: 'Home Hero Carousel', icon: 'images-outline', description: 'Add image banners and redirect links to the home carousel.' },
       { key: 'promoSpotlights', label: 'Promo Spotlights', icon: 'flash-outline', description: 'Control the promotions students see in the app.' },
       { key: 'streakRewards', label: 'Streak Rewards', icon: 'gift-outline', description: 'Set the milestones and rewards that keep students coming back.' },
       { key: 'stickers', label: 'Stickers', icon: 'happy-outline', description: 'Manage sticker packs and individual stickers.' },
@@ -586,6 +588,8 @@ export default function AdminPanelPage() {
             </Pressable>
           </View>
         );
+      case 'homeHero':
+        return <HomeHeroCarouselManager />;
       case 'promoSpotlights':
         return <PromoSpotlightManager />;
       case 'streakRewards':

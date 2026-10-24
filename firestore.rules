@@ -523,6 +523,11 @@ service cloud.firestore {
       allow create, update, delete: if isAdminRequest();
     }
 
+    match /homeHeroSlides/{slideId} {
+      allow read: if signedIn() && (resource.data.enabled == true || isAdminRequest());
+      allow create, update, delete: if isAdminRequest();
+    }
+
     match /marketingSources/{sourceId} {
       allow read: if signedIn() || resource.data.active == true;
       allow create, update, delete: if isAdminRequest();

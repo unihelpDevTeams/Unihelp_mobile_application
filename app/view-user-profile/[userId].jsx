@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Keyboard,
@@ -6,12 +6,15 @@ import {
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -31,6 +34,7 @@ import {
   createOrOpenFriendConversation,
   declineFriendRequest,
   fetchFriendStats,
+  fetchUserFriends,
   listenRelationship,
   removeFriend,
   sendFriendRequest,
@@ -39,32 +43,86 @@ import {
   getUserProfileById,
 } from '../../src/shared/services/friendships';
 
+/* -------------------------------------------------------------------------- */
+/*                         Constants & in-memory caches                       */
+/* -------------------------------------------------------------------------- */
+
 const INTRO_MAX = 500;
+const FRIENDS_PAGE_SIZE = 12;
+const REFRESH_COOLDOWN_MS = 5000;
+const RELATIONSHIP_TIMEOUT_MS = 4000;
+
+// Re-opening a profile (or coming back from a chat) used to re-read the profile, the stats and the
+// first page of friends every single time. These caches make those repeat visits free.
+const PROFILE_TTL_MS = 2 * 60 * 1000;
+const STATS_TTL_MS = 60 * 1000;
+const FRIENDS_TTL_MS = 2 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 20;
+
+const PROFILE_CACHE = new Map();
+const STATS_CACHE = new Map();
+const FRIENDS_CACHE = new Map();
+const RELATIONSHIP_CACHE = new Map();
+const INTRO_SENT = new Set(); // session-only: stops repeated message requests to the same student
+
+const writeCache = (map, key, value) => {
+  if (!key) return;
+  map.delete(key);
+  map.set(key, { value, ts: Date.now() });
+  while (map.size > CACHE_MAX_ENTRIES) map.delete(map.keys().next().value);
+};
+const isFresh = (entry, ttl) => Boolean(entry && Date.now() - entry.ts < ttl);
 
 export default function ViewUserProfile() {
   const params = useLocalSearchParams();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { user, profile: currentProfile } = useAuth();
   const { colors } = useTheme();
 
   // Route params can be string | string[]
   const rawId = Array.isArray(params.userId) ? params.userId[0] : params.userId;
   const targetUid = String(rawId || '');
+  const isSelf = Boolean(user?.uid) && user.uid === targetUid;
+  const selfProfileReady = isSelf && Boolean(currentProfile);
+  const relationshipKey = `${user?.uid || ''}:${targetUid}`;
 
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const seedProfile = () => (selfProfileReady ? currentProfile : PROFILE_CACHE.get(targetUid)?.value || null);
+
+  const [profile, setProfile] = useState(seedProfile);
+  const [loading, setLoading] = useState(() => !seedProfile());
   const [loadError, setLoadError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
-  const [relationship, setRelationship] = useState({ state: RELATIONSHIP.NONE });
+  const [relationship, setRelationship] = useState(() => RELATIONSHIP_CACHE.get(relationshipKey) || { state: RELATIONSHIP.NONE });
+  const [relationshipLoaded, setRelationshipLoaded] = useState(() => isSelf || RELATIONSHIP_CACHE.has(relationshipKey));
   const [busy, setBusy] = useState('');
   const [messageModal, setMessageModal] = useState(false);
   const [intro, setIntro] = useState('');
   const [messageError, setMessageError] = useState('');
+  const [introSent, setIntroSent] = useState(() => INTRO_SENT.has(relationshipKey));
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [feedback, setFeedback] = useState(null);
-  const [friendStats, setFriendStats] = useState(null);
+  const [friendStats, setFriendStats] = useState(() => STATS_CACHE.get(targetUid)?.value || null);
+  const [profileTab, setProfileTab] = useState('information');
+  const [friends, setFriends] = useState([]);
+  const [friendsTotal, setFriendsTotal] = useState(null);
+  const [friendsCursor, setFriendsCursor] = useState(null);
+  const [friendsHasMore, setFriendsHasMore] = useState(false);
+  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [friendsLoadingMore, setFriendsLoadingMore] = useState(false);
+  const [friendsUnavailable, setFriendsUnavailable] = useState(false);
+  const [friendsError, setFriendsError] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [coverFailed, setCoverFailed] = useState(false);
+  const [imageViewer, setImageViewer] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const targetRef = useRef(targetUid);
+  targetRef.current = targetUid;
+  const friendsRequestRef = useRef(0);
+  const lastRefreshRef = useRef(0);
+  const wasFriendRef = useRef(null);
 
   // Theme-safe danger colours (the file mixed colors.error / colors.red / colors.danger)
   const danger = colors.error ?? colors.danger ?? colors.red;
@@ -72,25 +130,46 @@ export default function ViewUserProfile() {
   const success = colors.success ?? colors.brand;
   const successSoft = colors.successLight ?? colors.brandLight;
 
-  /* ---------- data ---------- */
+  /* ---------- profile ---------- */
 
+  // Your own profile is already in memory: zero reads.
   useEffect(() => {
-    let cancelled = false;
-    setProfile(null);
+    if (!selfProfileReady) return;
+    setProfile(currentProfile);
+    setLoading(false);
     setLoadError(false);
-    setFriendStats(null);
+  }, [selfProfileReady, currentProfile]);
+
+  // Other students: serve a fresh cache hit instantly, otherwise show the cached copy while refreshing.
+  useEffect(() => {
     if (!targetUid) {
       setLoading(false); // previously stayed on the loader forever without a userId
       return undefined;
     }
-    setLoading(true);
+    if (selfProfileReady) return undefined;
+
+    const entry = PROFILE_CACHE.get(targetUid);
+    setLoadError(false);
+    if (entry) {
+      setProfile(entry.value);
+      setLoading(false);
+      if (reloadKey === 0 && isFresh(entry, PROFILE_TTL_MS)) return undefined;
+    } else {
+      setProfile(null);
+      setLoading(true);
+    }
+
+    let cancelled = false;
     getUserProfileById(targetUid)
       .then((data) => {
-        if (!cancelled) setProfile(data || null);
+        if (cancelled) return;
+        if (data) writeCache(PROFILE_CACHE, targetUid, data);
+        else PROFILE_CACHE.delete(targetUid);
+        setProfile(data || null);
       })
       .catch((error) => {
         console.warn('Failed to load user profile', error);
-        if (!cancelled) setLoadError(true);
+        if (!cancelled && !entry) setLoadError(true); // keep showing the cached copy if we have one
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -98,31 +177,198 @@ export default function ViewUserProfile() {
     return () => {
       cancelled = true;
     };
-  }, [targetUid, reloadKey]);
+  }, [targetUid, reloadKey, selfProfileReady]);
+
+  // Silent re-read used after the friendship changes (e.g. email becomes visible to friends).
+  const refreshProfile = useCallback(async () => {
+    if (!targetUid || selfProfileReady) return;
+    try {
+      const data = await getUserProfileById(targetUid);
+      if (targetRef.current !== targetUid || !data) return;
+      writeCache(PROFILE_CACHE, targetUid, data);
+      setProfile(data);
+    } catch (error) {
+      console.warn('Failed to refresh user profile', error);
+    }
+  }, [targetUid, selfProfileReady]);
+
+  /* ---------- relationship ---------- */
 
   useEffect(() => {
-    setRelationship({ state: RELATIONSHIP.NONE });
-    if (!user?.uid || !targetUid || user.uid === targetUid) return undefined;
-    return listenRelationship(user.uid, targetUid, setRelationship);
-  }, [targetUid, user?.uid]);
+    const cached = RELATIONSHIP_CACHE.get(relationshipKey);
+    setRelationship(cached || { state: RELATIONSHIP.NONE });
+    setIntroSent(INTRO_SENT.has(relationshipKey));
+    if (!user?.uid || !targetUid || isSelf) {
+      setRelationshipLoaded(true);
+      return undefined;
+    }
+    setRelationshipLoaded(Boolean(cached));
 
+    // Never leave the screen on the loader if the listener is slow or fails.
+    const fallback = setTimeout(() => setRelationshipLoaded(true), RELATIONSHIP_TIMEOUT_MS);
+    const unsubscribe = listenRelationship(user.uid, targetUid, (next) => {
+      RELATIONSHIP_CACHE.set(relationshipKey, next);
+      setRelationship((prev) =>
+        prev.state === next.state && prev.request?.id === next.request?.id && prev.blockedByMe === next.blockedByMe ? prev : next
+      );
+      setRelationshipLoaded(true);
+    });
+    return () => {
+      clearTimeout(fallback);
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [relationshipKey, targetUid, user?.uid, isSelf]);
+
+  const isBlocked = relationship.state === RELATIONSHIP.BLOCKED;
+  const blockedByMe = isBlocked && relationship.blockedByMe;
+  const isFriend = relationship.state === RELATIONSHIP.FRIENDS;
+
+  /* ---------- friend stats ---------- */
+
+  const loadStats = useCallback(
+    async (force = false) => {
+      if (!targetUid) return;
+      const entry = STATS_CACHE.get(targetUid);
+      setFriendStats(entry ? entry.value : null);
+      if (!force && isFresh(entry, STATS_TTL_MS)) return;
+      try {
+        const stats = await fetchFriendStats(targetUid);
+        if (targetRef.current !== targetUid) return;
+        writeCache(STATS_CACHE, targetUid, stats);
+        setFriendStats(stats);
+      } catch (error) {
+        console.warn('Failed to load friend stats', error);
+        if (targetRef.current === targetUid && !entry) setFriendStats({ friendCount: null, mutualCount: 0 });
+      }
+    },
+    [targetUid]
+  );
+
+  // Coming back from a chat no longer refetches: the cache is honoured for a minute.
   useFocusEffect(
     useCallback(() => {
-      let cancelled = false;
-      if (!targetUid) return undefined;
-      fetchFriendStats(targetUid)
-        .then((stats) => {
-          if (!cancelled) setFriendStats(stats);
-        })
-        .catch((error) => {
-          console.warn('Failed to load friend stats', error);
-          if (!cancelled) setFriendStats({ friendCount: null, mutualCount: 0 });
-        });
-      return () => {
-        cancelled = true;
-      };
-    }, [targetUid])
+      loadStats();
+    }, [loadStats])
   );
+
+  /* ---------- friends list (lazy: only when the Friends tab is opened) ---------- */
+
+  const applyFriendsState = (state) => {
+    setFriends(state.friends);
+    setFriendsTotal(state.total);
+    setFriendsCursor(state.cursor);
+    setFriendsHasMore(state.hasMore);
+    setFriendsUnavailable(state.unavailable);
+    setFriendsError(false);
+  };
+
+  const loadFriends = useCallback(
+    async ({ force = false } = {}) => {
+      if (!targetUid) return;
+      const entry = FRIENDS_CACHE.get(targetUid);
+      if (entry) applyFriendsState(entry.value);
+      if (!force && isFresh(entry, FRIENDS_TTL_MS)) return;
+
+      const token = ++friendsRequestRef.current;
+      if (!entry) {
+        setFriends([]);
+        setFriendsTotal(null);
+        setFriendsUnavailable(false);
+      }
+      setFriendsLoading(!entry);
+      setFriendsError(false);
+      try {
+        const page = await fetchUserFriends(targetUid, { pageSize: FRIENDS_PAGE_SIZE });
+        if (token !== friendsRequestRef.current || targetRef.current !== targetUid) return;
+        const state = {
+          friends: page.friends || [],
+          total: Number(page.total) || 0,
+          cursor: page.nextCursor || null,
+          hasMore: Boolean(page.hasMore),
+          unavailable: false,
+        };
+        writeCache(FRIENDS_CACHE, targetUid, state);
+        applyFriendsState(state);
+      } catch (error) {
+        if (token !== friendsRequestRef.current || targetRef.current !== targetUid) return;
+        if (error?.status === 403) {
+          const state = { friends: [], total: 0, cursor: null, hasMore: false, unavailable: true };
+          writeCache(FRIENDS_CACHE, targetUid, state);
+          applyFriendsState(state);
+        } else if (!entry) {
+          setFriends([]);
+          setFriendsError(true);
+        }
+      } finally {
+        if (token === friendsRequestRef.current) setFriendsLoading(false);
+      }
+    },
+    [targetUid]
+  );
+
+  useEffect(() => {
+    if (profileTab !== 'friends' || isBlocked || !relationshipLoaded) return;
+    loadFriends();
+  }, [profileTab, isBlocked, relationshipLoaded, loadFriends]);
+
+  const loadMoreFriends = async () => {
+    if (!friendsCursor || !friendsHasMore || friendsLoadingMore) return;
+    const uid = targetUid;
+    setFriendsLoadingMore(true);
+    try {
+      const page = await fetchUserFriends(uid, { cursor: friendsCursor, pageSize: FRIENDS_PAGE_SIZE });
+      if (targetRef.current !== uid) return;
+      const seen = new Set(friends.map((friend) => friend.uid));
+      const merged = [...friends, ...(page.friends || []).filter((friend) => !seen.has(friend.uid))];
+      const state = {
+        friends: merged,
+        total: Number(page.total) || friendsTotal || 0,
+        cursor: page.nextCursor || null,
+        hasMore: Boolean(page.hasMore),
+        unavailable: false,
+      };
+      writeCache(FRIENDS_CACHE, uid, state);
+      applyFriendsState(state);
+    } catch (error) {
+      setFeedback({ type: 'error', text: error?.message || 'Could not load more friends.' });
+    } finally {
+      setFriendsLoadingMore(false);
+    }
+  };
+
+  // When the friendship starts/ends, the counts, the friends list and what the server reveals
+  // (like the email) are out of date: drop those caches and refresh just what is on screen.
+  useEffect(() => {
+    if (!relationshipLoaded || isSelf) return;
+    if (wasFriendRef.current !== null && wasFriendRef.current !== isFriend) {
+      STATS_CACHE.delete(targetUid);
+      FRIENDS_CACHE.delete(targetUid);
+      PROFILE_CACHE.delete(targetUid);
+      loadStats(true);
+      refreshProfile();
+      if (profileTab === 'friends') loadFriends({ force: true });
+    }
+    wasFriendRef.current = isFriend;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFriend, relationshipLoaded]);
+
+  const onRefresh = useCallback(async () => {
+    if (Date.now() - lastRefreshRef.current < REFRESH_COOLDOWN_MS) return; // protects against read spam
+    lastRefreshRef.current = Date.now();
+    setRefreshing(true);
+    try {
+      FRIENDS_CACHE.delete(targetUid);
+      await Promise.all([
+        refreshProfile(),
+        loadStats(true),
+        profileTab === 'friends' && !isBlocked ? loadFriends({ force: true }) : null,
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [targetUid, refreshProfile, loadStats, loadFriends, profileTab, isBlocked]);
+
+  /* ---------- derived ---------- */
 
   const friendCount = Number(friendStats?.friendCount ?? profile?.friendCount ?? 0) || 0;
   const mutualCount = Number(friendStats?.mutualCount ?? 0) || 0;
@@ -131,8 +377,13 @@ export default function ViewUserProfile() {
   const avatarThumbUrl = String(profile?.photoThumb || avatarUrl).trim();
   const coverUrl = String(profile?.coverPhoto || profile?.cover || profile?.coverUrl || profile?.banner || '').trim();
 
-  useEffect(() => setAvatarFailed(false), [avatarUrl]);
-  useEffect(() => setCoverFailed(false), [coverUrl]);
+  // Keyed on the URL that is actually displayed (it used to watch a different one).
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [avatarThumbUrl]);
+  useEffect(() => {
+    setCoverFailed(false);
+  }, [coverUrl]);
 
   // Success messages fade out on their own; errors stay until the next action.
   useEffect(() => {
@@ -153,11 +404,7 @@ export default function ViewUserProfile() {
     );
   }, [profile]);
 
-  const isSelf = user?.uid === targetUid;
-  const isBlocked = relationship.state === RELATIONSHIP.BLOCKED;
-  const blockedByMe = isBlocked && relationship.blockedByMe;
   const premiumActive = isPremiumActive(profile);
-  const isFriend = relationship.state === RELATIONSHIP.FRIENDS;
   // Email is private: only the owner and friends see it.
   const showEmail = !isBlocked && !!profile?.email && (isSelf || isFriend);
 
@@ -186,6 +433,15 @@ export default function ViewUserProfile() {
         },
       ].filter((item) => String(item.value || '').trim())
     : [];
+
+  // Don't hardcode a department in the placeholder: build it from the current student.
+  const introPlaceholder = `Hi, I'm ${currentProfile?.username || 'a fellow student'}${
+    currentProfile?.department ? ` from ${currentProfile.department}` : ''
+  }...`;
+
+  // Wait for the relationship before showing a profile, so a blocked student's details never flash
+  // and the wrong action (e.g. "Add friend" for an existing friend) never appears.
+  const showLoader = loading || (Boolean(profile) && !isSelf && !relationshipLoaded);
 
   /* ---------- actions ---------- */
 
@@ -219,8 +475,7 @@ export default function ViewUserProfile() {
     setMessageError('');
   };
 
-  // Errors now show inside the sheet (they used to appear hidden behind the modal),
-  // and an empty intro can no longer be sent.
+  // Errors show inside the sheet, and an empty intro can't be sent.
   const submitMessageRequest = async () => {
     const text = intro.trim();
     if (!text) {
@@ -237,6 +492,8 @@ export default function ViewUserProfile() {
         currentProfile,
         targetProfile: profile,
       });
+      INTRO_SENT.add(relationshipKey);
+      setIntroSent(true);
       setIntro('');
       closeMessageModal();
       setFeedback({ type: 'success', text: 'Message request sent.' });
@@ -318,7 +575,7 @@ export default function ViewUserProfile() {
             variant="secondary"
             loading={busy === 'decline'}
             disabled={anyBusy || !request}
-            onPress={() => runAction('decline', () => declineFriendRequest({ request, currentUid: user.uid, currentProfile }))}
+            onPress={() => runAction('decline', () => declineFriendRequest({ request, currentUid: user.uid, currentProfile }), 'Request declined.')}
           />
         </View>
       );
@@ -350,7 +607,13 @@ export default function ViewUserProfile() {
             )
           }
         />
-        <ActionButton label="Message" icon="mail-outline" variant="secondary" disabled={anyBusy} onPress={() => setMessageModal(true)} />
+        <ActionButton
+          label={introSent ? 'Requested' : 'Message'}
+          icon={introSent ? 'checkmark-done-outline' : 'mail-outline'}
+          variant="secondary"
+          disabled={anyBusy || introSent}
+          onPress={() => setMessageModal(true)}
+        />
         <ActionButton icon="ban-outline" variant="icon" accessibilityLabel="Block student" loading={busy === 'block'} disabled={anyBusy} onPress={confirmBlock} />
       </View>
     );
@@ -360,17 +623,28 @@ export default function ViewUserProfile() {
 
   const cardStyle = { backgroundColor: colors.card, borderColor: colors.borderDefault, shadowColor: colors.shadow };
   const subtitle = profile?.department || profile?.school;
+  const friendsTabCount = friendsTotal ?? friendCount;
 
   return (
     <ScreenShell title="Profile" showBack>
-      {loading ? (
+      {showLoader ? (
         <View style={[styles.loadingCard, cardStyle]}>
           <PageLoader label="Fetching student profile..." />
         </View>
       ) : profile ? (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} colors={[colors.brand]} />}
+        >
           <View style={styles.headerContainer}>
-            <View style={[styles.coverBanner, { backgroundColor: colors.brandLight }]}>
+            <Pressable
+              style={[styles.coverBanner, { backgroundColor: colors.brandLight }]}
+              onPress={() => setImageViewer({ uri: coverUrl, label: 'Cover photo' })}
+              disabled={!coverUrl || coverFailed || isBlocked}
+              accessibilityRole="imagebutton"
+              accessibilityLabel="View full-size cover photo"
+            >
               {coverUrl && !coverFailed && !isBlocked ? (
                 <Image
                   source={{ uri: coverUrl }}
@@ -389,15 +663,22 @@ export default function ViewUserProfile() {
                 </View>
               )}
               <View style={styles.coverScrim} />
-            </View>
+            </Pressable>
             <View style={styles.avatarWrapper}>
               <EvosAura size={104} active={premiumActive || profile?.role === 'admin'}>
-                <View style={[styles.avatarBorder, { backgroundColor: colors.surfacePrimary, shadowColor: colors.shadow }]}>
+                <Pressable
+                  style={[styles.avatarBorder, { backgroundColor: colors.surfacePrimary, shadowColor: colors.shadow }]}
+                  onPress={() => setImageViewer({ uri: avatarUrl || avatarThumbUrl, label: 'Profile photo' })}
+                  disabled={!avatarThumbUrl || avatarFailed || isBlocked}
+                  accessibilityRole="imagebutton"
+                  accessibilityLabel="View full-size profile photo"
+                >
                   {avatarThumbUrl && !avatarFailed && !isBlocked ? (
                     <Image
                       source={{ uri: avatarThumbUrl }}
                       style={styles.avatarImage}
                       contentFit="cover"
+                      cachePolicy="memory-disk"
                       accessibilityLabel={`${profile?.username || 'Student'} profile photo`}
                       onError={() => setAvatarFailed(true)}
                     />
@@ -410,7 +691,7 @@ export default function ViewUserProfile() {
                       )}
                     </View>
                   )}
-                </View>
+                </Pressable>
               </EvosAura>
             </View>
           </View>
@@ -425,7 +706,7 @@ export default function ViewUserProfile() {
               ) : null}
             </View>
             {!isBlocked && subtitle ? <Text style={[styles.subtitle, { color: colors.textSecondary }]} numberOfLines={1}>{subtitle}</Text> : null}
-            {showEmail ? <Text style={[styles.email, { color: colors.textTertiary }]}>{profile.email}</Text> : null}
+            {showEmail ? <Text style={[styles.email, { color: colors.textTertiary }]} selectable>{profile.email}</Text> : null}
           </View>
 
           {feedback ? (
@@ -445,6 +726,11 @@ export default function ViewUserProfile() {
                 color={feedback.type === 'error' ? danger : success}
               />
               <Text style={[styles.feedbackText, { color: feedback.type === 'error' ? danger : success }]}>{feedback.text}</Text>
+              {feedback.type === 'error' ? (
+                <Pressable onPress={() => setFeedback(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Dismiss message">
+                  <Ionicons name="close" size={16} color={danger} />
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
 
@@ -489,39 +775,109 @@ export default function ViewUserProfile() {
                 ) : null}
               </View>
 
-              <View style={[styles.sectionCard, cardStyle]}>
-                <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Academic profile</Text>
-                {academicItems.length ? (
-                  <View style={styles.infoGrid}>
-                    {academicItems.map((item) => (
-                      <InfoTile key={item.label} {...item} />
-                    ))}
-                  </View>
-                ) : (
-                  <Text style={[styles.bioText, { color: colors.textTertiary }]}>This student hasn't added academic details yet.</Text>
-                )}
+              <View style={[styles.profileTabs, { backgroundColor: colors.surfaceSecondary }]} accessibilityRole="tablist">
+                {[
+                  { key: 'information', label: 'Information', icon: 'person-outline' },
+                  { key: 'friends', label: friendsTabCount ? `Friends (${friendsTabCount})` : 'Friends', icon: 'people-outline' },
+                ].map((tab) => {
+                  const selected = profileTab === tab.key;
+                  return (
+                    <Pressable
+                      key={tab.key}
+                      style={[styles.profileTab, selected && { backgroundColor: colors.brand }]}
+                      onPress={() => setProfileTab(tab.key)}
+                      accessibilityRole="tab"
+                      accessibilityState={{ selected }}
+                    >
+                      <Ionicons name={tab.icon} size={16} color={selected ? colors.onBrand : colors.textSecondary} />
+                      <Text style={[styles.profileTabText, { color: selected ? colors.onBrand : colors.textSecondary }]}>{tab.label}</Text>
+                    </Pressable>
+                  );
+                })}
               </View>
 
-              {personalItems.length ? (
+              {profileTab === 'friends' ? (
                 <View style={[styles.sectionCard, cardStyle]}>
-                  <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Personal details</Text>
-                  <View style={styles.infoGrid}>
-                    {personalItems.map((item) => (
-                      <InfoTile key={item.label} {...item} />
-                    ))}
+                  {friendsUnavailable ? (
+                    <Text style={[styles.bioText, { color: colors.textTertiary }]}>This friend list is unavailable.</Text>
+                  ) : friendsLoading ? (
+                    <ActivityIndicator color={colors.brand} />
+                  ) : friendsError ? (
+                    <View style={styles.friendsErrorBox}>
+                      <Text style={[styles.bioText, { color: colors.textTertiary }]}>Couldn't load friends.</Text>
+                      <ActionButton label="Try again" icon="refresh-outline" variant="secondary" onPress={() => loadFriends({ force: true })} />
+                    </View>
+                  ) : friends.length ? (
+                    <View style={styles.friendList}>
+                      {friends.map((friend) => {
+                        const friendPhoto = friend.photoThumb || friend.photoURL || friend.photo || '';
+                        const friendName = friend.displayName || friend.username || 'Student';
+                        return (
+                          <Pressable
+                            key={friend.uid}
+                            style={({ pressed }) => [styles.friendRow, pressed && styles.friendRowPressed]}
+                            onPress={() => router.push(`/view-user-profile/${friend.uid}`)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`View ${friendName}'s profile`}
+                          >
+                            {friendPhoto ? (
+                              <Image source={{ uri: friendPhoto }} style={styles.friendAvatar} contentFit="cover" cachePolicy="memory-disk" />
+                            ) : (
+                              <View style={[styles.friendAvatar, styles.friendAvatarFallback, { backgroundColor: colors.brandLight }]}>
+                                <Text style={[styles.friendAvatarInitial, { color: colors.brandText }]}>{friendName.trim().charAt(0).toUpperCase() || 'S'}</Text>
+                              </View>
+                            )}
+                            <View style={styles.friendDetails}>
+                              <Text style={[styles.friendName, { color: colors.textPrimary }]} numberOfLines={1}>{friendName}</Text>
+                              <Text style={[styles.friendSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+                                {[friend.school, friend.department].filter(Boolean).join(' · ') || 'UniHelp student'}
+                              </Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                          </Pressable>
+                        );
+                      })}
+                      {friendsHasMore ? (
+                        <Pressable style={styles.loadMoreFriends} onPress={loadMoreFriends} disabled={friendsLoadingMore} accessibilityRole="button">
+                          {friendsLoadingMore ? <ActivityIndicator size="small" color={colors.brand} /> : <Text style={[styles.loadMoreFriendsText, { color: colors.brand }]}>Load more friends</Text>}
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  ) : (
+                    <Text style={[styles.bioText, { color: colors.textTertiary }]}>No friends to show yet.</Text>
+                  )}
+                </View>
+              ) : (
+                <>
+                  <View style={[styles.sectionCard, cardStyle]}>
+                    <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Academic profile</Text>
+                    {academicItems.length ? (
+                      <View style={styles.infoGrid}>
+                        {academicItems.map((item) => <InfoTile key={item.label} {...item} />)}
+                      </View>
+                    ) : (
+                      <Text style={[styles.bioText, { color: colors.textTertiary }]}>This student hasn't added academic details yet.</Text>
+                    )}
                   </View>
-                  <Text style={[styles.bioText, { color: colors.textTertiary, fontSize: 12 }]}>
-                    Only you can see these details.
-                  </Text>
-                </View>
-              ) : null}
 
-              {String(profile?.bio || '').trim() ? (
-                <View style={[styles.sectionCard, cardStyle]}>
-                  <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>About</Text>
-                  <Text style={[styles.bioText, { color: colors.textSecondary }]}>{String(profile.bio).trim()}</Text>
-                </View>
-              ) : null}
+                  {personalItems.length ? (
+                    <View style={[styles.sectionCard, cardStyle]}>
+                      <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Personal details</Text>
+                      <View style={styles.infoGrid}>
+                        {personalItems.map((item) => <InfoTile key={item.label} {...item} />)}
+                      </View>
+                      <Text style={[styles.bioText, { color: colors.textTertiary, fontSize: 12, marginTop: 10 }]}>Only you can see these details.</Text>
+                    </View>
+                  ) : null}
+
+                  {String(profile?.bio || '').trim() ? (
+                    <View style={[styles.sectionCard, cardStyle]}>
+                      <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>About</Text>
+                      <Text style={[styles.bioText, { color: colors.textSecondary }]}>{String(profile.bio).trim()}</Text>
+                    </View>
+                  ) : null}
+                </>
+              )}
             </>
           )}
         </ScrollView>
@@ -543,6 +899,48 @@ export default function ViewUserProfile() {
         </View>
       )}
 
+      {/* Full-size photo viewer: pinch to zoom, tap anywhere to close */}
+      <Modal visible={!!imageViewer} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setImageViewer(null)}>
+        <View style={styles.imageViewerRoot}>
+          <View style={styles.imageViewerBackdrop} />
+          {imageViewer?.uri ? (
+            <ScrollView
+              style={styles.imageViewerScroll}
+              contentContainerStyle={styles.imageViewerScrollContent}
+              maximumZoomScale={4}
+              minimumZoomScale={1}
+              bouncesZoom
+              centerContent
+              showsVerticalScrollIndicator={false}
+              showsHorizontalScrollIndicator={false}
+            >
+              <Pressable
+                onPress={() => setImageViewer(null)}
+                style={{ width: windowWidth, height: windowHeight }}
+                accessibilityRole="button"
+                accessibilityLabel="Close full-size image"
+              >
+                <Image
+                  source={{ uri: imageViewer.uri }}
+                  style={StyleSheet.absoluteFill}
+                  contentFit="contain"
+                  transition={180}
+                  accessibilityLabel={imageViewer.label}
+                />
+              </Pressable>
+            </ScrollView>
+          ) : null}
+          <Pressable
+            style={[styles.imageViewerClose, { top: insets.top + 10 }]}
+            onPress={() => setImageViewer(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Close image"
+          >
+            <Ionicons name="close" size={22} color="#FFFFFF" />
+          </Pressable>
+        </View>
+      </Modal>
+
       {/* Message request sheet — KeyboardAvoidingView keeps the input above the keyboard */}
       <Modal visible={messageModal} transparent animationType="slide" statusBarTranslucent onRequestClose={closeMessageModal}>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -551,7 +949,7 @@ export default function ViewUserProfile() {
             onPress={closeMessageModal}
             accessibilityLabel="Close message request"
           />
-          <View style={[styles.modalSheet, { backgroundColor: colors.modalBackground }]}>
+          <View style={[styles.modalSheet, { backgroundColor: colors.modalBackground, paddingBottom: Math.max(insets.bottom, 16) + 12 }]}>
             <View style={[styles.modalHandle, { backgroundColor: colors.borderDefault }]} />
             <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Send message request</Text>
             <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
@@ -563,7 +961,7 @@ export default function ViewUserProfile() {
                 setIntro(t);
                 if (messageError) setMessageError('');
               }}
-              placeholder="Hi, I'm also studying Mechanical Engineering..."
+              placeholder={introPlaceholder}
               placeholderTextColor={colors.placeholder}
               style={[
                 styles.messageInput,
@@ -579,7 +977,7 @@ export default function ViewUserProfile() {
               accessibilityLabel="Introduction message"
             />
             <View style={styles.inputMeta}>
-              <Text style={[styles.inputError, { color: danger }]}>{messageError}</Text>
+              <Text style={[styles.inputError, { color: danger }]} accessibilityLiveRegion="polite">{messageError}</Text>
               <Text style={[styles.counter, { color: colors.textTertiary }]}>{intro.length}/{INTRO_MAX}</Text>
             </View>
             <View style={styles.modalActions}>
@@ -678,7 +1076,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 36,
     alignItems: 'center',
-    justifyContent: 'center', // was the invalid `justify`
+    justifyContent: 'center',
     marginTop: 20,
   },
 
@@ -802,11 +1200,26 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   sectionTitle: { fontSize: 16, fontWeight: '800', marginBottom: 14 },
+  profileTabs: { flexDirection: 'row', gap: 4, marginHorizontal: 16, marginBottom: 16, padding: 4, borderRadius: 12 },
+  profileTab: { flex: 1, minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 8, borderRadius: 9 },
+  profileTabText: { fontSize: 12.5, fontWeight: '800' },
+  friendList: { gap: 8 },
+  friendsErrorBox: { alignItems: 'center', gap: 12 },
+  friendRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 58, paddingVertical: 5 },
+  friendRowPressed: { opacity: 0.72 },
+  friendAvatar: { width: 44, height: 44, borderRadius: 22 },
+  friendAvatarFallback: { alignItems: 'center', justifyContent: 'center' },
+  friendAvatarInitial: { fontSize: 17, fontWeight: '800' },
+  friendDetails: { flex: 1, gap: 3 },
+  friendName: { fontSize: 14, fontWeight: '800' },
+  friendSubtitle: { fontSize: 12 },
+  loadMoreFriends: { alignItems: 'center', justifyContent: 'center', minHeight: 40, marginTop: 4 },
+  loadMoreFriendsText: { fontSize: 13, fontWeight: '800' },
   infoGrid: { gap: 10 },
   infoTile: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 12 },
   infoIconContainer: { width: 34, height: 34, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   infoContent: { flex: 1 },
-  infoLabel: { fontSize: 12, fontWeight: '700' }, // no more all-caps labels
+  infoLabel: { fontSize: 12, fontWeight: '700' },
   infoValue: { fontSize: 14, fontWeight: '700', marginTop: 2 },
   bioText: { fontSize: 14.5, lineHeight: 22 },
 
@@ -824,6 +1237,11 @@ const styles = StyleSheet.create({
   emptyActions: { flexDirection: 'row', gap: 10, marginTop: 14, alignSelf: 'stretch' },
 
   modalOverlay: { flex: 1, justifyContent: 'flex-end' },
+  imageViewerRoot: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  imageViewerBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0, 0, 0, 0.96)' },
+  imageViewerScroll: { flex: 1, width: '100%' },
+  imageViewerScrollContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center' },
+  imageViewerClose: { position: 'absolute', right: 20, width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(30, 30, 30, 0.85)' },
   modalBackdrop: { ...StyleSheet.absoluteFillObject },
   modalSheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, paddingBottom: 28 },
   modalHandle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },

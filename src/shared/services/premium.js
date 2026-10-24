@@ -13,19 +13,19 @@ export const PREMIUM_PLAN = {
       key: 'offline-library',
       icon: 'cloud-download-outline',
       title: 'Offline Learning Library',
-      description: 'Save your favorite learning resources and study without internet.',
+      description: 'Save learning resources and keep studying when you are offline.',
     },
     {
       key: 'voice-messages',
       icon: 'mic-outline',
       title: 'Voice messages in chat',
-      description: 'Get richer conversations and faster explanations.',
+      description: 'Record and send voice messages in direct chats.',
     },
     {
       key: 'downloads',
       icon: 'download-outline',
-      title: 'Past question & lecture downloads',
-      description: 'Keep the study materials you need on hand.',
+      title: 'Save CBT papers for study',
+      description: 'Bookmark individual CBT papers alongside your other study resources.',
     },
     {
       key: 'verified-badge',
@@ -36,26 +36,14 @@ export const PREMIUM_PLAN = {
     {
       key: 'ai-limit',
       icon: 'sparkles-outline',
-      title: 'Higher AI response limit',
-      description: 'Get more support during busy study weeks.',
-    },
-    {
-      key: 'ads',
-      icon: 'remove-circle-outline',
-      title: 'Reduced ads experience',
-      description: 'Stay focused with fewer distractions.',
+      title: '10 AI requests each day',
+      description: 'Get twice the daily AI request allowance of the free plan.',
     },
     {
       key: 'uploads',
       icon: 'storefront-outline',
       title: 'Up to 10 hostel and 10 product uploads',
-      description: 'Grow your campus listings without the free limits.',
-    },
-    {
-      key: 'early-access',
-      icon: 'rocket-outline',
-      title: 'Early access to new tools',
-      description: 'Try the newest UniHelp features before everyone else.',
+      description: 'The free plan allows up to 5 of each listing type.',
     },
   ],
 };

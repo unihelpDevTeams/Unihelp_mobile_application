@@ -6,5 +6,6 @@ export {
   listenToPushTokenChanges,
   getLastNotificationResponse,
   clearLastNotificationResponse,
+  dismissNotification,
   configureAndroidNotificationChannels,
 } from '../utils/notificationPermission';

@@ -652,3 +652,11 @@ export const fetchFriendStats = async (uid) => {
   const response = await getJson(`/api/users/${encodeURIComponent(uid)}/social-counts`);
   return response.data || { friendCount: 0, mutualCount: 0, mutualFriendIds: [], isFriend: false };
 };
+
+export const fetchUserFriends = async (uid, { cursor = '', pageSize = FRIEND_PAGE_SIZE } = {}) => {
+  if (!uid) return { friends: [], total: 0, hasMore: false, nextCursor: null };
+  const params = new URLSearchParams({ limit: String(pageSize) });
+  if (cursor) params.set('cursor', cursor);
+  const response = await getJson(`/api/users/${encodeURIComponent(uid)}/friends?${params.toString()}`);
+  return response.data || { friends: [], total: 0, hasMore: false, nextCursor: null };
+};

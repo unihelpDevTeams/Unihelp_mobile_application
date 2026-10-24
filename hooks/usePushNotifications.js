@@ -7,6 +7,7 @@ import {
   listenToPushTokenChanges,
   getLastNotificationResponse,
   clearLastNotificationResponse,
+  dismissNotification,
   registerPushNotificationsForCurrentUser,
 } from '../services/pushNotifications';
 import { handleNotificationAction } from '../src/shared/services/notificationActions';
@@ -87,14 +88,23 @@ export function PushNotificationBootstrap() {
     const target = getRouteTarget(payload);
 
     if (response?.actionIdentifier && response.actionIdentifier !== 'default') {
-      const result = await handleNotificationAction({
-        actionIdentifier: response.actionIdentifier,
-        userText: response.userText,
-        notification: response.notification,
-        currentUserId: userId,
-      });
+      let result;
+      try {
+        result = await handleNotificationAction({
+          actionIdentifier: response.actionIdentifier,
+          userText: response.userText,
+          notification: response.notification,
+          currentUserId: userId,
+        });
+      } catch (error) {
+        console.warn('Notification action failed:', error?.message || error);
+        result = { handled: false };
+      }
+
+      const notificationIdentifier = response?.notification?.request?.identifier;
 
       if (result?.route) {
+        await dismissNotification(notificationIdentifier);
         if (result.route === '/pomodoroScreen') router.navigate(result.route);
         else router.push(result.route);
         if (clearStoredResponse) await clearLastNotificationResponse();
@@ -103,6 +113,7 @@ export function PushNotificationBootstrap() {
       // Reply, mute and mark-read are tray actions. They should complete silently
       // and never fall through to opening the app's destination screen.
       if (result?.handled) {
+        await dismissNotification(notificationIdentifier);
         if (clearStoredResponse) await clearLastNotificationResponse();
         return;
       }

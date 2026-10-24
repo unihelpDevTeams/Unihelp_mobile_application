@@ -36,7 +36,7 @@ import {
   isValidDateOfBirth,
   parseDateOfBirth,
 } from '../../src/signup/validation';
-import { useAuth } from '../../context/AuthContext';
+import { hasRequiredProfileDetails, useAuth } from '../../context/AuthContext';
 import { saveUserProfile, fetchDailyStreak } from '../../services/firestoreSync';
 import { getDocs, collection, query, where } from 'firebase/firestore';
 import { db } from '../../firebase/config';
@@ -359,7 +359,8 @@ const updateProfilePhoto = async ({ kind = 'photo', uri }) => {
 
 // Fields shown together inside the single "Edit Profile" sheet, in order.
 const fields = [
-  { key: 'username', label: 'Name', placeholder: 'Add your name', icon: 'person-outline' },
+  { key: 'displayName', label: 'Name', placeholder: 'Add your name', icon: 'person-outline' },
+  { key: 'username', label: 'Username', placeholder: 'Choose a username', icon: 'at-outline' },
   { key: 'bio', label: 'About', placeholder: 'Tell others a little about yourself', icon: 'chatbubble-ellipses-outline', multiline: true, maxLength: BIO_MAX_LENGTH },
   { key: 'school', label: 'School', placeholder: 'Add your school', icon: 'school-outline' },
   { key: 'department', label: 'Department', placeholder: 'Add your department', icon: 'library-outline' },
@@ -378,7 +379,7 @@ const THEME_OPTIONS = [
 const POST_PRESET_COLORS = { indigo: '#4F46E5', violet: '#7C3AED', blue: '#0284C7', green: '#15803D', orange: '#EA580C', pink: '#DB2777', red: '#DC2626', dark: '#111827' };
 
 const emptyForm = {
-  username: '', school: '', schoolId: '', department: '', departmentId: '', faculty: '', level: '', location: '', bio: '', gender: '', dateOfBirth: '', role: 'university',
+  displayName: '', username: '', school: '', schoolId: '', department: '', departmentId: '', faculty: '', level: '', location: '', bio: '', gender: '', dateOfBirth: '', role: 'university',
 };
 
 // Sheets are mutually exclusive — only one is meaningfully open at a time.
@@ -407,7 +408,7 @@ const formatPostDate = (value) => {
 export default function ProfileScreen() {
   const router = useRouter();
   const { edit } = useLocalSearchParams();
-  const { user, profile, refreshProfile, logout } = useAuth();
+  const { user, profile, profileSyncing, refreshProfile, logout } = useAuth();
   const { colors, isDark, themeMode, setTheme } = useTheme();
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
@@ -734,10 +735,13 @@ export default function ProfileScreen() {
 
   // Used by the app-level incomplete-profile redirect after sign-in.
   useEffect(() => {
-    if (String(edit) !== '1') return undefined;
-    const timer = setTimeout(() => setSheet(SHEET.EDIT_PROFILE), 0);
+    if (String(edit) !== '1' || profileSyncing || !user?.uid) return undefined;
+    const timer = setTimeout(() => {
+      router.setParams({ edit: '0' });
+      if (!hasRequiredProfileDetails(profile)) setSheet(SHEET.EDIT_PROFILE);
+    }, 0);
     return () => clearTimeout(timer);
-  }, [edit]);
+  }, [edit, profile, profileSyncing, router, user?.uid]);
 
   // The Firestore profile can arrive just after this screen (or its edit sheet)
   // opens following sign-up. Keep hydrating the form until the user starts an
@@ -746,7 +750,8 @@ export default function ProfileScreen() {
     if (isDirty) return;
     const signupName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim();
     const next = {
-      username: signupName || profile?.displayName || user?.displayName || profile?.username || '',
+      displayName: signupName || profile?.displayName || user?.displayName || profile?.username || '',
+      username: /^[a-zA-Z0-9_]{3,30}$/.test(profile?.username || '') ? profile.username : '',
       school: profile?.school || profile?.universityName || profile?.university || '',
       schoolId: profile?.schoolId || profile?.universityId || '',
       department: profile?.department || profile?.departmentName || '',
@@ -850,9 +855,9 @@ export default function ProfileScreen() {
   }, [loadFriendCount, loadStats, loadStreakAndChallenge, loadProfilePosts, profileView]);
 
   const initials = useMemo(() => {
-    const source = form.username || user?.email || 'S';
+    const source = form.displayName || form.username || user?.email || 'S';
     return source.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('') || 'S';
-  }, [form.username, user?.email]);
+  }, [form.displayName, form.username, user?.email]);
 
   const profilePhoto = profile?.photoURL || profile?.photo || user?.photoURL || '';
   const profilePhotoThumb = profile?.photoThumb || profilePhoto;
@@ -867,7 +872,8 @@ export default function ProfileScreen() {
     const checks = [
       { done: !!profilePhoto, hint: 'Add a profile photo — tap your avatar.' },
       { done: !!profileCover, hint: 'Add a cover photo to make your profile yours.' },
-      { done: !!form.username.trim(), hint: 'Add your name.' },
+      { done: !!form.displayName.trim(), hint: 'Add your name.' },
+      { done: !!form.username.trim(), hint: 'Choose a username.' },
       { done: !!form.bio.trim(), hint: 'Write a short About so people know you.' },
       { done: !!form.school, hint: 'Add your school.' },
       { done: !!form.department, hint: 'Add your department.' },
@@ -999,13 +1005,18 @@ export default function ProfileScreen() {
   };
 
   const save = async () => {
-    const trimmedName = form.username.trim();
+    const trimmedName = form.displayName.trim();
+    const trimmedUsername = form.username.trim();
     if (!trimmedName) {
       showStatus({ type: 'error', text: 'Your name cannot be empty.' });
       return;
     }
     if (trimmedName.length < 2) {
       showStatus({ type: 'error', text: 'Please enter a name with at least 2 characters.' });
+      return;
+    }
+    if (trimmedUsername.length < 3 || trimmedUsername.length > 30 || !/^[a-zA-Z0-9_]+$/.test(trimmedUsername)) {
+      showStatus({ type: 'error', text: 'Username must be 3-30 characters using only letters, numbers, or underscores.' });
       return;
     }
     if (form.dateOfBirth && !isValidDateOfBirth(form.dateOfBirth)) {
@@ -1018,9 +1029,19 @@ export default function ProfileScreen() {
     try {
       setSaving(true);
       setStatus(null);
+      if (trimmedUsername.toLowerCase() !== String(profile?.username || '').trim().toLowerCase()) {
+        const matchingUsers = await getDocs(query(
+          collection(db, COLLECTIONS.users),
+          where('usernameLower', '==', trimmedUsername.toLowerCase())
+        ));
+        if (matchingUsers.docs.some((item) => item.id !== user?.uid)) {
+          showStatus({ type: 'error', text: 'That username is already taken.' });
+          return;
+        }
+      }
       const [firstName, ...lastNameParts] = trimmedName.split(/\s+/);
       await saveUserProfile({
-        username: profile?.username || trimmedName,
+        username: trimmedUsername,
         displayName: trimmedName,
         firstName,
         lastName: lastNameParts.join(' '),
@@ -1189,8 +1210,8 @@ export default function ProfileScreen() {
       </View>
       <Text style={styles.planCopy}>
         {premiumActive
-          ? 'You have full access to AI tutoring, unlimited CBT mock exams and ad-free browsing.'
-          : 'Upgrade to Premium for unlimited AI tutoring sessions, full-length JAMB mock exams and an ad-free experience.'}
+          ? 'Your Premium plan includes offline study resources, voice messages, 10 daily AI requests, and higher hostel and product upload limits.'
+          : 'Premium adds offline study resources, voice messages, 10 daily AI requests, saved CBT papers, and higher hostel and product upload limits.'}
       </Text>
       {!premiumActive ? (
         <Pressable onPress={() => goTo('/premium')} style={({ pressed }) => [styles.saveButton, pressed && styles.saveButtonPressed]} accessibilityRole="button" accessibilityLabel="Upgrade to premium">
@@ -1548,7 +1569,7 @@ export default function ProfileScreen() {
 
           <View style={styles.identityTextWrap}>
             <View style={styles.identityNameRow}>
-              <Text style={styles.identityName} numberOfLines={1}>{form.username || 'Student profile'}</Text>
+              <Text style={styles.identityName} numberOfLines={1}>{form.displayName || 'Student profile'}</Text>
               {premiumActive ? (
                 <Ionicons name="checkmark-circle" size={18} color={colors.brand} accessibilityLabel="Verified Premium student" />
               ) : null}

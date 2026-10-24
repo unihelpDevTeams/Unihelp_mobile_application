@@ -29,6 +29,7 @@ export const COLLECTIONS = {
   questionRequests: 'questionRequests',
   promoSpotlights: 'promoSpotlights',
   promoSpotlightEvents: 'promoSpotlightEvents',
+  homeHeroSlides: 'homeHeroSlides',
 };
 
 export const userSubcollections = {

@@ -1,6 +1,6 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { ActivityIndicator, AppState, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
@@ -252,6 +252,7 @@ export default function NotificationsPage() {
   const loadingMoreRef = useRef(false);
   const requestIdRef = useRef(0);
   const mountedRef = useRef(true);
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -322,14 +323,27 @@ export default function NotificationsPage() {
     }
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      const mode = hasLoadedRef.current ? 'refresh' : 'initial';
+      hasLoadedRef.current = true;
+      if (mode === 'refresh') setRefreshing(true);
+      fetchPage(mode);
+      return undefined;
+    }, [fetchPage])
+  );
+
   useEffect(() => {
-    // Start the request after this render commits. This avoids synchronously
-    // scheduling state updates while React is still processing the effect.
-    const initialLoad = setTimeout(() => {
-      fetchPage('initial');
-    }, 0);
-    return () => clearTimeout(initialLoad);
-  }, [fetchPage]);
+    let previousState = AppState.currentState;
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      const resumed = ['inactive', 'background'].includes(previousState) && nextState === 'active';
+      previousState = nextState;
+      if (!resumed || !hasLoadedRef.current || !userId || !mountedRef.current) return;
+      setRefreshing(true);
+      fetchPage('refresh');
+    });
+    return () => subscription.remove();
+  }, [fetchPage, userId]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);

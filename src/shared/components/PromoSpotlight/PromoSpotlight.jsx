@@ -51,7 +51,7 @@ const clamp = (value, min, max, fallback) => {
   return Math.min(max, Math.max(min, n));
 };
 
-export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) {
+export default function PromoSpotlight({ promo, visible, onDismiss, onAction, blurTarget }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors, shadows, isDark } = useTheme();
@@ -241,7 +241,8 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction }) 
         <BlurView
           intensity={Platform.OS === 'ios' ? 40 : 60}
           tint="dark"
-          experimentalBlurMethod="dimezisBlurView"
+          blurMethod="dimezisBlurView"
+          blurTarget={blurTarget}
           style={StyleSheet.absoluteFill}
         />
         <View style={[StyleSheet.absoluteFill, { backgroundColor: dimColor }]} />

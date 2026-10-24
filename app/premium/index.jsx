@@ -636,9 +636,7 @@ export default function PremiumPage() {
     ? daysLeft == null
       ? `Your gifted Premium access is active until ${expiryLabel}.`
       : `You have ${daysLeft} days of gifted Premium. Your access stays active until ${expiryLabel}.`
-    : countdownParts
-      ? `Your Premium plan is active until ${expiryLabel}. Keep using up to ${COMMERCE_UPLOAD_LIMITS.premium} product uploads.`
-      : `Premium is active - up to ${COMMERCE_UPLOAD_LIMITS.premium} product uploads`;
+    : `Your Premium benefits are active until ${expiryLabel}: offline learning, voice messages, 10 daily AI requests, and up to ${COMMERCE_UPLOAD_LIMITS.premium} hostel and product uploads.`;
   const progressPct = useMemo(() => {
     if (!countdownParts) return null;
     const totalDays = isAdminGift ? ADMIN_PREMIUM_GIFT_DAYS : (PREMIUM_PLAN?.durationDays || 30);
@@ -751,7 +749,7 @@ export default function PremiumPage() {
           </View>
           <Text style={styles.heroTitle}>Unlock Student Premium</Text>
           <Text style={styles.heroText}>
-            More downloads, stronger AI help, a verified badge, and up to {COMMERCE_UPLOAD_LIMITS.premium} hostel plus {COMMERCE_UPLOAD_LIMITS.premium} product uploads.
+            Study offline, send voice messages, save CBT papers, get 10 AI requests daily, and publish up to {COMMERCE_UPLOAD_LIMITS.premium} hostels and {COMMERCE_UPLOAD_LIMITS.premium} products.
           </Text>
         </View>
       )}
@@ -840,20 +838,6 @@ export default function PremiumPage() {
             </View>
           </View>
 
-          <View style={styles.featureList}>
-            {PREMIUM_PLAN.features.map((feature) => (
-              <View key={feature.key || feature.title} style={styles.featureRow}>
-                <View style={styles.checkIcon}>
-                  <Ionicons name="checkmark" size={13} color={colors.brand} />
-                </View>
-                <View style={styles.featureCopy}>
-                  <Text style={styles.featureText}>{feature.title}</Text>
-                  {feature.description ? <Text style={styles.featureDescription}>{feature.description}</Text> : null}
-                </View>
-              </View>
-            ))}
-          </View>
-
           {message ? (
             <View style={styles.successBox}>
               <Ionicons name="checkmark-circle" size={17} color={colors.brand} />
@@ -891,6 +875,23 @@ export default function PremiumPage() {
           </Pressable>
         </View>
       )}
+
+      <View style={styles.planCard}>
+        <Text style={styles.sectionTitle}>Included Premium benefits</Text>
+        <View style={styles.featureList}>
+          {PREMIUM_PLAN.features.map((feature) => (
+            <View key={feature.key || feature.title} style={styles.featureRow}>
+              <View style={styles.checkIcon}>
+                <Ionicons name="checkmark" size={13} color={colors.brand} />
+              </View>
+              <View style={styles.featureCopy}>
+                <Text style={styles.featureText}>{feature.title}</Text>
+                {feature.description ? <Text style={styles.featureDescription}>{feature.description}</Text> : null}
+              </View>
+            </View>
+          ))}
+        </View>
+      </View>
 
       {isAdminGift ? (
         <View style={styles.giftNotice}>

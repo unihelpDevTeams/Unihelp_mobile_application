@@ -1,7 +1,27 @@
-import React, { memo, useCallback, useMemo, useRef, useState, useEffect } from 'react';
-import { ActivityIndicator, View, Text, Pressable, StyleSheet, Animated, PanResponder, Modal } from 'react-native';
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+
+import {
+  ActivityIndicator,
+  View,
+  Text,
+  Pressable,
+  StyleSheet,
+  Animated,
+  PanResponder,
+  Modal,
+  useWindowDimensions,
+} from 'react-native';
+
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { useAuth } from '../../../context/AuthContext';
 import { isPremiumActive } from '../services/premium';
@@ -22,337 +42,845 @@ const COLORS = {
 const SWIPE_TO_CANCEL_THRESHOLD = -80;
 const WAVE_BARS = 5;
 
+const clamp = (value, min, max) =>
+  Math.min(Math.max(Number(value) || 0, min), max);
+
 /**
- * Voice recorder bar that appears in the composer area.
- * Hold to record, release to send, swipe left to cancel.
- * Recording is a premium feature; existing voice messages can be played by everyone.
+ * UniHelp Voice Recorder Bar
+ *
+ * Interaction:
+ * 1. Tap the microphone to start recording.
+ * 2. Tap the send button to send the recording.
+ * 3. Swipe left across the recording surface to cancel.
+ * 4. Recording automatically sends when the maximum duration is reached.
+ *
+ * Voice recording is Premium-only.
  */
-const VoiceRecorderBar = memo(({ conversationId, onVoiceSent, onStateChange, expanded = false }) => {
-  const router = useRouter();
-  const { profile } = useAuth();
-  const isPremium = isPremiumActive(profile);
-  const {
-    isRecording,
-    recordingDuration,
-    isUploading,
-    error,
-    startRecording,
-    cancelRecording,
-    sendRecording,
-    formatDuration,
-    maxDurationMs,
-  } = useAudioRecorder({ conversationId, isPremium });
+const VoiceRecorderBar = memo(
+  ({
+    conversationId,
+    onVoiceSent,
+    onStateChange,
+    expanded = false,
+  }) => {
+    const router = useRouter();
+    const { profile } = useAuth();
+    const { width: screenWidth } = useWindowDimensions();
 
-  const [showUpgrade, setShowUpgrade] = useState(false);
-  const [isSending, setIsSending] = useState(false);
-  const [isCancelling, setIsCancelling] = useState(false);
-  const panX = useRef(new Animated.Value(0)).current;
-  const isSwiping = useRef(false);
-  const sendingRef = useRef(false);
+    const isPremium = isPremiumActive(profile);
 
-  // Wave animation values
-  const waveAnims = useRef(
-    Array.from({ length: WAVE_BARS }, () => new Animated.Value(0.3))
-  ).current;
-
-  const recorderState = isUploading || isSending ? 'uploading' : isRecording ? 'recording' : 'idle';
-
-  // Keep the containing composer in sync so it can swap the text input for
-  // a dedicated recorder surface instead of squeezing both into one row.
-  useEffect(() => {
-    onStateChange?.(recorderState);
-  }, [onStateChange, recorderState]);
-
-  useEffect(() => () => onStateChange?.('idle'), [onStateChange]);
-
-  // Animate the waveform while recording and while the file is uploading.
-  useEffect(() => {
-    if (!isRecording && !isUploading) {
-      waveAnims.forEach((anim) => anim.setValue(0.3));
-      return;
-    }
-
-    const waveLoops = waveAnims.map((anim) => {
-      const randomDuration = 200 + Math.random() * 400;
-      const randomHeight = 0.4 + Math.random() * 0.6;
-      const loop = Animated.loop(Animated.sequence([
-        Animated.timing(anim, {
-          toValue: randomHeight,
-          duration: randomDuration,
-          useNativeDriver: false,
-        }),
-        Animated.timing(anim, {
-          toValue: 0.3,
-          duration: randomDuration * 0.7,
-          useNativeDriver: false,
-        }),
-      ]));
-      loop.start();
-      return loop;
+    const {
+      isRecording,
+      recordingDuration,
+      isUploading,
+      error,
+      startRecording,
+      cancelRecording,
+      sendRecording,
+      formatDuration,
+      maxDurationMs,
+    } = useAudioRecorder({
+      conversationId,
+      isPremium,
     });
 
-    return () => {
-      waveLoops.forEach((loop) => loop.stop());
-      waveAnims.forEach((anim) => anim.stopAnimation());
-    };
-  }, [isRecording, isUploading, isSending, waveAnims]);
+    const [showUpgrade, setShowUpgrade] = useState(false);
+    const [isSending, setIsSending] = useState(false);
+    const [isCancelling, setIsCancelling] = useState(false);
+    const [actionError, setActionError] = useState('');
 
-  const finalizeAndSend = useCallback(async () => {
-    if (sendingRef.current) return;
+    const panX = useRef(new Animated.Value(0)).current;
 
-    sendingRef.current = true;
-    setIsSending(true);
-    try {
-      const result = await sendRecording();
-      if (result && onVoiceSent) {
-        await onVoiceSent(result);
-      }
-    } finally {
-      setIsSending(false);
-      sendingRef.current = false;
-    }
-  }, [onVoiceSent, sendRecording]);
+    const sendingRef = useRef(false);
+    const startingRef = useRef(false);
+    const cancellingRef = useRef(false);
+    const mountedRef = useRef(true);
 
-  useEffect(() => {
-    if (!isRecording || recordingDuration < maxDurationMs || sendingRef.current) return;
-    finalizeAndSend();
-  }, [finalizeAndSend, isRecording, maxDurationMs, recordingDuration]);
+    const onStateChangeRef = useRef(onStateChange);
+    const onVoiceSentRef = useRef(onVoiceSent);
 
-  const panResponder = useMemo(
-    () => PanResponder.create({
-      onStartShouldSetPanResponder: () => isRecording,
-      onMoveShouldSetPanResponder: () => isRecording && !sendingRef.current,
-      onPanResponderMove: (_, gesture) => {
-        if (gesture.dx < 0 && !sendingRef.current) {
-          panX.setValue(gesture.dx);
-          isSwiping.current = Math.abs(gesture.dx) > 20;
-          setIsCancelling(gesture.dx < SWIPE_TO_CANCEL_THRESHOLD / 2);
-        }
-      },
-      onPanResponderRelease: async (_, gesture) => {
-        if (!isRecording || sendingRef.current) return;
+    const waveAnims = useRef(
+      Array.from(
+        { length: WAVE_BARS },
+        () => new Animated.Value(0.3)
+      )
+    ).current;
 
-        if (gesture.dx < SWIPE_TO_CANCEL_THRESHOLD) {
-          // Swipe left to cancel
-          sendingRef.current = true;
-          setIsCancelling(true);
-          try {
-            await cancelRecording();
-          } finally {
-            sendingRef.current = false;
-          }
-        } else {
-          // Release to send
-          await finalizeAndSend();
-        }
-        Animated.spring(panX, {
-          toValue: 0,
-          useNativeDriver: true,
-        }).start();
-        isSwiping.current = false;
-        setIsCancelling(false);
-      },
-    }),
-    [cancelRecording, finalizeAndSend, isRecording, panX]
-  );
+    const waveLoopsRef = useRef([]);
+    const gestureStartXRef = useRef(0);
 
-  const handleUpgrade = useCallback(() => {
-    setShowUpgrade(false);
-    router.navigate('/premium');
-  }, [router]);
+    const recorderState =
+      isUploading || isSending
+        ? 'uploading'
+        : isRecording
+          ? 'recording'
+          : 'idle';
 
-  const handlePressIn = useCallback(async () => {
-    if (!isPremium) {
-      setShowUpgrade(true);
-      return;
-    }
-    if (sendingRef.current) return;
-    sendingRef.current = true;
-    try {
-      await startRecording();
-    } finally {
-      sendingRef.current = false;
-    }
-  }, [isPremium, startRecording]);
-
-  const durationMs = recordingDuration;
-  const progress = maxDurationMs > 0 ? durationMs / maxDurationMs : 0;
-  const maxReached = durationMs >= maxDurationMs;
-  const seconds = Math.floor(durationMs / 1000);
-
-  const upgradeModal = (
-    <Modal visible={showUpgrade} transparent animationType="fade" onRequestClose={() => setShowUpgrade(false)}>
-      <Pressable style={styles.modalBackdrop} onPress={() => setShowUpgrade(false)} />
-      <View style={styles.modalSheet}>
-        <View style={styles.modalHandle} />
-        <View style={styles.modalIconWrap}>
-          <Ionicons name="lock-closed" size={24} color="#B45309" />
-        </View>
-        <Text style={styles.modalTitle}>Premium Feature</Text>
-        <Text style={styles.modalText}>
-          Recording voice messages is available to Premium members. Upgrade to record and send your own voice notes.
-        </Text>
-        <Pressable style={styles.modalButton} onPress={handleUpgrade}>
-          <Ionicons name="sparkles" size={16} color="#FFFFFF" />
-          <Text style={styles.modalButtonText}>Upgrade to Premium</Text>
-        </Pressable>
-        <Pressable style={styles.modalCancel} onPress={() => setShowUpgrade(false)}>
-          <Text style={styles.modalCancelText}>Maybe later</Text>
-        </Pressable>
-      </View>
-    </Modal>
-  );
-
-  // If not premium, show a button that triggers upgrade prompt
-  if (!isPremium) {
-    return (
-      <>
-        <Pressable
-          onPress={() => setShowUpgrade(true)}
-          style={({ pressed }) => [
-            styles.micButton,
-            pressed && styles.micButtonPressed,
-          ]}
-        >
-          <Ionicons name="mic-outline" size={20} color={COLORS.inkSoft} />
-        </Pressable>
-        {upgradeModal}
-      </>
+    const durationMs = Math.max(
+      0,
+      Number(recordingDuration) || 0
     );
-  }
 
-  return (
-    <View style={[styles.container, expanded && styles.containerExpanded]}>
-      {isRecording ? (
-        <Animated.View
-          style={[
-            styles.recordingContainer,
-            { transform: [{ translateX: panX }] },
-            isCancelling && styles.recordingContainerCancelling,
-          ]}
-          {...panResponder.panHandlers}
-        >
-          {/* Cancel indicator */}
-          <View style={[styles.cancelZone, isCancelling && styles.cancelZoneActive]}>
-            <Ionicons
-              name={isCancelling ? "close-circle" : "arrow-back"}
-              size={18}
-              color={isCancelling ? COLORS.white : COLORS.danger}
-            />
-            <Text style={[styles.cancelText, isCancelling && styles.cancelTextActive]}>
-              {isCancelling ? 'Release to cancel' : 'Slide'}
+    const maximumDuration = Math.max(
+      0,
+      Number(maxDurationMs) || 0
+    );
+
+    const progress = maximumDuration > 0
+      ? clamp(durationMs / maximumDuration, 0, 1)
+      : 0;
+
+    const maxReached =
+      maximumDuration > 0 &&
+      durationMs >= maximumDuration;
+
+    const seconds = Math.floor(durationMs / 1000);
+
+    const isBusy =
+      isUploading ||
+      isSending ||
+      sendingRef.current ||
+      startingRef.current ||
+      cancellingRef.current;
+
+    const availableWidth = Math.max(0, screenWidth - 32);
+
+    /*
+     * Keep the recording surface within the available width
+     * so it cannot push the message composer off-screen.
+     */
+    const recorderWidth = expanded
+      ? '100%'
+      : Math.min(availableWidth, 440);
+
+    /*
+     * Keep callbacks up to date without repeatedly notifying
+     * the parent every time an inline callback changes identity.
+     */
+    useEffect(() => {
+      onStateChangeRef.current = onStateChange;
+    }, [onStateChange]);
+
+    useEffect(() => {
+      onVoiceSentRef.current = onVoiceSent;
+    }, [onVoiceSent]);
+
+    useEffect(() => {
+      onStateChangeRef.current?.(recorderState);
+    }, [recorderState]);
+
+    useEffect(() => {
+      mountedRef.current = true;
+
+      return () => {
+        mountedRef.current = false;
+
+        onStateChangeRef.current?.('idle');
+
+        waveLoopsRef.current.forEach((loop) => {
+          loop.stop();
+        });
+
+        waveLoopsRef.current = [];
+
+        waveAnims.forEach((anim) => {
+          anim.stopAnimation();
+        });
+
+        panX.stopAnimation();
+      };
+    }, [waveAnims, panX]);
+
+    /*
+     * Waveform animation lifecycle.
+     */
+    const stopWaveAnimations = useCallback(() => {
+      waveLoopsRef.current.forEach((loop) => {
+        loop.stop();
+      });
+
+      waveLoopsRef.current = [];
+
+      waveAnims.forEach((anim) => {
+        anim.stopAnimation();
+        anim.setValue(0.3);
+      });
+    }, [waveAnims]);
+
+    useEffect(() => {
+      if (!isRecording && !isUploading && !isSending) {
+        stopWaveAnimations();
+        return undefined;
+      }
+
+      const loops = waveAnims.map((anim) => {
+        const randomDuration = 200 + Math.random() * 400;
+        const randomHeight = 0.4 + Math.random() * 0.6;
+
+        const loop = Animated.loop(
+          Animated.sequence([
+            Animated.timing(anim, {
+              toValue: randomHeight,
+              duration: randomDuration,
+              useNativeDriver: false,
+            }),
+            Animated.timing(anim, {
+              toValue: 0.3,
+              duration: randomDuration * 0.7,
+              useNativeDriver: false,
+            }),
+          ])
+        );
+
+        return loop;
+      });
+
+      waveLoopsRef.current = loops;
+
+      loops.forEach((loop) => loop.start());
+
+      return () => {
+        loops.forEach((loop) => loop.stop());
+
+        waveLoopsRef.current = waveLoopsRef.current.filter(
+          (loop) => !loops.includes(loop)
+        );
+      };
+    }, [
+      isRecording,
+      isUploading,
+      isSending,
+      waveAnims,
+      stopWaveAnimations,
+    ]);
+
+    /*
+     * Reset the horizontal offset after each gesture.
+     */
+    const resetPan = useCallback(() => {
+      Animated.spring(panX, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 100,
+        friction: 12,
+      }).start();
+    }, [panX]);
+
+    /*
+     * Start recording once per tap.
+     */
+    const handleStartRecording = useCallback(async () => {
+      if (!isPremium) {
+        setShowUpgrade(true);
+        return;
+      }
+
+      if (
+        startingRef.current ||
+        sendingRef.current ||
+        cancellingRef.current ||
+        isRecording ||
+        isUploading
+      ) {
+        return;
+      }
+
+      startingRef.current = true;
+      setActionError('');
+
+      try {
+        await startRecording();
+      } catch (err) {
+        if (mountedRef.current) {
+          setActionError(
+            err?.message || 'Unable to start recording. Please try again.'
+          );
+        }
+      } finally {
+        startingRef.current = false;
+      }
+    }, [
+      isPremium,
+      isRecording,
+      isUploading,
+      startRecording,
+    ]);
+
+    /*
+     * Send exactly once.
+     *
+     * Errors are surfaced in the UI instead of leaving an
+     * unhandled promise rejection.
+     */
+    const finalizeAndSend = useCallback(async () => {
+      if (
+        sendingRef.current ||
+        startingRef.current ||
+        cancellingRef.current ||
+        !isRecording
+      ) {
+        return;
+      }
+
+      sendingRef.current = true;
+
+      if (mountedRef.current) {
+        setIsSending(true);
+        setActionError('');
+      }
+
+      try {
+        const result = await sendRecording();
+
+        if (result && onVoiceSentRef.current) {
+          await onVoiceSentRef.current(result);
+        }
+      } catch (err) {
+        if (mountedRef.current) {
+          setActionError(
+            err?.message || 'Failed to send voice message. Please try again.'
+          );
+        }
+      } finally {
+        sendingRef.current = false;
+
+        if (mountedRef.current) {
+          setIsSending(false);
+        }
+
+        resetPan();
+      }
+    }, [
+      isRecording,
+      sendRecording,
+      resetPan,
+    ]);
+
+    /*
+     * Cancel safely without allowing a simultaneous send.
+     */
+    const handleCancelRecording = useCallback(async () => {
+      if (
+        cancellingRef.current ||
+        sendingRef.current ||
+        startingRef.current ||
+        !isRecording
+      ) {
+        return;
+      }
+
+      cancellingRef.current = true;
+
+      if (mountedRef.current) {
+        setIsCancelling(true);
+        setActionError('');
+      }
+
+      try {
+        await cancelRecording();
+      } catch (err) {
+        if (mountedRef.current) {
+          setActionError(
+            err?.message || 'Unable to cancel recording. Please try again.'
+          );
+        }
+      } finally {
+        cancellingRef.current = false;
+
+        if (mountedRef.current) {
+          setIsCancelling(false);
+        }
+
+        resetPan();
+      }
+    }, [
+      isRecording,
+      cancelRecording,
+      resetPan,
+    ]);
+
+    /*
+     * Auto-send at the recording duration limit.
+     */
+    useEffect(() => {
+      if (
+        !isRecording ||
+        maximumDuration <= 0 ||
+        durationMs < maximumDuration ||
+        sendingRef.current ||
+        cancellingRef.current
+      ) {
+        return;
+      }
+
+      finalizeAndSend();
+    }, [
+      isRecording,
+      durationMs,
+      maximumDuration,
+      finalizeAndSend,
+    ]);
+
+    /*
+     * Gesture handling:
+     * - Only claim the gesture after a meaningful horizontal move.
+     * - Let ordinary taps reach the send button.
+     * - Cancel only when the user crosses the left threshold.
+     * - Releasing without crossing the threshold does not auto-send;
+     *   the explicit send button handles sending.
+     */
+    const panResponder = useMemo(
+      () =>
+        PanResponder.create({
+          onStartShouldSetPanResponder: () => false,
+
+          onMoveShouldSetPanResponder: (_, gesture) => {
+            if (
+              !isRecording ||
+              sendingRef.current ||
+              startingRef.current ||
+              cancellingRef.current
+            ) {
+              return false;
+            }
+
+            const horizontal =
+              Math.abs(gesture.dx) > 8;
+
+            const mostlyHorizontal =
+              Math.abs(gesture.dx) >
+              Math.abs(gesture.dy) * 1.2;
+
+            return horizontal && mostlyHorizontal;
+          },
+
+          onPanResponderGrant: () => {
+            gestureStartXRef.current = 0;
+          },
+
+          onPanResponderMove: (_, gesture) => {
+            if (
+              sendingRef.current ||
+              cancellingRef.current
+            ) {
+              return;
+            }
+
+            /*
+             * Allow left movement only; slight rightward
+             * movement returns the surface toward its origin.
+             */
+            const dx = Math.min(0, gesture.dx);
+
+            panX.setValue(dx);
+
+            const cancelling =
+              dx <= SWIPE_TO_CANCEL_THRESHOLD;
+
+            if (mountedRef.current) {
+              setIsCancelling(cancelling);
+            }
+          },
+
+          onPanResponderRelease: async (_, gesture) => {
+            if (
+              sendingRef.current ||
+              cancellingRef.current
+            ) {
+              resetPan();
+              return;
+            }
+
+            if (
+              gesture.dx <= SWIPE_TO_CANCEL_THRESHOLD
+            ) {
+              await handleCancelRecording();
+            } else {
+              resetPan();
+
+              if (mountedRef.current) {
+                setIsCancelling(false);
+              }
+            }
+          },
+
+          onPanResponderTerminate: () => {
+            resetPan();
+
+            if (mountedRef.current) {
+              setIsCancelling(false);
+            }
+          },
+
+          onPanResponderTerminationRequest: () => false,
+
+          onShouldBlockNativeResponder: () => false,
+        }),
+      [
+        isRecording,
+        panX,
+        handleCancelRecording,
+        resetPan,
+      ]
+    );
+
+    const handleUpgrade = useCallback(() => {
+      setShowUpgrade(false);
+      router.navigate('/premium');
+    }, [router]);
+
+    const upgradeModal = (
+      <Modal
+        visible={showUpgrade}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setShowUpgrade(false)}
+      >
+        <View style={styles.modalRoot}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setShowUpgrade(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close premium prompt"
+          />
+
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+
+            <View style={styles.modalIconWrap}>
+              <Ionicons
+                name="lock-closed"
+                size={24}
+                color="#B45309"
+              />
+            </View>
+
+            <Text style={styles.modalTitle}>
+              Premium Feature
             </Text>
-          </View>
 
-          {/* Recording visualization */}
-          <View style={styles.recordingCenter}>
-            {/* Waveform visualization */}
-            <View style={styles.waveformRow}>
-              <View style={[styles.recordingDot, maxReached && styles.recordingDotMax]} />
+            <Text style={styles.modalText}>
+              Recording voice messages is available to Premium
+              members. Upgrade to record and send your own
+              voice notes.
+            </Text>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.modalButton,
+                pressed && styles.modalButtonPressed,
+              ]}
+              onPress={handleUpgrade}
+              accessibilityRole="button"
+            >
+              <Ionicons
+                name="sparkles"
+                size={16}
+                color={COLORS.white}
+              />
+
+              <Text style={styles.modalButtonText}>
+                Upgrade to Premium
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.modalCancel}
+              onPress={() => setShowUpgrade(false)}
+              accessibilityRole="button"
+            >
+              <Text style={styles.modalCancelText}>
+                Maybe later
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    );
+
+    /*
+     * Non-premium users see the microphone and upgrade prompt.
+     */
+    if (!isPremium) {
+      return (
+        <>
+          <Pressable
+            onPress={() => setShowUpgrade(true)}
+            style={({ pressed }) => [
+              styles.micButton,
+              pressed && styles.micButtonPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Upgrade to Premium to record voice messages"
+          >
+            <Ionicons
+              name="mic-outline"
+              size={20}
+              color={COLORS.inkSoft}
+            />
+          </Pressable>
+
+          {upgradeModal}
+        </>
+      );
+    }
+
+    const visibleError = actionError || error;
+
+    return (
+      <View
+        style={[
+          styles.container,
+          expanded && styles.containerExpanded,
+          !expanded && { maxWidth: recorderWidth },
+        ]}
+      >
+        {isRecording ? (
+          <Animated.View
+            style={[
+              styles.recordingContainer,
+              {
+                transform: [{ translateX: panX }],
+              },
+              isCancelling &&
+                styles.recordingContainerCancelling,
+            ]}
+            {...panResponder.panHandlers}
+          >
+            {/* Swipe-to-cancel indicator */}
+            <View
+              style={[
+                styles.cancelZone,
+                isCancelling && styles.cancelZoneActive,
+              ]}
+              pointerEvents="none"
+            >
+              <Ionicons
+                name={
+                  isCancelling
+                    ? 'close-circle'
+                    : 'arrow-back'
+                }
+                size={18}
+                color={
+                  isCancelling
+                    ? COLORS.white
+                    : COLORS.danger
+                }
+              />
+
+              <Text
+                style={[
+                  styles.cancelText,
+                  isCancelling && styles.cancelTextActive,
+                ]}
+              >
+                {isCancelling
+                  ? 'Release to cancel'
+                  : 'Slide'}
+              </Text>
+            </View>
+
+            {/* Recording waveform and timer */}
+            <View style={styles.recordingCenter}>
+              <View style={styles.waveformRow}>
+                <View
+                  style={[
+                    styles.recordingDot,
+                    maxReached && styles.recordingDotMax,
+                  ]}
+                />
+
+                {waveAnims.map((anim, index) => (
+                  <Animated.View
+                    key={`recording-wave-${index}`}
+                    style={[
+                      styles.waveBar,
+                      {
+                        height: anim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [4, 28],
+                        }),
+                        backgroundColor: maxReached
+                          ? '#DC2626'
+                          : COLORS.indigo,
+                      },
+                    ]}
+                  />
+                ))}
+              </View>
+
+              <View style={styles.timerRow}>
+                <Text
+                  style={[
+                    styles.recordingTimer,
+                    maxReached && styles.recordingTimerMax,
+                  ]}
+                >
+                  {formatDuration(durationMs)}
+                </Text>
+
+                <Text style={styles.sendHint}>
+                  {seconds >= 1 ? 'Tap ↑ to send' : 'Recording'}
+                </Text>
+              </View>
+
+              <View style={styles.progressTrack}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    { width: `${progress * 100}%` },
+                    maxReached && styles.progressFillMax,
+                  ]}
+                />
+              </View>
+            </View>
+
+            {/* Explicit send control */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.sendButton,
+                pressed && styles.sendButtonPressed,
+                (isSending || isUploading) &&
+                  styles.sendButtonSending,
+              ]}
+              onPress={finalizeAndSend}
+              disabled={
+                isSending ||
+                isUploading ||
+                isCancelling
+              }
+              hitSlop={{
+                top: 8,
+                bottom: 8,
+                left: 8,
+                right: 8,
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Send voice message"
+              accessibilityState={{
+                disabled:
+                  isSending ||
+                  isUploading ||
+                  isCancelling,
+              }}
+            >
+              {isSending || isUploading ? (
+                <ActivityIndicator
+                  size="small"
+                  color={COLORS.white}
+                />
+              ) : (
+                <Ionicons
+                  name="arrow-up"
+                  size={23}
+                  color={COLORS.white}
+                />
+              )}
+            </Pressable>
+          </Animated.View>
+        ) : isUploading || isSending ? (
+          <View
+            style={[
+              styles.uploadingContainer,
+              expanded &&
+                styles.uploadingContainerExpanded,
+            ]}
+          >
+            <View style={styles.uploadingSpinner}>
+              <ActivityIndicator
+                size="small"
+                color={COLORS.indigo}
+              />
+            </View>
+
+            <View
+              style={styles.uploadingWaveform}
+              accessibilityLabel="Voice message waveform is loading"
+            >
               {waveAnims.map((anim, index) => (
                 <Animated.View
-                  key={index}
+                  key={`upload-wave-${index}`}
                   style={[
-                    styles.waveBar,
+                    styles.uploadingWaveBar,
                     {
-                      height: anim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [4, 28],
-                      }),
-                      backgroundColor: maxReached ? '#DC2626' : COLORS.indigo,
+                      transform: [{ scaleY: anim }],
                     },
                   ]}
                 />
               ))}
             </View>
 
-            {/* Timer and send hint */}
-            <View style={styles.timerRow}>
-              <Text style={[styles.recordingTimer, maxReached && styles.recordingTimerMax]}>
-                {formatDuration(durationMs)}
-              </Text>
-              <Text style={styles.sendHint}>
-                {seconds >= 1 ? '↑ Send' : ''}
-              </Text>
-            </View>
-
-            {/* Progress bar */}
-            <View style={styles.progressTrack}>
-              <View
-                style={[
-                  styles.progressFill,
-                  { width: `${Math.min(progress * 100, 100)}%` },
-                  maxReached && styles.progressFillMax,
-                ]}
-              />
-            </View>
+            <Text
+              style={styles.uploadingText}
+              numberOfLines={1}
+            >
+              {isUploading
+                ? 'Uploading voice...'
+                : 'Sending voice...'}
+            </Text>
           </View>
-
-          {/* Send button */}
+        ) : (
           <Pressable
+            onPress={handleStartRecording}
+            disabled={isBusy}
             style={({ pressed }) => [
-              styles.sendButton,
-              pressed && styles.sendButtonPressed,
-              isSending && styles.sendButtonSending,
+              styles.micButton,
+              pressed && styles.micButtonActive,
+              isBusy && styles.micButtonDisabled,
             ]}
-            onPress={async () => {
-              await finalizeAndSend();
+            accessibilityRole="button"
+            accessibilityLabel="Start recording voice message"
+            accessibilityState={{
+              disabled: isBusy,
             }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Ionicons
-              name={isSending ? "hourglass-outline" : "arrow-up-circle"}
-              size={24}
-              color={COLORS.white}
+              name="mic"
+              size={22}
+              color={COLORS.indigo}
             />
           </Pressable>
-        </Animated.View>
-      ) : isUploading || isSending ? (
-        <View style={[styles.uploadingContainer, expanded && styles.uploadingContainerExpanded]}>
-          <View style={styles.uploadingSpinner}>
-            <ActivityIndicator size="small" color={COLORS.indigo} />
-          </View>
-          <View style={styles.uploadingWaveform} accessibilityLabel="Voice message waveform is loading">
-            {waveAnims.map((anim, index) => (
-              <Animated.View
-                key={index}
-                style={[styles.uploadingWaveBar, { transform: [{ scaleY: anim }] }]}
-              />
-            ))}
-          </View>
-          <Text style={styles.uploadingText}>{isUploading ? 'Uploading voice...' : 'Sending voice...'}</Text>
-        </View>
-      ) : (
-        <Pressable
-          onPress={handlePressIn}
-          style={({ pressed }) => [
-            styles.micButton,
-            pressed && styles.micButtonActive,
-          ]}
-        >
-          <Ionicons name="mic" size={22} color={COLORS.indigo} />
-        </Pressable>
-      )}
+        )}
 
-      {error ? (
-        <View style={styles.errorBanner}>
-          <Ionicons name="alert-circle" size={12} color={COLORS.danger} />
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : null}
+        {visibleError ? (
+          <View style={styles.errorBanner}>
+            <Ionicons
+              name="alert-circle"
+              size={13}
+              color={COLORS.danger}
+            />
 
-      {upgradeModal}
-    </View>
-  );
-});
+            <Text
+              style={styles.errorText}
+              numberOfLines={2}
+            >
+              {String(visibleError)}
+            </Text>
+          </View>
+        ) : null}
+
+        {upgradeModal}
+      </View>
+    );
+  }
+);
 
 VoiceRecorderBar.displayName = 'VoiceRecorderBar';
 
 const styles = StyleSheet.create({
   container: {
     position: 'relative',
+    minWidth: 0,
+    flexShrink: 1,
   },
-  containerExpanded: { width: '100%', alignSelf: 'stretch' },
+
+  containerExpanded: {
+    width: '100%',
+    alignSelf: 'stretch',
+  },
+
   micButton: {
     width: 44,
     height: 44,
@@ -363,21 +891,28 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#DDE3F5',
   },
+
   micButtonPressed: {
     backgroundColor: '#E0E7FF',
-    opacity: 0.8,
+    opacity: 0.85,
   },
+
   micButtonActive: {
     backgroundColor: '#DDE3F5',
-    transform: [{ scale: 0.95 }],
+    transform: [{ scale: 0.96 }],
   },
+
+  micButtonDisabled: {
+    opacity: 0.55,
+  },
+
   recordingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
     borderRadius: 24,
     paddingHorizontal: 6,
-    paddingVertical: 4,
+    paddingVertical: 5,
     minWidth: 0,
     width: '100%',
     borderWidth: 1.5,
@@ -388,76 +923,100 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
+
   recordingContainerCancelling: {
     borderColor: COLORS.danger,
     backgroundColor: COLORS.dangerSoft,
   },
+
   cancelZone: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
     paddingVertical: 4,
     gap: 1,
     borderRadius: 16,
-    minWidth: 44,
+    minWidth: 40,
+    flexShrink: 0,
   },
+
   cancelZoneActive: {
     backgroundColor: COLORS.danger,
   },
+
   cancelText: {
     fontSize: 8,
     fontWeight: '700',
     color: COLORS.danger,
     textAlign: 'center',
   },
+
   cancelTextActive: {
     color: COLORS.white,
   },
+
   recordingCenter: {
     flex: 1,
+    minWidth: 0,
     gap: 3,
-    paddingHorizontal: 6,
+    paddingHorizontal: 5,
   },
+
   waveformRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    justifyContent: 'center',
+    gap: 4,
     height: 28,
+    minWidth: 0,
   },
+
   recordingDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
     backgroundColor: COLORS.danger,
-    marginRight: 4,
+    marginRight: 2,
+    flexShrink: 0,
   },
+
   recordingDotMax: {
     backgroundColor: '#DC2626',
   },
+
   waveBar: {
     width: 3,
     borderRadius: 2,
     minHeight: 4,
+    flexShrink: 0,
   },
+
   timerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 4,
   },
+
   recordingTimer: {
     fontSize: 12,
     fontWeight: '800',
     color: COLORS.ink,
     fontVariant: ['tabular-nums'],
   },
+
   recordingTimerMax: {
     color: '#DC2626',
   },
+
   sendHint: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '600',
     color: COLORS.inkSoft,
+    flexShrink: 1,
+    textAlign: 'right',
   },
+
   progressTrack: {
     width: '100%',
     height: 3,
@@ -465,14 +1024,17 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     overflow: 'hidden',
   },
+
   progressFill: {
     height: '100%',
     backgroundColor: COLORS.indigo,
     borderRadius: 2,
   },
+
   progressFillMax: {
     backgroundColor: '#DC2626',
   },
+
   sendButton: {
     width: 36,
     height: 36,
@@ -480,22 +1042,28 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.indigo,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 4,
+    marginLeft: 3,
+    flexShrink: 0,
   },
+
   sendButtonPressed: {
     backgroundColor: COLORS.indigoDark,
-    transform: [{ scale: 0.92 }],
+    transform: [{ scale: 0.94 }],
   },
+
   sendButtonSending: {
     backgroundColor: COLORS.inkSoft,
   },
+
   uploadingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 7,
     paddingHorizontal: 8,
     paddingVertical: 4,
+    minWidth: 0,
   },
+
   uploadingContainerExpanded: {
     minHeight: 44,
     width: '100%',
@@ -505,6 +1073,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: COLORS.indigoSoft,
   },
+
   uploadingSpinner: {
     width: 24,
     height: 24,
@@ -512,34 +1081,61 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.indigoSoft,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
+
   uploadingText: {
     fontSize: 12,
     fontWeight: '700',
     color: COLORS.inkSoft,
+    flexShrink: 1,
   },
-  uploadingWaveform: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, height: 26 },
-  uploadingWaveBar: { width: 3, height: 20, borderRadius: 2, backgroundColor: COLORS.indigo },
-  errorBanner: {
+
+  uploadingWaveform: {
+    flex: 1,
+    minWidth: 16,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 4,
-    position: 'absolute',
-    top: -22,
-    left: 0,
-    right: 0,
+    height: 26,
   },
+
+  uploadingWaveBar: {
+    width: 3,
+    height: 20,
+    borderRadius: 2,
+    backgroundColor: COLORS.indigo,
+  },
+
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 5,
+    marginTop: 5,
+    maxWidth: '100%',
+  },
+
   errorText: {
+    flex: 1,
+    flexShrink: 1,
     fontSize: 11,
     color: COLORS.danger,
     fontWeight: '600',
   },
-  modalBackdrop: {
+
+  modalRoot: {
     flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.4)',
+    justifyContent: 'flex-end',
   },
+
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,23,42,0.45)',
+  },
+
   modalSheet: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.white,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 18,
@@ -547,14 +1143,16 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
     alignItems: 'center',
   },
+
   modalHandle: {
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#E7E9F4',
+    backgroundColor: COLORS.border,
     alignSelf: 'center',
     marginBottom: 14,
   },
+
   modalIconWrap: {
     width: 56,
     height: 56,
@@ -564,44 +1162,56 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 12,
   },
+
   modalTitle: {
     fontSize: 17,
     fontWeight: '800',
-    color: '#0F172A',
+    color: COLORS.ink,
     marginBottom: 8,
   },
+
   modalText: {
     fontSize: 14,
-    color: '#64748B',
+    color: COLORS.inkSoft,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 21,
     marginBottom: 20,
     paddingHorizontal: 8,
   },
+
   modalButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#6366F1',
+    backgroundColor: COLORS.indigo,
     borderRadius: 999,
     paddingVertical: 14,
     paddingHorizontal: 24,
     width: '100%',
   },
+
+  modalButtonPressed: {
+    backgroundColor: COLORS.indigoDark,
+    opacity: 0.92,
+  },
+
   modalButtonText: {
-    color: '#FFFFFF',
+    color: COLORS.white,
     fontSize: 15,
     fontWeight: '800',
   },
+
   modalCancel: {
     marginTop: 12,
     paddingVertical: 10,
+    paddingHorizontal: 20,
   },
+
   modalCancelText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#64748B',
+    color: COLORS.inkSoft,
   },
 });
 

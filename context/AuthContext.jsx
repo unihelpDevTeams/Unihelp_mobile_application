@@ -14,6 +14,20 @@ import { doc, onSnapshot, setDoc } from "firebase/firestore";
 
 const AuthContext = createContext(null);
 
+export const hasRequiredProfileDetails = (profile = {}) => {
+  const text = (value) => String(value || "").trim();
+  const username = text(profile.username);
+  return Boolean(
+    username.length >= 3 && username.length <= 30 && /^[a-zA-Z0-9_]+$/.test(username) &&
+    text(profile.displayName || profile.firstName) &&
+    text(profile.school || profile.universityName || profile.university) &&
+    text(profile.department || profile.departmentName) &&
+    text(profile.level) &&
+    text(profile.bio) &&
+    text(profile.photo || profile.photoURL || profile.photoThumb)
+  );
+};
+
 // ---------------------------------------------------------------------------
 // Profile cache helpers — keep only slim fields to avoid AsyncStorage limits
 // ---------------------------------------------------------------------------
@@ -124,6 +138,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [profileSyncing, setProfileSyncing] = useState(true);
 
   useEffect(() => {
     let unsubscribeProfile = null;
@@ -135,6 +150,7 @@ export function AuthProvider({ children }) {
       }
 
       if (firebaseUser) {
+        setProfileSyncing(true);
         // Step 1: read local cache immediately so the rest of the app can render
         const cachedProfile = await readProfileCache(firebaseUser.uid);
 
@@ -164,11 +180,13 @@ export function AuthProvider({ children }) {
           setProfile(freshProfile);
           persistProfileCache(freshProfile);
         }
+        setProfileSyncing(false);
       } else {
         setUser(null);
         setProfile(null);
         persistProfileCache(null);
         setLoading(false);
+        setProfileSyncing(false);
       }
     });
 
@@ -279,6 +297,7 @@ export function AuthProvider({ children }) {
     () => ({
       user,
       profile,
+      profileSyncing,
       loading,
       signIn,
       signUp,
@@ -287,7 +306,7 @@ export function AuthProvider({ children }) {
       resetPassword,
       updateProfile,
     }),
-    [loading, profile, user]
+    [loading, profile, profileSyncing, user]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

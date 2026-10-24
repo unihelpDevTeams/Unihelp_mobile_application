@@ -6,6 +6,7 @@ import {
   FlatList,
   Image,
   ImageBackground,
+  Linking,
   PanResponder,
   Pressable,
   ScrollView,
@@ -34,6 +35,7 @@ import { useAuth } from '../../context/AuthContext';
 import { isRouteAllowedForRole } from '../../src/shared/navigation/routePermissions';
 import { listSuggestedFriends } from '../../src/shared/services/friendships';
 import { isPremiumActive } from '../../src/shared/services/premium';
+import { fetchActiveHomeHeroSlides } from '../../src/shared/services/homeHeroSlides';
 
 // Curated high-res imagery for top-tier visual hierarchy
 const IMAGES = {
@@ -111,7 +113,7 @@ const friendlyPersonName = (person = {}) => person.username || person.name || pe
 
 const itemKey = (item, index) => `${item?.id || item?.uid || 'item'}-${index}`;
 
-const buildHeroSlides = ({ streakCount = 0, announcements = [], notes = [], questions = [] } = {}) => {
+const buildHeroSlides = ({ streakCount = 0, announcements = [], notes = [], questions = [], adminSlides = [] } = {}) => {
   const latestAnnouncement = announcements[0];
   const latestNote = notes[0];
   const latestQuestion = questions[0];
@@ -149,6 +151,18 @@ const buildHeroSlides = ({ streakCount = 0, announcements = [], notes = [], ques
       cta: { label: 'Practice now', route: '/cbt' },
     });
   }
+
+  adminSlides
+    .filter((item) => item.enabled === true && item.imageUrl && item.linkUrl)
+    .forEach((item) => slides.push({
+      slide: `admin-image-${item.id}`,
+      type: 'image',
+      imageUrl: item.imageUrl,
+      eyebrow: 'Featured',
+      title: item.title || 'Explore UniHelp',
+      stat: '',
+      cta: { label: 'Learn more', route: item.linkUrl },
+    }));
 
   slides.push({
     slide: 'study-streak',
@@ -366,6 +380,14 @@ function HeroCarousel({ slides, router }) {
       flex: 1,
       justifyContent: 'flex-end',
     },
+    customHeroImage: { flex: 1, minHeight: 188, justifyContent: 'flex-end' },
+    customHeroImageContent: { resizeMode: 'cover' },
+    customHeroOverlay: { flex: 1, minHeight: 188, justifyContent: 'flex-end' },
+    customHeroContent: { padding: s.lg, gap: s.sm },
+    customHeroEyebrow: { color: '#FFFFFF', fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+    customHeroTitle: { color: '#FFFFFF', fontSize: 22, lineHeight: 27, fontWeight: '900' },
+    customHeroCta: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 6, borderRadius: r.full, paddingHorizontal: s.md, paddingVertical: 8, backgroundColor: 'rgba(255,255,255,0.94)' },
+    customHeroCtaText: { color: c.ink, fontSize: 12, fontWeight: '900' },
     imageOverlay: {
       flex: 1,
     },
@@ -529,11 +551,29 @@ function HeroCarousel({ slides, router }) {
           return (
             <View key={slide.slide} style={{ width: cardWidth }}>
               <Pressable
-                onPress={() => router.navigate(slide.cta.route)}
+                onPress={() => {
+                  if (/^https?:\/\//i.test(slide.cta.route)) Linking.openURL(slide.cta.route).catch(() => {});
+                  else router.navigate(slide.cta.route);
+                }}
                 style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
                 accessibilityRole="button"
                 accessibilityLabel={`${slide.eyebrow}. ${slide.title}. ${slide.cta.label}`}
               >
+                {slide.type === 'image' ? (
+                  <ImageBackground source={{ uri: slide.imageUrl }} style={styles.customHeroImage} imageStyle={styles.customHeroImageContent}>
+                    <LinearGradient colors={['rgba(0,0,0,0.02)', 'rgba(0,0,0,0.78)']} style={styles.customHeroOverlay}>
+                      <View style={styles.customHeroContent}>
+                        <Text style={styles.customHeroEyebrow}>{slide.eyebrow}</Text>
+                        <Text style={styles.customHeroTitle} numberOfLines={2}>{slide.title}</Text>
+                        <View style={styles.customHeroCta}>
+                          <Text style={styles.customHeroCtaText}>{slide.cta.label}</Text>
+                          <Ionicons name="arrow-forward" size={13} color={colors.ink} />
+                        </View>
+                      </View>
+                    </LinearGradient>
+                  </ImageBackground>
+                ) : (
+                  <>
                 <View style={[styles.softCircle, { backgroundColor: accent.soft || accent.tint }]} />
                 <View style={styles.imagePanel} pointerEvents="none">
                   <ImageBackground source={accent.image || IMAGES.community} style={styles.image} resizeMode="cover">
@@ -594,6 +634,8 @@ function HeroCarousel({ slides, router }) {
                     ) : null}
                   </View>
                 </View>
+                  </>
+                )}
               </Pressable>
             </View>
           );
@@ -659,7 +701,7 @@ export default function HomeScreen() {
   const premiumUnlocked = isPremiumActive(profile);
 
   const [streakCount, setStreakCount] = useState(0);
-  const [heroContent, setHeroContent] = useState({ announcements: [], notes: [], questions: [] });
+  const [heroContent, setHeroContent] = useState({ announcements: [], notes: [], questions: [], adminSlides: [] });
   const avatarKey = profile?.photoURL || 'default';
   const [avatarFailures, setAvatarFailures] = useState({});
   const avatarFailed = Boolean(avatarFailures[avatarKey]);
@@ -1383,16 +1425,18 @@ export default function HomeScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      const [announcements, notes, questions, streakData] = await Promise.all([
+      const [announcements, notes, questions, streakData, adminSlides] = await Promise.all([
         fetchAnnouncements(),
         fetchNotes(),
         fetchQuestions(),
         fetchDailyStreak(),
+        fetchActiveHomeHeroSlides().catch(() => []),
       ]);
       setHeroContent({
         announcements: Array.isArray(announcements) ? announcements : [],
         notes: Array.isArray(notes) ? notes : [],
         questions: Array.isArray(questions) ? questions : [],
+        adminSlides: Array.isArray(adminSlides) ? adminSlides : [],
       });
       if (streakData) {
         setStreakCount(streakData.streakCount || 0);

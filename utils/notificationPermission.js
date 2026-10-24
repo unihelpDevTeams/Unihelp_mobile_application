@@ -91,35 +91,35 @@ export const configureAndroidNotificationChannels = async () => {
   const categoryMap = {
     unihelp_message: {
       actions: [
-        { identifier: NOTIFICATION_ACTION_IDS.REPLY, buttonTitle: 'Reply', textInput: { submitButtonTitle: 'Send', placeholder: 'Type a message' }, options: { opensAppToForeground: false } },
-        { identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read', options: { opensAppToForeground: false } },
-        { identifier: NOTIFICATION_ACTION_IDS.MUTE, buttonTitle: 'Mute', options: { opensAppToForeground: false } },
+        { identifier: NOTIFICATION_ACTION_IDS.REPLY, buttonTitle: 'Reply', textInput: { submitButtonTitle: 'Send', placeholder: 'Type a message' }, options: { opensAppToForeground: true } },
+        { identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read', options: { opensAppToForeground: true } },
+        { identifier: NOTIFICATION_ACTION_IDS.MUTE, buttonTitle: 'Mute', options: { opensAppToForeground: true } },
       ],
     },
     unihelp_group_message: {
       actions: [
-        { identifier: NOTIFICATION_ACTION_IDS.REPLY, buttonTitle: 'Reply', textInput: { submitButtonTitle: 'Send', placeholder: 'Type a message' }, options: { opensAppToForeground: false } },
-        { identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read', options: { opensAppToForeground: false } },
-        { identifier: NOTIFICATION_ACTION_IDS.MUTE, buttonTitle: 'Mute', options: { opensAppToForeground: false } },
+        { identifier: NOTIFICATION_ACTION_IDS.REPLY, buttonTitle: 'Reply', textInput: { submitButtonTitle: 'Send', placeholder: 'Type a message' }, options: { opensAppToForeground: true } },
+        { identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read', options: { opensAppToForeground: true } },
+        { identifier: NOTIFICATION_ACTION_IDS.MUTE, buttonTitle: 'Mute', options: { opensAppToForeground: true } },
       ],
     },
     unihelp_comment: {
       actions: [
-        { identifier: NOTIFICATION_ACTION_IDS.REPLY, buttonTitle: 'Reply', textInput: { submitButtonTitle: 'Send', placeholder: 'Reply' }, options: { opensAppToForeground: false } },
-        { identifier: NOTIFICATION_ACTION_IDS.LIKE, buttonTitle: 'Like', options: { opensAppToForeground: false } },
-        { identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read', options: { opensAppToForeground: false } },
+        { identifier: NOTIFICATION_ACTION_IDS.REPLY, buttonTitle: 'Reply', textInput: { submitButtonTitle: 'Send', placeholder: 'Reply' }, options: { opensAppToForeground: true } },
+        { identifier: NOTIFICATION_ACTION_IDS.LIKE, buttonTitle: 'Like', options: { opensAppToForeground: true } },
+        { identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read', options: { opensAppToForeground: true } },
       ],
     },
     unihelp_like: {
-      actions: [{ identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read', options: { opensAppToForeground: false } }],
+      actions: [{ identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read', options: { opensAppToForeground: true } }],
     },
     unihelp_general: {
-      actions: [{ identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read', options: { opensAppToForeground: false } }],
+      actions: [{ identifier: NOTIFICATION_ACTION_IDS.MARK_AS_READ, buttonTitle: 'Mark as read', options: { opensAppToForeground: true } }],
     },
     unihelp_promotion: {
       actions: [
-        { identifier: NOTIFICATION_ACTION_IDS.VIEW, buttonTitle: 'View' },
-        { identifier: NOTIFICATION_ACTION_IDS.DISMISS, buttonTitle: 'Dismiss' },
+        { identifier: NOTIFICATION_ACTION_IDS.VIEW, buttonTitle: 'View', options: { opensAppToForeground: true } },
+        { identifier: NOTIFICATION_ACTION_IDS.DISMISS, buttonTitle: 'Dismiss', options: { opensAppToForeground: true } },
       ],
     },
   };
@@ -368,7 +368,7 @@ export const registerNotificationCategoryForPayload = async (payload = {}) => {
     const category = await Notifications.setNotificationCategoryAsync(categoryIdentifier, actions.map((action) => ({
       identifier: action.action,
       buttonTitle: action.title,
-      options: { opensAppToForeground: false },
+      options: { opensAppToForeground: true },
       ...(action.action === NOTIFICATION_ACTION_IDS.REPLY ? {
         textInput: {
           submitButtonTitle: 'Send',
@@ -434,4 +434,17 @@ export const clearLastNotificationResponse = async () => {
     : await loadNotificationsModule();
   if (typeof Notifications?.clearLastNotificationResponseAsync !== 'function') return;
   await Notifications.clearLastNotificationResponseAsync();
+};
+
+export const dismissNotification = async (notificationId) => {
+  if (!notificationId || Platform.OS === 'web') return;
+  const Notifications = isAndroidExpoGo
+    ? await loadLocalNotificationsModule()
+    : await loadNotificationsModule();
+  if (typeof Notifications?.dismissNotificationAsync !== 'function') return;
+  try {
+    await Notifications.dismissNotificationAsync(notificationId);
+  } catch (error) {
+    console.warn('Unable to dismiss handled notification:', error?.message || error);
+  }
 };

@@ -198,6 +198,56 @@ const uploadLocalFileMultipart = async (path, uri, fieldName, mimeType, paramete
   return data;
 };
 
+const uploadChatAttachmentWithFetch = async (file, { targetType, targetId }) => {
+  const headers = await buildHeaders({});
+  delete headers['Content-Type'];
+
+  const formData = new FormData();
+  formData.append('targetType', targetType);
+  formData.append('targetId', targetId);
+  await appendFileToFormData(formData, 'file', {
+    uri: file.uri,
+    name: file.name || file.fileName || 'attachment.bin',
+    type: file.mimeType || file.type || 'application/octet-stream',
+  });
+
+  let response;
+  try {
+    response = await fetch(`${getApiUrl()}/api/uploads/message`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+  } catch (error) {
+    console.warn('[Network Error] POST /api/uploads/message', error);
+    throw new Error('Network error. Please check your connection and try again.');
+  }
+
+  const data = await parseResponse(response);
+  if (!response.ok) throw new Error(data.message || data.error || 'Upload failed. Please try again.');
+  return data;
+};
+
+const stageChatDocument = async (file) => {
+  const root = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+  if (!root) throw new Error('Local file storage is unavailable.');
+  const directory = `${root}chat-uploads/`;
+  const directoryInfo = await FileSystem.getInfoAsync(directory);
+  if (!directoryInfo.exists) {
+    await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
+  }
+
+  const extension = String(file.name || file.fileName || '').match(/\.[a-z0-9]{1,8}$/i)?.[0] || '.bin';
+  const stagedUri = `${directory}attachment-${Date.now()}-${Math.random().toString(36).slice(2, 9)}${extension}`;
+  await FileSystem.copyAsync({ from: file.uri, to: stagedUri });
+  const stagedInfo = await FileSystem.getInfoAsync(stagedUri, { size: true });
+  if (!stagedInfo.exists || !stagedInfo.size) {
+    await FileSystem.deleteAsync(stagedUri, { idempotent: true }).catch(() => {});
+    throw new Error('The selected document could not be copied for upload. Please select it again.');
+  }
+  return stagedUri;
+};
+
 export async function uploadFeatureMedia(file, { feature = 'stories', resourceType = 'auto', onProgress } = {}) {
   const normalizedFile = resourceType === 'image' || String(file?.type || file?.mimeType || '').startsWith('image/')
     ? await compressImageForUpload(file, { maxWidth: 1600, maxHeight: 1600, quality: 0.72 })
@@ -248,9 +298,39 @@ export async function uploadFeatureMedia(file, { feature = 'stories', resourceTy
 export async function uploadChatAttachment(file, { targetType, targetId, onProgress } = {}) {
   if (!targetId || !['conversation', 'group'].includes(targetType)) throw new Error('A valid conversation is required.');
   if (!file?.uri) throw new Error('The selected file is unavailable.');
-  const data = await uploadLocalFileMultipart('/api/uploads/message', file.uri, 'file', file.mimeType || file.type || 'application/octet-stream', { targetType, targetId });
-  onProgress?.(100);
-  return data;
+
+  const isDocument = file.kind === 'document' || String(file.mimeType || file.type || '').startsWith('application/');
+  let stagedUri = null;
+  let uploadFile = file;
+  if (isDocument) {
+    try {
+      stagedUri = await stageChatDocument(file);
+      uploadFile = { ...file, uri: stagedUri };
+    } catch (error) {
+      console.warn('[Chat upload] Could not stage document; trying its original URI:', error?.message || error);
+    }
+  }
+
+  try {
+    let data;
+    try {
+      data = await uploadLocalFileMultipart(
+        '/api/uploads/message',
+        uploadFile.uri,
+        'file',
+        file.mimeType || file.type || 'application/octet-stream',
+        { targetType, targetId }
+      );
+    } catch (error) {
+      const cannotReadLocalFile = /isn't readable|not readable|permission denied|no such file|enoent/i.test(error?.message || '');
+      if (!isDocument || !cannotReadLocalFile) throw error;
+      data = await uploadChatAttachmentWithFetch(uploadFile, { targetType, targetId });
+    }
+    onProgress?.(100);
+    return data;
+  } finally {
+    if (stagedUri) await FileSystem.deleteAsync(stagedUri, { idempotent: true }).catch(() => {});
+  }
 }
 
 export async function deleteProfileMedia(key) {

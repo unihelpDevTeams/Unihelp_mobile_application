@@ -2,8 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Animated,
+  Alert,
   AppState,
   AccessibilityInfo,
+  BackHandler,
   Easing,
   FlatList,
   Image,
@@ -27,6 +29,9 @@ import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
 import VoiceMessageBubble from '../../src/shared/components/VoiceMessageBubble';
@@ -71,9 +76,10 @@ import { clearConversationAppearance, getConversationAppearance, saveConversatio
 
 const CHAT_PAGE_SIZE = 25;
 const EDIT_WINDOW_MS = 60 * 60 * 1000;
-const VOICE_DELETE_WINDOW_MS = 30 * 60 * 1000;
+const VOICE_DELETE_WINDOW_MS = 2 * 60 * 60 * 1000;
 const GROUP_GAP_MS = 5 * 60 * 1000;
 const MAX_LENGTH = 4000;
+const MAX_ATTACHMENTS = 5;
 const TYPING_REFRESH_MS = 3000;
 const TYPING_IDLE_MS = 2000;
 const REMOTE_TYPING_TIMEOUT_MS = 5000;
@@ -102,6 +108,7 @@ const putCache = (map, key, value) => {
 
 const STATUS_RANK = { failed: 0, sending: 0, sent: 1, delivered: 2, read: 3 };
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '😮'];
+const QUICK_STARTERS = ['Hi 👋', 'Hey! How are you?', 'Are you in my class?'];
 
 const BUBBLE_PRESETS = [
   { key: 'brand', label: 'Classic', color: '#5B5CE2' },
@@ -177,6 +184,25 @@ const resolveBubbleFill = (appearance = {}) => {
 const resolveChatBackground = (appearance = {}) =>
   CHAT_BACKGROUNDS.find((item) => item.key === appearance.wallpaper) || CHAT_BACKGROUNDS[0];
 
+// Relative luminance of a #RRGGBB color (0 = black, 1 = white).
+const hexLuminance = (hex) => {
+  const clean = String(hex || '').replace('#', '');
+  if (clean.length !== 6) return 0;
+  const [r, g, b] = [0, 2, 4]
+    .map((i) => parseInt(clean.slice(i, i + 2), 16) / 255)
+    .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+
+const DARK_INK = { text: '#14141F', meta: 'rgba(20,20,31,0.6)' };
+/** Light bubble fills (white custom color, Lime gradient...) need dark text; otherwise null = keep default white. */
+const resolveBubbleInk = (fill) => {
+  const palette = fill?.gradient || (fill?.color ? [fill.color] : []);
+  if (!palette.length) return null;
+  const average = palette.reduce((sum, hex) => sum + hexLuminance(hex), 0) / palette.length;
+  return average > 0.45 ? DARK_INK : null;
+};
+
 /* -------------------------------------------------------------------------- */
 /*                                   Helpers                                  */
 /* -------------------------------------------------------------------------- */
@@ -197,6 +223,12 @@ const tap = (style = 'Light') => {
   } catch (_error) {
     // Haptics unavailable (simulator, web).
   }
+};
+
+const hashString = (value) => {
+  let hash = 5381;
+  for (let i = 0; i < value.length; i += 1) hash = ((hash << 5) + hash + value.charCodeAt(i)) | 0;
+  return (hash >>> 0).toString(36);
 };
 
 const toDate = (value) => {
@@ -238,13 +270,27 @@ const isLocalId = (id) => String(id || '').startsWith('local_');
 const messageKey = (message) => message?.clientTempId || message?.localId || message?.id;
 const keysOf = (message) => [message?.id, message?.clientTempId, message?.localId].filter(Boolean);
 
+const textOf = (message) => String(message?.text || message?.body || message?.caption || '');
+
+const getChatAttachmentKind = (attachment = {}) => {
+  const type = String(attachment.type || attachment.mimeType || '').toLowerCase();
+  if (type === 'image' || type.startsWith('image/')) return 'image';
+  if (type === 'video' || type.startsWith('video/')) return 'video';
+  return 'document';
+};
+
 const previewOf = (message) => {
   if (!message) return '';
   if (message.deleted) return 'Message deleted';
   if (message.type === 'voice') return '🎤 Voice message';
   if (message.type === 'sticker') return 'Sticker';
-  const text = String(message.text || message.body || message.caption || '').trim();
-  if (!text) return message.attachments?.length ? '📷 Photo' : '';
+  const text = textOf(message).trim();
+  if (!text) {
+    const first = message.attachments?.[0];
+    if (!first) return '';
+    const kind = getChatAttachmentKind(first);
+    return kind === 'image' ? '📷 Photo' : kind === 'video' ? '🎬 Video' : '📄 Document';
+  }
   return text.length > 80 ? `${text.slice(0, 80).trim()}…` : text;
 };
 
@@ -333,7 +379,7 @@ const toggleReactionLocal = (reactions = {}, emoji, uid) => {
   return copy;
 };
 
-const renderLinkedMessageText = (text, mine, colors) => {
+const renderLinkedMessageText = (text, linkColor) => {
   const content = String(text || '');
   const urlPattern = /https?:\/\/[^\s]+|www\.[^\s]+/gi;
   const parts = [];
@@ -353,7 +399,7 @@ const renderLinkedMessageText = (text, mine, colors) => {
       <Text
         key={`link-${match.index}`}
         accessibilityRole="link"
-        style={{ color: mine ? colors.onBrand : colors.brand, textDecorationLine: 'underline' }}
+        style={{ color: linkColor, textDecorationLine: 'underline' }}
         onPress={() => {
           const url = /^https?:\/\//i.test(visibleUrl) ? visibleUrl : `https://${visibleUrl}`;
           Linking.openURL(url).catch(() => {});
@@ -430,6 +476,9 @@ const createStyles = (c) => ({
   centerFill: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   retryButton: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.brand, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 10 },
   retryButtonText: { color: c.onBrand, fontWeight: '800', fontSize: 13.5 },
+  quickStartRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, paddingHorizontal: 20 },
+  quickChip: { backgroundColor: c.brandLight, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: c.borderDefault },
+  quickChipText: { color: c.brandDark, fontSize: 13, fontWeight: '700' },
 
   listHeader: { alignItems: 'center', paddingVertical: 14 },
   listHeaderText: { color: c.textTertiary, fontSize: 12 },
@@ -463,11 +512,11 @@ const createStyles = (c) => ({
   mineText: { color: c.onBrand },
   deletedRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   deletedText: { fontSize: 13.5, fontStyle: 'italic', color: c.textSecondary },
-  mineDeletedText: { color: 'rgba(255,255,255,0.85)' },
+  mineDeletedText: { color: 'rgba(160, 160, 160, 0.85)' },
   bubbleFooter: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
   outsideFooter: { marginTop: 2, marginBottom: 2, paddingHorizontal: 4 },
   metaText: { fontSize: 10.5, color: c.textTertiary },
-  mineMeta: { color: 'rgba(255,255,255,0.75)' },
+  mineMeta: { color: 'rgba(160, 160, 160, 0.85)' },
   seenText: { fontWeight: '800' },
   failedRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   failedText: { fontSize: 11.5, fontWeight: '700', color: c.error },
@@ -475,9 +524,10 @@ const createStyles = (c) => ({
   attachmentWrap: { borderRadius: 12, overflow: 'hidden', backgroundColor: c.skeleton },
   attachmentImage: { width: 210, height: 210 },
   attachmentOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: c.skeleton },
+  attachmentUploadingOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.28)' },
   attachmentOverlayText: { fontSize: 12, color: c.textSecondary, fontWeight: '600' },
   attachmentFile: { flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 190, padding: 10, borderRadius: 12, marginBottom: 5, backgroundColor: c.surfaceSecondary },
-  attachmentFileName: { flex: 1, color: c.textPrimary, fontSize: 12, fontWeight: '700' },
+  attachmentFileName: { flex: 1, color: c.textsecondary, fontSize: 12, fontWeight: '700' },
 
   replyBlock: { borderLeftWidth: 3, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 10, marginBottom: 6 },
   replyBlockMine: { backgroundColor: 'rgba(255,255,255,0.18)', borderLeftColor: c.onBrand },
@@ -528,6 +578,7 @@ const createStyles = (c) => ({
   counter: { alignSelf: 'flex-end', marginTop: 3, marginRight: 8, fontSize: 11, color: c.textTertiary },
   counterLimit: { color: c.error, fontWeight: '700' },
   button: { backgroundColor: c.brand, borderRadius: 22, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', shadowColor: c.brand, shadowOpacity: 0.3, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
+  buttonPressed: { opacity: 0.85 },
   buttonDisabled: { backgroundColor: c.brandGlow, opacity: 0.6 },
 
   composerBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.surfaceSecondary, borderRadius: 16, padding: 10, marginBottom: 8, borderLeftWidth: 4, borderLeftColor: c.brand },
@@ -535,10 +586,11 @@ const createStyles = (c) => ({
   composerBannerLabel: { fontWeight: '800', color: c.brand, fontSize: 12.5 },
   composerBannerText: { color: c.textPrimary, fontSize: 13.5, marginTop: 2 },
   composerBannerClose: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: c.skeleton },
+  attachmentPreviewList: { maxHeight: 140, marginBottom: 2 },
   attachmentPreviewRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 8, marginBottom: 7, borderRadius: 12, backgroundColor: c.surfaceSecondary },
   attachmentPreviewThumb: { width: 34, height: 34, borderRadius: 8, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: c.skeleton },
   attachmentPreviewImage: { width: '100%', height: '100%' },
-  attachmentPreviewText: { flex: 1, color: c.textPrimary, fontSize: 12, fontWeight: '700' },
+  attachmentPreviewText: { flex: 1, color: c.textSecondary, fontSize: 12, fontWeight: '700' },
 
   modalOverlay: { flex: 1, backgroundColor: c.overlay, justifyContent: 'flex-end' },
   dialogOverlay: { flex: 1, backgroundColor: c.overlay, justifyContent: 'center', paddingHorizontal: 28 },
@@ -645,6 +697,8 @@ const createStyles = (c) => ({
 
   viewerOverlay: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
   viewerImage: { width: '100%', height: '100%' },
+  viewerVideo: { width: '100%', aspectRatio: 16 / 9 },
+  viewerCaption: { position: 'absolute', left: 18, right: 72, bottom: 28, color: '#fff', fontSize: 13, fontWeight: '700' },
   viewerClose: { position: 'absolute', top: Platform.OS === 'ios' ? 56 : 36, right: 18, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
 
   relationshipCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: c.brandLight, borderWidth: 1, borderColor: c.borderDefault, borderRadius: 18, padding: 14, marginTop: 8, marginBottom: 12 },
@@ -741,10 +795,11 @@ function TypingBubble({ styles, reduceMotion }) {
 }
 
 /** Shown in the list while a voice note is being recorded -> uploaded, before it becomes a real message. */
-function VoicePendingBubble({ styles, colors }) {
+function VoicePendingBubble({ styles, colors, reduceMotion }) {
   const bars = useMemo(() => Array.from({ length: 14 }, () => new Animated.Value(0.3)), []);
 
   useEffect(() => {
+    if (reduceMotion) return undefined;
     const loops = bars.map((value, index) =>
       Animated.loop(
         Animated.sequence([
@@ -756,7 +811,7 @@ function VoicePendingBubble({ styles, colors }) {
     );
     loops.forEach((loop) => loop.start());
     return () => loops.forEach((loop) => loop.stop());
-  }, [bars]);
+  }, [bars, reduceMotion]);
 
   return (
     <View style={styles.voicePendingRow}>
@@ -773,10 +828,11 @@ function VoicePendingBubble({ styles, colors }) {
   );
 }
 
-function MessageSkeleton({ styles }) {
-  const pulse = useMemo(() => new Animated.Value(0.45), []);
+function MessageSkeleton({ styles, reduceMotion }) {
+  const pulse = useMemo(() => new Animated.Value(reduceMotion ? 0.7 : 0.45), [reduceMotion]);
 
   useEffect(() => {
+    if (reduceMotion) return undefined;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1, duration: 750, useNativeDriver: true }),
@@ -785,7 +841,7 @@ function MessageSkeleton({ styles }) {
     );
     loop.start();
     return () => loop.stop();
-  }, [pulse]);
+  }, [pulse, reduceMotion]);
 
   const rows = [
     { w: '58%', mine: false }, { w: '40%', mine: false }, { w: '66%', mine: true },
@@ -820,16 +876,22 @@ function PulsingClock({ color }) {
   );
 }
 
-const StatusIcon = React.memo(function StatusIcon({ status, colors, onBubble }) {
-  const dim = onBubble ? 'rgba(255,255,255,0.7)' : colors.textTertiary;
+const StatusIcon = React.memo(function StatusIcon({ status, colors, onBubble, inkText, inkMeta }) {
+  const dim = onBubble ? inkMeta || 'rgba(255,255,255,0.7)' : colors.textTertiary;
   if (status === 'sending') return <PulsingClock color={dim} />;
-  if (status === 'read') return <Ionicons name="checkmark-done" size={15} color={onBubble ? colors.onBrand : colors.brand} />;
+  if (status === 'read') return <Ionicons name="checkmark-done" size={15} color={onBubble ? inkText || colors.onBrand : colors.brand} />;
   if (status === 'delivered') return <Ionicons name="checkmark-done" size={15} color={dim} />;
   return <Ionicons name="checkmark" size={14} color={dim} />;
 });
 
-function AttachmentImage({ uri, styles, colors, spaced, onPress, onLongPress }) {
+function AttachmentImage({ uri, styles, colors, spaced, uploading, onPress, onLongPress }) {
   const [state, setState] = useState('loading');
+
+  // A local preview swapping to the uploaded URL keeps showing the image; only recover from errors.
+  useEffect(() => {
+    setState((current) => (current === 'error' ? 'loading' : current));
+  }, [uri]);
+
   return (
     <Pressable
       onPress={() => state !== 'error' && onPress?.(uri)}
@@ -851,7 +913,46 @@ function AttachmentImage({ uri, styles, colors, spaced, onPress, onLongPress }) 
           <Text style={styles.attachmentOverlayText}>Could not load photo</Text>
         </View>
       ) : null}
+      {uploading && state !== 'error' ? (
+        <View pointerEvents="none" style={styles.attachmentUploadingOverlay}>
+          <ActivityIndicator color="#fff" />
+        </View>
+      ) : null}
     </Pressable>
+  );
+}
+
+function ChatMediaViewer({ media, styles, onClose }) {
+  const player = useVideoPlayer(
+    media?.kind === 'video' && media?.uri ? { uri: media.uri } : null,
+    (videoPlayer) => { videoPlayer.loop = false; }
+  );
+
+  useEffect(() => {
+    if (media?.kind === 'video') player.play();
+    else player.pause();
+  }, [media?.kind, player]);
+
+  return (
+    <View style={styles.viewerOverlay}>
+      {media?.kind === 'video' ? (
+        <VideoView player={player} style={styles.viewerVideo} nativeControls contentFit="contain" />
+      ) : media?.uri ? (
+        <ScrollView
+          style={{ flex: 1, width: '100%' }}
+          maximumZoomScale={3}
+          minimumZoomScale={1}
+          centerContent
+          contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Image source={{ uri: media.uri }} style={styles.viewerImage} resizeMode="contain" />
+        </ScrollView>
+      ) : null}
+      {media?.name ? <Text style={styles.viewerCaption} numberOfLines={1}>{media.name}</Text> : null}
+      <Pressable style={styles.viewerClose} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close media viewer">
+        <Ionicons name="close" size={24} color="#fff" />
+      </Pressable>
+    </View>
   );
 }
 
@@ -911,6 +1012,7 @@ const MOTION_OPTIONS = [
 function BubbleStudio({ appearance, scope, saving, onChange, onDraftChange, onScopeChange, onReset, onSave, onDone, styles, colors, isDark, reduceMotion }) {
   const motion = useBubbleLoop(appearance.animation, { enabled: true, reduceMotion });
   const fill = resolveBubbleFill(appearance);
+  const ink = resolveBubbleInk(fill);
   const shape = BUBBLE_SHAPES.find((item) => item.key === appearance.shape) || BUBBLE_SHAPES[0];
   const solidPreview = fill.gradient ? fill.gradient[0] : fill.color;
 
@@ -969,8 +1071,8 @@ function BubbleStudio({ appearance, scope, saving, onChange, onDraftChange, onSc
                   <LinearGradient colors={['transparent', 'rgba(255,255,255,0.35)', 'transparent']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ width: 120, height: '100%' }} />
                 </Animated.View>
               ) : null}
-              <Text style={[styles.studioBubbleText, { fontSize: appearance.fontSize }]}>This is so you ✦</Text>
-              <Text style={styles.studioBubbleMeta}>Delivered · now</Text>
+              <Text style={[styles.studioBubbleText, { fontSize: appearance.fontSize }, ink && { color: ink.text }]}>This is so you ✦</Text>
+              <Text style={[styles.studioBubbleMeta, ink && { color: ink.meta }]}>Delivered · now</Text>
             </View>
           </Animated.View>
           <View style={styles.studioIncoming}>
@@ -1119,7 +1221,8 @@ const MessageRow = React.memo(function MessageRow({
   onRetry,
   onJumpToReply,
   onToggleReaction,
-  onOpenImage,
+  onOpenMedia,
+  onOpenDocument,
   bubbleAppearance,
   bubbleMotion,
 }) {
@@ -1144,11 +1247,31 @@ const MessageRow = React.memo(function MessageRow({
   const chosenShape = BUBBLE_SHAPES.find((item) => item.key === bubbleAppearance?.shape) || BUBBLE_SHAPES[0];
   const bubbleFill = resolveBubbleFill(bubbleAppearance);
   const animation = bubbleAppearance?.animation || 'none';
+  const ink = mine ? resolveBubbleInk(bubbleFill) : null;
 
-  const floatY = bubbleMotion.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, -3, 0] });
-  const popScale = bubbleMotion.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.025, 1] });
-  const shimmerX = bubbleMotion.interpolate({ inputRange: [0, 1], outputRange: [-150, 230] });
-  const auroraBorder = bubbleMotion.interpolate({ inputRange: [0, 0.33, 0.66, 1], outputRange: ['#00D2FF', '#7F00FF', '#FF4D9D', '#00D2FF'] });
+  // Interpolations are only built for "mine" rows that actually use the animation.
+  const motion = useMemo(() => {
+    if (!mine || animation === 'none') return null;
+    if (animation === 'float') {
+      return { wrapper: { transform: [{ translateY: bubbleMotion.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, -3, 0] }) }] } };
+    }
+    if (animation === 'pop') {
+      return { wrapper: { transform: [{ scale: bubbleMotion.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.025, 1] }) }] } };
+    }
+    if (animation === 'shimmer') {
+      return { shimmerX: bubbleMotion.interpolate({ inputRange: [0, 1], outputRange: [-150, 230] }) };
+    }
+    if (animation === 'aurora-border') {
+      return {
+        wrapper: {
+          padding: 2,
+          ...chosenShape.radii,
+          backgroundColor: bubbleMotion.interpolate({ inputRange: [0, 0.33, 0.66, 1], outputRange: ['#00D2FF', '#7F00FF', '#FF4D9D', '#00D2FF'] }),
+        },
+      };
+    }
+    return null;
+  }, [mine, animation, bubbleMotion, chosenShape]);
 
   const radius = mine
     ? { borderTopRightRadius: groupStart ? 20 : 6, borderBottomRightRadius: groupEnd ? 4 : 6 }
@@ -1181,16 +1304,17 @@ const MessageRow = React.memo(function MessageRow({
       accessibilityRole="button"
       accessibilityLabel="Jump to replied message"
     >
-      <Text style={[styles.replyAuthor, mine && styles.replyAuthorMine]} numberOfLines={1}>
+      <Text style={[styles.replyAuthor, mine && styles.replyAuthorMine, ink && { color: ink.text }]} numberOfLines={1}>
         {message.replyTo.senderName || 'Student'}
       </Text>
-      <Text style={[styles.replyText, mine && styles.replyTextMine]} numberOfLines={2}>
+      <Text style={[styles.replyText, mine && styles.replyTextMine, ink && { color: ink.meta }]} numberOfLines={2}>
         {message.replyTo.text || ''}
       </Text>
     </Pressable>
   ) : null;
 
   const onBubble = !isVoice && !isSticker;
+  const metaStyle = [styles.metaText, mine && onBubble && styles.mineMeta, mine && onBubble && ink && { color: ink.meta }];
   const footer = showFooter ? (
     <View style={[styles.bubbleFooter, { justifyContent: mine ? 'flex-end' : 'flex-start' }]}>
       {failed ? (
@@ -1200,10 +1324,10 @@ const MessageRow = React.memo(function MessageRow({
         </Pressable>
       ) : (
         <>
-          {edited ? <Text style={[styles.metaText, mine && onBubble && styles.mineMeta]}>Edited</Text> : null}
-          {mine && showSeen ? <Text style={[styles.metaText, styles.seenText, onBubble ? styles.mineMeta : { color: colors.brand }]}>Seen</Text> : null}
-          <Text style={[styles.metaText, mine && onBubble && styles.mineMeta]}>{sending ? 'Sending…' : formatTime(message.createdAt)}</Text>
-          {mine ? <StatusIcon status={message.status} colors={colors} onBubble={onBubble} /> : null}
+          {edited ? <Text style={metaStyle}>Edited</Text> : null}
+          {mine && showSeen ? <Text style={[styles.metaText, styles.seenText, onBubble ? [styles.mineMeta, ink && { color: ink.meta }] : { color: colors.brand }]}>Seen</Text> : null}
+          <Text style={metaStyle}>{sending ? 'Sending…' : formatTime(message.createdAt)}</Text>
+          {mine ? <StatusIcon status={message.status} colors={colors} onBubble={onBubble} inkText={ink?.text} inkMeta={ink?.meta} /> : null}
         </>
       )}
     </View>
@@ -1243,7 +1367,10 @@ const MessageRow = React.memo(function MessageRow({
             message={message}
             isMine={mine}
             onLongPress={handleLongPress}
-            bubbleColor={bubbleFill.gradient ? bubbleFill.gradient[0] : bubbleFill.color}
+            bubbleAppearance={bubbleAppearance}
+            bubbleFill={bubbleFill}
+            bubbleShape={chosenShape.radii}
+            bubbleMotion={bubbleMotion}
           />
         </View>
         {footer ? <View style={styles.outsideFooter}>{footer}</View> : null}
@@ -1251,18 +1378,12 @@ const MessageRow = React.memo(function MessageRow({
     );
   } else {
     const attachments = Array.isArray(message.attachments) ? message.attachments : [];
-    const hasText = Boolean(message.text || message.body || message.caption);
+    const hasText = Boolean(textOf(message));
     const needsClipLayer = mine && (bubbleFill.gradient || animation === 'shimmer' || chosenShape.key === 'fold');
+    const inkColor = ink?.text;
 
     body = (
-      <Animated.View
-        style={[
-          { alignSelf: mine ? 'flex-end' : 'flex-start' },
-          mine && animation === 'float' ? { transform: [{ translateY: floatY }] } : null,
-          mine && animation === 'pop' ? { transform: [{ scale: popScale }] } : null,
-          mine && animation === 'aurora-border' ? { padding: 2, ...chosenShape.radii, backgroundColor: auroraBorder } : null,
-        ]}
-      >
+      <Animated.View style={[{ alignSelf: mine ? 'flex-end' : 'flex-start' }, motion?.wrapper]}>
         <Pressable
           onLongPress={handleLongPress}
           delayLongPress={220}
@@ -1282,8 +1403,8 @@ const MessageRow = React.memo(function MessageRow({
           {needsClipLayer ? (
             <View pointerEvents="none" style={[StyleSheet.absoluteFill, mineRadii, { overflow: 'hidden' }]}>
               {bubbleFill.gradient ? <LinearGradient colors={bubbleFill.gradient} style={StyleSheet.absoluteFill} /> : null}
-              {animation === 'shimmer' ? (
-                <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ translateX: shimmerX }] }]}>
+              {animation === 'shimmer' && motion?.shimmerX ? (
+                <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ translateX: motion.shimmerX }] }]}>
                   <LinearGradient colors={['transparent', 'rgba(255,255,255,0.33)', 'transparent']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ width: 100, height: '100%' }} />
                 </Animated.View>
               ) : null}
@@ -1295,29 +1416,46 @@ const MessageRow = React.memo(function MessageRow({
           ) : null}
           {replyBlock}
           {attachments.map((att, i) =>
-            att?.type === 'image' && att.url ? (
+            getChatAttachmentKind(att) === 'image' && att.url ? (
               <AttachmentImage
-                key={att.url || i}
+                key={`img-${i}`}
                 uri={att.url}
                 styles={styles}
                 colors={colors}
                 spaced={hasText}
-                onPress={onOpenImage}
+                uploading={sending}
+                onPress={(uri) => onOpenMedia?.({ uri, kind: 'image', name: att.fileName || att.name || 'Image' })}
                 onLongPress={handleLongPress}
               />
             ) : null
           )}
-          {attachments.map((att, i) =>
-            att?.type !== 'image' && att.url ? (
-              <Pressable key={`file-${att.url || i}`} style={styles.attachmentFile} onPress={() => Linking.openURL(att.url).catch(() => {})} accessibilityRole="link" accessibilityLabel={`Open ${att.fileName || 'attachment'}`}>
-                <Ionicons name={att.type === 'video' ? 'play-circle-outline' : 'document-text-outline'} size={24} color={mine ? '#fff' : colors.brand} />
-                <View style={{ flex: 1 }}><Text style={[styles.attachmentFileName, mine && styles.mineText]} numberOfLines={1}>{att.fileName || att.name || (att.type === 'video' ? 'Video' : 'Document')}</Text><Text style={[styles.metaText, mine && styles.mineMeta]}>{att.duration ? `${Math.round(att.duration / 1000)} sec · ` : ''}{att.uploadedSize ? humanSize(att.uploadedSize) : att.size ? humanSize(att.size) : ''}</Text></View>
+          {attachments.map((att, i) => {
+            const kind = getChatAttachmentKind(att);
+            if (kind === 'image' || !att.url) return null;
+            const label = att.fileName || att.name || (kind === 'video' ? 'Video' : 'Document');
+            const sizeLabel = att.uploadedSize ? humanSize(att.uploadedSize) : att.size ? humanSize(att.size) : '';
+            return (
+              <Pressable
+                key={`file-${i}`}
+                style={styles.attachmentFile}
+                onPress={() => (kind === 'video'
+                  ? onOpenMedia?.({ uri: att.url, kind: 'video', name: label })
+                  : onOpenDocument?.(att))}
+                accessibilityRole="button"
+                accessibilityLabel={kind === 'video' ? `Play ${label}` : `Open ${label}`}>
+                <Ionicons name={kind === 'video' ? 'play-circle-outline' : 'document-text-outline'} size={24} color={mine ? colors.ink: colors.brand} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.attachmentFileName, mine && styles.mineText, colors.ink && { color: colors.ink }]} numberOfLines={1}>{label}</Text>
+                  <Text style={[styles.metaText, mine && styles.mineMeta, ink && { color: ink.meta }]}>
+                    {att.duration ? `${Math.round(att.duration / 1000)} sec · ` : ''}{sizeLabel}
+                  </Text>
+                </View>
               </Pressable>
-            ) : null
-          )}
+            );
+          })}
           {hasText ? (
-            <Text style={[styles.text, mine && styles.mineText, textStyle]}>
-              {renderLinkedMessageText(message.text || message.body || message.caption, mine, colors)}
+            <Text style={[styles.text, mine && styles.mineText, textStyle, inkColor && { color: inkColor }]}>
+              {renderLinkedMessageText(textOf(message), mine ? inkColor || colors.onBrand : colors.brand)}
             </Text>
           ) : null}
           {footer}
@@ -1399,6 +1537,7 @@ function ConversationScreen({ conversationId }) {
 
   const cachedMessages = MESSAGE_CACHE.get(conversationId);
   const cachedConversation = CONVERSATION_CACHE.get(conversationId);
+  const cacheFreshAtMount = Boolean(cachedMessages?.ts && Date.now() - cachedMessages.ts < MESSAGE_CACHE_TTL_MS);
 
   const [conversation, setConversation] = useState(cachedConversation?.data || null);
   const [conversationError, setConversationError] = useState(false);
@@ -1408,6 +1547,7 @@ function ConversationScreen({ conversationId }) {
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [loading, setLoading] = useState(!cachedConversation);
   const [messagesLoading, setMessagesLoading] = useState(!cachedMessages);
+  const [initialSynced, setInitialSynced] = useState(cacheFreshAtMount);
   const [loadError, setLoadError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [connected, setConnected] = useState(true);
@@ -1443,11 +1583,11 @@ function ConversationScreen({ conversationId }) {
   const [newBelow, setNewBelow] = useState(0);
   const [highlightId, setHighlightId] = useState(null);
   const [toast, setToast] = useState('');
-  const [imagePreview, setImagePreview] = useState(null);
+  const [mediaPreview, setMediaPreview] = useState(null);
   const [voiceState, setVoiceState] = useState('idle'); // idle | recording | uploading
   const [pendingAttachments, setPendingAttachments] = useState([]);
   const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
-  const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const [attachmentPreparing, setAttachmentPreparing] = useState(false);
   const [unread, setUnread] = useState(null); // { id, count } -> "N new messages" divider
 
   const openBubbleStudio = useCallback(() => {
@@ -1475,7 +1615,11 @@ function ConversationScreen({ conversationId }) {
   const hasConnectedOnce = useRef(false);
   const disconnectedAtRef = useRef(0);
   const retryRef = useRef(null);
+  const deliverRef = useRef(null);
+  const loadOlderRef = useRef(null);
   const listDataRef = useRef([]);
+  const listHeightRef = useRef(0);
+  const hasMoreRef = useRef(hasMoreMessages);
   const messagesRef = useRef(messages);
   const selectedIdsRef = useRef([]);
   const syncedAtRef = useRef(cachedMessages?.ts || 0);
@@ -1597,6 +1741,10 @@ function ConversationScreen({ conversationId }) {
     messagesRef.current = messages;
   }, [messages]);
 
+  useEffect(() => {
+    hasMoreRef.current = hasMoreMessages;
+  }, [hasMoreMessages]);
+
   const lastMessage = visibleMessages[visibleMessages.length - 1];
   const lastKey = lastMessage ? messageKey(lastMessage) : null;
   const lastIncomingId = useMemo(() => {
@@ -1614,13 +1762,66 @@ function ConversationScreen({ conversationId }) {
   }, []);
 
   const showToast = useCallback((text) => {
-    setToast(text);
     clearTimeout(toastTimer.current);
+    toastOpacity.stopAnimation();
+    setToast(text);
     Animated.timing(toastOpacity, { toValue: 1, duration: 160, useNativeDriver: true }).start();
     toastTimer.current = setTimeout(() => {
-      Animated.timing(toastOpacity, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => setToast(''));
+      // Only clear when the fade finished, so a newer toast is never wiped by an older animation.
+      Animated.timing(toastOpacity, { toValue: 0, duration: 220, useNativeDriver: true }).start(({ finished }) => {
+        if (finished) setToast('');
+      });
     }, 2000);
   }, [toastOpacity]);
+
+  const openDocumentInAnotherApp = useCallback(async (attachment) => {
+    const sourceUrl = String(attachment?.url || '').trim();
+    if (!sourceUrl) return;
+    try {
+      let localUri = sourceUrl;
+      if (!/^(?:file|content):\/\//i.test(sourceUrl)) {
+        const fileName = String(attachment.fileName || attachment.name || 'chat-document')
+          .replace(/[^a-zA-Z0-9._-]/g, '_');
+        // Stable name per URL: opening the same document again reuses the cached file (no re-download).
+        const destination = `${FileSystem.cacheDirectory}chat-${hashString(sourceUrl)}-${fileName}`;
+        const info = await FileSystem.getInfoAsync(destination).catch(() => null);
+        if (!info?.exists) {
+          try {
+            const downloaded = await FileSystem.downloadAsync(sourceUrl, destination);
+            if (downloaded?.status && downloaded.status >= 400) throw new Error('The file could not be downloaded.');
+          } catch (downloadError) {
+            FileSystem.deleteAsync(destination, { idempotent: true }).catch(() => {});
+            throw downloadError;
+          }
+        }
+        localUri = destination;
+      }
+
+      const sharingAvailable = await Sharing.isAvailableAsync().catch(() => false);
+      if (sharingAvailable) {
+        await Sharing.shareAsync(localUri, {
+          mimeType: attachment.mimeType || 'application/octet-stream',
+          dialogTitle: 'Open document with',
+        });
+      } else {
+        await Linking.openURL(localUri);
+      }
+    } catch (error) {
+      Alert.alert('Could not open document', error?.message || 'No compatible document app is available.');
+    }
+  }, []);
+
+  const requestDocumentOpen = useCallback((attachment) => {
+    const fileName = attachment?.fileName || attachment?.name || 'this document';
+    Alert.alert(
+      'Open document?',
+      `Choose another app on your device to open ${fileName}.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open in another app', onPress: () => openDocumentInAnotherApp(attachment) },
+      ]
+    );
+  }, [openDocumentInAnotherApp]);
 
   const showAlertDialog = useCallback((title, subtitle, icon = 'alert-circle-outline', iconBgColor = colors.dangerLight, iconColor = colors.error) => {
     setDialogConfig({
@@ -1721,6 +1922,7 @@ function ConversationScreen({ conversationId }) {
       setHasMoreMessages(Boolean(data.hasMore));
     } catch (error) {
       console.log('Failed to fetch older messages', error);
+      showToast("Couldn't load earlier messages");
     } finally {
       setLoadingOlderMessages(false);
       // Hold the guard briefly so the auto-stick-to-bottom logic doesn't fight the prepend.
@@ -1729,7 +1931,11 @@ function ConversationScreen({ conversationId }) {
         loadingOlderRef.current = false;
       }, 350);
     }
-  }, [conversationId, hasMoreMessages, lastVisibleMessageId]);
+  }, [conversationId, hasMoreMessages, lastVisibleMessageId, showToast]);
+
+  useEffect(() => {
+    loadOlderRef.current = loadOlderMessages;
+  }, [loadOlderMessages]);
 
   // Initial load, live updates, and gap-filling after real reconnects.
   useEffect(() => {
@@ -1766,20 +1972,33 @@ function ConversationScreen({ conversationId }) {
         console.log('Failed to fetch messages', error);
         if (initial && !cancelled && !messagesRef.current.length) setLoadError(true);
       } finally {
-        if (initial && !cancelled) setMessagesLoading(false);
+        if (initial && !cancelled) {
+          setMessagesLoading(false);
+          setInitialSynced(true);
+        }
       }
     };
 
     // Skip the network completely when the cache is fresh and this isn't a manual retry.
     const cacheIsFresh = reloadKey === 0 && syncedAtRef.current && Date.now() - syncedAtRef.current < MESSAGE_CACHE_TTL_MS;
     if (!cacheIsFresh) fetchLatest(true);
-    else setMessagesLoading(false);
+    else {
+      setMessagesLoading(false);
+      setInitialSynced(true);
+    }
 
-    const socket = getSocket();
+    // The socket can be unavailable (not initialised yet, auth race). Never crash the screen for it:
+    // HTTP sending and loading still work, we just lose live updates until the next mount.
+    let socket = null;
+    try {
+      socket = getSocket();
+    } catch (_error) {
+      socket = null;
+    }
 
     const handleConnect = () => {
       setConnected(true);
-      socket.emit('join_conversation', conversationId);
+      socket?.emit('join_conversation', conversationId);
       const wasGone = disconnectedAtRef.current ? Date.now() - disconnectedAtRef.current : 0;
       disconnectedAtRef.current = 0;
       // Only gap-fill after a meaningful outage; short blips are covered by the live socket.
@@ -1797,17 +2016,14 @@ function ConversationScreen({ conversationId }) {
       if (!disconnectedAtRef.current) disconnectedAtRef.current = Date.now();
     };
 
-    if (socket.connected) handleConnect();
-    else handleDisconnect();
-
     const handleReceiveMessage = (newMessage) => {
       if (newMessage?.conversationId && newMessage.conversationId !== conversationId) return;
       if (newMessage?.senderId && newMessage.senderId !== currentUidRef.current) setIsTyping(false);
       setMessages((prev) => reconcileIncomingMessage(prev, { ...newMessage, status: newMessage?.status || 'sent' }));
     };
 
-    const handleTyping = ({ userId, isTyping: typing, name }) => {
-      if (userId === currentUidRef.current) return;
+    const handleTyping = ({ conversationId: cid, userId, isTyping: typing, name }) => {
+      if ((cid && cid !== conversationId) || userId === currentUidRef.current) return;
       setIsTyping(Boolean(typing));
       if (typing && name) setTypingName(name);
       clearTimeout(remoteTypingTimer.current);
@@ -1844,18 +2060,26 @@ function ConversationScreen({ conversationId }) {
       setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, ...patch } : m)));
     };
 
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
-    socket.on('connect_error', handleDisconnect);
-    socket.on('receive_message', handleReceiveMessage);
-    socket.on('typing_update', handleTyping);
-    socket.on('messages_read', handleMessagesRead);
-    socket.on('message_status', handleMessageStatus);
-    socket.on('message_updated', handleMessagePatch); // { conversationId, messageId, patch:{text,edited,reactions,deleted} }
+    if (socket) {
+      socket.on('connect', handleConnect);
+      socket.on('disconnect', handleDisconnect);
+      socket.on('connect_error', handleDisconnect);
+      socket.on('receive_message', handleReceiveMessage);
+      socket.on('typing_update', handleTyping);
+      socket.on('messages_read', handleMessagesRead);
+      socket.on('message_status', handleMessageStatus);
+      socket.on('message_updated', handleMessagePatch); // { conversationId, messageId, patch:{text,edited,reactions,deleted} }
+
+      if (socket.connected) handleConnect();
+      else handleDisconnect();
+    } else {
+      handleDisconnect();
+    }
 
     return () => {
       cancelled = true;
       clearTimeout(remoteTypingTimer.current);
+      if (!socket) return;
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
       socket.off('connect_error', handleDisconnect);
@@ -1892,8 +2116,9 @@ function ConversationScreen({ conversationId }) {
   );
 
   // "N new messages" divider, computed once from the unread counter at open time.
+  // Waits for the first sync so a stale cache can't anchor the divider on the wrong message.
   useEffect(() => {
-    if (unreadComputedRef.current || messagesLoading || !conversation || !currentUid) return;
+    if (unreadComputedRef.current || messagesLoading || !initialSynced || !conversation || !currentUid) return;
     unreadComputedRef.current = true;
     const count = Number(conversation?.unread?.[currentUid] || 0);
     if (!count) return;
@@ -1901,7 +2126,7 @@ function ConversationScreen({ conversationId }) {
     if (!incoming.length) return;
     const anchor = incoming[Math.max(0, incoming.length - count)];
     setUnread({ id: anchor.id, count: Math.min(count, incoming.length) });
-  }, [messagesLoading, conversation, currentUid, messages]);
+  }, [messagesLoading, initialSynced, conversation, currentUid, messages]);
 
   // Auto-scroll: only for genuinely new tail messages, never when older pages load.
   useEffect(() => {
@@ -1926,7 +2151,8 @@ function ConversationScreen({ conversationId }) {
   }, [isTyping, voiceUploading, scrollToBottom]);
 
   useEffect(() => {
-    const showSub = Keyboard.addListener('keyboardDidShow', () => {
+    const eventName = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const showSub = Keyboard.addListener(eventName, () => {
       if (nearBottomRef.current) scrollToBottom(true);
     });
     return () => showSub.remove();
@@ -1992,7 +2218,7 @@ function ConversationScreen({ conversationId }) {
 
   // Little "pop" on the send button when it becomes active.
   const activeText = editingMessage ? editText : draft;
-  const canSubmit = Boolean(activeText.trim() || pendingAttachments.length) && !attachmentUploading;
+  const canSubmit = Boolean(activeText.trim() || pendingAttachments.length) && !attachmentPreparing;
   useEffect(() => {
     Animated.spring(sendScale, { toValue: canSubmit ? 1 : 0.92, useNativeDriver: true, friction: 6, tension: 160 }).start();
   }, [canSubmit, sendScale]);
@@ -2034,6 +2260,13 @@ function ConversationScreen({ conversationId }) {
     typingTimeout.current = setTimeout(stopTyping, TYPING_IDLE_MS);
   };
 
+  const useQuickStarter = (text) => {
+    tap('Light');
+    setDraft(text);
+    DRAFT_CACHE.set(conversationId, text);
+    setTimeout(() => inputRef.current?.focus?.(), 50);
+  };
+
   /* -------------------------------- Sending ------------------------------- */
 
   const markFailedMessage = (clientId, errorMessage) => {
@@ -2054,10 +2287,45 @@ function ConversationScreen({ conversationId }) {
     console.log('Failed to send message', error);
   };
 
-  const deliver = async (clientId, payload, fallbackMessage) => {
+  const uploadAttachmentFiles = (files, clientId) =>
+    Promise.all(
+      files.map(async (attachment, index) => {
+        const uploaded = await uploadChatAttachment(attachment, { targetType: 'conversation', targetId: conversationId });
+        const uploadedSize = Number(uploaded.uploadedSize || attachment.uploadedSize);
+        return {
+          id: uploaded.key || `${clientId}-${index}-${attachment.name}`,
+          url: uploaded.url || uploaded.secure_url,
+          key: uploaded.key || '',
+          type: attachment.kind,
+          fileName: attachment.name,
+          mimeType: attachment.mimeType,
+          originalSize: attachment.originalSize,
+          uploadedSize,
+          size: uploadedSize,
+          compressionStatus: attachment.compressionStatus,
+          duration: attachment.duration || 0,
+        };
+      })
+    );
+
+  /**
+   * Sends a message that already exists optimistically in the list.
+   * `files` (optional) are local attachments still to upload: the bubble is visible immediately
+   * and swaps to the uploaded URLs. If the upload fails, the files stay on the message so Retry re-uploads them.
+   */
+  const deliver = async (clientId, payload, fallbackMessage, files = null) => {
     try {
+      let body = payload;
+      if (files?.length) {
+        const attachments = await uploadAttachmentFiles(files, clientId);
+        body = { ...payload, attachments };
+        // From here on a retry only needs to resend (never to re-upload) and never carries file:// URIs.
+        setMessages((prev) =>
+          prev.map((m) => (messageKey(m) === clientId ? { ...m, attachments, _files: undefined } : m))
+        );
+      }
       const response = await sendDirectMessage(conversation, user, profile || {}, {
-        ...payload,
+        ...body,
         clientTempId: clientId,
       });
       const next = response?.message || response || fallbackMessage;
@@ -2077,6 +2345,10 @@ function ConversationScreen({ conversationId }) {
     }
   };
 
+  useEffect(() => {
+    deliverRef.current = deliver;
+  });
+
   const baseOptimistic = (clientId) => ({
     id: clientId,
     localId: clientId,
@@ -2088,40 +2360,78 @@ function ConversationScreen({ conversationId }) {
   });
 
   const addPickedAttachments = async (assets = []) => {
+    if (!assets.length) return;
+    setAttachmentPreparing(true);
     try {
-      const prepared = await Promise.all(assets.slice(0, 5).map(prepareChatAttachment));
-      setPendingAttachments((current) => [...current, ...prepared].slice(0, 5));
-    } catch (error) { showToast(error?.message || 'Unable to prepare that attachment.'); }
+      const prepared = await Promise.all(assets.slice(0, MAX_ATTACHMENTS).map(prepareChatAttachment));
+      setPendingAttachments((current) => {
+        const merged = [...current, ...prepared];
+        if (merged.length > MAX_ATTACHMENTS) showToast(`You can attach up to ${MAX_ATTACHMENTS} files at a time.`);
+        return merged.slice(0, MAX_ATTACHMENTS);
+      });
+    } catch (error) {
+      showToast(error?.message || 'Unable to prepare that attachment.');
+    } finally {
+      setAttachmentPreparing(false);
+    }
   };
   const pickPhotos = async (camera = false) => {
     setAttachmentMenuVisible(false);
-    const permission = camera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return showToast(camera ? 'Camera permission is needed to take a photo.' : 'Photo-library permission is needed to share media.');
-    const result = camera ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 }) : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], allowsMultipleSelection: true, selectionLimit: 5, quality: 1 });
-    if (!result.canceled) await addPickedAttachments(result.assets || []);
+    const remaining = MAX_ATTACHMENTS - pendingAttachments.length;
+    if (remaining <= 0) return showToast(`You can attach up to ${MAX_ATTACHMENTS} files at a time.`);
+    try {
+      const permission = camera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) return showToast(camera ? 'Camera permission is needed to take a photo.' : 'Photo-library permission is needed to share media.');
+      const result = camera
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], allowsMultipleSelection: true, selectionLimit: remaining, quality: 1 });
+      if (!result.canceled) await addPickedAttachments(result.assets || []);
+    } catch (error) {
+      showToast(error?.message || 'Could not open your photos.');
+    }
+    return undefined;
   };
   const pickDocument = async () => {
     setAttachmentMenuVisible(false);
-    const result = await DocumentPicker.getDocumentAsync({ type: DOCUMENT_MIME_TYPES, copyToCacheDirectory: true, multiple: true });
-    if (!result.canceled) await addPickedAttachments(result.assets || []);
+    if (pendingAttachments.length >= MAX_ATTACHMENTS) return showToast(`You can attach up to ${MAX_ATTACHMENTS} files at a time.`);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: DOCUMENT_MIME_TYPES, copyToCacheDirectory: true, multiple: true });
+      if (!result.canceled) await addPickedAttachments(result.assets || []);
+    } catch (error) {
+      showToast(error?.message || 'Could not open your files.');
+    }
+    return undefined;
   };
-  const send = async () => {
+
+  // The bubble appears instantly (with local previews) and uploads in the background.
+  const send = () => {
     const nextText = draft.trim();
-    if ((!nextText && !pendingAttachments.length) || !conversation || !user || !canChat || attachmentUploading) return;
+    const files = pendingAttachments;
+    if ((!nextText && !files.length) || !conversation || !user || !canChat || attachmentPreparing) return undefined;
 
     tap('Medium');
     const clientId = createMessageClientId();
     const reply = buildReplyPayload(replyTo);
-    let attachments;
-    try {
-      setAttachmentUploading(true);
-      attachments = await Promise.all(pendingAttachments.map(async (attachment) => {
-        const uploaded = await uploadChatAttachment(attachment, { targetType: 'conversation', targetId: conversationId });
-        return { id: uploaded.key || `${clientId}-${attachment.name}`, url: uploaded.url || uploaded.secure_url, key: uploaded.key || '', type: attachment.kind, fileName: attachment.name, mimeType: attachment.mimeType, originalSize: attachment.originalSize, uploadedSize: Number(uploaded.uploadedSize || attachment.uploadedSize), size: Number(uploaded.uploadedSize || attachment.uploadedSize), compressionStatus: attachment.compressionStatus, duration: attachment.duration || 0 };
-      }));
-    } catch (error) { setAttachmentUploading(false); showSendError(error); return; }
-    setAttachmentUploading(false);
-    const optimistic = { ...baseOptimistic(clientId), type: 'text', text: nextText, attachments, replyTo: reply };
+    const localAttachments = files.map((file, index) => ({
+      id: `${clientId}-local-${index}`,
+      url: file.uri,
+      type: file.kind,
+      fileName: file.name,
+      mimeType: file.mimeType,
+      originalSize: file.originalSize,
+      uploadedSize: file.uploadedSize,
+      size: file.uploadedSize,
+      compressionStatus: file.compressionStatus,
+      duration: file.duration || 0,
+    }));
+    const optimistic = {
+      ...baseOptimistic(clientId),
+      type: 'text',
+      text: nextText,
+      attachments: localAttachments,
+      replyTo: reply,
+      _files: files.length ? files : undefined,
+    };
 
     setMessages((prev) => reconcileIncomingMessage(prev, optimistic));
     setDraft('');
@@ -2131,7 +2441,7 @@ function ConversationScreen({ conversationId }) {
     stopTyping();
     scrollToBottom();
 
-    await deliver(clientId, { type: 'text', text: nextText, attachments, replyTo: reply }, optimistic);
+    return deliver(clientId, { type: 'text', text: nextText, attachments: [], replyTo: reply }, optimistic, files);
   };
 
   const sendVoiceMessage = useCallback(
@@ -2166,25 +2476,9 @@ function ConversationScreen({ conversationId }) {
       setMessages((prev) => reconcileIncomingMessage(prev, optimistic));
       setReplyTo(null);
       scrollToBottom();
-
-      try {
-        const response = await sendDirectMessage(conversation, user, profile || {}, {
-          type: 'voice',
-          ...voiceFields,
-          replyTo: reply,
-          clientTempId: clientId,
-        });
-        const next = response?.message || response || { ...optimistic, status: 'sent' };
-        setMessages((prev) =>
-          reconcileIncomingMessage(prev, { ...next, clientTempId: clientId, localId: clientId, status: next?.status || 'sent' })
-        );
-      } catch (error) {
-        markFailedMessage(clientId, error?.message || 'Failed to send');
-        showSendError(error);
-      }
+      await deliverRef.current?.(clientId, { type: 'voice', ...voiceFields, replyTo: reply }, { ...optimistic, status: 'sent' });
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canChat, conversation, user, profile, replyTo, currentUid]
+    [canChat, conversation, user, profile, replyTo, currentUid, scrollToBottom, showToast]
   );
 
   const sendSticker = async (sticker) => {
@@ -2206,7 +2500,7 @@ function ConversationScreen({ conversationId }) {
     setMessages((prev) =>
       prev.map((entry) => (messageKey(entry) === clientId ? { ...entry, status: 'sending', failedReason: null } : entry))
     );
-    await deliver(clientId, payloadFromMessage(message), message);
+    await deliver(clientId, payloadFromMessage(message), message, message._files || null);
   };
   useEffect(() => {
     retryRef.current = retrySendMessage;
@@ -2322,8 +2616,9 @@ function ConversationScreen({ conversationId }) {
   };
 
   const handleCopyFromSheet = async () => {
-    if (activeMessage?.text) {
-      await Clipboard.setStringAsync(activeMessage.text);
+    const value = textOf(activeMessage);
+    if (value) {
+      await Clipboard.setStringAsync(value);
       showToast('Copied to clipboard');
     }
     closeSheet();
@@ -2338,7 +2633,7 @@ function ConversationScreen({ conversationId }) {
   const handleCopySelectedMessages = async () => {
     const text = selectedMessages
       .map((message) => {
-        const value = String(message.text || message.body || message.caption || '').trim();
+        const value = textOf(message).trim();
         return value || (message.type === 'voice' ? '[Voice message]' : '');
       })
       .filter(Boolean)
@@ -2383,10 +2678,10 @@ function ConversationScreen({ conversationId }) {
     setTimeout(() => inputRef.current?.focus?.(), 80);
   };
 
-  const cancelEditingMessage = () => {
+  const cancelEditingMessage = useCallback(() => {
     setEditingMessage(null);
     setEditText('');
-  };
+  }, []);
 
   // Optimistic edit: the new text + "Edited" appear immediately; reverted if the server rejects it.
   const saveEditedMessage = async () => {
@@ -2414,7 +2709,7 @@ function ConversationScreen({ conversationId }) {
       showAlertDialog(
         'Delete unavailable',
         activeMessage.type === 'voice'
-          ? 'Voice messages can only be deleted within 30 minutes of sending.'
+          ? 'Voice messages can only be deleted within 2 hours of sending.'
           : 'Messages can only be deleted within 1 hour of sending.'
       );
       setConfirmingDelete(false);
@@ -2438,8 +2733,10 @@ function ConversationScreen({ conversationId }) {
     setRoomBusy('clear');
     try {
       await clearConversationForUser(conversationId, currentUid);
-      // Use the newest message's own timestamp instead of the device clock, so clock skew can't hide or leak messages.
-      const clearedAt = new Date(toMillis(lastMessage?.createdAt) || Date.now());
+      // Read the newest *server* message at confirmation time (a ref, not a stale render closure),
+      // and use its own timestamp instead of the device clock so clock skew can't hide or leak messages.
+      const newest = [...messagesRef.current].reverse().find((m) => !isLocalId(m.id));
+      const clearedAt = new Date(toMillis(newest?.createdAt) || Date.now());
       setReplyTo(null);
       setActiveMessage(null);
       setUnread(null);
@@ -2477,9 +2774,13 @@ function ConversationScreen({ conversationId }) {
     setShowOptionsSheet(true);
   };
 
+  const openOtherProfile = () => {
+    if (otherId) router.navigate(`/view-user-profile/${otherId}`);
+  };
+
   const handleViewProfile = () => {
     setShowOptionsSheet(false);
-    if (otherId) router.navigate(`/view-user-profile/${otherId}`);
+    openOtherProfile();
   };
 
   const handlePromptClearChat = () => {
@@ -2659,6 +2960,27 @@ function ConversationScreen({ conversationId }) {
 
   /* ------------------------------ List behavior --------------------------- */
 
+  // Android back button: leave selection / edit / reply mode first, then navigate.
+  useEffect(() => {
+    if (!isFocused) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (multiSelectMode) {
+        clearMessageSelection();
+        return true;
+      }
+      if (editingMessage) {
+        cancelEditingMessage();
+        return true;
+      }
+      if (replyTo) {
+        setReplyTo(null);
+        return true;
+      }
+      return false;
+    });
+    return () => subscription.remove();
+  }, [isFocused, multiSelectMode, editingMessage, replyTo, clearMessageSelection, cancelEditingMessage]);
+
   const jumpToMessage = useCallback(
     (id) => {
       const index = listDataRef.current.findIndex(
@@ -2689,14 +3011,20 @@ function ConversationScreen({ conversationId }) {
     [loadOlderMessages]
   );
 
-  const handleContentSizeChange = useCallback(() => {
+  const handleListLayout = useCallback((event) => {
+    listHeightRef.current = event.nativeEvent.layout.height;
+  }, []);
+
+  const handleContentSizeChange = useCallback((_width, height) => {
     if (!initialScrollDone.current) {
       initialScrollDone.current = true;
       listRef.current?.scrollToEnd?.({ animated: false });
-      return;
+    } else if (nearBottomRef.current && !loadingOlderRef.current) {
+      // Late-growing content (photos finishing, typing bubble) keeps the view pinned to the bottom.
+      listRef.current?.scrollToEnd?.({ animated: false });
     }
-    // Late-growing content (photos finishing, typing bubble) keeps the view pinned to the bottom.
-    if (nearBottomRef.current && !loadingOlderRef.current) listRef.current?.scrollToEnd?.({ animated: false });
+    // Short history that doesn't fill the screen can never be scrolled, so fetch the next page automatically.
+    if (hasMoreRef.current && listHeightRef.current && height < listHeightRef.current) loadOlderRef.current?.();
   }, []);
 
   const handleScrollToIndexFailed = useCallback((info) => {
@@ -2768,13 +3096,14 @@ function ConversationScreen({ conversationId }) {
           onRetry={handleRetry}
           onJumpToReply={jumpToMessage}
           onToggleReaction={toggleReaction}
-          onOpenImage={setImagePreview}
+          onOpenMedia={setMediaPreview}
+          onOpenDocument={requestDocumentOpen}
           bubbleAppearance={bubbleAppearance}
           bubbleMotion={bubbleMotion}
         />
       );
     },
-    [styles, colors, currentUid, highlightId, multiSelectMode, selectedSet, openSheet, startReply, handleRetry, jumpToMessage, toggleMessageSelection, toggleReaction, bubbleAppearance, bubbleMotion]
+    [styles, colors, currentUid, highlightId, multiSelectMode, selectedSet, openSheet, startReply, handleRetry, jumpToMessage, toggleMessageSelection, toggleReaction, requestDocumentOpen, bubbleAppearance, bubbleMotion]
   );
 
   /* ------------------------------- Renderers ------------------------------ */
@@ -2898,7 +3227,7 @@ function ConversationScreen({ conversationId }) {
         ) : (
           <>
             {!sending ? <SheetOption {...opt} icon="arrow-undo-outline" label="Reply" onPress={handleReplyFromSheet} /> : null}
-            {m.text ? <SheetOption {...opt} icon="copy-outline" label="Copy text" onPress={handleCopyFromSheet} /> : null}
+            {textOf(m) ? <SheetOption {...opt} icon="copy-outline" label="Copy text" onPress={handleCopyFromSheet} /> : null}
             {editable && isText ? <SheetOption {...opt} icon="create-outline" label="Edit message" onPress={startEditingMessage} /> : null}
             {!sending && !m.deleted ? (
               <SheetOption {...opt} icon="checkbox-outline" label="Select" onPress={() => { setSelection([m.id], true); closeSheet(); }} />
@@ -2907,7 +3236,7 @@ function ConversationScreen({ conversationId }) {
             {mine && !deletable && !sending ? (
               <Text style={styles.sheetHint}>
                 {m.type === 'voice'
-                  ? 'Voice messages can be deleted within 30 minutes of sending.'
+                  ? 'Voice messages can be deleted within 2 hours of sending.'
                   : 'Messages can be edited or deleted within 1 hour of sending.'}
               </Text>
             ) : null}
@@ -2939,7 +3268,7 @@ function ConversationScreen({ conversationId }) {
   const listFooter =
     isTyping || voiceUploading ? (
       <>
-        {voiceUploading ? <VoicePendingBubble styles={styles} colors={colors} /> : null}
+        {voiceUploading ? <VoicePendingBubble styles={styles} colors={colors} reduceMotion={reduceMotion} /> : null}
         {isTyping ? <TypingBubble styles={styles} reduceMotion={reduceMotion} /> : null}
       </>
     ) : null;
@@ -2971,7 +3300,7 @@ function ConversationScreen({ conversationId }) {
   }
 
   return (
-    <ScreenShell showHeader={false} loading={loading} scrollable={false} contentPadding={false}>
+    <ScreenShell showHeader={false} loading={loading} scrollable={false} contentPadding={false} keyboardAvoiding={false}>
       <View style={{ flex: 1 }}>
         <ChatBackground appearance={bubbleAppearance} colors={colors} isDark={isDark} styles={styles} />
         <FriendRequestModal
@@ -2994,7 +3323,7 @@ function ConversationScreen({ conversationId }) {
           </Pressable>
           <Pressable
             style={styles.avatarWrapper}
-            onPress={() => otherId && router.navigate(`/view-user-profile/${otherId}`)}
+            onPress={openOtherProfile}
             disabled={!otherId}
             accessibilityRole="button"
             accessibilityLabel={`View ${headerTitle}'s profile`}
@@ -3012,13 +3341,13 @@ function ConversationScreen({ conversationId }) {
               </View>
             ) : null}
           </Pressable>
-          <View style={styles.headerMeta}>
+          <Pressable style={styles.headerMeta} onPress={openOtherProfile} disabled={!otherId} accessibilityRole="button" accessibilityLabel={`View ${headerTitle}'s profile`}>
             <Text style={styles.headerName} numberOfLines={1}>{headerTitle}</Text>
             <View style={styles.headerStatusRow}>
               {isTyping ? <View style={styles.headerStatusDot} /> : null}
               <Text style={[styles.headerHint, isTyping && styles.headerHintActive]} numberOfLines={1}>{statusText}</Text>
             </View>
-          </View>
+          </Pressable>
           <Pressable
             style={({ pressed }) => [styles.headerAction, pressed && styles.headerActionPressed]}
             onPress={showChatOptions}
@@ -3031,7 +3360,7 @@ function ConversationScreen({ conversationId }) {
         </View>
 
         {showReconnect && !messagesLoading ? (
-          <View style={styles.banner}>
+          <View style={styles.banner} accessibilityLiveRegion="polite">
             <ActivityIndicator size="small" color={colors.textSecondary} />
             <Text style={styles.bannerText}>Reconnecting… messages will still send</Text>
           </View>
@@ -3044,7 +3373,7 @@ function ConversationScreen({ conversationId }) {
         >
           <View style={styles.messagesPane}>
             {messagesLoading && !messages.length ? (
-              <MessageSkeleton styles={styles} />
+              <MessageSkeleton styles={styles} reduceMotion={reduceMotion} />
             ) : loadError && !messages.length ? (
               <View style={styles.centerFill}>
                 <EmptyState title="Couldn't load messages" description="Check your connection and try again." />
@@ -3069,6 +3398,7 @@ function ConversationScreen({ conversationId }) {
                 renderItem={renderItem}
                 onScroll={handleScroll}
                 scrollEventThrottle={16}
+                onLayout={handleListLayout}
                 onContentSizeChange={handleContentSizeChange}
                 onScrollToIndexFailed={handleScrollToIndexFailed}
                 maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
@@ -3085,10 +3415,21 @@ function ConversationScreen({ conversationId }) {
                 removeClippedSubviews={Platform.OS === 'android'}
               />
             ) : (
-              <EmptyState
-                title="No messages yet"
-                description={canChat ? 'Say hello and start the conversation.' : 'Messages will show up here once you are connected.'}
-              />
+              <View style={styles.centerFill}>
+                <EmptyState
+                  title="No messages yet"
+                  description={canChat ? 'Say hello and start the conversation.' : 'Messages will show up here once you are connected.'}
+                />
+                {canChat ? (
+                  <View style={styles.quickStartRow}>
+                    {QUICK_STARTERS.map((starter) => (
+                      <Pressable key={starter} style={styles.quickChip} onPress={() => useQuickStarter(starter)} accessibilityRole="button" accessibilityLabel={`Use "${starter}"`}>
+                        <Text style={styles.quickChipText}>{starter}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
             )}
 
             {showScrollDown && !multiSelectMode ? (
@@ -3138,7 +3479,7 @@ function ConversationScreen({ conversationId }) {
             ) : null}
 
             {toast ? (
-              <Animated.View pointerEvents="none" style={[styles.toast, { opacity: toastOpacity }]}>
+              <Animated.View pointerEvents="none" style={[styles.toast, { opacity: toastOpacity }]} accessibilityLiveRegion="polite">
                 <Text style={styles.toastText}>{toast}</Text>
               </Animated.View>
             ) : null}
@@ -3148,13 +3489,33 @@ function ConversationScreen({ conversationId }) {
 
           {canChat ? (
             <View style={styles.composerContainer}>
-              {!editingMessage && pendingAttachments.length ? pendingAttachments.map((attachment, index) => (
-                <View key={`${attachment.uri}-${index}`} style={styles.attachmentPreviewRow}>
-                  <View style={styles.attachmentPreviewThumb}>{attachment.kind === 'image' ? <Image source={{ uri: attachment.uri }} style={styles.attachmentPreviewImage} /> : <Ionicons name={attachment.kind === 'video' ? 'videocam-outline' : 'document-text-outline'} size={19} color={colors.brand} />}</View>
-                  <Text style={styles.attachmentPreviewText} numberOfLines={2}>{attachment.name}{attachment.compressionStatus === 'optimized' ? `\nOptimized: ${humanSize(attachment.originalSize)} → ${humanSize(attachment.uploadedSize)}` : `\n${humanSize(attachment.originalSize)}`}</Text>
-                  <Pressable onPress={() => setPendingAttachments((all) => all.filter((_, itemIndex) => itemIndex !== index))} accessibilityLabel="Remove attachment"><Ionicons name="close-circle" size={22} color={colors.textTertiary} /></Pressable>
-                </View>
-              )) : null}
+              {!editingMessage && pendingAttachments.length ? (
+                <ScrollView style={styles.attachmentPreviewList} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                  {pendingAttachments.map((attachment, index) => (
+                    <View key={`${attachment.uri}-${index}`} style={styles.attachmentPreviewRow}>
+                      <View style={styles.attachmentPreviewThumb}>
+                        {attachment.kind === 'image'
+                          ? <Image source={{ uri: attachment.uri }} style={styles.attachmentPreviewImage} />
+                          : <Ionicons name={attachment.kind === 'video' ? 'videocam-outline' : 'document-text-outline'} size={19} color={colors.brand} />}
+                      </View>
+                      <Text style={styles.attachmentPreviewText} numberOfLines={2}>
+                        {attachment.name}
+                        {attachment.compressionStatus === 'optimized'
+                          ? `\nOptimized: ${humanSize(attachment.originalSize)} → ${humanSize(attachment.uploadedSize)}`
+                          : `\n${humanSize(attachment.originalSize)}`}
+                      </Text>
+                      <Pressable
+                        onPress={() => setPendingAttachments((all) => all.filter((_, itemIndex) => itemIndex !== index))}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Remove attachment"
+                      >
+                        <Ionicons name="close-circle" size={22} color={colors.textTertiary} />
+                      </Pressable>
+                    </View>
+                  ))}
+                </ScrollView>
+              ) : null}
               {editingMessage ? (
                 <View style={styles.composerBanner}>
                   <Ionicons name="create-outline" size={18} color={colors.brand} />
@@ -3179,11 +3540,19 @@ function ConversationScreen({ conversationId }) {
                 </View>
               ) : null}
 
-              {/* Smart composer: sticker + input + (send when there is text, mic when there isn't). */}
+              {/* Smart composer: attach + sticker + input + (send when there is text, mic when there isn't). */}
               <View style={styles.composer}>
                 {!editingMessage && !voiceBusy ? (
-                  <Pressable style={styles.stickerButton} onPress={() => setAttachmentMenuVisible(true)} accessibilityRole="button" accessibilityLabel="Add attachment">
-                    <Ionicons name="add" size={25} color={colors.brand} />
+                  <Pressable
+                    style={styles.stickerButton}
+                    onPress={() => setAttachmentMenuVisible(true)}
+                    disabled={attachmentPreparing}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add attachment"
+                  >
+                    {attachmentPreparing
+                      ? <ActivityIndicator size="small" color={colors.brand} />
+                      : <Ionicons name="add" size={25} color={colors.brand} />}
                   </Pressable>
                 ) : null}
 
@@ -3204,6 +3573,7 @@ function ConversationScreen({ conversationId }) {
                       style={[styles.input, editingMessage && styles.inputEditing]}
                       maxLength={MAX_LENGTH}
                       multiline
+                      textAlignVertical="center"
                       accessibilityLabel="Message input"
                     />
                     {nearLimit ? (
@@ -3217,7 +3587,7 @@ function ConversationScreen({ conversationId }) {
                 {showSend && !voiceBusy ? (
                   <Animated.View style={{ transform: [{ scale: sendScale }] }}>
                     <Pressable
-                      style={styles.button}
+                      style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
                       onPress={editingMessage ? saveEditedMessage : send}
                       accessibilityRole="button"
                       accessibilityLabel={editingMessage ? 'Save edited message' : 'Send message'}
@@ -3244,17 +3614,19 @@ function ConversationScreen({ conversationId }) {
 
         <StickerPicker visible={stickerPickerVisible} onClose={() => setStickerPickerVisible(false)} onSelect={sendSticker} />
         <Modal visible={attachmentMenuVisible} transparent animationType="fade" onRequestClose={() => setAttachmentMenuVisible(false)}>
-          <Pressable style={styles.modalOverlay} onPress={() => setAttachmentMenuVisible(false)}><Pressable style={styles.sheet} onPress={(event) => event.stopPropagation()}><View style={styles.sheetHandle} /><SheetOption styles={styles} colors={colors} icon="images-outline" label="Photos and videos" onPress={() => pickPhotos(false)} /><SheetOption styles={styles} colors={colors} icon="camera-outline" label="Camera" onPress={() => pickPhotos(true)} /><SheetOption styles={styles} colors={colors} icon="document-attach-outline" label="Document" onPress={pickDocument} /></Pressable></Pressable>
+          <Pressable style={styles.modalOverlay} onPress={() => setAttachmentMenuVisible(false)}>
+            <Pressable style={styles.sheet} onPress={(event) => event.stopPropagation()}>
+              <View style={styles.sheetHandle} />
+              <SheetOption styles={styles} colors={colors} icon="images-outline" label="Photos and videos" onPress={() => pickPhotos(false)} />
+              <SheetOption styles={styles} colors={colors} icon="camera-outline" label="Camera" onPress={() => pickPhotos(true)} />
+              <SheetOption styles={styles} colors={colors} icon="document-attach-outline" label="Document" onPress={pickDocument} />
+            </Pressable>
+          </Pressable>
         </Modal>
 
         {/* Full-screen photo viewer */}
-        <Modal visible={!!imagePreview} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setImagePreview(null)}>
-          <View style={styles.viewerOverlay}>
-            {imagePreview ? <Image source={{ uri: imagePreview }} style={styles.viewerImage} resizeMode="contain" /> : null}
-            <Pressable style={styles.viewerClose} onPress={() => setImagePreview(null)} accessibilityRole="button" accessibilityLabel="Close photo">
-              <Ionicons name="close" size={24} color="#fff" />
-            </Pressable>
-          </View>
+        <Modal visible={!!mediaPreview} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setMediaPreview(null)}>
+          <ChatMediaViewer media={mediaPreview} styles={styles} onClose={() => setMediaPreview(null)} />
         </Modal>
 
         {/* Message actions */}

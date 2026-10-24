@@ -27,7 +27,7 @@ export const PAGE_SIZE = 20;
 export const CHAT_PAGE_SIZE = 20;
 export const MESSAGE_PAGE_SIZE = CHAT_PAGE_SIZE;
 export const MESSAGE_EDIT_WINDOW_MS = 60 * 60 * 1000;
-export const VOICE_MESSAGE_DELETE_WINDOW_MS = 30 * 60 * 1000;
+export const VOICE_MESSAGE_DELETE_WINDOW_MS = 2 * 60 * 60 * 1000;
 export const GROUP_POST_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 const normalizeSearch = (value = '') => value.trim().toLowerCase();
@@ -723,7 +723,7 @@ export async function deleteDirectMessage(conversationId, messageId, options = {
   const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
   const message = await assertMessageOwnerWithinWindow(messageRef, auth.currentUser?.uid);
   if (message.type === 'voice' && Date.now() - messageCreatedAtMillis(message.createdAt) > VOICE_MESSAGE_DELETE_WINDOW_MS) {
-    throw new Error('Voice messages can only be deleted within 30 minutes of sending.');
+    throw new Error('Voice messages can only be deleted within 2 hours of sending.');
   }
   if (options.voice) {
     try {

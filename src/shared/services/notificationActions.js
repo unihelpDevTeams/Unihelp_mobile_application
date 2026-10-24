@@ -119,7 +119,7 @@ const muteConversation = async ({ conversationId, groupId, uid }) => {
   return { conversationId: targetConversationId };
 };
 
-const replyToConversation = async ({ conversationId, groupId, userText, uid }) => {
+const replyToConversation = async ({ conversationId, groupId, userText, uid, notificationId }) => {
   const trimmed = String(userText || '').trim();
   if (!trimmed || !uid) {
     return { handled: false, reason: 'missing-text-or-user' };
@@ -135,21 +135,28 @@ const replyToConversation = async ({ conversationId, groupId, userText, uid }) =
       { username: currentProfile?.name || currentUser.displayName || 'Student', photo: currentProfile?.avatar || '' },
       { text: trimmed, type: 'text' }
     );
-    return { handled: true };
+    if (notificationId) await markNotificationRead(notificationId, uid);
+    return { handled: true, route: `/community/${groupId}` };
   }
 
   if (!conversationId) {
     return { handled: false, reason: 'missing-conversation' };
   }
 
+  const conversationSnapshot = await getDoc(doc(db, 'conversations', conversationId));
+  if (!conversationSnapshot.exists()) throw new Error('This conversation is no longer available.');
+  const conversation = { id: conversationSnapshot.id, ...conversationSnapshot.data() };
+  if (!conversation.memberIds?.includes(uid)) throw new Error('You are not a member of this conversation.');
+
   await sendDirectMessage(
-    { id: conversationId },
-    { uid: currentUser.uid },
+    conversation,
+    { uid: currentUser.uid, displayName: currentUser.displayName || currentProfile?.name || 'Student' },
     { username: currentProfile?.name || currentUser.displayName || 'Student', photo: currentProfile?.avatar || '' },
     { text: trimmed, type: 'text' }
   );
 
-  return { handled: true };
+  await markNotificationAndConversationRead({ notificationId, conversationId, uid });
+  return { handled: true, route: `/messages/${conversationId}` };
 };
 
 const likeNotificationTarget = async ({ storyId, commentId, uid, notificationId }) => {
@@ -185,7 +192,7 @@ export const handleNotificationAction = async ({
 
   switch (actionIdentifier) {
     case NOTIFICATION_ACTION_IDS.REPLY:
-      return replyToConversation({ conversationId, groupId, userText, uid });
+      return replyToConversation({ conversationId, groupId, userText, uid, notificationId });
 
     case NOTIFICATION_ACTION_IDS.MARK_AS_READ:
       await markNotificationAndConversationRead({ notificationId, conversationId, uid });

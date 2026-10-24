@@ -2,6 +2,7 @@ import { Stack, useRootNavigationState, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { BlurTargetView } from 'expo-blur';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Modal,
@@ -16,7 +17,7 @@ import { useFonts, Manrope_400Regular, Manrope_500Medium, Manrope_600SemiBold, M
 import { useFonts as useSoraFonts, Sora_400Regular, Sora_500Medium, Sora_600SemiBold, Sora_700Bold, Sora_800ExtraBold } from '@expo-google-fonts/sora';
 import * as Linking from 'expo-linking';
 import '@/global.css';
-import { AuthProvider, useAuth } from '../context/AuthContext';
+import { AuthProvider, hasRequiredProfileDetails, useAuth } from '../context/AuthContext';
 import { parseDeepLink, readPendingDeepLink, clearPendingDeepLink, savePendingDeepLink } from '../utils/deepLink';
 import { AIProvider } from '../src/shared/context/AIContext';
 import RoleGuard from '../components/RoleGuard';
@@ -37,25 +38,14 @@ function GlobalPreloader({ navigationReady }) {
   return <SplashScreen />;
 }
 
-const hasRequiredProfileDetails = (profile = {}) => {
-  const text = (value) => String(value || '').trim();
-  return Boolean(
-    text(profile.username || profile.displayName || profile.firstName) &&
-    text(profile.school || profile.universityName || profile.university) &&
-    text(profile.department || profile.departmentName) &&
-    text(profile.level) &&
-    text(profile.bio) &&
-    text(profile.photo || profile.photoURL || profile.photoThumb)
-  );
-};
-
 function AppContent() {
   const { colors, isDark, themeLoaded } = useTheme();
-  const { profile, user } = useAuth();
+  const { profile, profileSyncing, user } = useAuth();
   const { promo, visible: promoVisible, dismiss: dismissPromo, markClicked: markPromoClicked } = usePromoSpotlight();
   const { isOnline } = useNetwork();
   const router = useRouter();
   const rootNavigationState = useRootNavigationState();
+  const promoBlurTarget = useRef(null);
   const premiumUnlocked = isPremiumActive(profile);
   const navigationReady = Boolean(rootNavigationState?.key);
 
@@ -68,7 +58,7 @@ function AppContent() {
   const profileRedirectedUidRef = useRef(null);
 
   useEffect(() => {
-    if (!user?.uid || !profile || profile._offline) return;
+    if (!user?.uid || profileSyncing || profile?._offline) return;
 
     if (hasRequiredProfileDetails(profile)) {
       profileRedirectedUidRef.current = null;
@@ -80,7 +70,7 @@ function AppContent() {
     if (profileRedirectedUidRef.current === user.uid) return;
     profileRedirectedUidRef.current = user.uid;
     router.replace({ pathname: '/profile', params: { edit: '1' } });
-  }, [profile, router, user?.uid]);
+  }, [profile, profileSyncing, router, user?.uid]);
 
   useEffect(() => {
     const handleInitialUrl = async () => {
@@ -194,36 +184,39 @@ function AppContent() {
   return (
     <ThemeGate>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <GlobalPreloader navigationReady={navigationReady} />
-      <RoleGuard>
-        <Stack
-          initialRouteName="(tabs)"
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.canvas },
-          }}
-        >
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="premium/index" options={{ presentation: 'card' }} />
-          <Stack.Screen name="profile/danger" options={{ presentation: 'card' }} />
-          <Stack.Screen name="splash" options={{ presentation: 'modal', gestureEnabled: false }} />
-          <Stack.Screen name="search/index" options={{ presentation: 'card' }} />
-          <Stack.Screen name="saved/index" options={{ presentation: 'card' }} />
-          <Stack.Screen name="downloads/index" options={{ presentation: 'card' }} />
-          <Stack.Screen name="offline-center" options={{ presentation: 'card' }} />
-          <Stack.Screen name="leaderboard/index" options={{ presentation: 'card' }} />
-          <Stack.Screen name="achievements/index" options={{ presentation: 'card' }} />
-          <Stack.Screen name="rewards/index" options={{ presentation: 'card' }} />
-          <Stack.Screen name="payment-success/index" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="stickers/create" options={{ presentation: 'card' }} />
-        </Stack>
-      </RoleGuard>
+      <BlurTargetView ref={promoBlurTarget} style={{ flex: 1 }}>
+        <GlobalPreloader navigationReady={navigationReady} />
+        <RoleGuard>
+          <Stack
+            initialRouteName="(tabs)"
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: colors.canvas },
+            }}
+          >
+            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="premium/index" options={{ presentation: 'card' }} />
+            <Stack.Screen name="profile/danger" options={{ presentation: 'card' }} />
+            <Stack.Screen name="splash" options={{ presentation: 'modal', gestureEnabled: false }} />
+            <Stack.Screen name="search/index" options={{ presentation: 'card' }} />
+            <Stack.Screen name="saved/index" options={{ presentation: 'card' }} />
+            <Stack.Screen name="downloads/index" options={{ presentation: 'card' }} />
+            <Stack.Screen name="offline-center" options={{ presentation: 'card' }} />
+            <Stack.Screen name="leaderboard/index" options={{ presentation: 'card' }} />
+            <Stack.Screen name="achievements/index" options={{ presentation: 'card' }} />
+            <Stack.Screen name="rewards/index" options={{ presentation: 'card' }} />
+            <Stack.Screen name="payment-success/index" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="stickers/create" options={{ presentation: 'card' }} />
+          </Stack>
+        </RoleGuard>
+      </BlurTargetView>
       <PromoSpotlight
         promo={promo}
         visible={promoVisible}
         onDismiss={dismissPromo}
         onAction={markPromoClicked}
+        blurTarget={promoBlurTarget}
       />
       <OfflineBanner />
       <Modal

@@ -65,6 +65,7 @@ export default function ScreenShell({
   onSearch,
   showNotifications,
   headerScrollY,
+  keyboardAvoiding = true,
 }) {
   const router = useRouter();
   const { profile, user, logout } = useAuth();
@@ -214,6 +215,7 @@ export default function ScreenShell({
       width: 50, height: 50, borderRadius: 25, backgroundColor: c.brand,
       alignItems: 'center', justifyContent: 'center',
     },
+    menuAvatarImage: { width: 50, height: 50, borderRadius: 25, backgroundColor: c.brand },
     menuAvatarText: { color: c.onBrand, fontSize: 18, fontWeight: '800' },
     menuProfileTextWrap: { flex: 1, gap: 3 },
     menuGreeting: { fontSize: 11, fontWeight: '700', color: c.brandText },
@@ -409,7 +411,7 @@ export default function ScreenShell({
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" enabled={keyboardAvoiding}>
         {showHeader && (
           <Animated.View
             style={headerScrollY ? {
@@ -457,7 +459,11 @@ export default function ScreenShell({
         onNavigate={(route) => { setMenuOpen(false); router.navigate(route); }}
         sections={filteredMenuSections}
         profile={profile}
-        onProfilePress={onProfilePress ? () => { setMenuOpen(false); onProfilePress(); } : null}
+        onProfilePress={() => {
+          setMenuOpen(false);
+          if (onProfilePress) onProfilePress();
+          else router.navigate('/profile');
+        }}
         onLogout={confirmLogout}
         footerNote={menuFooterNote}
         premiumUnlocked={premiumUnlocked}
@@ -634,6 +640,7 @@ function MenuDrawer({ visible, onClose, onNavigate, sections, profile, onProfile
   }, [sections, searchQuery]);
 
   const profileName = profile?.username || 'Student';
+  const profileImage = profile?.photoThumb || profile?.photoURL || profile?.photo || profile?.avatar || '';
   const roleLabel = profile?.role ? (ROLE_LABELS[profile.role] || profile.role) : null;
   const showSearch = totalItemCount >= MENU_SEARCH_THRESHOLD;
 
@@ -662,9 +669,13 @@ function MenuDrawer({ visible, onClose, onNavigate, sections, profile, onProfile
               accessibilityLabel={onProfilePress ? `View profile, ${profileName}` : undefined}
             >
               <View style={styles.menuAvatarRing}>
-                <View style={styles.menuAvatar}>
-                  <Text style={styles.menuAvatarText}>{getInitials(profileName)}</Text>
-                </View>
+                {profileImage ? (
+                  <Image source={{ uri: profileImage }} style={styles.menuAvatarImage} contentFit="cover" />
+                ) : (
+                  <View style={styles.menuAvatar}>
+                    <Text style={styles.menuAvatarText}>{getInitials(profileName)}</Text>
+                  </View>
+                )}
               </View>
               <View style={styles.menuProfileTextWrap}>
                 <Text style={styles.menuGreeting}>{getGreeting()}</Text>
