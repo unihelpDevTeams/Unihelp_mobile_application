@@ -42,7 +42,7 @@ export function usePromoSpotlight() {
     let cancelled = false;
     let timer = null;
 
-    if (loading || !user) {
+    if (loading || !user || !user.emailVerified) {
       launchLoadedRef.current = false;
       setPromo(null);
       setVisible(false);
@@ -63,7 +63,7 @@ export function usePromoSpotlight() {
   }, [loadPromoForOpen, loading, user]);
 
   useEffect(() => {
-    if (loading || !user) return undefined;
+    if (loading || !user || !user.emailVerified) return undefined;
 
     const subscription = AppState.addEventListener('change', (nextState) => {
       const previousState = appStateRef.current;

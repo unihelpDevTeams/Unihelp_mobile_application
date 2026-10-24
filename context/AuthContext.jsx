@@ -22,9 +22,7 @@ export const hasRequiredProfileDetails = (profile = {}) => {
     text(profile.displayName || profile.firstName) &&
     text(profile.school || profile.universityName || profile.university) &&
     text(profile.department || profile.departmentName) &&
-    text(profile.level) &&
-    text(profile.bio) &&
-    text(profile.photo || profile.photoURL || profile.photoThumb)
+    text(profile.level)
   );
 };
 
@@ -293,6 +291,20 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const reloadUser = async () => {
+    if (!auth.currentUser) {
+      return null;
+    }
+    await auth.currentUser.reload();
+    const currentUser = auth.currentUser;
+    const updatedUser = Object.assign(Object.create(Object.getPrototypeOf(currentUser)), currentUser);
+    setUser(updatedUser);
+    if (currentUser.emailVerified) {
+      await refreshProfile();
+    }
+    return currentUser;
+  };
+
   const value = useMemo(
     () => ({
       user,
@@ -303,6 +315,7 @@ export function AuthProvider({ children }) {
       signUp,
       logout,
       refreshProfile,
+      reloadUser,
       resetPassword,
       updateProfile,
     }),

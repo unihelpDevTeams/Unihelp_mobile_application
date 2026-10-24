@@ -81,7 +81,7 @@ const orderedList = async (name, field = 'createdAt', direction = 'desc', pageSi
 
 const normalizeUserProfile = (profile = {}, uid = null) => {
   if (!profile) return null;
-  const username = profile.username || profile.displayName || profile.display_name || profile.name || '';
+  const username = profile.username || (/^[a-zA-Z0-9_]{3,30}$/.test(profile.displayName || '') ? profile.displayName : (profile.username || ''));
   const school = profile.school || profile.universityName || profile.university || '';
   const department = profile.department || profile.departmentName || '';
   
@@ -204,6 +204,7 @@ const buildDefaultUserProfile = (overrides = {}) => {
 
 const toUserApiPayload = (profile = {}) => ({
   display_name: profile.displayName || profile.username || profile.display_name || '',
+  username: profile.username || '',
   email: profile.email || auth.currentUser?.email || '',
   university: profile.universityName || profile.school || profile.university || '',
   department: profile.departmentName || profile.department || '',

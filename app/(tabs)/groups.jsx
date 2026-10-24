@@ -29,7 +29,7 @@ import { useAuth } from '../../context/AuthContext';
 /*  Setup + constants                                                         */
 /* -------------------------------------------------------------------------- */
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+if (Platform.OS === 'android' && !global.nativeFabricUIManager && UIManager.setLayoutAnimationEnabledExperimental) {
   try {
     UIManager.setLayoutAnimationEnabledExperimental(true);
   } catch (_error) {

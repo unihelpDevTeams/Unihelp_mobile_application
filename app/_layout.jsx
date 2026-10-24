@@ -58,7 +58,7 @@ function AppContent() {
   const profileRedirectedUidRef = useRef(null);
 
   useEffect(() => {
-    if (!user?.uid || profileSyncing || profile?._offline) return;
+    if (!user?.uid || !user.emailVerified || profileSyncing || profile?._offline) return;
 
     if (hasRequiredProfileDetails(profile)) {
       profileRedirectedUidRef.current = null;
@@ -69,8 +69,8 @@ function AppContent() {
     // parameter and opens its edit sheet directly.
     if (profileRedirectedUidRef.current === user.uid) return;
     profileRedirectedUidRef.current = user.uid;
-    router.replace({ pathname: '/profile', params: { edit: '1' } });
-  }, [profile, profileSyncing, router, user?.uid]);
+    router.replace({ pathname: '/(tabs)/profile', params: { edit: '1' } });
+  }, [profile, profileSyncing, router, user?.uid, user?.emailVerified]);
 
   useEffect(() => {
     const handleInitialUrl = async () => {
@@ -213,7 +213,7 @@ function AppContent() {
       </BlurTargetView>
       <PromoSpotlight
         promo={promo}
-        visible={promoVisible}
+        visible={promoVisible && Boolean(user?.emailVerified)}
         onDismiss={dismissPromo}
         onAction={markPromoClicked}
         blurTarget={promoBlurTarget}

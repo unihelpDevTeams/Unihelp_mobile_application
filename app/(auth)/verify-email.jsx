@@ -11,7 +11,7 @@ import { useThemeStyles } from '../../src/shared/theme/createStyles';
 export default function VerifyEmailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { user, logout } = useAuth();
+  const { user, logout, reloadUser } = useAuth();
   const { colors } = useTheme();
   const [checking, setChecking] = useState(false);
   const [resending, setResending] = useState(false);
@@ -39,11 +39,11 @@ export default function VerifyEmailScreen() {
     }
     setChecking(true);
     try {
-      await auth.currentUser.reload();
-      if (auth.currentUser.emailVerified) {
+      const refreshedUser = reloadUser ? await reloadUser() : (await auth.currentUser.reload(), auth.currentUser);
+      if (refreshedUser?.emailVerified) {
         router.replace('/(tabs)');
       } else {
-        Alert.alert('Not verified yet', 'Open the link in your email, then tap Check again.');
+        Alert.alert('Not verified yet', 'Open the link in your email, then tap "I verified my email".');
       }
     } catch (error) {
       Alert.alert('Could not check verification', error?.message || 'Please try again.');

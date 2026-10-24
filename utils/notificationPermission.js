@@ -45,7 +45,7 @@ const loadNotificationsModule = async () => {
 };
 
 const loadLocalNotificationsModule = async () => {
-  if (Platform.OS === 'web') return null;
+  if (Platform.OS === 'web' || isAndroidExpoGo) return null;
   try {
     return await import('expo-notifications');
   } catch (error) {
@@ -388,59 +388,33 @@ export const registerNotificationCategoryForPayload = async (payload = {}) => {
 };
 
 export const listenToNotificationResponses = (handler) => {
-  if (!isAndroidExpoGo) {
-    return addLazyNotificationListener(
-      (Notifications, callback) => Notifications.addNotificationResponseReceivedListener(callback),
-      handler
-    );
+  if (isAndroidExpoGo) {
+    return noopSubscription;
   }
 
-  let active = true;
-  let subscription = null;
-  loadLocalNotificationsModule().then((Notifications) => {
-    if (!active || !Notifications) return;
-    if (typeof Notifications.addNotificationResponseReceivedListener !== 'function') {
-      console.warn('Notification response listeners are unavailable in this runtime.');
-      return;
-    }
-    try {
-      subscription = Notifications.addNotificationResponseReceivedListener(handler) || null;
-    } catch (error) {
-      console.warn('Unable to register notification response listener:', error?.message || error);
-    }
-  }).catch((error) => {
-    console.warn('Unable to initialize notification response listener:', error?.message || error);
-  });
-
-  return {
-    remove: () => {
-      active = false;
-      subscription?.remove?.();
-    },
-  };
+  return addLazyNotificationListener(
+    (Notifications, callback) => Notifications.addNotificationResponseReceivedListener(callback),
+    handler
+  );
 };
 
 export const getLastNotificationResponse = async () => {
-  const Notifications = isAndroidExpoGo
-    ? await loadLocalNotificationsModule()
-    : await loadNotificationsModule();
+  if (isAndroidExpoGo) return null;
+  const Notifications = await loadNotificationsModule();
   if (typeof Notifications?.getLastNotificationResponseAsync !== 'function') return null;
   return Notifications.getLastNotificationResponseAsync();
 };
 
 export const clearLastNotificationResponse = async () => {
-  const Notifications = isAndroidExpoGo
-    ? await loadLocalNotificationsModule()
-    : await loadNotificationsModule();
+  if (isAndroidExpoGo) return;
+  const Notifications = await loadNotificationsModule();
   if (typeof Notifications?.clearLastNotificationResponseAsync !== 'function') return;
   await Notifications.clearLastNotificationResponseAsync();
 };
 
 export const dismissNotification = async (notificationId) => {
-  if (!notificationId || Platform.OS === 'web') return;
-  const Notifications = isAndroidExpoGo
-    ? await loadLocalNotificationsModule()
-    : await loadNotificationsModule();
+  if (!notificationId || Platform.OS === 'web' || isAndroidExpoGo) return;
+  const Notifications = await loadNotificationsModule();
   if (typeof Notifications?.dismissNotificationAsync !== 'function') return;
   try {
     await Notifications.dismissNotificationAsync(notificationId);

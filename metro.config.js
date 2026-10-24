@@ -1,3 +1,4 @@
+require('./scripts/patch-fallback-watcher');
 const { getDefaultConfig } = require('expo/metro-config');
 const path = require('path');
 

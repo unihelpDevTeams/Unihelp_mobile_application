@@ -238,13 +238,15 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction, bl
     <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose} statusBarTranslucent>
       {/* Blurred + dimmed backdrop */}
       <Animated.View style={[StyleSheet.absoluteFill, { opacity: progress }]}>
-        <BlurView
-          intensity={Platform.OS === 'ios' ? 40 : 60}
-          tint="dark"
-          blurMethod="dimezisBlurView"
-          blurTarget={blurTarget}
-          style={StyleSheet.absoluteFill}
-        />
+        {Platform.OS === 'ios' ? (
+          <BlurView
+            intensity={40}
+            tint="dark"
+            style={StyleSheet.absoluteFill}
+          />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(7, 11, 20, 0.88)' }]} />
+        )}
         <View style={[StyleSheet.absoluteFill, { backgroundColor: dimColor }]} />
         <Pressable
           style={StyleSheet.absoluteFill}

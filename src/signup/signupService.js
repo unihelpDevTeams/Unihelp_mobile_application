@@ -11,6 +11,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import {
   createUserWithEmailAndPassword,
   deleteUser,
+  sendEmailVerification,
   updateProfile as updateFirebaseAuthProfile,
 } from 'firebase/auth';
 import { auth, db } from '../../firebase/config';
@@ -128,6 +129,14 @@ export async function createCompleteAccount(formData) {
   const credential = await createUserWithEmailAndPassword(auth, email, password);
   const displayName = `${firstName} ${lastName}`.trim();
 
+  // Send verification email immediately upon account creation
+  try {
+    await sendEmailVerification(credential.user);
+    console.log('[Signup] Verification email sent to:', email);
+  } catch (verifyError) {
+    console.warn('[Signup] Could not send initial verification email:', verifyError?.message);
+  }
+
   const usernameResult = await checkUsernameAvailability(username);
   if (!usernameResult.available) {
     await deleteUser(credential.user).catch(() => {});
@@ -196,6 +205,7 @@ export async function createCompleteAccount(formData) {
     try {
       await putJson('/api/users', {
         display_name: displayName,
+        username: username.trim(),
         email: email.trim().toLowerCase(),
         university: universityName || '',
         department: departmentName || '',

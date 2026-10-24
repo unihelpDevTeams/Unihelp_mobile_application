@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import {
   DEFAULT_POMODORO_SETTINGS,
@@ -11,6 +12,7 @@ import {
 
 const STORAGE_KEY = '@unihelp_pomodoro_v1';
 const isWeb = Platform.OS === 'web';
+const isAndroidExpoGo = Platform.OS === 'android' && Constants.appOwnership === 'expo';
 let notificationsPromise = null;
 let storageWriteQueue = Promise.resolve();
 
@@ -37,7 +39,7 @@ const configurePomodoroNotificationHandler = (Notifications) => {
 export { DEFAULT_POMODORO_SETTINGS, POMODORO_MODES };
 
 const loadNotifications = async () => {
-  if (isWeb) return null;
+  if (isWeb || isAndroidExpoGo) return null;
   if (!notificationsPromise) {
     notificationsPromise = import('expo-notifications')
       .then((Notifications) => {

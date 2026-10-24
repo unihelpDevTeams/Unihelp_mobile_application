@@ -80,13 +80,6 @@ export default function SignupFlow() {
       setSubmitError('');
       await createCompleteAccount({ ...formData, photoURI: formData.photoURI });
 
-      const { auth } = require('../../firebase/config');
-      const { sendEmailVerification } = require('firebase/auth');
-      if (!auth.currentUser) {
-        throw new Error('Your account was created, but the verification email could not be sent. Please log in and resend it.');
-      }
-      await sendEmailVerification(auth.currentUser);
-
       router.replace({ pathname: '/(auth)/verify-email', params: { email: formData.email } });
     } catch (error) {
       const errorMessage = getSignupErrorMessage(error);
