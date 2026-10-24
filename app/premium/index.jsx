@@ -636,7 +636,7 @@ export default function PremiumPage() {
     ? daysLeft == null
       ? `Your gifted Premium access is active until ${expiryLabel}.`
       : `You have ${daysLeft} days of gifted Premium. Your access stays active until ${expiryLabel}.`
-    : `Your Premium benefits are active until ${expiryLabel}: offline learning, voice messages, 10 daily AI requests, and up to ${COMMERCE_UPLOAD_LIMITS.premium} hostel and product uploads.`;
+    : `Your Premium benefits are active until ${expiryLabel}: offline learning, 10 daily AI requests, and up to ${COMMERCE_UPLOAD_LIMITS.premium} hostel and product uploads.`;
   const progressPct = useMemo(() => {
     if (!countdownParts) return null;
     const totalDays = isAdminGift ? ADMIN_PREMIUM_GIFT_DAYS : (PREMIUM_PLAN?.durationDays || 30);
@@ -749,7 +749,7 @@ export default function PremiumPage() {
           </View>
           <Text style={styles.heroTitle}>Unlock Student Premium</Text>
           <Text style={styles.heroText}>
-            Study offline, send voice messages, save CBT papers, get 10 AI requests daily, and publish up to {COMMERCE_UPLOAD_LIMITS.premium} hostels and {COMMERCE_UPLOAD_LIMITS.premium} products.
+            Study offline, save CBT papers, get 10 AI requests daily, and publish up to {COMMERCE_UPLOAD_LIMITS.premium} hostels and {COMMERCE_UPLOAD_LIMITS.premium} products.
           </Text>
         </View>
       )}

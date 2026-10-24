@@ -15,16 +15,12 @@ import {
   StyleSheet,
   Animated,
   PanResponder,
-  Modal,
   useWindowDimensions,
 } from 'react-native';
 
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
-import { useAuth } from '../../../context/AuthContext';
-import { isPremiumActive } from '../services/premium';
 
 const COLORS = {
   indigo: '#6366F1',
@@ -54,7 +50,6 @@ const clamp = (value, min, max) =>
  * 3. Swipe left across the recording surface to cancel.
  * 4. Recording automatically sends when the maximum duration is reached.
  *
- * Voice recording is Premium-only.
  */
 const VoiceRecorderBar = memo(
   ({
@@ -63,11 +58,7 @@ const VoiceRecorderBar = memo(
     onStateChange,
     expanded = false,
   }) => {
-    const router = useRouter();
-    const { profile } = useAuth();
     const { width: screenWidth } = useWindowDimensions();
-
-    const isPremium = isPremiumActive(profile);
 
     const {
       isRecording,
@@ -81,10 +72,8 @@ const VoiceRecorderBar = memo(
       maxDurationMs,
     } = useAudioRecorder({
       conversationId,
-      isPremium,
     });
 
-    const [showUpgrade, setShowUpgrade] = useState(false);
     const [isSending, setIsSending] = useState(false);
     const [isCancelling, setIsCancelling] = useState(false);
     const [actionError, setActionError] = useState('');
@@ -270,11 +259,6 @@ const VoiceRecorderBar = memo(
      * Start recording once per tap.
      */
     const handleStartRecording = useCallback(async () => {
-      if (!isPremium) {
-        setShowUpgrade(true);
-        return;
-      }
-
       if (
         startingRef.current ||
         sendingRef.current ||
@@ -300,7 +284,6 @@ const VoiceRecorderBar = memo(
         startingRef.current = false;
       }
     }, [
-      isPremium,
       isRecording,
       isUploading,
       startRecording,
@@ -523,108 +506,6 @@ const VoiceRecorderBar = memo(
         resetPan,
       ]
     );
-
-    const handleUpgrade = useCallback(() => {
-      setShowUpgrade(false);
-      router.navigate('/premium');
-    }, [router]);
-
-    const upgradeModal = (
-      <Modal
-        visible={showUpgrade}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => setShowUpgrade(false)}
-      >
-        <View style={styles.modalRoot}>
-          <Pressable
-            style={styles.modalBackdrop}
-            onPress={() => setShowUpgrade(false)}
-            accessibilityRole="button"
-            accessibilityLabel="Close premium prompt"
-          />
-
-          <View style={styles.modalSheet}>
-            <View style={styles.modalHandle} />
-
-            <View style={styles.modalIconWrap}>
-              <Ionicons
-                name="lock-closed"
-                size={24}
-                color="#B45309"
-              />
-            </View>
-
-            <Text style={styles.modalTitle}>
-              Premium Feature
-            </Text>
-
-            <Text style={styles.modalText}>
-              Recording voice messages is available to Premium
-              members. Upgrade to record and send your own
-              voice notes.
-            </Text>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.modalButton,
-                pressed && styles.modalButtonPressed,
-              ]}
-              onPress={handleUpgrade}
-              accessibilityRole="button"
-            >
-              <Ionicons
-                name="sparkles"
-                size={16}
-                color={COLORS.white}
-              />
-
-              <Text style={styles.modalButtonText}>
-                Upgrade to Premium
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={styles.modalCancel}
-              onPress={() => setShowUpgrade(false)}
-              accessibilityRole="button"
-            >
-              <Text style={styles.modalCancelText}>
-                Maybe later
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-    );
-
-    /*
-     * Non-premium users see the microphone and upgrade prompt.
-     */
-    if (!isPremium) {
-      return (
-        <>
-          <Pressable
-            onPress={() => setShowUpgrade(true)}
-            style={({ pressed }) => [
-              styles.micButton,
-              pressed && styles.micButtonPressed,
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Upgrade to Premium to record voice messages"
-          >
-            <Ionicons
-              name="mic-outline"
-              size={20}
-              color={COLORS.inkSoft}
-            />
-          </Pressable>
-
-          {upgradeModal}
-        </>
-      );
-    }
 
     const visibleError = actionError || error;
 
@@ -861,7 +742,6 @@ const VoiceRecorderBar = memo(
           </View>
         ) : null}
 
-        {upgradeModal}
       </View>
     );
   }
@@ -1124,95 +1004,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  modalRoot: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-
-  modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15,23,42,0.45)',
-  },
-
-  modalSheet: {
-    backgroundColor: COLORS.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 28,
-    alignItems: 'center',
-  },
-
-  modalHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: COLORS.border,
-    alignSelf: 'center',
-    marginBottom: 14,
-  },
-
-  modalIconWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#FEF3C7',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: COLORS.ink,
-    marginBottom: 8,
-  },
-
-  modalText: {
-    fontSize: 14,
-    color: COLORS.inkSoft,
-    textAlign: 'center',
-    lineHeight: 21,
-    marginBottom: 20,
-    paddingHorizontal: 8,
-  },
-
-  modalButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: COLORS.indigo,
-    borderRadius: 999,
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    width: '100%',
-  },
-
-  modalButtonPressed: {
-    backgroundColor: COLORS.indigoDark,
-    opacity: 0.92,
-  },
-
-  modalButtonText: {
-    color: COLORS.white,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-
-  modalCancel: {
-    marginTop: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-  },
-
-  modalCancelText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.inkSoft,
-  },
 });
 
 export default VoiceRecorderBar;

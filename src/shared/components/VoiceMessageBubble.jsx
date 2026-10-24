@@ -19,6 +19,7 @@ import {
 
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import BubbleShapeAccents from './BubbleShapeAccents';
 import { useAudioPlayback } from '../hooks/useAudioPlayback';
 
 const COLORS = {
@@ -76,6 +77,7 @@ const VoiceMessageBubble = memo(
     bubbleAppearance,
     bubbleFill,
     bubbleShape,
+    bubbleShapeKey,
     bubbleMotion,
   }) => {
     const {
@@ -491,6 +493,12 @@ const VoiceMessageBubble = memo(
               end={{ x: 1, y: 1 }}
               style={StyleSheet.absoluteFill}
               pointerEvents="none"
+            />
+          ) : null}
+          {isMine && (bubbleShapeKey === 'zigzag' || bubbleShapeKey === 'glitch') ? (
+            <BubbleShapeAccents
+              shape={bubbleShapeKey}
+              color={fill.gradient ? fill.gradient[0] : fill.color}
             />
           ) : null}
 

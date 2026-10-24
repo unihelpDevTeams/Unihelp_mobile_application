@@ -19,6 +19,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
@@ -29,6 +30,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import EmptyState from '../../src/shared/components/EmptyState';
 import StickerPicker from '../../src/shared/components/StickerPicker';
 import StickerMessage from '../../src/shared/components/StickerMessage';
+import BubbleShapeAccents from '../../src/shared/components/BubbleShapeAccents';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { useAuth } from '../../context/AuthContext';
@@ -66,6 +68,17 @@ import {
 } from '../../src/shared/services/community';
 import { uploadChatAttachment, uploadFeatureMedia } from '../../src/shared/services/backend';
 import { DOCUMENT_MIME_TYPES, prepareChatAttachment } from '../../src/shared/services/chatAttachments';
+import {
+  BUBBLE_PRESETS,
+  BUBBLE_SHAPES,
+  CHAT_BACKGROUNDS,
+  DEFAULT_BUBBLE_APPEARANCE,
+  isHexColor,
+  normalizeBubbleAppearance,
+  resolveBubbleFill,
+  resolveBubbleInk,
+  resolveChatBackground,
+} from '../../src/shared/services/chatBubbleAppearance';
 
 /* -------------------------------------------------------------------------- */
 /*                                  Constants                                 */
@@ -438,6 +451,21 @@ const createStyles = (c) => ({
   conversationName: { color: c.textPrimary, fontSize: 16, fontWeight: '800' },
   conversationStatus: { color: c.textSecondary, fontSize: 11.5, marginTop: 2 },
   conversationAction: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surfaceSecondary },
+  chatAppearanceBackground: { ...StyleSheet.absoluteFillObject },
+  appearanceSection: { marginTop: 18 },
+  appearanceSectionTitle: { color: c.textPrimary, fontSize: 15, fontWeight: '900', marginBottom: 9 },
+  appearanceChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  appearanceChoice: { minWidth: 76, alignItems: 'center', gap: 5, padding: 6, borderRadius: 12, borderWidth: 1, borderColor: c.borderDefault, backgroundColor: c.surfaceSecondary },
+  appearanceChoiceSelected: { borderColor: c.brand, backgroundColor: c.brandLight },
+  appearanceSwatch: { width: 42, height: 28, borderRadius: 9, overflow: 'hidden' },
+  appearanceChoiceText: { color: c.textPrimary, fontSize: 9.5, fontWeight: '800', textAlign: 'center' },
+  appearanceOptionTile: { minHeight: 38, borderWidth: 1, borderColor: c.borderDefault, borderRadius: 12, paddingHorizontal: 11, paddingVertical: 8, backgroundColor: c.inputBackground, justifyContent: 'center' },
+  appearanceOptionText: { color: c.textPrimary, fontSize: 11, fontWeight: '800', textAlign: 'center' },
+  appearanceColorInput: { minWidth: 92, height: 36, borderRadius: 10, borderWidth: 1, borderColor: c.borderDefault, backgroundColor: c.inputBackground, color: c.textPrimary, paddingHorizontal: 10, fontSize: 12, fontWeight: '800' },
+  appearanceWallpaper: { width: 62, height: 40, borderRadius: 9, overflow: 'hidden' },
+  appearanceShape: { width: 44, height: 27, position: 'relative' },
+  appearancePreview: { alignSelf: 'flex-end', overflow: 'hidden', maxWidth: '88%', borderRadius: 20, padding: 12, marginVertical: 12 },
+  appearancePreviewText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
   chatArea: { flex: 1 },
   composerOuter: { backgroundColor: c.surface, borderTopWidth: StyleSheet.hairlineWidth, borderColor: c.borderDefault },
   chatContent: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 14 },
@@ -903,6 +931,7 @@ const MessageRow = React.memo(function MessageRow({
   onEditPoll,
   onTogglePollClosed,
   votingPollId,
+  bubbleAppearance,
 }) {
   const swipeX = useMemo(() => new Animated.Value(0), []);
   const scaleAnim = useMemo(() => new Animated.Value(1), []);
@@ -923,7 +952,10 @@ const MessageRow = React.memo(function MessageRow({
   const bubbleRole = senderRole && !isSticker && !isDeleted ? senderRole : null;
   const roleOnMine = Boolean(bubbleRole && mine);
   const tail = !groupedNext;
-  const radii = bubbleRadii(mine, tail);
+  const bubbleFill = resolveBubbleFill(bubbleAppearance);
+  const bubbleInk = resolveBubbleInk(bubbleFill);
+  const bubbleShape = BUBBLE_SHAPES.find((shape) => shape.key === bubbleAppearance?.shape) || BUBBLE_SHAPES[0];
+  const radii = mine ? bubbleShape.radii : bubbleRadii(mine, tail);
 
   const reactionEntries = useMemo(
     () =>
@@ -1022,7 +1054,7 @@ const MessageRow = React.memo(function MessageRow({
         </Pressable>
       ) : null}
 
-      <Animated.View style={[styles.bubbleColumn, message.type === 'poll' && styles.pollBubbleColumn, { transform: [{ translateX: swipeX }, { scale: scaleAnim }] }]}>
+      <Animated.View style={[styles.bubbleColumn, mine && bubbleAppearance?.width === 'wide' && { maxWidth: '90%' }, message.type === 'poll' && styles.pollBubbleColumn, { transform: [{ translateX: swipeX }, { scale: scaleAnim }] }]}>
         <Pressable
           onLongPress={() => onLongPress(message)}
           onPressIn={() => Animated.spring(scaleAnim, { toValue: 0.98, useNativeDriver: true, speed: 40, bounciness: 4 }).start()}
@@ -1033,16 +1065,29 @@ const MessageRow = React.memo(function MessageRow({
             styles.bubble,
             mine ? styles.bubbleMine : styles.bubbleTheirs,
             radii,
+            mine && bubbleAppearance?.density === 'compact' && { paddingHorizontal: 10, paddingVertical: 6 },
             isSticker && styles.bubbleSticker,
             bubbleRole && [
               styles.bubbleRole,
               { borderColor: bubbleRole.border, shadowColor: bubbleRole.glow },
               roleOnMine && bubbleRole.mineBg && { backgroundColor: bubbleRole.mineBg },
             ],
+            mine && !isSticker && { backgroundColor: bubbleFill.gradient ? 'transparent' : bubbleFill.color },
             failed && styles.bubbleFailed,
             sending && styles.pendingDim,
           ]}
         >
+          {mine && !isSticker && bubbleFill.gradient ? (
+            <View pointerEvents="none" style={[StyleSheet.absoluteFill, radii, { overflow: 'hidden' }]}>
+              <LinearGradient colors={bubbleFill.gradient} style={StyleSheet.absoluteFill} />
+            </View>
+          ) : null}
+          {mine && !isSticker && bubbleShape.accents ? (
+            <BubbleShapeAccents
+              shape={bubbleShape.key}
+              color={bubbleFill.gradient ? bubbleFill.gradient[0] : bubbleFill.color}
+            />
+          ) : null}
           {/* Tinted wash (theirs only) + top sheen make the role bubble read as a premium surface. */}
           {bubbleRole && !mine ? (
             <View pointerEvents="none" style={[StyleSheet.absoluteFill, radii, { backgroundColor: bubbleRole.tint }]} />
@@ -1068,7 +1113,7 @@ const MessageRow = React.memo(function MessageRow({
           ) : null}
 
           {isDeleted ? (
-            <Text style={[styles.messageBody, mine && styles.messageBodyMine, styles.messageDeleted]}>This message was deleted</Text>
+            <Text style={[styles.messageBody, mine && styles.messageBodyMine, mine && bubbleInk && { color: bubbleInk.text, fontSize: bubbleAppearance?.fontSize }, styles.messageDeleted]}>This message was deleted</Text>
           ) : message.type === 'sticker' ? (
             <View style={sending ? styles.pendingDim : null}>
               <StickerMessage message={message} isMine={mine} onLongPress={() => onLongPress(message)} />
@@ -1076,7 +1121,7 @@ const MessageRow = React.memo(function MessageRow({
           ) : message.type === 'poll' && message.poll ? (
             <PollMessage message={message} mine={mine} uid={uid} styles={styles} colors={colors} voting={votingPollId === message.id} onVote={onVotePoll} onViewVoters={onViewPollVoters} onEdit={onEditPoll} onToggleClosed={onTogglePollClosed} />
           ) : (
-            <Text style={[styles.messageBody, mine && styles.messageBodyMine]}>
+            <Text style={[styles.messageBody, mine && styles.messageBodyMine, mine && bubbleInk && { color: bubbleInk.text }, mine && { fontSize: bubbleAppearance?.fontSize || DEFAULT_BUBBLE_APPEARANCE.fontSize }]}>
               {message.text ? renderLinkedText(message.text, mine, colors) : '📎 Attachment'}
             </Text>
           )}
@@ -1135,8 +1180,8 @@ export default function GroupDetailPage() {
 
 function GroupDetailScreen({ groupId }) {
   const router = useRouter();
-  const { user, profile } = useAuth();
-  const { colors } = useTheme();
+  const { user, profile, updateProfile } = useAuth();
+  const { colors, isDark } = useTheme();
   const styles = useThemeStyles(createStyles);
   const uid = user?.uid;
   const cacheKey = `${uid || 'anon'}:${groupId}`;
@@ -1195,6 +1240,9 @@ function GroupDetailScreen({ groupId }) {
   const [activeMessage, setActiveMessage] = useState(null);
   const [reactionViewer, setReactionViewer] = useState(null);
   const [groupOptionsVisible, setGroupOptionsVisible] = useState(false);
+  const [bubbleCustomizerVisible, setBubbleCustomizerVisible] = useState(false);
+  const [bubbleAppearanceDraft, setBubbleAppearanceDraft] = useState(() => normalizeBubbleAppearance(profile?.chatBubbleAppearance));
+  const [appearanceSaving, setAppearanceSaving] = useState(false);
 
   const [editVisible, setEditVisible] = useState(false);
   const [editName, setEditName] = useState('');
@@ -1241,6 +1289,8 @@ function GroupDetailScreen({ groupId }) {
   const canSendMessages = Boolean(isAdmin || (isMember && group?.allowMemberMessages !== false));
   const activeText = editingMessage ? editText : draft;
   const canSubmit = Boolean(activeText.trim() || chatAttachment) && canSendMessages && !chatUploading;
+  const bubbleAppearance = normalizeBubbleAppearance(profile?.chatBubbleAppearance);
+  const chatWallpaper = resolveChatBackground(bubbleAppearance);
   const nearLimit = activeText.length > MAX_LENGTH * 0.85;
   const pollHasVotes = Boolean(pollEditing?.poll?.options?.some((option) => (option.voterIds || []).length));
   const canSubmitPoll = Boolean(pollQuestion.trim() && pollOptions.filter((option) => option.trim()).length >= 2) && !pollSubmitting;
@@ -1401,6 +1451,30 @@ function GroupDetailScreen({ groupId }) {
       Animated.timing(toastOpacity, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => setToast(''));
     }, 2200);
   }, [toastOpacity]);
+
+  const openBubbleCustomizer = () => {
+    setBubbleAppearanceDraft(bubbleAppearance);
+    setGroupOptionsVisible(false);
+    setBubbleCustomizerVisible(true);
+  };
+
+  const saveBubbleCustomizer = async () => {
+    if (appearanceSaving) return;
+    if (bubbleAppearanceDraft.preset === 'custom' && !isHexColor(bubbleAppearanceDraft.customColor)) {
+      Alert.alert('Invalid color', 'Enter a six-digit HEX color before saving.');
+      return;
+    }
+    setAppearanceSaving(true);
+    try {
+      await updateProfile({ chatBubbleAppearance: normalizeBubbleAppearance(bubbleAppearanceDraft) });
+      setBubbleCustomizerVisible(false);
+      showToast('Chat appearance saved for all your chats');
+    } catch (error) {
+      Alert.alert('Appearance not saved', error?.message || 'Please try again when you are connected.');
+    } finally {
+      setAppearanceSaving(false);
+    }
+  };
 
   const scrollToLatest = useCallback((animated = true) => {
     clearTimeout(scrollTimer.current);
@@ -2273,10 +2347,11 @@ function GroupDetailScreen({ groupId }) {
           onEditPoll={openPollEditor}
           onTogglePollClosed={togglePollClosed}
           votingPollId={votingPollId}
+          bubbleAppearance={bubbleAppearance}
         />
       );
     },
-    [styles, colors, uid, isMember, openActions, setReplyFromSwipe, toggleReaction, openReactionViewer, retryPending, openProfile, votePoll, openPollVoters, openPollEditor, togglePollClosed, votingPollId]
+    [styles, colors, uid, isMember, openActions, setReplyFromSwipe, toggleReaction, openReactionViewer, retryPending, openProfile, votePoll, openPollVoters, openPollEditor, togglePollClosed, votingPollId, bubbleAppearance]
   );
 
   const renderPostCard = (post) => {
@@ -2505,6 +2580,13 @@ function GroupDetailScreen({ groupId }) {
             </View>
             {activeTab === 'Chat' ? <>
             <View style={styles.chatArea}>
+              {chatWallpaper.gradient ? (
+                <LinearGradient
+                  colors={isDark && chatWallpaper.darkGradient ? chatWallpaper.darkGradient : chatWallpaper.gradient}
+                  style={styles.chatAppearanceBackground}
+                  pointerEvents="none"
+                />
+              ) : null}
               <FlatList
                 ref={scrollRef}
                 style={styles.flex}
@@ -2848,6 +2930,7 @@ function GroupDetailScreen({ groupId }) {
             </View>
 
             {[
+              { icon: 'color-palette-outline', label: 'Customize chat bubbles', onPress: openBubbleCustomizer },
               { icon: 'mail-outline', label: 'Open messages', onPress: () => { setGroupOptionsVisible(false); router.navigate('/messages'); } },
               { icon: 'settings-outline', label: isAdmin ? 'Members and settings' : 'Group settings', onPress: () => { setGroupOptionsVisible(false); router.navigate({ pathname: '/community-settings', params: { groupId } }); } },
               ...(isAdmin ? [{ icon: 'create-outline', label: 'Edit group details', onPress: openEdit }] : []),
@@ -2862,6 +2945,169 @@ function GroupDetailScreen({ groupId }) {
               </Pressable>
             ))}
           </Animated.View>
+        </View>
+      </Modal>
+
+      <Modal visible={bubbleCustomizerVisible} transparent animationType="slide" onRequestClose={() => setBubbleCustomizerVisible(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setBubbleCustomizerVisible(false)} />
+        <View style={styles.sheetWrap}>
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandleWrap}>
+              <View style={styles.sheetHandle} />
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <View>
+                <Text style={styles.sheetTitle}>Chat appearance</Text>
+                <Text style={[styles.requestMeta, { marginTop: -12, marginBottom: 8 }]}>Saved to your profile for all chats</Text>
+              </View>
+              <Pressable
+                onPress={saveBubbleCustomizer}
+                disabled={appearanceSaving}
+                style={[styles.sendButton, appearanceSaving && { opacity: 0.6 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Save chat appearance"
+              >
+                {appearanceSaving ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="checkmark" size={20} color="#FFFFFF" />}
+              </Pressable>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <View style={styles.appearanceSection}>
+                <Text style={styles.appearanceSectionTitle}>Bubble color</Text>
+                <View style={styles.appearanceChoices}>
+                  {BUBBLE_PRESETS.map((preset) => (
+                    <Pressable
+                      key={preset.key}
+                      onPress={() => setBubbleAppearanceDraft((current) => ({ ...current, preset: preset.key }))}
+                      style={[styles.appearanceChoice, bubbleAppearanceDraft.preset === preset.key && styles.appearanceChoiceSelected]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Use ${preset.label} bubble color`}
+                    >
+                      <View style={[styles.appearanceSwatch, { backgroundColor: preset.color || preset.gradient?.[0] }]}>
+                        {preset.gradient ? <LinearGradient colors={preset.gradient} style={StyleSheet.absoluteFill} /> : null}
+                      </View>
+                      <Text style={styles.appearanceChoiceText}>{preset.label}</Text>
+                    </Pressable>
+                  ))}
+                  <View style={[styles.appearanceChoice, bubbleAppearanceDraft.preset === 'custom' && styles.appearanceChoiceSelected]}>
+                    <Pressable
+                      onPress={() => setBubbleAppearanceDraft((current) => ({ ...current, preset: 'custom' }))}
+                      style={[styles.appearanceSwatch, { backgroundColor: bubbleAppearanceDraft.customColor || '#5B5CE2' }]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Use custom bubble color"
+                    />
+                    <TextInput
+                      value={String(bubbleAppearanceDraft.customColor || '').replace(/^#/, '')}
+                      onChangeText={(value) => setBubbleAppearanceDraft((current) => ({
+                        ...current,
+                        preset: 'custom',
+                        customColor: `#${value.replace(/[^0-9a-f]/gi, '').slice(0, 6).toUpperCase()}`,
+                      }))}
+                      placeholder="HEX"
+                      placeholderTextColor={colors.textTertiary}
+                      autoCapitalize="characters"
+                      autoCorrect={false}
+                      maxLength={6}
+                      style={styles.appearanceColorInput}
+                      accessibilityLabel="Custom bubble HEX color"
+                    />
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.appearanceSection}>
+                <Text style={styles.appearanceSectionTitle}>Bubble shape</Text>
+                <View style={styles.appearanceChoices}>
+                  {BUBBLE_SHAPES.map((shape) => {
+                    const selected = bubbleAppearanceDraft.shape === shape.key;
+                    const fill = resolveBubbleFill(bubbleAppearanceDraft);
+                    const color = fill.gradient?.[0] || fill.color;
+                    return (
+                      <Pressable
+                        key={shape.key}
+                        onPress={() => setBubbleAppearanceDraft((current) => ({ ...current, shape: shape.key }))}
+                        style={[styles.appearanceChoice, selected && styles.appearanceChoiceSelected]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Use ${shape.label} bubble shape`}
+                      >
+                        <View style={[styles.appearanceShape, shape.radii, { backgroundColor: color }]}>
+                          <BubbleShapeAccents shape={shape.key} color={color} compact />
+                        </View>
+                        <Text style={styles.appearanceChoiceText}>{shape.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={styles.appearanceSection}>
+                <Text style={styles.appearanceSectionTitle}>Reading comfort</Text>
+                <View style={styles.appearanceChoices}>
+                  {[14, 15.5, 17].map((size) => (
+                    <Pressable
+                      key={size}
+                      onPress={() => setBubbleAppearanceDraft((current) => ({ ...current, fontSize: size }))}
+                      style={[styles.appearanceOptionTile, bubbleAppearanceDraft.fontSize === size && styles.appearanceChoiceSelected]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Use ${size === 14 ? 'small' : size === 17 ? 'large' : 'standard'} message text`}
+                    >
+                      <Text style={styles.appearanceOptionText}>{size === 14 ? 'Small type' : size === 17 ? 'Large type' : 'Standard type'}</Text>
+                    </Pressable>
+                  ))}
+                  <Pressable
+                    onPress={() => setBubbleAppearanceDraft((current) => ({ ...current, density: current.density === 'compact' ? 'comfortable' : 'compact' }))}
+                    style={styles.appearanceOptionTile}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.appearanceOptionText}>{bubbleAppearanceDraft.density === 'compact' ? 'Compact spacing' : 'Comfortable spacing'}</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setBubbleAppearanceDraft((current) => ({
+                      ...current,
+                      width: current.width === 'standard' ? 'wide' : current.width === 'wide' ? 'compact' : 'standard',
+                    }))}
+                    style={styles.appearanceOptionTile}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.appearanceOptionText}>
+                      {bubbleAppearanceDraft.width === 'wide' ? 'Wide bubbles' : bubbleAppearanceDraft.width === 'compact' ? 'Narrow bubbles' : 'Standard width'}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <View style={styles.appearanceSection}>
+                <Text style={styles.appearanceSectionTitle}>Chat background</Text>
+                <View style={styles.appearanceChoices}>
+                  {CHAT_BACKGROUNDS.map((wallpaper) => (
+                    <Pressable
+                      key={wallpaper.key}
+                      onPress={() => setBubbleAppearanceDraft((current) => ({ ...current, wallpaper: wallpaper.key }))}
+                      style={[styles.appearanceChoice, bubbleAppearanceDraft.wallpaper === wallpaper.key && styles.appearanceChoiceSelected]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Use ${wallpaper.label} chat background`}
+                    >
+                      <View style={[styles.appearanceWallpaper, { backgroundColor: wallpaper.color || colors.background }]}>
+                        {wallpaper.gradient ? (
+                          <LinearGradient
+                            colors={isDark && wallpaper.darkGradient ? wallpaper.darkGradient : wallpaper.gradient}
+                            style={StyleSheet.absoluteFill}
+                          />
+                        ) : null}
+                      </View>
+                      <Text style={styles.appearanceChoiceText}>{wallpaper.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+              <Pressable
+                onPress={() => setBubbleAppearanceDraft(DEFAULT_BUBBLE_APPEARANCE)}
+                style={[styles.linkCard, { marginTop: 14, justifyContent: 'center' }]}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.linkText, { flex: 0 }]}>Restore default appearance</Text>
+              </Pressable>
+            </ScrollView>
+          </View>
         </View>
       </Modal>
 

@@ -1210,8 +1210,8 @@ export default function ProfileScreen() {
       </View>
       <Text style={styles.planCopy}>
         {premiumActive
-          ? 'Your Premium plan includes offline study resources, voice messages, 10 daily AI requests, and higher hostel and product upload limits.'
-          : 'Premium adds offline study resources, voice messages, 10 daily AI requests, saved CBT papers, and higher hostel and product upload limits.'}
+          ? 'Your Premium plan includes offline study resources, 10 daily AI requests, and higher hostel and product upload limits.'
+          : 'Premium adds offline study resources, 10 daily AI requests, saved CBT papers, and higher hostel and product upload limits.'}
       </Text>
       {!premiumActive ? (
         <Pressable onPress={() => goTo('/premium')} style={({ pressed }) => [styles.saveButton, pressed && styles.saveButtonPressed]} accessibilityRole="button" accessibilityLabel="Upgrade to premium">

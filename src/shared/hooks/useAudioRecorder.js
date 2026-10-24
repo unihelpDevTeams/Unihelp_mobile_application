@@ -62,7 +62,7 @@ const stopRecorder = async (recorder) => {
   };
 };
 
-export function useAudioRecorder({ conversationId, isPremium }) {
+export function useAudioRecorder({ conversationId }) {
   const audioRecorder = useExpoAudioRecorder(RECORDING_OPTIONS);
   const [permission, setPermission] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -139,11 +139,6 @@ export function useAudioRecorder({ conversationId, isPremium }) {
   }, []);
 
   const startRecording = useCallback(async () => {
-    if (!isPremium) {
-      setError('Recording voice messages is available for Premium members only.');
-      return;
-    }
-
     if (!permission) {
       Alert.alert('Microphone Permission', 'Microphone access is required to record voice messages.');
       return;
@@ -193,7 +188,7 @@ export function useAudioRecorder({ conversationId, isPremium }) {
       setIsRecording(false);
       await resetAudioMode();
     }
-  }, [audioRecorder, clearTimer, conversationId, isPremium, permission]);
+  }, [audioRecorder, clearTimer, conversationId, permission]);
 
   const stopRecording = useCallback(async () => {
     if (!recordingRef.current) return;

@@ -163,6 +163,10 @@ export const NIGERIA_UNIVERSITIES = [
   { name: 'National Open University of Nigeria', shortName: 'NOUN', state: 'Lagos', country: 'Nigeria' },
   { name: 'Yaba College of Technology', shortName: 'YABATECH', state: 'Lagos', country: 'Nigeria' },
   { name: 'Federal Polytechnic, Ilaro', shortName: 'Ilaro Poly', state: 'Ogun', country: 'Nigeria' },
+  { name: 'Adecom College of Business and Management', shortName: 'Adecom', state: 'Oyo', country: 'Nigeria' },
+  
+  { name: 'Gateway ICT Polytechnic', shortName: 'Gateway poly', state: 'Oyo', country: 'Nigeria' },
+
   { name: 'Federal Polytechnic, Nekede', shortName: 'Nekede Poly', state: 'Imo', country: 'Nigeria' },
   { name: 'Federal Polytechnic, Bauchi', shortName: 'Bauchi Poly', state: 'Bauchi', country: 'Nigeria' },
   { name: 'Federal Polytechnic, Oko', shortName: 'Oko Poly', state: 'Anambra', country: 'Nigeria' },

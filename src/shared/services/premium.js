@@ -16,12 +16,6 @@ export const PREMIUM_PLAN = {
       description: 'Save learning resources and keep studying when you are offline.',
     },
     {
-      key: 'voice-messages',
-      icon: 'mic-outline',
-      title: 'Voice messages in chat',
-      description: 'Record and send voice messages in direct chats.',
-    },
-    {
       key: 'downloads',
       icon: 'download-outline',
       title: 'Save CBT papers for study',

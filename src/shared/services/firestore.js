@@ -229,6 +229,15 @@ const toUserApiPayload = (profile = {}) => ({
     : {}),
 });
 
+const isValidDateOfBirth = (value) => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsedDate = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsedDate.getTime())
+    && parsedDate.toISOString().slice(0, 10) === value
+    && value >= '1900-01-01'
+    && value <= new Date().toISOString().slice(0, 10);
+};
+
 const readFirestoreUserProfile = async (uid = auth.currentUser?.uid) => {
   if (!uid) return null;
   const snapshot = await getDoc(doc(db, COLLECTIONS.users, uid));
@@ -493,7 +502,12 @@ export async function ensureCurrentUserProfile(overrides = {}) {
       profileCacheRef?.username &&
       (!existingData?.username || existingData?.username !== profileCacheRef.username)
     ) {
-      putJson('/api/users', toUserApiPayload(profileCacheRef)).catch((syncErr) => {
+      const backgroundPayload = toUserApiPayload(profileCacheRef);
+      if (backgroundPayload.date_of_birth && !isValidDateOfBirth(backgroundPayload.date_of_birth)) {
+        console.warn('[FirestoreSync] Skipping invalid date of birth during automatic PostgreSQL sync.');
+        delete backgroundPayload.date_of_birth;
+      }
+      putJson('/api/users', backgroundPayload).catch((syncErr) => {
         console.warn('[FirestoreSync] Automatic background sync to PostgreSQL failed:', syncErr?.message || syncErr);
       });
     }

@@ -35,6 +35,7 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
 import VoiceMessageBubble from '../../src/shared/components/VoiceMessageBubble';
+import BubbleShapeAccents from '../../src/shared/components/BubbleShapeAccents';
 import VoiceRecorderBar from '../../src/shared/components/VoiceRecorderBar';
 import StickerPicker from '../../src/shared/components/StickerPicker';
 import StickerMessage from '../../src/shared/components/StickerMessage';
@@ -69,6 +70,17 @@ import { uploadChatAttachment } from '../../src/shared/services/backend';
 import { DOCUMENT_MIME_TYPES, humanSize, prepareChatAttachment } from '../../src/shared/services/chatAttachments';
 import { submitReport } from '../../src/shared/services/support';
 import { clearConversationAppearance, getConversationAppearance, saveConversationAppearance } from '../../src/shared/services/chatAppearance';
+import {
+  BUBBLE_PRESETS,
+  BUBBLE_SHAPES,
+  CHAT_BACKGROUNDS,
+  DEFAULT_BUBBLE_APPEARANCE,
+  isHexColor,
+  normalizeBubbleAppearance,
+  resolveBubbleFill,
+  resolveBubbleInk,
+  resolveChatBackground,
+} from '../../src/shared/services/chatBubbleAppearance';
 
 /* -------------------------------------------------------------------------- */
 /*                                  Constants                                 */
@@ -109,99 +121,6 @@ const putCache = (map, key, value) => {
 const STATUS_RANK = { failed: 0, sending: 0, sent: 1, delivered: 2, read: 3 };
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '😮'];
 const QUICK_STARTERS = ['Hi 👋', 'Hey! How are you?', 'Are you in my class?'];
-
-const BUBBLE_PRESETS = [
-  { key: 'brand', label: 'Classic', color: '#5B5CE2' },
-  { key: 'ocean', label: 'Ocean', color: '#0A84FF' },
-  { key: 'rose', label: 'Rose', color: '#E83E8C' },
-  { key: 'forest', label: 'Forest', color: '#1F9D6A' },
-  { key: 'cherry', label: 'Cherry', color: '#E53935' },
-  { key: 'amber', label: 'Amber', color: '#E59600' },
-  { key: 'mint', label: 'Mint', color: '#00A884' },
-  { key: 'midnight', label: 'Midnight', color: '#27374D' },
-  { key: 'sunset', label: 'Sunset', gradient: ['#FF7A18', '#AF002D'] },
-  { key: 'violet', label: 'Violet', gradient: ['#7F00FF', '#E100FF'] },
-  { key: 'aurora', label: 'Aurora', gradient: ['#00C6FF', '#0072FF'] },
-  { key: 'candy', label: 'Candy', gradient: ['#F953C6', '#B91D73'] },
-  { key: 'lime', label: 'Lime', gradient: ['#56AB2F', '#A8E063'] },
-  { key: 'ember', label: 'Ember', gradient: ['#F12711', '#F5AF19'] },
-];
-const CHAT_BACKGROUNDS = [
-  { key: 'default', label: 'Default', color: null },
-  { key: 'midnight-grid', label: 'Midnight grid', gradient: ['#E8E7FF', '#C8C6FF'], darkGradient: ['#12152B', '#25215A'], pattern: 'grid' },
-  { key: 'aurora', label: 'Aurora', gradient: ['#D9F5FF', '#DED9FF', '#F9D6ED'], darkGradient: ['#082F49', '#312E81', '#5B2167'], pattern: 'orb' },
-  { key: 'paper', label: 'Soft paper', gradient: ['#F8FAFC', '#E9EFFF'], darkGradient: ['#1E293B', '#273449'], pattern: 'dots' },
-  { key: 'campus', label: 'Campus dusk', gradient: ['#FFF1EB', '#ACE0F9'], darkGradient: ['#4A2C3B', '#244A66'], pattern: 'sun' },
-  { key: 'forest', label: 'Forest mist', gradient: ['#DDF7EA', '#BFE9D5'], darkGradient: ['#0F3D32', '#1C6E5A'], pattern: 'leaf' },
-  { key: 'rose', label: 'Rose haze', gradient: ['#FFE4E6', '#E9D5FF'], darkGradient: ['#492442', '#34264F'], pattern: 'orb' },
-  { key: 'mono', label: 'Monochrome', gradient: ['#F5F5F5', '#D4D4D8'], darkGradient: ['#19191D', '#36363E'], pattern: 'grid' },
-];
-const BUBBLE_SHAPES = [
-  { key: 'tail', label: 'Speech tail', radii: { borderTopLeftRadius: 22, borderTopRightRadius: 22, borderBottomLeftRadius: 22, borderBottomRightRadius: 5 } },
-  { key: 'ticket', label: 'Ticket', radii: { borderTopLeftRadius: 8, borderTopRightRadius: 24, borderBottomLeftRadius: 24, borderBottomRightRadius: 8 } },
-  { key: 'comet', label: 'Comet', radii: { borderTopLeftRadius: 30, borderTopRightRadius: 30, borderBottomLeftRadius: 30, borderBottomRightRadius: 4 } },
-  { key: 'pixel', label: 'Pixel', radii: { borderTopLeftRadius: 2, borderTopRightRadius: 18, borderBottomLeftRadius: 18, borderBottomRightRadius: 2 } },
-  { key: 'ribbon', label: 'Ribbon', radii: { borderTopLeftRadius: 26, borderTopRightRadius: 5, borderBottomLeftRadius: 5, borderBottomRightRadius: 26 } },
-  { key: 'orbit', label: 'Orbit', radii: { borderTopLeftRadius: 36, borderTopRightRadius: 12, borderBottomLeftRadius: 36, borderBottomRightRadius: 12 } },
-  { key: 'fold', label: 'Fold', radii: { borderTopLeftRadius: 4, borderTopRightRadius: 4, borderBottomLeftRadius: 26, borderBottomRightRadius: 26 } },
-  { key: 'capsule', label: 'Capsule', radii: { borderTopLeftRadius: 999, borderTopRightRadius: 999, borderBottomLeftRadius: 999, borderBottomRightRadius: 999 } },
-  { key: 'pebble', label: 'Pebble', radii: { borderTopLeftRadius: 34, borderTopRightRadius: 34, borderBottomLeftRadius: 34, borderBottomRightRadius: 14 } },
-  { key: 'leaf', label: 'Leaf', radii: { borderTopLeftRadius: 32, borderTopRightRadius: 8, borderBottomLeftRadius: 32, borderBottomRightRadius: 32 } },
-  { key: 'postcard', label: 'Postcard', radii: { borderTopLeftRadius: 4, borderTopRightRadius: 18, borderBottomLeftRadius: 18, borderBottomRightRadius: 4 } },
-  { key: 'droplet', label: 'Droplet', radii: { borderTopLeftRadius: 30, borderTopRightRadius: 30, borderBottomLeftRadius: 30, borderBottomRightRadius: 2 } },
-  { key: 'arch', label: 'Arch', radii: { borderTopLeftRadius: 32, borderTopRightRadius: 32, borderBottomLeftRadius: 8, borderBottomRightRadius: 8 } },
-  { key: 'soft-square', label: 'Soft square', radii: { borderTopLeftRadius: 12, borderTopRightRadius: 12, borderBottomLeftRadius: 12, borderBottomRightRadius: 12 } },
-  { key: 'cut-corner', label: 'Cut corner', radii: { borderTopLeftRadius: 2, borderTopRightRadius: 24, borderBottomLeftRadius: 2, borderBottomRightRadius: 24 } },
-];
-const DEFAULT_BUBBLE_APPEARANCE = {
-  preset: 'brand', shape: 'tail', animation: 'none', customColor: '#5B5CE2',
-  fontSize: 15.5, density: 'comfortable', width: 'standard', metadata: 'inline', wallpaper: 'default',
-};
-const isHexColor = (value) => /^#[0-9A-F]{6}$/i.test(String(value || '').trim());
-const APPEARANCE_FONT_SIZES = [14, 15.5, 17];
-const APPEARANCE_DENSITIES = ['compact', 'comfortable'];
-const APPEARANCE_WIDTHS = ['compact', 'standard', 'wide'];
-const APPEARANCE_ANIMATIONS = ['none', 'aurora-border', 'shimmer', 'float', 'pop'];
-const normalizeBubbleAppearance = (value = {}) => {
-  const candidate = { ...DEFAULT_BUBBLE_APPEARANCE, ...(value || {}) };
-  return {
-    ...candidate,
-    preset: [...BUBBLE_PRESETS.map((item) => item.key), 'custom'].includes(candidate.preset) ? candidate.preset : 'brand',
-    shape: BUBBLE_SHAPES.some((item) => item.key === candidate.shape) ? candidate.shape : 'tail',
-    animation: APPEARANCE_ANIMATIONS.includes(candidate.animation) ? candidate.animation : 'none',
-    customColor: isHexColor(candidate.customColor) ? candidate.customColor.toUpperCase() : DEFAULT_BUBBLE_APPEARANCE.customColor,
-    fontSize: APPEARANCE_FONT_SIZES.includes(Number(candidate.fontSize)) ? Number(candidate.fontSize) : DEFAULT_BUBBLE_APPEARANCE.fontSize,
-    density: APPEARANCE_DENSITIES.includes(candidate.density) ? candidate.density : 'comfortable',
-    width: APPEARANCE_WIDTHS.includes(candidate.width) ? candidate.width : 'standard',
-    metadata: candidate.metadata === 'below' ? 'below' : 'inline',
-    wallpaper: CHAT_BACKGROUNDS.some((item) => item.key === candidate.wallpaper) ? candidate.wallpaper : 'default',
-  };
-};
-const resolveBubbleFill = (appearance = {}) => {
-  if (appearance.preset === 'custom') return { color: isHexColor(appearance.customColor) ? appearance.customColor : DEFAULT_BUBBLE_APPEARANCE.customColor };
-  return BUBBLE_PRESETS.find((item) => item.key === appearance.preset) || BUBBLE_PRESETS[0];
-};
-const resolveChatBackground = (appearance = {}) =>
-  CHAT_BACKGROUNDS.find((item) => item.key === appearance.wallpaper) || CHAT_BACKGROUNDS[0];
-
-// Relative luminance of a #RRGGBB color (0 = black, 1 = white).
-const hexLuminance = (hex) => {
-  const clean = String(hex || '').replace('#', '');
-  if (clean.length !== 6) return 0;
-  const [r, g, b] = [0, 2, 4]
-    .map((i) => parseInt(clean.slice(i, i + 2), 16) / 255)
-    .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-};
-
-const DARK_INK = { text: '#14141F', meta: 'rgba(20,20,31,0.6)' };
-/** Light bubble fills (white custom color, Lime gradient...) need dark text; otherwise null = keep default white. */
-const resolveBubbleInk = (fill) => {
-  const palette = fill?.gradient || (fill?.color ? [fill.color] : []);
-  if (!palette.length) return null;
-  const average = palette.reduce((sum, hex) => sum + hexLuminance(hex), 0) / palette.length;
-  return average > 0.45 ? DARK_INK : null;
-};
 
 /* -------------------------------------------------------------------------- */
 /*                                   Helpers                                  */
@@ -635,6 +554,7 @@ const createStyles = (c) => ({
   wallpaperName: { color: c.textPrimary, fontSize: 10, fontWeight: '800', textAlign: 'center', marginTop: 6, marginBottom: 2 },
   wallpaperDot: { position: 'absolute', width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(255,255,255,0.22)', top: -12, right: -10 },
   wallpaperLine: { position: 'absolute', height: 1, left: 0, right: 0, top: 18, backgroundColor: 'rgba(255,255,255,0.16)' },
+  wallpaperAccent: { position: 'absolute', backgroundColor: 'rgba(255,255,255,0.42)' },
   studioScroll: { paddingHorizontal: 16, paddingBottom: 36 },
   studioStage: { height: 218, borderRadius: 26, backgroundColor: '#131529', overflow: 'hidden', padding: 16, marginBottom: 18, justifyContent: 'center' },
   studioOrbOne: { position: 'absolute', width: 190, height: 190, borderRadius: 95, backgroundColor: '#6D28D9', opacity: 0.54, top: -94, right: -48 },
@@ -960,6 +880,50 @@ function ChatBackground({ appearance, colors, isDark, preview = false, styles })
   const wallpaper = resolveChatBackground(appearance);
   if (wallpaper.key === 'default') return preview ? <View style={[styles.wallpaperArt, { backgroundColor: colors.background }]} /> : null;
   const gradient = isDark && wallpaper.darkGradient ? wallpaper.darkGradient : wallpaper.gradient;
+  const patternMarks = {
+    stars: [
+      { top: '18%', left: '12%', width: 4, height: 4, borderRadius: 2 },
+      { top: '28%', left: '68%', width: 6, height: 6, borderRadius: 3 },
+      { top: '68%', left: '35%', width: 3, height: 3, borderRadius: 2 },
+      { top: '72%', left: '83%', width: 5, height: 5, borderRadius: 3 },
+      { top: '44%', left: '48%', width: 3, height: 3, borderRadius: 2 },
+    ],
+    bubbles: [
+      { top: '12%', left: '12%', width: 36, height: 36, borderRadius: 18 },
+      { top: '62%', left: '72%', width: 58, height: 58, borderRadius: 29 },
+      { top: '38%', left: '44%', width: 18, height: 18, borderRadius: 9 },
+      { top: '72%', left: '22%', width: 12, height: 12, borderRadius: 6 },
+    ],
+    confetti: [
+      { top: '15%', left: '16%', width: 5, height: 18, borderRadius: 3, transform: [{ rotate: '35deg' }] },
+      { top: '62%', left: '28%', width: 5, height: 16, borderRadius: 3, transform: [{ rotate: '-40deg' }] },
+      { top: '28%', left: '72%', width: 5, height: 17, borderRadius: 3, transform: [{ rotate: '-25deg' }] },
+      { top: '74%', left: '82%', width: 5, height: 15, borderRadius: 3, transform: [{ rotate: '50deg' }] },
+      { top: '48%', left: '54%', width: 5, height: 14, borderRadius: 3, transform: [{ rotate: '70deg' }] },
+    ],
+    glitch: [
+      { top: '18%', left: '8%', width: '30%', height: 3 },
+      { top: '35%', left: '53%', width: '42%', height: 2 },
+      { top: '62%', left: '18%', width: '48%', height: 3 },
+      { top: '78%', left: '66%', width: '24%', height: 2 },
+    ],
+    stripes: [
+      { top: '-10%', left: '18%', width: 10, height: '130%', transform: [{ rotate: '22deg' }] },
+      { top: '-10%', left: '53%', width: 6, height: '130%', transform: [{ rotate: '22deg' }] },
+      { top: '-10%', left: '82%', width: 12, height: '130%', transform: [{ rotate: '22deg' }] },
+    ],
+    embers: [
+      { top: '20%', left: '20%', width: 9, height: 9, borderRadius: 5 },
+      { top: '52%', left: '76%', width: 6, height: 6, borderRadius: 3 },
+      { top: '72%', left: '42%', width: 11, height: 11, borderRadius: 6 },
+      { top: '34%', left: '55%', width: 4, height: 4, borderRadius: 2 },
+    ],
+    orbs: [
+      { top: '6%', left: '12%', width: 68, height: 68, borderRadius: 34 },
+      { top: '50%', left: '62%', width: 90, height: 90, borderRadius: 45 },
+      { top: '65%', left: '18%', width: 36, height: 36, borderRadius: 18 },
+    ],
+  }[wallpaper.pattern] || [];
   const decoration = (
     <>
       {wallpaper.pattern === 'orb' || wallpaper.pattern === 'sun' ? <View style={styles.wallpaperDot} /> : null}
@@ -973,6 +937,9 @@ function ChatBackground({ appearance, colors, isDark, preview = false, styles })
       {wallpaper.pattern === 'leaf' ? (
         <View style={[styles.wallpaperDot, { width: 72, height: 38, borderRadius: 40, top: 7, right: -16, transform: [{ rotate: '-35deg' }] }]} />
       ) : null}
+      {patternMarks.map((mark, index) => (
+        <View key={`${wallpaper.key}-mark-${index}`} style={[styles.wallpaperAccent, mark]} />
+      ))}
     </>
   );
   if (preview) {
@@ -1074,6 +1041,7 @@ function BubbleStudio({ appearance, scope, saving, onChange, onDraftChange, onSc
               <Text style={[styles.studioBubbleText, { fontSize: appearance.fontSize }, ink && { color: ink.text }]}>This is so you ✦</Text>
               <Text style={[styles.studioBubbleMeta, ink && { color: ink.meta }]}>Delivered · now</Text>
             </View>
+            <BubbleShapeAccents shape={shape.key} color={solidPreview} />
           </Animated.View>
           <View style={styles.studioIncoming}>
             <Text style={styles.studioIncomingText}>Make it unmistakable.</Text>
@@ -1132,6 +1100,7 @@ function BubbleStudio({ appearance, scope, saving, onChange, onDraftChange, onSc
                 <View style={[styles.shapeMini, item.radii, { backgroundColor: solidPreview }]}>
                   {item.key === 'fold' ? <View style={styles.shapeFold} /> : null}
                   {item.key === 'tail' ? <View style={[styles.shapeTail, { backgroundColor: solidPreview }]} /> : null}
+                  <BubbleShapeAccents shape={item.key} color={solidPreview} compact />
                 </View>
                 <Text style={styles.shapeName}>{item.label}</Text>
               </Pressable>
@@ -1370,6 +1339,7 @@ const MessageRow = React.memo(function MessageRow({
             bubbleAppearance={bubbleAppearance}
             bubbleFill={bubbleFill}
             bubbleShape={chosenShape.radii}
+            bubbleShapeKey={chosenShape.key}
             bubbleMotion={bubbleMotion}
           />
         </View>
@@ -1413,6 +1383,9 @@ const MessageRow = React.memo(function MessageRow({
           ) : null}
           {showTail && chosenShape.key === 'tail' ? (
             <View pointerEvents="none" style={[styles.bubbleTail, { backgroundColor: bubbleFill.gradient ? bubbleFill.gradient[1] : bubbleFill.color }]} />
+          ) : null}
+          {mine && chosenShape.accents ? (
+            <BubbleShapeAccents shape={chosenShape.key} color={bubbleFill.gradient ? bubbleFill.gradient[0] : bubbleFill.color} />
           ) : null}
           {replyBlock}
           {attachments.map((att, i) =>
@@ -1567,6 +1540,7 @@ function ConversationScreen({ conversationId }) {
   const [relationshipBusy, setRelationshipBusy] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [typingName, setTypingName] = useState('');
   const [stickerPickerVisible, setStickerPickerVisible] = useState(false);
   const [friendRequestVisible, setFriendRequestVisible] = useState(false);
@@ -2151,11 +2125,17 @@ function ConversationScreen({ conversationId }) {
   }, [isTyping, voiceUploading, scrollToBottom]);
 
   useEffect(() => {
-    const eventName = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const showSub = Keyboard.addListener(eventName, () => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, () => {
+      setKeyboardVisible(true);
       if (nearBottomRef.current) scrollToBottom(true);
     });
-    return () => showSub.remove();
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
   }, [scrollToBottom]);
 
   // Mark as read: only when there IS a new incoming message, debounced, only while the app is
@@ -3367,8 +3347,8 @@ function ConversationScreen({ conversationId }) {
         ) : null}
 
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={0}
           style={{ flex: 1 }}
         >
           <View style={styles.messagesPane}>
@@ -3488,7 +3468,7 @@ function ConversationScreen({ conversationId }) {
           {renderRelationshipPrompt()}
 
           {canChat ? (
-            <View style={styles.composerContainer}>
+            <View style={[styles.composerContainer, keyboardVisible && { paddingBottom: 8 }]}>
               {!editingMessage && pendingAttachments.length ? (
                 <ScrollView style={styles.attachmentPreviewList} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                   {pendingAttachments.map((attachment, index) => (
