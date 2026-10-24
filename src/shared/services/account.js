@@ -1,9 +1,12 @@
 import {
   EmailAuthProvider,
+  deleteUser,
   reauthenticateWithCredential,
 } from 'firebase/auth';
 import {
   collection,
+  deleteDoc,
+  doc,
   getDocs,
   writeBatch,
 } from 'firebase/firestore';
@@ -154,6 +157,14 @@ export async function deleteCurrentUserAccount({ password = '' } = {}) {
   const activityCloudinaryResult = await cleanupActivityCloudinaryAssets(uid);
   const deletedActivities = await deleteCollectionPath(`${COLLECTIONS.users}/${uid}/activity`);
   const mediaResult = await deleteCurrentUserWithMedia();
+
+  // Delete user profile in Firestore
+  await deleteDoc(doc(db, COLLECTIONS.users, uid)).catch((firestoreError) => {
+    console.warn('[Account] Could not delete user document:', firestoreError?.message || firestoreError);
+  });
+
+  // Permanently delete the Firebase Auth user
+  await deleteUser(currentUser);
 
   return {
     deletedActivities,

@@ -152,6 +152,7 @@ export default function ProfileDangerScreen() {
               setBusyAction('account');
               setMessage(null);
               await deleteCurrentUserAccount({ password });
+              await logout();
               router.replace('/(auth)/login');
             } catch (error) {
               showError(error);

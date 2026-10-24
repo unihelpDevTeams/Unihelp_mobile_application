@@ -1,4 +1,3 @@
-import { PDFDocument } from "pdf-lib";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system/legacy";
 
@@ -166,6 +165,7 @@ const optimizePdfFile = async (file) => {
   }
 
   try {
+    const { PDFDocument } = await import('pdf-lib');
     const originalBytes = await file.arrayBuffer();
     const pdfDocument = await PDFDocument.load(originalBytes);
     const optimizedBytes = await pdfDocument.save({

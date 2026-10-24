@@ -85,7 +85,7 @@ const TYPE_META = {
   formula: { label: 'Formula sheet', icon: 'calculator' },
 };
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+if (Platform.OS === 'android' && !global.nativeFabricUIManager && UIManager.setLayoutAnimationEnabledExperimental) {
   try {
     UIManager.setLayoutAnimationEnabledExperimental(true);
   } catch (_error) {
