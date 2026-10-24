@@ -43,9 +43,40 @@ const MISSING_PROFILE_HINT = {
 
 const TOAST_DURATION = 2600;
 
-const nameOf = (person = {}) => person.username || person.name || person.email || 'Student';
-const schoolOf = (person = {}) => person.school || person.university || '';
-const metaOf = (person = {}) => [schoolOf(person), person.department, person.level].filter(Boolean).join(' | ');
+const nameOf = (person = {}) => {
+  const possible = (
+    person.displayName
+    || person.display_name
+    || person.username
+    || person.name
+    || (person.firstName ? `${person.firstName} ${person.lastName || ''}`.trim() : '')
+    || (person.first_name ? `${person.first_name} ${person.last_name || ''}`.trim() : '')
+    || (person.email ? person.email.split('@')[0] : '')
+  );
+  return (possible && String(possible).trim()) || 'Student';
+};
+
+const schoolOf = (person = {}) => (
+  person.school
+  || person.university
+  || person.universityName
+  || person.university_name
+  || ''
+);
+
+const departmentOf = (person = {}) => (
+  person.department
+  || person.departmentName
+  || person.department_name
+  || ''
+);
+
+const metaOf = (person = {}) => [
+  schoolOf(person),
+  departmentOf(person),
+  person.level,
+].filter(Boolean).join(' | ');
+
 const uidOf = (person = {}) => person.id || person.uid;
 const norm = (value) => String(value || '').trim().toLowerCase();
 
@@ -59,7 +90,7 @@ const mySchoolOf = (profile) => schoolOf(profile || {});
 const isFilterReady = (key, profile) => {
   if (key === 'all') return true;
   if (key === 'school') return !!mySchoolOf(profile);
-  if (key === 'department') return !!profile?.department;
+  if (key === 'department') return !!departmentOf(profile);
   if (key === 'level') return !!profile?.level;
   if (key === 'interest') return interestsOf(profile).length > 0;
   return true;
@@ -68,7 +99,7 @@ const isFilterReady = (key, profile) => {
 const matchesFilter = (person, key, profile) => {
   if (key === 'all') return true;
   if (key === 'school') return !!schoolOf(person) && norm(schoolOf(person)) === norm(mySchoolOf(profile));
-  if (key === 'department') return !!person.department && norm(person.department) === norm(profile?.department);
+  if (key === 'department') return !!departmentOf(person) && norm(departmentOf(person)) === norm(departmentOf(profile));
   if (key === 'level') return !!person.level && norm(person.level) === norm(profile?.level);
   if (key === 'interest') {
     const mine = interestsOf(profile);

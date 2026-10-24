@@ -4,7 +4,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { useThemeStyles } from '../theme/createStyles';
 
-const personName = (person) => person?.name || person?.username || person?.email || 'Student';
+const personName = (person = {}) => (
+  person?.displayName
+  || person?.display_name
+  || person?.username
+  || person?.name
+  || (person?.firstName ? `${person.firstName} ${person.lastName || ''}`.trim() : '')
+  || (person?.first_name ? `${person.first_name} ${person.last_name || ''}`.trim() : '')
+  || (person?.email ? person.email.split('@')[0] : '')
+  || 'Student'
+);
 
 export default function FriendRequestModal({ visible, person, onClose, onAdd }) {
   const { colors } = useTheme();

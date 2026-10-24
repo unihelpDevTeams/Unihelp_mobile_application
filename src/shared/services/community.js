@@ -20,7 +20,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { auth, db } from '../../../firebase/config';
-import { getApiUrl, sendAppNotification, postJson } from './backend';
+import { getApiUrl, sendAppNotification, postJson, getJson } from './backend';
 import { canSendDirectMessage, createOrOpenFriendConversation } from './friendships';
 
 export const PAGE_SIZE = 20;
@@ -55,18 +55,56 @@ export const searchUsers = async (term, currentUid, pageSize = 12) => {
   if (value.length < 2) return [];
 
   const safeLimit = Math.max(1, Number(pageSize) || 12);
-  const q = query(
-    collection(db, 'users'),
-    where('usernameLower', '>=', value),
-    where('usernameLower', '<=', `${value}\uf8ff`),
-    orderBy('usernameLower'),
-    limit(safeLimit)
-  );
 
-  const snapshot = await getDocs(q);
-  return mapDocs(snapshot)
-    .filter((entry) => entry.id !== currentUid)
-    .slice(0, safeLimit);
+  // 1. Try PostgreSQL backend search first
+  try {
+    const res = await getJson(`/api/friendships/search?q=${encodeURIComponent(value)}`);
+    if (Array.isArray(res) && res.length > 0) {
+      return res.filter((entry) => (entry.id || entry.uid) !== currentUid).slice(0, safeLimit);
+    }
+  } catch {
+    // Non-fatal: fall back to Firestore
+  }
+
+  // 2. Fallback to Firestore
+  try {
+    const q = query(
+      collection(db, 'users'),
+      where('usernameLower', '>=', value),
+      where('usernameLower', '<=', `${value}\uf8ff`),
+      orderBy('usernameLower'),
+      limit(safeLimit)
+    );
+
+    const snapshot = await getDocs(q);
+    return mapDocs(snapshot)
+      .filter((entry) => entry.id !== currentUid)
+      .map((student) => {
+        const studentName = (
+          student.displayName
+          || student.display_name
+          || student.username
+          || student.name
+          || (student.firstName ? `${student.firstName} ${student.lastName || ''}`.trim() : '')
+          || (student.email ? student.email.split('@')[0] : 'Student')
+        );
+        return {
+          ...student,
+          name: studentName,
+          displayName: student.displayName || student.display_name || studentName,
+          username: student.username || student.displayName || studentName,
+          school: student.school || student.university || student.universityName || '',
+          university: student.university || student.school || student.universityName || '',
+          department: student.department || student.departmentName || '',
+          avatar: student.avatar || student.photo || student.photoURL || '',
+          photo: student.photo || student.avatar || student.photoURL || '',
+        };
+      })
+      .slice(0, safeLimit);
+  } catch (error) {
+    console.error('Failed to search users in Firestore:', error);
+    return [];
+  }
 };
 
 export const listGroups = async ({ search = '', category = 'All', cursor = null } = {}) => {

@@ -34,8 +34,21 @@ const TABS = [
   { key: 'blocked', label: 'Blocked', icon: 'ban-outline' },
 ];
 
-const nameOf = (person) => person?.name || person?.username || person?.email || 'Student';
-const schoolLine = (person) => [person?.university || person?.school, person?.department, person?.level].filter(Boolean).join(' • ');
+const nameOf = (person = {}) => (
+  person?.displayName
+  || person?.display_name
+  || person?.username
+  || person?.name
+  || (person?.firstName ? `${person.firstName} ${person.lastName || ''}`.trim() : '')
+  || (person?.first_name ? `${person.first_name} ${person.last_name || ''}`.trim() : '')
+  || (person?.email ? person.email.split('@')[0] : '')
+  || 'Student'
+);
+const schoolLine = (person = {}) => [
+  person?.school || person?.university || person?.universityName,
+  person?.department || person?.departmentName,
+  person?.level,
+].filter(Boolean).join(' • ');
 
 function Avatar({ person, styles, size = 50 }) {
   const name = nameOf(person);

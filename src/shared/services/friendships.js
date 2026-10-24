@@ -55,20 +55,32 @@ const addDays = (date, days) => {
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
-const userName = (profile = {}, fallback = 'Student') => (
-  profile.username || profile.name || profile.displayName || profile.email || fallback
-);
+const userName = (profile = {}, fallback = 'Student') => {
+  const possible = (
+    profile.displayName
+    || profile.display_name
+    || profile.username
+    || profile.name
+    || (profile.firstName ? `${profile.firstName} ${profile.lastName || ''}`.trim() : '')
+    || (profile.first_name ? `${profile.first_name} ${profile.last_name || ''}`.trim() : '')
+    || (profile.email ? profile.email.split('@')[0] : '')
+  );
+  return (possible && String(possible).trim()) || fallback;
+};
 
 const profileSummary = (uid, profile = {}) => ({
   uid,
   name: userName(profile),
-  username: profile.username || profile.name || '',
+  displayName: profile.displayName || profile.display_name || userName(profile),
+  username: profile.username || profile.name || profile.displayName || '',
   email: profile.email || '',
   avatar: profile.photo || profile.avatar || profile.photoURL || '',
-  university: profile.university || profile.school || '',
-  school: profile.school || profile.university || '',
+  photo: profile.photo || profile.avatar || profile.photoURL || '',
+  photoURL: profile.photoURL || profile.photo || profile.avatar || '',
+  university: profile.university || profile.school || profile.universityName || '',
+  school: profile.school || profile.university || profile.universityName || '',
   faculty: profile.faculty || '',
-  department: profile.department || '',
+  department: profile.department || profile.departmentName || '',
   level: profile.level || '',
   interests: Array.isArray(profile.interests) ? profile.interests : [],
   role: profile.role || '',
@@ -96,12 +108,21 @@ export const getUserProfileById = async (uid) => {
 
   if (snap?.exists()) {
     const data = snap.data() || {};
+    const name = userName(data);
     return {
       id: snap.id,
       uid: snap.id,
       ...data,
-      username: data.username || data.usernameLower || '',
-      displayName: data.displayName || data.firstName || data.username || data.name || '',
+      name,
+      username: data.username || data.usernameLower || data.displayName || name,
+      displayName: data.displayName || data.display_name || data.firstName || data.username || name,
+      school: data.school || data.university || data.universityName || '',
+      university: data.university || data.school || data.universityName || '',
+      department: data.department || data.departmentName || '',
+      level: data.level || '',
+      photo: data.photo || data.avatar || data.photoURL || '',
+      avatar: data.avatar || data.photo || data.photoURL || '',
+      photoURL: data.photoURL || data.photo || data.avatar || '',
     };
   }
 
@@ -110,17 +131,21 @@ export const getUserProfileById = async (uid) => {
     const res = await getJson(`/api/users/${uid}`);
     if (res?.data) {
       const row = res.data;
+      const name = row.display_name || row.username || (row.email ? row.email.split('@')[0] : 'Student');
       return {
         id: row.id || uid,
         uid: row.id || uid,
-        username: row.username || row.username_lower || '',
-        displayName: row.display_name || row.username || '',
+        name,
+        username: row.username || row.display_name || row.username_lower || name,
+        displayName: row.display_name || row.username || name,
         school: row.university || '',
+        university: row.university || '',
         department: row.department || '',
         level: row.level || '',
         bio: row.bio || '',
         photo: row.avatar || '',
         photoURL: row.avatar || '',
+        avatar: row.avatar || '',
         photoAsset: row.photo_asset || null,
         cover: row.cover_url || '',
         coverPhoto: row.cover_url || '',
@@ -642,41 +667,80 @@ export const loadMoreFriends = async (uid, cursor, pageSize = FRIEND_PAGE_SIZE) 
   return { items: mapDocs(snap), cursor: snap.docs[snap.docs.length - 1] || null, hasMore: snap.size === pageSize };
 };
 
-export const listSuggestedFriends = async ({ uid, profile = {}, pageSize = 20 } = {}) => {
+export const listSuggestedFriends = async ({ uid, profile = {}, pageSize = 40 } = {}) => {
   if (!uid) return [];
-  const usersSnap = await getDocs(query(collection(db, COLLECTIONS.users), limit(120)));
-  const [friendsSnap, outgoingSnap, incomingSnap, blockedSnap] = await Promise.all([
-    getDocs(query(collection(db, COLLECTIONS.friends), where('users', 'array-contains', uid))),
-    getDocs(query(collection(db, COLLECTIONS.friendRequests), where('from', '==', uid), where('status', '==', 'pending'))),
-    getDocs(query(collection(db, COLLECTIONS.friendRequests), where('to', '==', uid), where('status', '==', 'pending'))),
-    getDocs(query(collection(db, COLLECTIONS.blockedUsers), where('blockerId', '==', uid))),
-  ]);
-  const excluded = new Set([uid]);
-  friendsSnap.docs.forEach((friendDoc) => friendDoc.data()?.users?.forEach?.((id) => id !== uid && excluded.add(id)));
-  outgoingSnap.docs.forEach((requestDoc) => excluded.add(requestDoc.data()?.to));
-  incomingSnap.docs.forEach((requestDoc) => excluded.add(requestDoc.data()?.from));
-  blockedSnap.docs.forEach((blockDoc) => excluded.add(blockDoc.data()?.blockedId));
 
-  const currentInterests = new Set(Array.isArray(profile.interests) ? profile.interests.map((item) => String(item).toLowerCase()) : []);
-  return mapDocs(usersSnap)
-    .filter((student) => !excluded.has(student.id || student.uid))
-    .map((student) => {
-      const interests = Array.isArray(student.interests) ? student.interests : [];
-      const sharedInterests = interests.filter((item) => currentInterests.has(String(item).toLowerCase())).length;
-      let score = 0;
-      if ((student.school || student.university) && (student.school || student.university) === (profile.school || profile.university)) score += 35;
-      if (student.faculty && student.faculty === profile.faculty) score += 20;
-      if (student.department && student.department === profile.department) score += 25;
-      if (student.level && student.level === profile.level) score += 12;
-      score += Math.min(sharedInterests * 8, 24);
-      if (student.verifiedTutor) score += 10;
-      if (student.lastActiveAt) score += 4;
-      const cappedScore = Math.min(score, 100);
-      return { ...student, score: cappedScore, matchPercentage: cappedScore };
-    })
-    .filter((student) => student.score > 0)
-    .sort((left, right) => right.score - left.score)
-    .slice(0, pageSize);
+  // 1. First attempt: fetch recommendations from PostgreSQL backend
+  try {
+    const res = await getJson('/api/friendships/suggestions');
+    if (Array.isArray(res) && res.length > 0) {
+      return res.slice(0, pageSize);
+    }
+  } catch (error) {
+    // Non-fatal: fall back to Firestore
+  }
+
+  // 2. Fallback: fetch from Firestore users collection
+  try {
+    const usersSnap = await getDocs(query(collection(db, COLLECTIONS.users), limit(120)));
+    const [friendsSnap, outgoingSnap, incomingSnap, blockedSnap] = await Promise.all([
+      getDocs(query(collection(db, COLLECTIONS.friends), where('users', 'array-contains', uid))),
+      getDocs(query(collection(db, COLLECTIONS.friendRequests), where('from', '==', uid), where('status', '==', 'pending'))),
+      getDocs(query(collection(db, COLLECTIONS.friendRequests), where('to', '==', uid), where('status', '==', 'pending'))),
+      getDocs(query(collection(db, COLLECTIONS.blockedUsers), where('blockerId', '==', uid))),
+    ]);
+    const excluded = new Set([uid]);
+    friendsSnap.docs.forEach((friendDoc) => friendDoc.data()?.users?.forEach?.((id) => id !== uid && excluded.add(id)));
+    outgoingSnap.docs.forEach((requestDoc) => excluded.add(requestDoc.data()?.to));
+    incomingSnap.docs.forEach((requestDoc) => excluded.add(requestDoc.data()?.from));
+    blockedSnap.docs.forEach((blockDoc) => excluded.add(blockDoc.data()?.blockedId));
+
+    const currentInterests = new Set(Array.isArray(profile.interests) ? profile.interests.map((item) => String(item).toLowerCase()) : []);
+    const mySchool = profile.school || profile.university || profile.universityName || '';
+    const myDept = profile.department || profile.departmentName || '';
+    const myLevel = profile.level || '';
+
+    return mapDocs(usersSnap)
+      .filter((student) => !excluded.has(student.id || student.uid))
+      .map((student) => {
+        const studentSchool = student.school || student.university || student.universityName || '';
+        const studentDept = student.department || student.departmentName || '';
+        const studentName = userName(student);
+        const interests = Array.isArray(student.interests) ? student.interests : [];
+        const sharedInterests = interests.filter((item) => currentInterests.has(String(item).toLowerCase())).length;
+        let score = 0;
+        if (studentSchool && mySchool && String(studentSchool).toLowerCase() === String(mySchool).toLowerCase()) score += 35;
+        if (student.faculty && profile.faculty && String(student.faculty).toLowerCase() === String(profile.faculty).toLowerCase()) score += 20;
+        if (studentDept && myDept && String(studentDept).toLowerCase() === String(myDept).toLowerCase()) score += 25;
+        if (student.level && myLevel && String(student.level).toLowerCase() === String(myLevel).toLowerCase()) score += 12;
+        score += Math.min(sharedInterests * 8, 24);
+        if (student.verifiedTutor) score += 10;
+        if (student.lastActiveAt) score += 4;
+        const cappedScore = Math.min(score, 100);
+        return {
+          ...student,
+          id: student.id || student.uid,
+          uid: student.id || student.uid,
+          name: studentName,
+          displayName: student.displayName || student.display_name || studentName,
+          username: student.username || student.displayName || studentName,
+          school: studentSchool,
+          university: studentSchool,
+          department: studentDept,
+          level: student.level || '',
+          photo: student.photo || student.avatar || student.photoURL || '',
+          avatar: student.avatar || student.photo || student.photoURL || '',
+          photoURL: student.photoURL || student.photo || student.avatar || '',
+          score: cappedScore,
+          matchPercentage: cappedScore,
+        };
+      })
+      .sort((left, right) => right.score - left.score)
+      .slice(0, pageSize);
+  } catch (error) {
+    console.error('Failed to list suggested friends:', error);
+    return [];
+  }
 };
 
 export const updatePrivacySettings = async (uid, privacy) => {

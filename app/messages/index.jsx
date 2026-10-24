@@ -105,8 +105,15 @@ const hashHue = (text) => {
   return hash;
 };
 
-const personName = (profileLike = {}) =>
-  profileLike.name || profileLike.username || profileLike.email || 'Student';
+const personName = (profileLike = {}) => (
+  profileLike.displayName
+  || profileLike.display_name
+  || profileLike.name
+  || profileLike.username
+  || (profileLike.firstName ? `${profileLike.firstName} ${profileLike.lastName || ''}`.trim() : '')
+  || (profileLike.email ? profileLike.email.split('@')[0] : '')
+  || 'Student'
+);
 
 /* -------------------------------------------------------------------------- */
 /*                              Small components                              */

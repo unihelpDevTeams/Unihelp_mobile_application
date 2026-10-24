@@ -622,7 +622,23 @@ export default function ViewUserProfile() {
   /* ---------- render ---------- */
 
   const cardStyle = { backgroundColor: colors.card, borderColor: colors.borderDefault, shadowColor: colors.shadow };
-  const subtitle = profile?.department || profile?.school;
+  const subtitle = [
+    profile?.school || profile?.university || profile?.universityName,
+    profile?.department || profile?.departmentName,
+    profile?.level,
+  ].filter(Boolean).join(' • ');
+  const profileName = isBlocked
+    ? 'Blocked student'
+    : (
+        profile?.displayName
+        || profile?.display_name
+        || profile?.username
+        || profile?.name
+        || (profile?.firstName ? `${profile.firstName} ${profile.lastName || ''}`.trim() : '')
+        || (profile?.first_name ? `${profile.first_name} ${profile.last_name || ''}`.trim() : '')
+        || (profile?.email ? profile.email.split('@')[0] : '')
+        || 'Student'
+      );
   const friendsTabCount = friendsTotal ?? friendCount;
 
   return (
@@ -699,7 +715,7 @@ export default function ViewUserProfile() {
           <View style={styles.profileMeta}>
             <View style={styles.nameRow}>
               <Text style={[styles.name, { color: colors.textPrimary }]} accessibilityRole="header" numberOfLines={2}>
-                {isBlocked ? 'Blocked student' : profile?.username || 'Student'}
+                {profileName}
               </Text>
               {!isBlocked && premiumActive ? (
                 <Ionicons name="checkmark-circle" size={19} color={colors.brand} accessibilityLabel="Verified Premium student" />

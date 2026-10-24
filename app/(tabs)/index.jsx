@@ -109,7 +109,15 @@ const formatPrice = (value) => {
   return `₦${num.toLocaleString()}`;
 };
 
-const friendlyPersonName = (person = {}) => person.username || person.name || person.displayName || person.email || 'Student';
+const friendlyPersonName = (person = {}) => (
+  person.displayName
+  || person.display_name
+  || person.username
+  || person.name
+  || (person.firstName ? `${person.firstName} ${person.lastName || ''}`.trim() : '')
+  || (person.email ? person.email.split('@')[0] : '')
+  || 'Student'
+);
 
 const itemKey = (item, index) => `${item?.id || item?.uid || 'item'}-${index}`;
 
@@ -1552,7 +1560,7 @@ export default function HomeScreen() {
       const person = item || {};
       const personName = friendlyPersonName(person);
       const personImage = resolveImage(person);
-      const school = person.school || person.university || person.department || 'Student network';
+      const school = person.school || person.university || person.universityName || person.department || person.departmentName || 'Student network';
       const targetId = person.id || person.uid;
       return (
         <View style={s.discoveryCardShadowWrap}>
