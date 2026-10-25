@@ -30,7 +30,6 @@ import {
 } from '../../services/firestoreSync';
 import { useAuth } from '../../context/AuthContext';
 import { canManageResource, canUploadResource, isResourceAdmin } from '../../src/shared/auth/resourcePermissions';
-import { buildPastQuestionWhatsAppUrl } from '../../src/shared/config/resourceContribution';
 
 const PAGE_SIZE = 20;
 const VALID_TABS = ['questions', 'notes', 'cbt'];
@@ -780,27 +779,7 @@ export default function StudyMaterials() {
     setFilterSheetOpen(false);
   };
 
-  const openContributionWhatsApp = async () => {
-    const url = buildPastQuestionWhatsAppUrl();
-    if (!url) {
-      Alert.alert(
-        'Contribution number missing',
-        'No WhatsApp number available to receive past question contributions.'
-      );
-      return;
-    }
-    try {
-      await Linking.openURL(url);
-    } catch {
-      Alert.alert("Couldn't open WhatsApp", 'Make sure WhatsApp is installed on this device.');
-    }
-  };
-
   const openUpload = () => {
-    if (!canUploadCurrent) {
-      openContributionWhatsApp();
-      return;
-    }
     router.navigate(`/upload?type=${resourceKind}`);
   };
 
@@ -912,31 +891,6 @@ export default function StudyMaterials() {
           </Pressable>
         ) : null}
       </View>
-
-      {isQuestions && !isAdmin ? (
-        <View style={styles.contributionCard}>
-          <View style={styles.contributionInfo}>
-            <View style={styles.contributionIconWrap}>
-              <Ionicons name="logo-whatsapp" size={20} color={colors.success || colors.brand} />
-            </View>
-            <View style={styles.contributionCopy}>
-              <Text style={styles.contributionTitle}>Have a past question to share?</Text>
-              <Text style={styles.contributionText}>
-                Send it to UniHelp on WhatsApp and an admin will review and publish it.
-              </Text>
-            </View>
-          </View>
-          <Pressable
-            onPress={openContributionWhatsApp}
-            style={({ pressed }) => [styles.contributionButton, pressed && styles.uploadButtonPressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Contribute past question on WhatsApp"
-          >
-            <Text style={styles.contributionButtonText}>Contribute</Text>
-            <Ionicons name="arrow-forward" size={14} color={colors.success || colors.brand} />
-          </Pressable>
-        </View>
-      ) : null}
 
       {/* SEARCH AND FILTER INPUT BAR */}
       <View style={styles.searchRow}>

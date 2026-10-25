@@ -121,6 +121,7 @@ const putCache = (map, key, value) => {
 const STATUS_RANK = { failed: 0, sending: 0, sent: 1, delivered: 2, read: 3 };
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '😮'];
 const QUICK_STARTERS = ['Hi 👋', 'Hey! How are you?', 'Are you in my class?'];
+const APPEARANCE_FONT_SIZES = [14, 15.5, 17];
 
 /* -------------------------------------------------------------------------- */
 /*                                   Helpers                                  */

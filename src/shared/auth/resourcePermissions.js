@@ -28,7 +28,8 @@ export const canManageResource = ({ type, item, user, profile }) => {
   const uid = profile?.uid || user?.uid;
   if (!uid || !item) return false;
   if (isResourceAdmin(profile, user)) return true;
-  if (type === 'question') return false;
-  if (type === 'note') return getResourceOwnerId(item) === uid;
+  if (type === 'question' || type === 'note') {
+    return getResourceOwnerId(item) === uid;
+  }
   return false;
 };

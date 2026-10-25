@@ -905,7 +905,7 @@ export default function UploadPage() {
     }
 
     if (!canManageCurrentEdit) {
-      setError(uploadType === 'question' ? 'Only admins can edit past questions.' : 'You can only edit notes you uploaded.');
+      setError(uploadType === 'question' ? 'You can only edit your own past question uploads.' : 'You can only edit notes you uploaded.');
       return;
     }
 
