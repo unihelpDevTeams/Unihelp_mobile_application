@@ -753,7 +753,20 @@ service cloud.firestore {
 
     match /questions/{questionId} {
       allow read: if signedIn();
-      allow create, update, delete: if isAdminRequest();
+      allow create: if isAdminRequest() || (
+        signedIn() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        request.resource.data.uploadedBy == request.auth.uid &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.createdBy == request.auth.uid &&
+        request.resource.data.title is string &&
+        request.resource.data.courseCode is string &&
+        request.resource.data.school is string &&
+        request.resource.data.files is list &&
+        request.resource.data.files.size() > 0 &&
+        request.resource.data.status == 'published'
+      );
+      allow update, delete: if isAdminRequest();
     }
 
     match /groups/{groupId} {

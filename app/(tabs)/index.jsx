@@ -156,7 +156,7 @@ const buildHeroSlides = ({ streakCount = 0, announcements = [], notes = [], ques
       eyebrow: 'Practice ready',
       title: latestQuestion.title || latestQuestion.name || 'Practice questions are ready',
       stat: `${questions.length} question${questions.length === 1 ? '' : 's'} available for revision.`,
-      cta: { label: 'Practice now', route: '/cbt' },
+      cta: { label: 'Practice now', route: '/studyMaterials' },
     });
   }
 

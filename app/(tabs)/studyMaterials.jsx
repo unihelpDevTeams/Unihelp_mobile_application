@@ -4,7 +4,6 @@ import {
   Alert,
   Animated,
   FlatList,
-  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -29,7 +28,7 @@ import {
   fetchNotesPage,
 } from '../../services/firestoreSync';
 import { useAuth } from '../../context/AuthContext';
-import { canManageResource, canUploadResource, isResourceAdmin } from '../../src/shared/auth/resourcePermissions';
+import { canManageResource, canUploadResource } from '../../src/shared/auth/resourcePermissions';
 
 const PAGE_SIZE = 20;
 const VALID_TABS = ['questions', 'notes', 'cbt'];
@@ -78,7 +77,7 @@ export default function StudyMaterials() {
   const loadingMoreRef = useRef(false);
 
   // Skeleton pulse
-  const pulse = useRef(new Animated.Value(0.55)).current;
+  const [pulse] = useState(() => new Animated.Value(0.55));
 
   // Dynamic Accents
   const isQuestions = activeTab === 'questions';
@@ -95,7 +94,6 @@ export default function StudyMaterials() {
   const resourceTypeLabel = isQuestions ? 'Past Questions' : 'Lecture Notes';
   const resourceNoun = isQuestions ? 'papers' : 'notes';
   const resourceKind = isQuestions ? 'question' : 'note';
-  const isAdmin = isResourceAdmin(profile, user);
   const canUploadCurrent = canUploadResource({ type: resourceKind, user, profile });
 
   const toneForTab = (key) => (key === 'questions' ? colors.blue : key === 'notes' ? colors.brand : cbtTone);
@@ -180,64 +178,6 @@ export default function StudyMaterials() {
     },
     uploadButtonPressed: {
       opacity: 0.75,
-    },
-
-    // CONTRIBUTION CARD
-    contributionCard: {
-      flexDirection: width >= 640 ? 'row' : 'column',
-      alignItems: width >= 640 ? 'center' : 'stretch',
-      justifyContent: 'space-between',
-      gap: s.md,
-      backgroundColor: c.card,
-      borderRadius: r.xl,
-      borderWidth: 1,
-      borderColor: c.borderDefault,
-      padding: s.md,
-    },
-    contributionInfo: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: s.sm,
-    },
-    contributionIconWrap: {
-      width: 38,
-      height: 38,
-      borderRadius: r.full,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: c.successLight || c.surfaceSecondary,
-    },
-    contributionCopy: {
-      flex: 1,
-      gap: 2,
-    },
-    contributionTitle: {
-      fontSize: 14,
-      fontWeight: '800',
-      color: c.textPrimary,
-    },
-    contributionText: {
-      fontSize: 12.5,
-      lineHeight: 18,
-      color: c.textSecondary,
-    },
-    contributionButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      minHeight: 40,
-      paddingHorizontal: s.md,
-      borderRadius: r.full,
-      backgroundColor: c.successLight || c.surfaceSecondary,
-      borderWidth: 1,
-      borderColor: c.success || c.borderDefault,
-    },
-    contributionButtonText: {
-      fontSize: 12.5,
-      fontWeight: '800',
-      color: c.success || c.brand,
     },
 
     // SEARCH & FILTER BAR
