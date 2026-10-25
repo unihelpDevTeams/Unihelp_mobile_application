@@ -466,6 +466,7 @@ const createStyles = (c) => ({
   appearanceShape: { width: 44, height: 27, position: 'relative' },
   appearancePreview: { alignSelf: 'flex-end', overflow: 'hidden', maxWidth: '88%', borderRadius: 20, padding: 12, marginVertical: 12 },
   appearancePreviewText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  chatKeyboardAvoiding: { flex: 1 },
   chatArea: { flex: 1 },
   composerOuter: { backgroundColor: c.surface, borderTopWidth: StyleSheet.hairlineWidth, borderColor: c.borderDefault },
   chatContent: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 14 },
@@ -2579,6 +2580,11 @@ function GroupDetailScreen({ groupId }) {
               </ScrollView>
             </View>
             {activeTab === 'Chat' ? <>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              keyboardVerticalOffset={0}
+              style={styles.chatKeyboardAvoiding}
+            >
             <View style={styles.chatArea}>
               {chatWallpaper.gradient ? (
                 <LinearGradient
@@ -2725,6 +2731,7 @@ function GroupDetailScreen({ groupId }) {
                 </View>
               </View>
             ) : null}
+            </KeyboardAvoidingView>
             </> : <View style={styles.flex}>{renderWorkspaceTab()}</View>}
           </View>
 

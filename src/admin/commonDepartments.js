@@ -11,6 +11,7 @@ export const COMMON_DEPARTMENTS = [
   { name: 'Biochemistry', faculty: 'Science', universityId: 'any' },
   { name: 'Microbiology', faculty: 'Science', universityId: 'any' },
   { name: 'Geology', faculty: 'Science', universityId: 'any' },
+  { name: 'Geophysics', faculty: 'Science', universityId: 'any' },
   { name: 'Statistics', faculty: 'Science', universityId: 'any' },
   { name: 'Medicine & Surgery', faculty: 'Medical Sciences', universityId: 'any' },
   { name: 'Nursing Science', faculty: 'Medical Sciences', universityId: 'any' },

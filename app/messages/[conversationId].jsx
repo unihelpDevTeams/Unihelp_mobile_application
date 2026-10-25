@@ -3347,7 +3347,7 @@ function ConversationScreen({ conversationId }) {
         ) : null}
 
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={0}
           style={{ flex: 1 }}
         >
