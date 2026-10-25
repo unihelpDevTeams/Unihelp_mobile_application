@@ -343,7 +343,7 @@ const renderLinkedMessageText = (text, linkColor) => {
  *   native driver is never re-driven by JS (aurora-border needs the JS driver).
  * - Used once per screen instead of once per message row.
  */
-function useBubbleLoop(animation, { enabled, reduceMotion }) {
+function useBubbleLoop(animation, { enabled, reduceMotion, useNativeDriver }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const value = useMemo(() => new Animated.Value(0), [animation]);
   useEffect(() => {
@@ -351,17 +351,18 @@ function useBubbleLoop(animation, { enabled, reduceMotion }) {
       value.setValue(0);
       return undefined;
     }
+    const native = useNativeDriver !== undefined ? useNativeDriver : animation !== 'aurora-border';
     const loop = Animated.loop(
       Animated.timing(value, {
         toValue: 1,
         duration: animation === 'pop' ? 1150 : 1800,
         easing: Easing.inOut(Easing.quad),
-        useNativeDriver: animation !== 'aurora-border',
+        useNativeDriver: native,
       })
     );
     loop.start();
     return () => loop.stop();
-  }, [animation, enabled, reduceMotion, value]);
+  }, [animation, enabled, reduceMotion, useNativeDriver, value]);
   return value;
 }
 
@@ -512,10 +513,10 @@ const createStyles = (c) => ({
   attachmentPreviewImage: { width: '100%', height: '100%' },
   attachmentPreviewText: { flex: 1, color: c.textSecondary, fontSize: 12, fontWeight: '700' },
 
-  modalOverlay: { flex: 1, backgroundColor: c.overlay, justifyContent: 'flex-end' },
+  modalOverlay: { flex: 1, backgroundColor: c.overlay, justifyContent: 'flex-end', width: '100%' },
   dialogOverlay: { flex: 1, backgroundColor: c.overlay, justifyContent: 'center', paddingHorizontal: 28 },
   dialogCard: { backgroundColor: c.bottomSheetBackground, borderRadius: 24, paddingHorizontal: 20, paddingTop: 22, paddingBottom: 12 },
-  sheet: { backgroundColor: c.bottomSheetBackground, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 18, paddingTop: 10, paddingBottom: 28 },
+  sheet: { width: '100%', backgroundColor: c.bottomSheetBackground, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 18, paddingTop: 10, paddingBottom: 28 },
   sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: c.borderDefault, alignSelf: 'center', marginBottom: 14 },
   sheetTitle: { fontSize: 17, fontWeight: '800', color: c.textPrimary, textAlign: 'center', marginBottom: 2 },
   sheetSubtitle: { fontSize: 13, color: c.textSecondary, textAlign: 'center', marginBottom: 10 },
@@ -534,7 +535,8 @@ const createStyles = (c) => ({
   customColorPreview: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: c.borderDefault },
   customColorInput: { flex: 1, height: 42, borderRadius: 12, borderWidth: 1, borderColor: c.borderDefault, backgroundColor: c.inputBackground, color: c.textPrimary, paddingHorizontal: 12, fontWeight: '800', letterSpacing: 1 },
   customColorHint: { color: c.textTertiary, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
-  studioSheet: { flex: 1, backgroundColor: c.bottomSheetBackground, borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' },
+  studioSheetContainer: { height: '88%', width: '100%', maxHeight: '92%' },
+  studioSheet: { flex: 1, width: '100%', backgroundColor: c.bottomSheetBackground, borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' },
   studioTopbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
   studioEyebrow: { color: c.brand, fontSize: 10, fontWeight: '900', letterSpacing: 1.5 },
   studioTitle: { color: c.textPrimary, fontSize: 27, fontWeight: '900', letterSpacing: -0.8, marginTop: 1 },
@@ -977,24 +979,67 @@ const MOTION_OPTIONS = [
   ['pop', 'Soft bounce', 'radio-outline'],
 ];
 
+class StudioErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error) {
+    // Gracefully handle any unexpected render error in bubble studio
+  }
+
+  render() {
+    if (this.state.hasError) {
+      const { styles, colors, onReset } = this.props;
+      return (
+        <View style={[styles.studioSheet, { padding: 24, alignItems: 'center', justifyContent: 'center' }]}>
+          <Ionicons name="color-palette-outline" size={44} color={colors.brand} style={{ marginBottom: 12 }} />
+          <Text style={{ fontSize: 18, fontWeight: '800', color: colors.textPrimary, marginBottom: 8, textAlign: 'center' }}>
+            Could not open Bubble Studio
+          </Text>
+          <Text style={{ fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginBottom: 20 }}>
+            Something went wrong rendering the bubble preview. You can reset to the default style.
+          </Text>
+          <Pressable
+            style={[styles.studioSave, { paddingHorizontal: 24 }]}
+            onPress={() => {
+              onReset?.();
+              this.setState({ hasError: false });
+            }}
+          >
+            <Text style={styles.studioSaveText}>Reset to default</Text>
+          </Pressable>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function BubbleStudio({ appearance, scope, saving, onChange, onDraftChange, onScopeChange, onReset, onSave, onDone, styles, colors, isDark, reduceMotion }) {
-  const motion = useBubbleLoop(appearance.animation, { enabled: true, reduceMotion });
-  const fill = resolveBubbleFill(appearance);
+  const safeAppearance = useMemo(() => normalizeBubbleAppearance(appearance), [appearance]);
+  const motion = useBubbleLoop(safeAppearance.animation, { enabled: true, reduceMotion, useNativeDriver: false });
+  const fill = resolveBubbleFill(safeAppearance) || BUBBLE_PRESETS[0];
   const ink = resolveBubbleInk(fill);
-  const shape = BUBBLE_SHAPES.find((item) => item.key === appearance.shape) || BUBBLE_SHAPES[0];
-  const solidPreview = fill.gradient ? fill.gradient[0] : fill.color;
+  const shape = BUBBLE_SHAPES.find((item) => item.key === safeAppearance.shape) || BUBBLE_SHAPES[0];
+  const solidPreview = fill?.gradient ? fill.gradient[0] : (fill?.color || '#5B5CE2');
 
   const borderTone = motion.interpolate({ inputRange: [0, 0.33, 0.66, 1], outputRange: ['#00D2FF', '#8B5CF6', '#FF4DA6', '#00D2FF'] });
   const drift = motion.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, -5, 0] });
   const pulse = motion.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.03, 1] });
   const shimmerX = motion.interpolate({ inputRange: [0, 1], outputRange: [-180, 290] });
-  const customValid = isHexColor(appearance.customColor);
+  const customValid = isHexColor(safeAppearance.customColor);
 
   const frameMotion = [
-    appearance.animation === 'aurora-border' && { padding: 2, backgroundColor: borderTone },
-    appearance.animation === 'float' && { transform: [{ translateY: drift }] },
-    appearance.animation === 'pop' && { transform: [{ scale: pulse }] },
-  ];
+    safeAppearance.animation === 'aurora-border' ? { padding: 2, backgroundColor: borderTone } : null,
+    safeAppearance.animation === 'float' ? { transform: [{ translateY: drift }] } : null,
+    safeAppearance.animation === 'pop' ? { transform: [{ scale: pulse }] } : null,
+  ].filter(Boolean);
 
   return (
     <View style={styles.studioSheet}>
@@ -1034,12 +1079,12 @@ function BubbleStudio({ appearance, scope, saving, onChange, onDraftChange, onSc
           <Animated.View style={[styles.studioBubbleFrame, shape.radii, ...frameMotion]}>
             <View style={[styles.studioBubble, shape.radii, { backgroundColor: fill.gradient ? 'transparent' : fill.color }]}>
               {fill.gradient ? <LinearGradient colors={fill.gradient} style={StyleSheet.absoluteFill} /> : null}
-              {appearance.animation === 'shimmer' ? (
+              {safeAppearance.animation === 'shimmer' ? (
                 <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { transform: [{ translateX: shimmerX }] }]}>
                   <LinearGradient colors={['transparent', 'rgba(255,255,255,0.35)', 'transparent']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ width: 120, height: '100%' }} />
                 </Animated.View>
               ) : null}
-              <Text style={[styles.studioBubbleText, { fontSize: appearance.fontSize }, ink && { color: ink.text }]}>This is so you ✦</Text>
+              <Text style={[styles.studioBubbleText, { fontSize: safeAppearance.fontSize }, ink && { color: ink.text }]}>This is so you ✦</Text>
               <Text style={[styles.studioBubbleMeta, ink && { color: ink.meta }]}>Delivered · now</Text>
             </View>
             <BubbleShapeAccents shape={shape.key} color={solidPreview} />
@@ -1052,9 +1097,9 @@ function BubbleStudio({ appearance, scope, saving, onChange, onDraftChange, onSc
         <StudioSection title="Choose a mood" caption="Color, gradient and atmosphere" styles={styles}>
           <View style={styles.moodGrid}>
             {BUBBLE_PRESETS.map((preset) => {
-              const selected = appearance.preset === preset.key;
+              const selected = safeAppearance.preset === preset.key;
               return (
-                <Pressable key={preset.key} onPress={() => onChange({ ...appearance, preset: preset.key })} style={[styles.moodCard, selected && styles.moodCardSelected]} accessibilityRole="button" accessibilityLabel={`Use ${preset.label} mood`}>
+                <Pressable key={preset.key} onPress={() => onChange({ ...safeAppearance, preset: preset.key })} style={[styles.moodCard, selected && styles.moodCardSelected]} accessibilityRole="button" accessibilityLabel={`Use ${preset.label} mood`}>
                   <View style={[styles.moodArtwork, { backgroundColor: preset.gradient ? 'transparent' : preset.color }]}>
                     {preset.gradient ? <LinearGradient colors={preset.gradient} style={StyleSheet.absoluteFill} /> : null}
                     <View style={styles.moodArtworkDot} />
@@ -1071,17 +1116,17 @@ function BubbleStudio({ appearance, scope, saving, onChange, onDraftChange, onSc
           </View>
           <View style={styles.customColorRow}>
             <Pressable
-              onPress={() => onChange({ ...appearance, preset: 'custom' })}
-              style={[styles.customColorPreview, { backgroundColor: customValid ? appearance.customColor : '#FFFFFF' }, appearance.preset === 'custom' && styles.bubbleStyleSelected]}
+              onPress={() => onChange({ ...safeAppearance, preset: 'custom' })}
+              style={[styles.customColorPreview, { backgroundColor: customValid ? safeAppearance.customColor : '#FFFFFF' }, safeAppearance.preset === 'custom' && styles.bubbleStyleSelected]}
               accessibilityRole="button"
               accessibilityLabel="Use a custom color"
             />
             <TextInput
-              value={appearance.customColor || ''}
+              value={safeAppearance.customColor || ''}
               onChangeText={(value) =>
-                onDraftChange({ ...appearance, preset: 'custom', customColor: `#${value.replace(/[^0-9a-f]/gi, '').slice(0, 6).toUpperCase()}` })
+                onDraftChange({ ...safeAppearance, preset: 'custom', customColor: `#${value.replace(/[^0-9a-f]/gi, '').slice(0, 6).toUpperCase()}` })
               }
-              onEndEditing={() => onChange({ ...appearance, preset: 'custom' })}
+              onEndEditing={() => onChange({ ...safeAppearance, preset: 'custom' })}
               placeholder="#6C63FF"
               placeholderTextColor={colors.textTertiary}
               autoCapitalize="characters"
@@ -1097,7 +1142,7 @@ function BubbleStudio({ appearance, scope, saving, onChange, onDraftChange, onSc
         <StudioSection title="Sculpt the silhouette" caption="Designed shapes, not rounded rectangles" styles={styles}>
           <View style={styles.shapeGallery}>
             {BUBBLE_SHAPES.map((item) => (
-              <Pressable key={item.key} onPress={() => onChange({ ...appearance, shape: item.key })} style={[styles.shapeTile, appearance.shape === item.key && styles.shapeTileSelected]} accessibilityRole="button" accessibilityLabel={`Use ${item.label} shape`}>
+              <Pressable key={item.key} onPress={() => onChange({ ...safeAppearance, shape: item.key })} style={[styles.shapeTile, safeAppearance.shape === item.key && styles.shapeTileSelected]} accessibilityRole="button" accessibilityLabel={`Use ${item.label} shape`}>
                 <View style={[styles.shapeMini, item.radii, { backgroundColor: solidPreview }]}>
                   {item.key === 'fold' ? <View style={styles.shapeFold} /> : null}
                   {item.key === 'tail' ? <View style={[styles.shapeTail, { backgroundColor: solidPreview }]} /> : null}
@@ -1112,9 +1157,9 @@ function BubbleStudio({ appearance, scope, saving, onChange, onDraftChange, onSc
         <StudioSection title="Motion lab" caption="A subtle loop applied to your bubbles" styles={styles}>
           <View style={styles.motionGrid}>
             {MOTION_OPTIONS.map(([key, label, icon]) => (
-              <Pressable key={key} onPress={() => onChange({ ...appearance, animation: key })} style={[styles.motionTile, appearance.animation === key && styles.motionTileSelected]} accessibilityRole="button" accessibilityLabel={`Use ${label} animation`}>
-                <Ionicons name={icon} size={19} color={appearance.animation === key ? colors.onBrand : colors.brand} />
-                <Text style={[styles.motionName, appearance.animation === key && styles.motionNameSelected]}>{label}</Text>
+              <Pressable key={key} onPress={() => onChange({ ...safeAppearance, animation: key })} style={[styles.motionTile, safeAppearance.animation === key && styles.motionTileSelected]} accessibilityRole="button" accessibilityLabel={`Use ${label} animation`}>
+                <Ionicons name={icon} size={19} color={safeAppearance.animation === key ? colors.onBrand : colors.brand} />
+                <Text style={[styles.motionName, safeAppearance.animation === key && styles.motionNameSelected]}>{label}</Text>
               </Pressable>
             ))}
           </View>
@@ -1124,21 +1169,21 @@ function BubbleStudio({ appearance, scope, saving, onChange, onDraftChange, onSc
         <StudioSection title="Reading comfort" caption="Tuned for comfortable everyday messaging" styles={styles}>
           <View style={styles.motionGrid}>
             {APPEARANCE_FONT_SIZES.map((size) => (
-              <Pressable key={size} onPress={() => onChange({ ...appearance, fontSize: size })} style={[styles.motionTile, appearance.fontSize === size && styles.motionTileSelected]} accessibilityRole="button">
-                <Text style={[styles.motionName, appearance.fontSize === size && styles.motionNameSelected]}>
+              <Pressable key={size} onPress={() => onChange({ ...safeAppearance, fontSize: size })} style={[styles.motionTile, safeAppearance.fontSize === size && styles.motionTileSelected]} accessibilityRole="button">
+                <Text style={[styles.motionName, safeAppearance.fontSize === size && styles.motionNameSelected]}>
                   {size === 14 ? 'Small type' : size === 17 ? 'Large type' : 'Standard type'}
                 </Text>
               </Pressable>
             ))}
-            <Pressable onPress={() => onChange({ ...appearance, density: appearance.density === 'compact' ? 'comfortable' : 'compact' })} style={styles.motionTile} accessibilityRole="button">
-              <Text style={styles.motionName}>{appearance.density === 'compact' ? 'Compact spacing' : 'Comfortable spacing'}</Text>
+            <Pressable onPress={() => onChange({ ...safeAppearance, density: safeAppearance.density === 'compact' ? 'comfortable' : 'compact' })} style={styles.motionTile} accessibilityRole="button">
+              <Text style={styles.motionName}>{safeAppearance.density === 'compact' ? 'Compact spacing' : 'Comfortable spacing'}</Text>
             </Pressable>
             <Pressable
-              onPress={() => onChange({ ...appearance, width: appearance.width === 'standard' ? 'wide' : appearance.width === 'wide' ? 'compact' : 'standard' })}
+              onPress={() => onChange({ ...safeAppearance, width: safeAppearance.width === 'standard' ? 'wide' : safeAppearance.width === 'wide' ? 'compact' : 'standard' })}
               style={styles.motionTile}
               accessibilityRole="button"
             >
-              <Text style={styles.motionName}>{appearance.width === 'wide' ? 'Wide bubbles' : appearance.width === 'compact' ? 'Narrow bubbles' : 'Standard width'}</Text>
+              <Text style={styles.motionName}>{safeAppearance.width === 'wide' ? 'Wide bubbles' : safeAppearance.width === 'compact' ? 'Narrow bubbles' : 'Standard width'}</Text>
             </Pressable>
           </View>
         </StudioSection>
@@ -1146,7 +1191,7 @@ function BubbleStudio({ appearance, scope, saving, onChange, onDraftChange, onSc
         <StudioSection title="Chat wallpaper" caption="Creative, lightweight backgrounds only you can see" styles={styles}>
           <View style={styles.wallpaperGrid}>
             {CHAT_BACKGROUNDS.map((wallpaper) => (
-              <Pressable key={wallpaper.key} onPress={() => onChange({ ...appearance, wallpaper: wallpaper.key })} style={[styles.wallpaperCard, appearance.wallpaper === wallpaper.key && styles.wallpaperCardSelected]} accessibilityRole="button" accessibilityLabel={`Use ${wallpaper.label} chat wallpaper`}>
+              <Pressable key={wallpaper.key} onPress={() => onChange({ ...safeAppearance, wallpaper: wallpaper.key })} style={[styles.wallpaperCard, safeAppearance.wallpaper === wallpaper.key && styles.wallpaperCardSelected]} accessibilityRole="button" accessibilityLabel={`Use ${wallpaper.label} chat wallpaper`}>
                 <ChatBackground appearance={{ wallpaper: wallpaper.key }} colors={colors} isDark={isDark} preview styles={styles} />
                 <Text style={styles.wallpaperName}>{wallpaper.label}</Text>
               </Pressable>
@@ -1566,7 +1611,7 @@ function ConversationScreen({ conversationId }) {
   const [unread, setUnread] = useState(null); // { id, count } -> "N new messages" divider
 
   const openBubbleStudio = useCallback(() => {
-    setBubbleDraft(bubbleAppearance);
+    setBubbleDraft(normalizeBubbleAppearance(bubbleAppearance));
     setScopeDraft(bubbleScope);
     setBubbleCustomizerVisible(true);
   }, [bubbleAppearance, bubbleScope]);
@@ -3595,14 +3640,15 @@ function ConversationScreen({ conversationId }) {
 
         <StickerPicker visible={stickerPickerVisible} onClose={() => setStickerPickerVisible(false)} onSelect={sendSticker} />
         <Modal visible={attachmentMenuVisible} transparent animationType="fade" onRequestClose={() => setAttachmentMenuVisible(false)}>
-          <Pressable style={styles.modalOverlay} onPress={() => setAttachmentMenuVisible(false)}>
-            <Pressable style={styles.sheet} onPress={(event) => event.stopPropagation()}>
+          <View style={styles.modalOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setAttachmentMenuVisible(false)} />
+            <View style={styles.sheet}>
               <View style={styles.sheetHandle} />
               <SheetOption styles={styles} colors={colors} icon="images-outline" label="Photos and videos" onPress={() => pickPhotos(false)} />
               <SheetOption styles={styles} colors={colors} icon="camera-outline" label="Camera" onPress={() => pickPhotos(true)} />
               <SheetOption styles={styles} colors={colors} icon="document-attach-outline" label="Document" onPress={pickDocument} />
-            </Pressable>
-          </Pressable>
+            </View>
+          </View>
         </Modal>
 
         {/* Full-screen photo viewer */}
@@ -3612,8 +3658,9 @@ function ConversationScreen({ conversationId }) {
 
         {/* Message actions */}
         <Modal visible={!!activeMessage} transparent animationType="fade" statusBarTranslucent onRequestClose={closeSheet}>
-          <Pressable style={styles.modalOverlay} onPress={closeSheet}>
-            <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+          <View style={styles.modalOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeSheet} />
+            <View style={styles.sheet}>
               <View style={styles.sheetHandle} />
               {!confirmingDelete ? (
                 <>
@@ -3639,14 +3686,15 @@ function ConversationScreen({ conversationId }) {
                   </Pressable>
                 </>
               )}
-            </Pressable>
-          </Pressable>
+            </View>
+          </View>
         </Modal>
 
         {/* Chat options */}
         <Modal visible={showOptionsSheet} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setShowOptionsSheet(false)}>
-          <Pressable style={styles.modalOverlay} onPress={() => setShowOptionsSheet(false)}>
-            <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+          <View style={styles.modalOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowOptionsSheet(false)} />
+            <View style={styles.sheet}>
               <View style={styles.sheetHandle} />
               <Text style={styles.sheetTitle}>Chat options</Text>
               <Text style={styles.sheetSubtitle}>Changes only affect your side of this chat.</Text>
@@ -3659,7 +3707,9 @@ function ConversationScreen({ conversationId }) {
                 label="Chat bubble style"
                 onPress={() => {
                   setShowOptionsSheet(false);
-                  openBubbleStudio();
+                  setTimeout(() => {
+                    openBubbleStudio();
+                  }, 200);
                 }}
               />
               <SheetOption
@@ -3696,40 +3746,44 @@ function ConversationScreen({ conversationId }) {
               <Pressable style={styles.sheetCancel} onPress={() => setShowOptionsSheet(false)} accessibilityRole="button">
                 <Text style={styles.sheetCancelText}>Cancel</Text>
               </Pressable>
-            </Pressable>
-          </Pressable>
+            </View>
+          </View>
         </Modal>
 
-        {/* Bubble Studio: the inner Pressable owns the 88% height so the sheet can actually fill it. */}
+        {/* Bubble Studio */}
         <Modal visible={bubbleCustomizerVisible} transparent animationType="slide" statusBarTranslucent onRequestClose={() => setBubbleCustomizerVisible(false)}>
-          <Pressable style={styles.modalOverlay} onPress={() => setBubbleCustomizerVisible(false)}>
-            <Pressable style={{ height: '88%' }} onPress={(e) => e.stopPropagation()}>
-              <BubbleStudio
-                appearance={bubbleDraft}
-                scope={scopeDraft}
-                saving={appearanceSaving}
-                onChange={(next) => setBubbleDraft(normalizeBubbleAppearance(next))}
-                onDraftChange={(next) => setBubbleDraft((current) => ({ ...current, ...next }))}
-                onScopeChange={setScopeDraft}
-                onReset={resetBubbleAppearance}
-                onSave={saveBubbleAppearance}
-                onDone={() => setBubbleCustomizerVisible(false)}
-                styles={styles}
-                colors={colors}
-                isDark={isDark}
-                reduceMotion={reduceMotion}
-              />
-            </Pressable>
-          </Pressable>
+          <View style={styles.modalOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setBubbleCustomizerVisible(false)} />
+            <View style={styles.studioSheetContainer}>
+              <StudioErrorBoundary styles={styles} colors={colors} onReset={resetBubbleAppearance}>
+                <BubbleStudio
+                  appearance={bubbleDraft}
+                  scope={scopeDraft}
+                  saving={appearanceSaving}
+                  onChange={(next) => setBubbleDraft(normalizeBubbleAppearance(next))}
+                  onDraftChange={(next) => setBubbleDraft((current) => ({ ...current, ...next }))}
+                  onScopeChange={setScopeDraft}
+                  onReset={resetBubbleAppearance}
+                  onSave={saveBubbleAppearance}
+                  onDone={() => setBubbleCustomizerVisible(false)}
+                  styles={styles}
+                  colors={colors}
+                  isDark={isDark}
+                  reduceMotion={reduceMotion}
+                />
+              </StudioErrorBoundary>
+            </View>
+          </View>
         </Modal>
 
         {/* Universal confirmation / error dialog */}
         <Modal visible={!!dialogConfig} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setDialogConfig(null)}>
-          <Pressable
-            style={styles.dialogOverlay}
-            onPress={() => (dialogConfig?.onSecondary ? dialogConfig.onSecondary() : setDialogConfig(null))}
-          >
-            <Pressable style={styles.dialogCard} onPress={(e) => e.stopPropagation()}>
+          <View style={styles.dialogOverlay}>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => (dialogConfig?.onSecondary ? dialogConfig.onSecondary() : setDialogConfig(null))}
+            />
+            <View style={styles.dialogCard}>
               {dialogConfig?.icon ? (
                 <View style={[styles.confirmIconWrap, { backgroundColor: dialogConfig.iconBgColor }]}>
                   <Ionicons name={dialogConfig.icon} size={24} color={dialogConfig.iconColor} />
@@ -3751,8 +3805,8 @@ function ConversationScreen({ conversationId }) {
                   <Text style={styles.sheetCancelText}>{dialogConfig.secondaryText}</Text>
                 </Pressable>
               ) : null}
-            </Pressable>
-          </Pressable>
+            </View>
+          </View>
         </Modal>
       </View>
     </ScreenShell>
