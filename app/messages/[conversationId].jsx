@@ -65,8 +65,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { getSocket } from '../../src/shared/services/socket';
-import { getJson } from '../../src/shared/services/backend';
-import { uploadChatAttachment } from '../../src/shared/services/backend';
+import { getJson, uploadChatAttachment } from '../../src/shared/services/backend';
 import { DOCUMENT_MIME_TYPES, humanSize, prepareChatAttachment } from '../../src/shared/services/chatAttachments';
 import { submitReport } from '../../src/shared/services/support';
 import { clearConversationAppearance, getConversationAppearance, saveConversationAppearance } from '../../src/shared/services/chatAppearance';
@@ -2286,7 +2285,7 @@ function ConversationScreen({ conversationId }) {
     typingTimeout.current = setTimeout(stopTyping, TYPING_IDLE_MS);
   };
 
-  const useQuickStarter = (text) => {
+  const applyQuickStarter = (text) => {
     tap('Light');
     setDraft(text);
     DRAFT_CACHE.set(conversationId, text);
@@ -3449,7 +3448,7 @@ function ConversationScreen({ conversationId }) {
                 {canChat ? (
                   <View style={styles.quickStartRow}>
                     {QUICK_STARTERS.map((starter) => (
-                      <Pressable key={starter} style={styles.quickChip} onPress={() => useQuickStarter(starter)} accessibilityRole="button" accessibilityLabel={`Use "${starter}"`}>
+                      <Pressable key={starter} style={styles.quickChip} onPress={() => applyQuickStarter(starter)} accessibilityRole="button" accessibilityLabel={`Use "${starter}"`}>
                         <Text style={styles.quickChipText}>{starter}</Text>
                       </Pressable>
                     ))}
