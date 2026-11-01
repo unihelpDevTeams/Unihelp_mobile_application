@@ -33,6 +33,7 @@ export async function createHomeHeroSlide(payload = {}) {
   if (!auth.currentUser?.uid) throw new Error('No authenticated user');
   const ref = await addDoc(collection(db, COLLECTIONS.homeHeroSlides), {
     title: String(payload.title || '').trim(),
+    note: String(payload.note || '').trim(),
     linkUrl: String(payload.linkUrl || '').trim(),
     imageUrl: String(payload.imageUrl || '').trim(),
     imageAsset: payload.imageAsset || null,

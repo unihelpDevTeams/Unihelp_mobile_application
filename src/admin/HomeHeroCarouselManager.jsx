@@ -7,7 +7,7 @@ import { useTheme } from '../shared/theme/ThemeContext';
 import { deleteMarketingMedia, uploadFeatureMedia } from '../shared/services/backend';
 import { createHomeHeroSlide, deleteHomeHeroSlide, fetchHomeHeroSlidesForAdmin } from '../shared/services/homeHeroSlides';
 
-const EMPTY_FORM = { title: '', linkUrl: '', order: '0' };
+const EMPTY_FORM = { title: '', note: '', linkUrl: '', order: '0' };
 
 const assetKeyOf = (asset) => asset?.key || asset?.publicId || '';
 
@@ -22,7 +22,6 @@ export default function HomeHeroCarouselManager() {
   const pendingAssetRef = useRef(null);
 
   const loadItems = useCallback(async () => {
-    setLoading(true);
     try {
       setItems(await fetchHomeHeroSlidesForAdmin());
     } catch (error) {
@@ -33,8 +32,21 @@ export default function HomeHeroCarouselManager() {
   }, []);
 
   useEffect(() => {
-    loadItems();
-  }, [loadItems]);
+    let active = true;
+    fetchHomeHeroSlidesForAdmin()
+      .then((slides) => {
+        if (active) setItems(slides);
+      })
+      .catch((error) => {
+        if (active) Alert.alert('Could not load hero slides', error?.message || 'Please try again.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => () => {
     const pending = pendingAssetRef.current;
@@ -89,9 +101,10 @@ export default function HomeHeroCarouselManager() {
 
   const save = async () => {
     const title = form.title.trim();
+    const note = form.note.trim();
     const linkUrl = form.linkUrl.trim();
-    if (!title || !image?.url || !linkUrl) {
-      Alert.alert('Complete the slide', 'Add a title, image, and redirect link.');
+    if (!title || !note || !image?.url || !linkUrl) {
+      Alert.alert('Complete the slide', 'Add a title, note, image, and redirect link.');
       return;
     }
     if (!linkUrl.startsWith('/') && !/^https?:\/\//i.test(linkUrl)) {
@@ -107,6 +120,7 @@ export default function HomeHeroCarouselManager() {
     try {
       await createHomeHeroSlide({
         title,
+        note,
         linkUrl,
         imageUrl: image.url,
         imageAsset: image.asset,
@@ -150,6 +164,7 @@ export default function HomeHeroCarouselManager() {
     copy: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
     form: { gap: 12, padding: 16, borderRadius: 12, borderWidth: 1, borderColor: colors.borderDefault, backgroundColor: colors.card },
     input: { minHeight: 46, paddingHorizontal: 12, borderRadius: 9, borderWidth: 1, borderColor: colors.borderDefault, backgroundColor: colors.inputBackground, color: colors.textPrimary },
+    noteInput: { minHeight: 84, paddingTop: 12, textAlignVertical: 'top' },
     imageButton: { minHeight: 48, borderRadius: 9, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.brand, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
     imagePreview: { width: '100%', height: 150, borderRadius: 9, backgroundColor: colors.surfaceSecondary },
     saveButton: { minHeight: 46, borderRadius: 9, paddingHorizontal: 14, backgroundColor: colors.brand, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
@@ -174,6 +189,7 @@ export default function HomeHeroCarouselManager() {
 
       <View style={styles.form}>
         <TextInput value={form.title} onChangeText={(value) => updateField('title', value)} placeholder="Banner title" placeholderTextColor={colors.placeholder} style={styles.input} maxLength={70} />
+        <TextInput value={form.note} onChangeText={(value) => updateField('note', value)} placeholder="Short note shown below the title" placeholderTextColor={colors.placeholder} style={[styles.input, styles.noteInput]} maxLength={180} multiline />
         <TextInput value={form.linkUrl} onChangeText={(value) => updateField('linkUrl', value)} placeholder="Redirect link (e.g. /premium or https://...)" placeholderTextColor={colors.placeholder} style={styles.input} autoCapitalize="none" keyboardType="url" />
         <TextInput value={form.order} onChangeText={(value) => updateField('order', value.replace(/[^0-9]/g, ''))} placeholder="Order (lower numbers first)" placeholderTextColor={colors.placeholder} style={styles.input} keyboardType="number-pad" />
         <Pressable style={styles.imageButton} onPress={pickImage} disabled={uploading} accessibilityRole="button">
@@ -193,6 +209,7 @@ export default function HomeHeroCarouselManager() {
           <Image source={{ uri: item.imageUrl }} style={styles.itemImage} contentFit="cover" />
           <View style={styles.itemBody}>
             <Text style={styles.itemTitle} numberOfLines={1}>{item.title}</Text>
+            {item.note ? <Text style={styles.itemLink} numberOfLines={2}>{item.note}</Text> : null}
             <Text style={styles.itemLink} numberOfLines={1}>{item.linkUrl}</Text>
           </View>
           <Pressable style={styles.deleteButton} onPress={() => confirmDelete(item)} accessibilityRole="button" accessibilityLabel={`Delete ${item.title} banner`}>

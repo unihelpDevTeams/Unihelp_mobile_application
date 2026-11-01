@@ -18,6 +18,8 @@ import Step2AcademicInfo from './steps/Step2AcademicInfo';
 import Step3HeardFrom from './steps/Step3HeardFrom';
 import Step4Profile from './steps/Step3Profile';
 import Step5Confirmation from './steps/Step4Confirmation';
+import GoogleAuthButton from '../shared/components/GoogleAuthButton';
+import { useAuth } from '../../context/AuthContext';
 
 const STEP_LABELS = { 1: 'Basic Information', 2: 'Academic Information', 3: 'Where do you hear us from?', 4: 'Your Profile', 5: 'Confirmation' };
 
@@ -40,6 +42,7 @@ const getSignupErrorMessage = (error) => {
 export default function SignupFlow() {
   const router = useRouter();
   const { colors, isDark } = useTheme();
+  const { signInWithGoogle } = useAuth();
   const { currentStep, formData, errors, updateField, goToStep, setErrors } = useSignupForm();
   const [loading, setLoading] = React.useState(false);
   const [submitError, setSubmitError] = React.useState('');
@@ -89,6 +92,19 @@ export default function SignupFlow() {
       setLoading(false);
     }
   }, [formData, goToStep, router, setErrors]);
+
+  const handleGoogleSignIn = useCallback(async () => {
+    try {
+      setLoading(true);
+      setSubmitError('');
+      const result = await signInWithGoogle();
+      if (!result?.cancelled) router.replace('/(tabs)');
+    } catch (error) {
+      setSubmitError(getSignupErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }, [router, signInWithGoogle]);
 
   const confirmSubmit = useCallback(() => {
     if (loading) return;
@@ -189,6 +205,14 @@ export default function SignupFlow() {
           showsVerticalScrollIndicator={false}
         >
           {renderStep()}
+          {currentStep === 1 ? (
+            <View style={{ gap: 12, marginTop: 20 }}>
+              <GoogleAuthButton onPress={handleGoogleSignIn} loading={loading} />
+              <Text style={{ color: colors.textSecondary, textAlign: 'center', fontSize: 12, fontWeight: '700' }}>
+                Or continue with your email
+              </Text>
+            </View>
+          ) : null}
         </ScrollView>
         <View style={styles.actionContainer}>
           {currentStep === 5

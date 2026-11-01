@@ -22,6 +22,7 @@ import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import logo from '../../assets/images/favicon.png';
 import { useAuth } from '../../context/AuthContext';
 import { readPendingDeepLink, clearPendingDeepLink } from '../../utils/deepLink';
+import GoogleAuthButton from '../../src/shared/components/GoogleAuthButton';
 
 import { logError, translateError } from '../../src/utils/errorLogger';
 
@@ -30,7 +31,7 @@ const LOGIN_STORAGE_KEY = '@unihelp_saved_login';
 
 export default function Login() {
   const router = useRouter();
-  const { signIn } = useAuth();
+  const { signIn, signInWithGoogle } = useAuth();
   const { colors, isDark } = useTheme();
   const passwordRef = useRef(null);
 
@@ -170,6 +171,28 @@ export default function Login() {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      const result = await signInWithGoogle();
+      if (result?.cancelled) return;
+
+      const pending = await readPendingDeepLink();
+      if (pending) {
+        await clearPendingDeepLink();
+        router.replace({ pathname: pending.pathname, params: pending.params || {} });
+        return;
+      }
+      router.replace('/(tabs)');
+    } catch (googleError) {
+      logError('Google login', googleError);
+      setError(translateError(googleError));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.screen}>
       <LinearGradient colors={isDark ? darkGradients.auth : gradients.auth} style={StyleSheet.absoluteFillObject} />
@@ -202,6 +225,8 @@ export default function Login() {
                 {error}
               </Text>
             ) : null}
+
+            <GoogleAuthButton onPress={handleGoogleSignIn} loading={loading} />
 
             <View style={styles.field}>
               <Text style={styles.label}>Email address</Text>

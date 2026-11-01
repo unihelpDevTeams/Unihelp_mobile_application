@@ -1,13 +1,20 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   createUserWithEmailAndPassword,
+  GoogleAuthProvider,
   onAuthStateChanged,
   sendPasswordResetEmail,
+  signInWithCredential,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut as firebaseSignOut,
   updateProfile as updateFirebaseAuthProfile,
 } from "firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
+import { Platform } from "react-native";
+import * as Google from "expo-auth-session/providers/google";
+import { ResponseType } from "expo-auth-session";
 import { auth, db } from "../firebase/config";
 import { ensureCurrentUserProfile } from "../src/shared/services/firestore";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
@@ -137,6 +144,18 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [profileSyncing, setProfileSyncing] = useState(true);
+  const googleAuthConfig = useMemo(
+    () => Constants.expoConfig?.extra || {},
+    []
+  );
+  const [googleRequest, , promptGoogleAsync] = Google.useAuthRequest({
+    clientId: googleAuthConfig.googleWebClientId,
+    webClientId: googleAuthConfig.googleWebClientId,
+    androidClientId: googleAuthConfig.googleAndroidClientId,
+    iosClientId: googleAuthConfig.googleIosClientId,
+    responseType: ResponseType.IdToken,
+    selectAccount: true,
+  });
 
   useEffect(() => {
     let unsubscribeProfile = null;
@@ -214,6 +233,64 @@ export function AuthProvider({ children }) {
     persistProfileCache(profileData);
     return { credential, profile: profileData };
   };
+
+  const signInWithGoogle = useCallback(async () => {
+    let credential;
+    if (Platform.OS === "web") {
+      credential = await signInWithPopup(auth, new GoogleAuthProvider());
+    } else {
+      if (Constants.executionEnvironment === "storeClient") {
+        throw new Error("Google sign-in cannot return to Expo Go. Use an Expo development build to test Google sign-in.");
+      }
+
+      const {
+        googleWebClientId,
+        googleAndroidClientConfigured,
+        googleIosClientId,
+      } = googleAuthConfig;
+      if (!googleWebClientId) {
+        throw new Error("Google sign-in is not configured. Add a Google web OAuth client ID to the app configuration.");
+      }
+      if (Platform.OS === "android" && !googleAndroidClientConfigured) {
+        throw new Error("Android Google sign-in needs the app's SHA-1 fingerprints added in Firebase. Download the updated google-services.json and rebuild the app.");
+      }
+      if (Platform.OS === "ios" && !googleIosClientId) {
+        throw new Error("Google sign-in on iOS needs an iOS OAuth client ID in EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID.");
+      }
+
+      if (!googleRequest) {
+        throw new Error("Google sign-in is still initializing. Please try again.");
+      }
+      const response = await promptGoogleAsync();
+      if (response.type === "cancel" || response.type === "dismiss") {
+        return { cancelled: true };
+      }
+      if (response.type !== "success") {
+        if (response.error?.message) {
+          throw new Error(response.error.message);
+        }
+        throw new Error("Google sign-in did not complete. Please try again.");
+      }
+      const idToken = response.params?.id_token;
+      if (!idToken) {
+        throw new Error("Google did not return an ID token. Check the OAuth client configuration and try again.");
+      }
+      credential = await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+    }
+
+    const profileData = await ensureCurrentUserProfile({
+      provider: "google",
+      email: credential.user.email || "",
+      displayName: credential.user.displayName || "",
+      photo: credential.user.photoURL || "",
+    });
+    setUser(credential.user);
+    if (profileData) {
+      setProfile(profileData);
+      persistProfileCache(profileData);
+    }
+    return { credential, profile: profileData };
+  }, [googleAuthConfig, googleRequest, promptGoogleAsync]);
 
   const signUp = async ({ username, email, password, photoURL }) => {
     const credential = await createUserWithEmailAndPassword(auth, email, password);
@@ -312,6 +389,7 @@ export function AuthProvider({ children }) {
       profileSyncing,
       loading,
       signIn,
+      signInWithGoogle,
       signUp,
       logout,
       refreshProfile,
@@ -319,7 +397,7 @@ export function AuthProvider({ children }) {
       resetPassword,
       updateProfile,
     }),
-    [loading, profile, profileSyncing, user]
+    [loading, profile, profileSyncing, signInWithGoogle, user]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

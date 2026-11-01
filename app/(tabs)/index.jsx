@@ -168,7 +168,7 @@ const buildHeroSlides = ({ streakCount = 0, announcements = [], notes = [], ques
       imageUrl: item.imageUrl,
       eyebrow: 'Featured',
       title: item.title || 'Explore UniHelp',
-      stat: '',
+      stat: item.note || '',
       cta: { label: 'Learn more', route: item.linkUrl },
     }));
 
@@ -318,7 +318,7 @@ const HERO_ACCENTS = {
 // used everywhere else on this screen. Swipeable between slides, with a
 // slow auto-advance that pauses the moment someone drags it.
 function HeroCarousel({ slides, router }) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const { width: screenWidth } = useWindowDimensions();
   const cardWidth = screenWidth - layout.screenPadding * 2;
 
@@ -394,8 +394,9 @@ function HeroCarousel({ slides, router }) {
     customHeroContent: { padding: s.lg, gap: s.sm },
     customHeroEyebrow: { color: '#FFFFFF', fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
     customHeroTitle: { color: '#FFFFFF', fontSize: 22, lineHeight: 27, fontWeight: '900' },
-    customHeroCta: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 6, borderRadius: r.full, paddingHorizontal: s.md, paddingVertical: 8, backgroundColor: 'rgba(255,255,255,0.94)' },
-    customHeroCtaText: { color: c.ink, fontSize: 12, fontWeight: '900' },
+    customHeroNote: { color: 'rgba(255,255,255,0.94)', fontSize: 13, lineHeight: 19, fontWeight: '600' },
+    customHeroCta: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 6, borderRadius: r.full, paddingHorizontal: s.md, paddingVertical: 8, backgroundColor: c.brand },
+    customHeroCtaText: { color: c.onBrand, fontSize: 12, fontWeight: '900' },
     imageOverlay: {
       flex: 1,
     },
@@ -565,17 +566,18 @@ function HeroCarousel({ slides, router }) {
                 }}
                 style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
                 accessibilityRole="button"
-                accessibilityLabel={`${slide.eyebrow}. ${slide.title}. ${slide.cta.label}`}
+                accessibilityLabel={[slide.eyebrow, slide.title, slide.stat, slide.cta.label].filter(Boolean).join('. ')}
               >
                 {slide.type === 'image' ? (
                   <ImageBackground source={{ uri: slide.imageUrl }} style={styles.customHeroImage} imageStyle={styles.customHeroImageContent}>
-                    <LinearGradient colors={['rgba(0,0,0,0.02)', 'rgba(0,0,0,0.78)']} style={styles.customHeroOverlay}>
+                    <LinearGradient colors={isDark ? ['rgba(5,8,18,0.18)', 'rgba(5,8,18,0.9)'] : ['rgba(15,23,42,0.02)', 'rgba(15,23,42,0.78)']} style={styles.customHeroOverlay}>
                       <View style={styles.customHeroContent}>
                         <Text style={styles.customHeroEyebrow}>{slide.eyebrow}</Text>
                         <Text style={styles.customHeroTitle} numberOfLines={2}>{slide.title}</Text>
+                        {slide.stat ? <Text style={styles.customHeroNote} numberOfLines={2}>{slide.stat}</Text> : null}
                         <View style={styles.customHeroCta}>
                           <Text style={styles.customHeroCtaText}>{slide.cta.label}</Text>
-                          <Ionicons name="arrow-forward" size={13} color={colors.ink} />
+                          <Ionicons name="arrow-forward" size={13} color={colors.onBrand} />
                         </View>
                       </View>
                     </LinearGradient>

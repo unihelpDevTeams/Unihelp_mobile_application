@@ -205,6 +205,11 @@ const inSameGroup = (a, b) => {
 
 const createLocalId = () => `local_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
+const withinEditWindow = (message) => {
+  const sentAt = getMillis(message);
+  return Boolean(sentAt && Date.now() - sentAt <= EDIT_WINDOW_MS);
+};
+
 // Pending-write messages (no timestamp yet) sort to the end instead of jumping to the top.
 const sortMessages = (items) =>
   items.sort((a, b) => {
@@ -407,32 +412,41 @@ function GroupMediaViewer({ media, onClose }) {
 
 // Drag-to-dismiss for bottom sheets. Attach panHandlers to the handle only.
 function useDraggableSheet(onDismiss) {
-  const translateY = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0));
   const dismissRef = useRef(onDismiss);
-  dismissRef.current = onDismiss;
+
+  useEffect(() => {
+    dismissRef.current = onDismiss;
+  }, [onDismiss]);
+
+  /* eslint-disable react-hooks/refs */
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, g) => g.dy > 6 && Math.abs(g.dy) > Math.abs(g.dx),
       onPanResponderMove: (_, g) => {
-        if (g.dy > 0) translateY.setValue(g.dy);
+        if (g.dy > 0) translateY.current.setValue(g.dy);
       },
       onPanResponderRelease: (_, g) => {
         if (g.dy > 110 || g.vy > 0.9) {
-          Animated.timing(translateY, { toValue: 700, duration: 180, useNativeDriver: true }).start(() => {
+          Animated.timing(translateY.current, { toValue: 700, duration: 180, useNativeDriver: true }).start(() => {
             dismissRef.current();
             // Reset after the modal has closed, otherwise the sheet flashes back up.
-            setTimeout(() => translateY.setValue(0), 300);
+            setTimeout(() => translateY.current.setValue(0), 300);
           });
         } else {
-          Animated.spring(translateY, { toValue: 0, useNativeDriver: true, bounciness: 6 }).start();
+          Animated.spring(translateY.current, { toValue: 0, useNativeDriver: true, bounciness: 6 }).start();
         }
       },
       onPanResponderTerminate: () => {
-        Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
+        Animated.spring(translateY.current, { toValue: 0, useNativeDriver: true }).start();
       },
     })
-  ).current;
-  return { translateY, panHandlers: panResponder.panHandlers };
+  );
+  /* eslint-enable react-hooks/refs */
+
+  /* eslint-disable react-hooks/refs */
+  return { translateY: translateY.current, panHandlers: panResponder.current.panHandlers };
+  /* eslint-enable react-hooks/refs */
 }
 
 /* -------------------------------------------------------------------------- */
@@ -968,8 +982,11 @@ const MessageRow = React.memo(function MessageRow({
 
   // The PanResponder is created once; it reads the latest props through this ref.
   const latest = useRef({});
-  latest.current = { message, onSwipeReply, canSwipe: isMember && !isDeleted && !isLocal };
+  useEffect(() => {
+    latest.current = { message, onSwipeReply, canSwipe: isMember && !isDeleted && !isLocal };
+  }, [isDeleted, isLocal, isMember, message, onSwipeReply]);
 
+  /* eslint-disable react-hooks/refs */
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -998,6 +1015,7 @@ const MessageRow = React.memo(function MessageRow({
       }),
     [mine, swipeX]
   );
+  /* eslint-enable react-hooks/refs */
 
   const replyIconOpacity = swipeX.interpolate({
     inputRange: mine ? [-SWIPE_REPLY_THRESHOLD, 0] : [0, SWIPE_REPLY_THRESHOLD],
@@ -1373,13 +1391,6 @@ function GroupDetailScreen({ groupId }) {
     return [...fromMessages, ...fromPosts, ...links].sort((left, right) => getMillis(right) - getMillis(left));
   }, [displayMessages, posts]);
 
-  // Drop optimistic copies once the real message has arrived.
-  useEffect(() => {
-    if (!pending.length) return;
-    const stale = pending.filter((p) => hasServerEcho(p, messages));
-    if (stale.length) setPending((prev) => prev.filter((p) => !stale.some((s) => s.localId === p.localId)));
-  }, [messages, pending]);
-
   const listData = useMemo(() => {
     if (!isMember) return [];
     const out = [];
@@ -1537,11 +1548,19 @@ function GroupDetailScreen({ groupId }) {
 
   useEffect(() => {
     let cancelled = false;
-    load()
-      .catch(() => {})
-      .finally(() => {
+
+    const run = async () => {
+      try {
+        await load();
+      } catch {
+        // keep the existing error states unchanged for the caller
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    };
+
+    void run();
+
     return () => {
       cancelled = true;
     };
@@ -1688,14 +1707,18 @@ function GroupDetailScreen({ groupId }) {
   }, [handleScroll]);
 
   // Stable Animated.event (header collapse) that forwards to the latest handler.
+  /* eslint-disable react-hooks/refs */
   const onScroll = useMemo(
     () =>
       Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
         useNativeDriver: false,
-        listener: (event) => handleScrollRef.current?.(event),
+        listener: (event) => {
+          handleScrollRef.current?.(event);
+        },
       }),
     [scrollY]
   );
+  /* eslint-enable react-hooks/refs */
 
   const handleContentSizeChange = useCallback(() => {
     // Only follow new content if the reader is already at the bottom.
@@ -1889,11 +1912,31 @@ function GroupDetailScreen({ groupId }) {
   };
 
   const votePoll = useCallback(async (message, optionId) => {
-    if (!message?.id || votingPollId) return;
+    if (!message?.id || votingPollId || !message?.poll) return;
+    const previousPoll = message.poll;
     setVotingPollId(message.id);
-    try { await voteGroupPoll(groupId, message.id, optionId, uid); }
-    catch (error) { showToast(error?.message || 'Could not record your vote.'); }
-    finally { setVotingPollId(null); }
+    setMessages((prev) => prev.map((item) => {
+      if (item.id !== message.id || !item.poll) return item;
+      const nextOptions = (item.poll.options || []).map((option) => {
+        if (option.id !== optionId) {
+          if (!item.poll.multiSelect) return { ...option, voterIds: (option.voterIds || []).filter((id) => id !== uid) };
+          return option;
+        }
+        const voterIds = option.voterIds || [];
+        const alreadySelected = voterIds.includes(uid);
+        return { ...option, voterIds: alreadySelected ? voterIds.filter((id) => id !== uid) : [...voterIds, uid] };
+      });
+      return { ...item, poll: { ...item.poll, options: nextOptions } };
+    }));
+
+    try {
+      await voteGroupPoll(groupId, message.id, optionId, uid);
+    } catch (error) {
+      setMessages((prev) => prev.map((item) => (item.id === message.id ? { ...item, poll: previousPoll } : item)));
+      showToast(error?.message || 'Could not record your vote.');
+    } finally {
+      setVotingPollId(null);
+    }
   }, [groupId, showToast, uid, votingPollId]);
 
   const openPollVoters = useCallback((option) => {
@@ -1922,11 +1965,6 @@ function GroupDetailScreen({ groupId }) {
   const discardPending = (message) => setPending((prev) => prev.filter((p) => p.localId !== message.localId));
 
   /* ----------------------------- Message actions -------------------------- */
-
-  const withinEditWindow = (message) => {
-    const sentAt = getMillis(message);
-    return Boolean(sentAt && Date.now() - sentAt <= EDIT_WINDOW_MS);
-  };
 
   const openActions = useCallback((message) => {
     Haptics.selectionAsync();
