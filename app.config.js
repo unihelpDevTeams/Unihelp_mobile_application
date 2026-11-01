@@ -31,6 +31,7 @@ const googleWebClientId =
 
 // Get the Android OAuth client matching UniHelp's package name
 const googleAndroidClientId =
+  process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ||
   googleServicesConfig?.client
     ?.find(
       (client) =>

@@ -151,7 +151,7 @@ export function AuthProvider({ children }) {
   const [googleRequest, , promptGoogleAsync] = Google.useAuthRequest({
     clientId: googleAuthConfig.googleWebClientId,
     webClientId: googleAuthConfig.googleWebClientId,
-    androidClientId: googleAuthConfig.googleAndroidClientId,
+    androidClientId: googleAuthConfig.googleAndroidClientId || googleAuthConfig.googleWebClientId,
     iosClientId: googleAuthConfig.googleIosClientId,
     responseType: ResponseType.IdToken,
     selectAccount: true,
@@ -252,7 +252,7 @@ export function AuthProvider({ children }) {
         throw new Error("Google sign-in is not configured. Add a Google web OAuth client ID to the app configuration.");
       }
       if (Platform.OS === "android" && !googleAndroidClientConfigured) {
-        throw new Error("Android Google sign-in needs the app's SHA-1 fingerprints added in Firebase. Download the updated google-services.json and rebuild the app.");
+        throw new Error("Android Google sign-in is not configured. Add an Android OAuth client for com.zenithdev.unihelp with this build's SHA-1 fingerprint, then set EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID or download the updated google-services.json and rebuild.");
       }
       if (Platform.OS === "ios" && !googleIosClientId) {
         throw new Error("Google sign-in on iOS needs an iOS OAuth client ID in EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID.");
