@@ -2,25 +2,36 @@ import Constants from 'expo-constants';
 import { Share } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 
-const DEFAULT_BASE = 'https://unihelp.app';
+const DEFAULT_BASE = 'https://myunihelp.com.ng';
 
 const appBase =
-  Constants.expoConfig?.extra?.APP_URL ||
-  Constants.manifest?.extra?.APP_URL ||
-  (typeof process !== 'undefined' ? process.env?.APP_URL : undefined) ||
+  Constants.expoConfig?.extra?.EXPO_PUBLIC_APP_URL ||
+  Constants.manifest?.extra?.EXPO_PUBLIC_APP_URL ||
   DEFAULT_BASE;
 
+const CONTENT_PATHS = {
+  post: (id) => `/feed?post=${encodeURIComponent(id)}`,
+  profile: (id) => `/profile/${encodeURIComponent(id)}`,
+  marketplace: (id) => `/marketplace/${encodeURIComponent(id)}`,
+  hostel: (id) => `/hostels/${encodeURIComponent(id)}`,
+  pastQuestion: (id) => `/past-questions/${encodeURIComponent(id)}`,
+  formula: (id) => `/formula-hub/${encodeURIComponent(id)}`,
+};
+
 export const buildShareUrl = (pathname, params = {}) => {
-  const base = `${appBase}`.replace(/\/$/, '');
-  const path = `${pathname || ''}`.replace(/^\//, '');
-  const url = `${base}/${path}`;
+  const url = new URL(`${pathname || ''}`.replace(/^\//, ''), `${appBase.replace(/\/$/, '')}/`);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      url.searchParams.set(key, String(value));
+    }
+  });
+  return url.toString();
+};
 
-  const search = Object.entries(params)
-    .filter(([, v]) => v !== undefined && v !== null && v !== '')
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
-    .join('&');
-
-  return search ? `${url}?${search}` : url;
+export const buildContentShareUrl = (type, id) => {
+  const buildPath = CONTENT_PATHS[type];
+  if (!buildPath || id === undefined || id === null || id === '') return '';
+  return buildShareUrl(buildPath(String(id)));
 };
 
 export const shareContent = async ({ title, text, url }) => {
@@ -28,7 +39,7 @@ export const shareContent = async ({ title, text, url }) => {
     const message = [text || '', url || ''].filter(Boolean).join('\n\n');
     const result = await Share.share({ message, title });
     if (result && result.action) return 'shared';
-  } catch (err) {
+  } catch (_err) {
     // ignore and fallback to clipboard
   }
 
@@ -37,7 +48,7 @@ export const shareContent = async ({ title, text, url }) => {
       await Clipboard.setStringAsync(url);
       return 'copied';
     }
-  } catch (err) {
+  } catch (_err) {
     // final fallback: return nothing
   }
 

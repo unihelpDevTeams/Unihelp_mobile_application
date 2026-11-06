@@ -54,7 +54,7 @@ const googleIosClientId =
 
 const extra = {
   EXPO_PUBLIC_APP_URL:
-    process.env.EXPO_PUBLIC_APP_URL || "https://unihelp.app",
+    "https://myunihelp.com.ng",
 
   EXPO_PUBLIC_API_URL:
     process.env.EXPO_PUBLIC_API_URL ||
@@ -138,6 +138,11 @@ module.exports = {
 
       bundleIdentifier: "com.zenithdev.unihelp",
 
+      associatedDomains: [
+        "applinks:myunihelp.com.ng",
+        "applinks:www.myunihelp.com.ng",
+      ],
+
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
 
@@ -177,24 +182,48 @@ module.exports = {
       intentFilters: [
         {
           action: "VIEW",
-
           autoVerify: true,
-
           data: [
             {
               scheme: "https",
-              host: "unihelp.app",
-            },
-            {
-              scheme: "http",
-              host: "unihelp.app",
-            },
-            {
-              scheme: "unihelp",
-              host: "*",
+              host: "myunihelp.com.ng",
+              pathPrefix: "/",
             },
           ],
-
+          category: ["BROWSABLE", "DEFAULT"],
+        },
+        {
+          action: "VIEW",
+          autoVerify: true,
+          data: [
+            {
+              scheme: "https",
+              host: "www.myunihelp.com.ng",
+              pathPrefix: "/",
+            },
+          ],
+          category: ["BROWSABLE", "DEFAULT"],
+        },
+        {
+          action: "VIEW",
+          autoVerify: true,
+          data: [
+            { scheme: "https", host: "unihelp.app", pathPrefix: "/" },
+          ],
+          category: ["BROWSABLE", "DEFAULT"],
+        },
+        {
+          action: "VIEW",
+          data: [
+            { scheme: "http", host: "unihelp.app", pathPrefix: "/" },
+          ],
+          category: ["BROWSABLE", "DEFAULT"],
+        },
+        {
+          action: "VIEW",
+          data: [
+            { scheme: "unihelp", host: "*" },
+          ],
           category: ["BROWSABLE", "DEFAULT"],
         },
       ],

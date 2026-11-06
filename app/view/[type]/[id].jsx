@@ -11,7 +11,6 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -47,6 +46,7 @@ import {
   startMarketplaceSponsorshipCheckout,
 } from '../../../src/shared/services/marketplaceSponsorship';
 import PastQuestionDocumentReader from '../../../src/shared/components/PastQuestionDocumentReader';
+import { buildContentShareUrl, buildShareUrl, shareContent } from '../../../utils/share';
 
 /* -------------------------------------------------------------------------- */
 /*  Constants                                                                 */
@@ -1405,12 +1405,18 @@ export default function RecordViewPage() {
   };
 
   const shareRecord = async () => {
-    try {
-      const lines = [title, formattedPrice, description ? description.slice(0, 200) : ''].filter(Boolean);
-      await Share.share({ title, message: `${lines.join('\n\n')}\n\nShared from UniHelp` });
-    } catch (_error) {
-      // Cancelled or unavailable: nothing to surface.
-    }
+    const contentType = type === 'listing'
+      ? 'marketplace'
+      : type === 'hostel'
+        ? 'hostel'
+        : type === 'question'
+          ? 'pastQuestion'
+          : null;
+    const url = contentType
+      ? buildContentShareUrl(contentType, id)
+      : buildShareUrl(`/view/${encodeURIComponent(type)}/${encodeURIComponent(id)}`);
+    const lines = [title, formattedPrice, description ? description.slice(0, 200) : ''].filter(Boolean);
+    await shareContent({ title, text: `${lines.join('\n\n')}\n\nShared from UniHelp`, url });
   };
 
   const deleteCurrentResource = async () => {

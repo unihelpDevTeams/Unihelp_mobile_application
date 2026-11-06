@@ -21,7 +21,7 @@ import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import logo from '../../assets/images/favicon.png';
 import { useAuth } from '../../context/AuthContext';
-import { readPendingDeepLink, clearPendingDeepLink } from '../../utils/deepLink';
+import { readPendingDeepLink } from '../../utils/deepLink';
 import GoogleAuthButton from '../../src/shared/components/GoogleAuthButton';
 
 import { logError, translateError } from '../../src/utils/errorLogger';
@@ -152,11 +152,7 @@ export default function Login() {
       );
 
       const pending = await readPendingDeepLink();
-      if (pending) {
-        await clearPendingDeepLink();
-        router.replace({ pathname: pending.pathname, params: pending.params || {} });
-        return;
-      }
+      if (pending) return;
 
       router.replace('/(tabs)');
     } catch (submitError) {
@@ -179,11 +175,7 @@ export default function Login() {
       if (result?.cancelled) return;
 
       const pending = await readPendingDeepLink();
-      if (pending) {
-        await clearPendingDeepLink();
-        router.replace({ pathname: pending.pathname, params: pending.params || {} });
-        return;
-      }
+      if (pending) return;
       router.replace('/(tabs)');
     } catch (googleError) {
       logError('Google login', googleError);

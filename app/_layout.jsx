@@ -30,17 +30,10 @@ import { NetworkProvider, useNetwork } from '../context/NetworkContext';
 import OfflineBanner from '../components/OfflineBanner';
 import { isPremiumActive } from '../src/shared/services/premium';
 import { submitReport } from '../src/shared/services/support';
-import SplashScreen from './splash';
-
-function GlobalPreloader({ navigationReady }) {
-  const { loading } = useAuth();
-  if (!loading && navigationReady) return null;
-  return <SplashScreen />;
-}
 
 function AppContent() {
   const { colors, isDark, themeLoaded } = useTheme();
-  const { profile, profileSyncing, user } = useAuth();
+  const { loading: authLoading, profile, profileSyncing, user } = useAuth();
   const { promo, visible: promoVisible, dismiss: dismissPromo, markClicked: markPromoClicked } = usePromoSpotlight();
   const { isOnline } = useNetwork();
   const router = useRouter();
@@ -56,6 +49,13 @@ function AppContent() {
   const lastShakeRef = useRef(0);
   const shakeMagnitudeRef = useRef(0);
   const profileRedirectedUidRef = useRef(null);
+  const seenDeepLinksRef = useRef(new Map());
+  const pendingNavigationRef = useRef(null);
+  const deepLinkStateRef = useRef(null);
+
+  useEffect(() => {
+    deepLinkStateRef.current = { authLoading, navigationReady, profile, profileSyncing, user };
+  }, [authLoading, navigationReady, profile, profileSyncing, user]);
 
   useEffect(() => {
     if (!user?.uid || !user.emailVerified || profileSyncing || profile?._offline) return;
@@ -73,51 +73,62 @@ function AppContent() {
   }, [profile, profileSyncing, router, user?.uid, user?.emailVerified]);
 
   useEffect(() => {
-    const handleInitialUrl = async () => {
-      const initialUrl = await Linking.getInitialURL();
-      if (!initialUrl) return;
-
-      const match = parseDeepLink(initialUrl);
-      if (!match) return;
-
-      if (!user) {
-        await savePendingDeepLink(initialUrl);
-        return;
-      }
-
-      router.push({ pathname: match.pathname, params: match.params || {} });
-    };
-
-    handleInitialUrl();
-  }, [router, user]);
-
-  useEffect(() => {
-    const subscription = Linking.addEventListener('url', async ({ url }) => {
+    const handleUrl = async (url) => {
       const match = parseDeepLink(url);
       if (!match) return;
+      const state = deepLinkStateRef.current;
 
-      if (!user) {
+      const key = JSON.stringify(match);
+      const now = Date.now();
+      const lastSeen = seenDeepLinksRef.current.get(key) || 0;
+      if (now - lastSeen < 2500) return;
+      seenDeepLinksRef.current.set(key, now);
+
+      const profileIncomplete = state.user?.emailVerified && !state.profile?._offline && !hasRequiredProfileDetails(state.profile);
+      if (!state.user || state.authLoading || state.profileSyncing || !state.navigationReady || !state.user.emailVerified || profileIncomplete) {
         await savePendingDeepLink(url);
+        if (!state.user && !state.authLoading && state.navigationReady) router.replace('/(auth)/onboarding');
         return;
       }
 
-      router.push({ pathname: match.pathname, params: match.params || {} });
-    });
+      await clearPendingDeepLink();
+      router.replace({ pathname: match.pathname, params: match.params || {} });
+    };
+
+    const subscription = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+    Linking.getInitialURL().then((url) => {
+      if (url) handleUrl(url);
+    }).catch(() => {});
 
     return () => subscription?.remove?.();
-  }, [router, user]);
+  }, [router]);
 
   useEffect(() => {
     const resumePendingDeepLink = async () => {
-      if (!user) return;
+      const profileIncomplete = user?.emailVerified && !profile?._offline && !hasRequiredProfileDetails(profile);
+      if (!user || authLoading || profileSyncing || !navigationReady || !user.emailVerified || profileIncomplete) return;
+
       const pending = await readPendingDeepLink();
       if (!pending) return;
+      const key = JSON.stringify(pending);
+      if (pendingNavigationRef.current === key) return;
+      pendingNavigationRef.current = key;
       await clearPendingDeepLink();
-      router.push({ pathname: pending.pathname, params: pending.params || {} });
+      router.replace({ pathname: pending.pathname, params: pending.params || {} });
+      pendingNavigationRef.current = null;
     };
 
-    resumePendingDeepLink();
-  }, [router, user]);
+    resumePendingDeepLink().catch(() => {
+      pendingNavigationRef.current = null;
+    });
+  }, [authLoading, navigationReady, profile, profileSyncing, router, user]);
+
+  useEffect(() => {
+    if (user || authLoading || !navigationReady) return;
+    readPendingDeepLink().then((pending) => {
+      if (pending) router.replace('/(auth)/onboarding');
+    }).catch(() => {});
+  }, [authLoading, navigationReady, router, user]);
 
   useEffect(() => {
     if (isOnline === false && premiumUnlocked && router.pathname !== '/offline-center' && router.pathname !== '/premium') {
@@ -178,14 +189,13 @@ function AppContent() {
 
   // Prevent flash - don't render until theme is loaded
   if (!themeLoaded) {
-    return <SplashScreen />;
+    return <View style={{ flex: 1, backgroundColor: colors.canvas }} />;
   }
 
   return (
     <ThemeGate>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <BlurTargetView ref={promoBlurTarget} style={{ flex: 1 }}>
-        <GlobalPreloader navigationReady={navigationReady} />
+      <BlurTargetView ref={promoBlurTarget} style={{ flex: 1, backgroundColor: colors.canvas }}>
         <RoleGuard>
           <Stack
             initialRouteName="(tabs)"
@@ -198,7 +208,6 @@ function AppContent() {
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="premium/index" options={{ presentation: 'card' }} />
             <Stack.Screen name="profile/danger" options={{ presentation: 'card' }} />
-            <Stack.Screen name="splash" options={{ presentation: 'modal', gestureEnabled: false }} />
             <Stack.Screen name="search/index" options={{ presentation: 'card' }} />
             <Stack.Screen name="saved/index" options={{ presentation: 'card' }} />
             <Stack.Screen name="downloads/index" options={{ presentation: 'card' }} />

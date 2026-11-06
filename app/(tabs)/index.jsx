@@ -712,6 +712,7 @@ export default function HomeScreen() {
 
   const [streakCount, setStreakCount] = useState(0);
   const [heroContent, setHeroContent] = useState({ announcements: [], notes: [], questions: [], adminSlides: [] });
+  const [homeDataLoading, setHomeDataLoading] = useState(true);
   const avatarKey = profile?.photoURL || 'default';
   const [avatarFailures, setAvatarFailures] = useState({});
   const avatarFailed = Boolean(avatarFailures[avatarKey]);
@@ -1330,6 +1331,70 @@ export default function HomeScreen() {
       alignItems: 'center',
       justifyContent: 'center',
     },
+    loadingSkeletonRow: {
+      flexDirection: 'row',
+      gap: s.md,
+      marginHorizontal: -layout.screenPadding,
+      paddingHorizontal: layout.screenPadding,
+    },
+    loadingSkeletonCard: {
+      width: 190,
+      overflow: 'hidden',
+      borderRadius: r['2xl'],
+      borderWidth: 1,
+      borderColor: c.borderLight || c.border,
+      backgroundColor: c.surface,
+    },
+    loadingSkeletonMedia: {
+      height: 116,
+      backgroundColor: c.surfaceSecondary || c.canvasLight,
+    },
+    loadingSkeletonBody: {
+      padding: s.md,
+      gap: s.sm,
+    },
+    loadingSkeletonLine: {
+      height: 11,
+      borderRadius: r.full,
+      backgroundColor: c.surfaceSecondary || c.canvasLight,
+    },
+    homeHeroSkeleton: {
+      minHeight: 206,
+      marginBottom: s.lg,
+      padding: s.lg,
+      justifyContent: 'space-between',
+      borderRadius: r['2xl'],
+      borderWidth: 1,
+      borderColor: c.borderLight || c.border,
+      backgroundColor: c.surface,
+    },
+    homeHeroSkeletonLabel: {
+      width: 112,
+      height: 12,
+      borderRadius: r.full,
+      backgroundColor: c.surfaceSecondary || c.canvasLight,
+    },
+    homeHeroSkeletonTitle: {
+      width: '78%',
+      height: 24,
+      marginTop: s.xl,
+      borderRadius: r.md,
+      backgroundColor: c.surfaceSecondary || c.canvasLight,
+    },
+    homeHeroSkeletonCopy: {
+      width: '94%',
+      height: 13,
+      marginTop: s.sm,
+      borderRadius: r.full,
+      backgroundColor: c.surfaceSecondary || c.canvasLight,
+    },
+    homeHeroSkeletonButton: {
+      width: 126,
+      height: 34,
+      marginTop: s.lg,
+      borderRadius: r.full,
+      backgroundColor: c.surfaceSecondary || c.canvasLight,
+    },
     // Shadow on the outer wrapper; overflow:hidden (needed to clip the
     // image corners) lives on the inner wrapper.
     discoveryCardShadowWrap: {
@@ -1451,7 +1516,11 @@ export default function HomeScreen() {
       if (streakData) {
         setStreakCount(streakData.streakCount || 0);
       }
-    } catch {}
+    } catch {
+      // Home content has useful static fallbacks when remote data is unavailable.
+    } finally {
+      setHomeDataLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -1694,7 +1763,19 @@ export default function HomeScreen() {
         </View>
 
         {/* SMART STUDY HERO: one message at a time, user-swipeable */}
-        <HeroCarousel slides={heroSlides} router={router} />
+        {homeDataLoading ? (
+          <View style={styles.homeHeroSkeleton} accessibilityLabel="Loading home content">
+            <View>
+              <View style={styles.homeHeroSkeletonLabel} />
+              <View style={styles.homeHeroSkeletonTitle} />
+              <View style={styles.homeHeroSkeletonCopy} />
+              <View style={[styles.homeHeroSkeletonCopy, { width: '66%' }]} />
+            </View>
+            <View style={styles.homeHeroSkeletonButton} />
+          </View>
+        ) : (
+          <HeroCarousel slides={heroSlides} router={router} />
+        )}
 
         {/* Premium is supportive, not the first thing a student sees on launch. */}
         {!premiumUnlocked ? <PremiumMarquee onPress={() => router.navigate('/premium')} /> : null}
@@ -1795,8 +1876,17 @@ export default function HomeScreen() {
           <Text style={discoverySectionStyles.discoveryTitle}>Discover</Text>
 
           {discoverData.loading ? (
-            <View style={discoverySectionStyles.loadingWrap}>
-              <ActivityIndicator size="small" color={colors.brand} />
+            <View style={discoverySectionStyles.loadingSkeletonRow} accessibilityLabel="Loading suggestions and listings">
+              {[0, 1].map((key) => (
+                <View key={key} style={discoverySectionStyles.loadingSkeletonCard}>
+                  <View style={discoverySectionStyles.loadingSkeletonMedia} />
+                  <View style={discoverySectionStyles.loadingSkeletonBody}>
+                    <View style={[discoverySectionStyles.loadingSkeletonLine, { width: '44%' }]} />
+                    <View style={[discoverySectionStyles.loadingSkeletonLine, { width: '82%' }]} />
+                    <View style={[discoverySectionStyles.loadingSkeletonLine, { width: '64%' }]} />
+                  </View>
+                </View>
+              ))}
             </View>
           ) : discoverData.error ? (
             <View style={discoverySectionStyles.discoveryPlaceholder}>

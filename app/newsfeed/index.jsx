@@ -20,7 +20,7 @@ import {
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EvosAura from '../../src/shared/components/EvosAura';
@@ -28,7 +28,7 @@ import EmptyState from '../../src/shared/components/EmptyState';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { deleteJson, getJson, postJson, putJson, uploadFeatureMedia } from '../../src/shared/services/backend';
-import { buildShareUrl, shareContent } from '../../utils/share';
+import { buildContentShareUrl, buildShareUrl, shareContent } from '../../utils/share';
 import { useAuth } from '../../context/AuthContext';
 import { isPremiumActive } from '../../src/shared/services/premium';
 import {
@@ -285,6 +285,9 @@ const PostCard = React.memo(function PostCard({
 
 export default function NewsFeedPage() {
   const router = useRouter();
+  const routeParams = useLocalSearchParams();
+  const rawSharedPostId = Array.isArray(routeParams.post) ? routeParams.post[0] : routeParams.post;
+  const sharedPostId = typeof rawSharedPostId === 'string' ? rawSharedPostId.trim() : '';
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   const { colors } = useTheme();
@@ -293,6 +296,9 @@ export default function NewsFeedPage() {
   const viewerAvatar = profile?.photoThumb || profile?.photoURL || profile?.photo || profile?.avatar || user?.photoURL || '';
 
   const [items, setItems] = useState([]);
+  const [sharedPostResult, setSharedPostResult] = useState(null);
+  const sharedPost = sharedPostResult?.id === sharedPostId ? sharedPostResult.post : null;
+  const sharedPostError = sharedPostResult?.id === sharedPostId && sharedPostResult.error;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [feedCursor, setFeedCursor] = useState(null);
@@ -706,6 +712,32 @@ export default function NewsFeedPage() {
 
   useEffect(() => { loadFeed(); }, [loadFeed]);
 
+  useEffect(() => {
+    if (!sharedPostId || !user?.uid) return undefined;
+
+    let cancelled = false;
+    getJson(`/api/feed/posts/${encodeURIComponent(sharedPostId)}`)
+      .then(async (response) => {
+        const record = response?.item || response?.post || response;
+        if (!record?.id) throw new Error('This post is unavailable.');
+        const [hydratedPost] = await hydrateItems([record]);
+        if (cancelled) return;
+        setSharedPostResult({ id: sharedPostId, post: hydratedPost, error: false });
+        setLikedPostIds((current) => {
+          const next = new Set(current);
+          if (hydratedPost.likedByMe) next.add(hydratedPost.id);
+          return next;
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn('[Feed] Shared post could not be loaded', error);
+        setSharedPostResult({ id: sharedPostId, post: null, error: true });
+      });
+
+    return () => { cancelled = true; };
+  }, [sharedPostId, user?.uid, hydrateItems]);
+
   // Appends the next page of older posts.
   const loadMore = useCallback(async () => {
     if (!hasMore || !feedCursor || loadingMore || loading || refreshing) return;
@@ -896,7 +928,7 @@ export default function NewsFeedPage() {
     await shareContent({
       title: `${item.authorName || 'UniHelp student'} on UniHelp`,
       text: item.content || 'View this post on UniHelp.',
-      url: buildShareUrl('feed', { post: item.id }),
+      url: buildContentShareUrl('post', item.id),
     });
   }, []);
 
@@ -1174,7 +1206,8 @@ export default function NewsFeedPage() {
     const normalizedSearch = search.trim().toLowerCase();
     const now = Date.now();
     const timeLimits = { today: 24, week: 24 * 7, month: 24 * 30 };
-    const filtered = items.filter((item) => {
+    const sourceItems = sharedPostId ? (sharedPost ? [sharedPost] : []) : items;
+    const filtered = sourceItems.filter((item) => {
       const matchesType = typeFilter === 'all' || item.type === typeFilter;
       const matchesMine = !mineOnly || item.authorId === user?.uid;
       const tags = getPostHashtags(item);
@@ -1196,7 +1229,7 @@ export default function NewsFeedPage() {
       if (sortFilter === 'latest') return rightTime - leftTime;
       return 0;
     });
-  }, [items, search, sortFilter, timeFilter, typeFilter, mineOnly, user?.uid]);
+  }, [items, sharedPost, sharedPostId, search, sortFilter, timeFilter, typeFilter, mineOnly, user?.uid]);
 
   const renderPost = useCallback(({ item }) => (
     <PostCard
@@ -1406,8 +1439,12 @@ export default function NewsFeedPage() {
           maxToRenderPerBatch={6}
           ListEmptyComponent={!loading ? (
             <EmptyState
-              title={items.length && !visibleItems.length ? 'No matching posts' : 'Your feed is quiet'}
-              description={items.length && !visibleItems.length
+              title={sharedPostId
+                ? (sharedPostError ? 'Post unavailable' : 'Loading shared post')
+                : items.length && !visibleItems.length ? 'No matching posts' : 'Your feed is quiet'}
+              description={sharedPostId
+                ? (sharedPostError ? 'This post may have been deleted or is not available to your account.' : 'The shared post is loading.')
+                : items.length && !visibleItems.length
                 ? (hasMore ? 'Nothing in the posts loaded so far. Try another filter or load more.' : 'Try another search or filter.')
                 : 'Add friends and start sharing what is happening around campus.'}
             />

@@ -5,7 +5,6 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -46,6 +45,7 @@ import { deleteCloudinaryAssets } from '../../services/mediaCleanup';
 import { isPremiumActive } from '../../src/shared/services/premium';
 import { fetchFriendStats } from '../../src/shared/services/friendships';
 import { deleteProfileMedia, getJson, uploadFeatureMedia } from '../../src/shared/services/backend';
+import { buildContentShareUrl, shareContent } from '../../utils/share';
 import { getMediaDownloadPreferences, setMediaDownloadPreferences } from '../../src/shared/services/mediaCache';
 
 const BIO_MAX_LENGTH = 160;
@@ -1071,13 +1071,11 @@ export default function ProfileScreen() {
 
   const shareProfile = async () => {
     closeSheet();
-    try {
-      await Share.share({
-        message: 'Join me on UniHelp — the all-in-one app for CGPA tracking, JAMB/CBT practice and campus life. Get it at unihelp.ng',
-      });
-    } catch {
-      /* user cancelled — nothing to do */
-    }
+    await shareContent({
+      title: 'My UniHelp profile',
+      text: 'Join me on UniHelp — the all-in-one app for CGPA tracking, JAMB/CBT practice and campus life.',
+      url: buildContentShareUrl('profile', user?.uid),
+    });
   };
 
   const goTo = (path) => {

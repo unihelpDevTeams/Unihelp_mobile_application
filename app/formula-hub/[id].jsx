@@ -4,7 +4,6 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
-  Share,
   Text,
   View,
 } from 'react-native';
@@ -16,6 +15,7 @@ import * as Clipboard from 'expo-clipboard';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { fetchFormulaByIdFromApi } from '../../hooks/useFormulas';
 import { isFormulaBookmarked, toggleFormulaBookmark } from '../../src/shared/services/formulaBookmarks';
+import { buildContentShareUrl, shareContent } from '../../utils/share';
 
 // Theme Context & Design System
 import { useTheme } from '../../src/shared/theme/ThemeContext';
@@ -231,13 +231,11 @@ export default function FormulaDetails() {
   };
 
   const shareFormula = async () => {
-    try {
-      await Share.share({
-        message: `${formula?.title || 'Formula'}\n${formulaDisplay}\n\nShared from UniHelp`,
-      });
-    } catch {
-      // user cancelled — nothing to do
-    }
+    await shareContent({
+      title: formula?.title || 'Formula',
+      text: `${formula?.title || 'Formula'}\n${formulaDisplay}\n\nShared from UniHelp`,
+      url: buildContentShareUrl('formula', id),
+    });
   };
 
   const toggleBookmark = async () => {
