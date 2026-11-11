@@ -40,7 +40,7 @@ import VoiceRecorderBar from '../../src/shared/components/VoiceRecorderBar';
 import StickerPicker from '../../src/shared/components/StickerPicker';
 import StickerMessage from '../../src/shared/components/StickerMessage';
 import FriendRequestModal from '../../src/shared/components/FriendRequestModal';
-import { fetchRecord } from '../../services/firestoreSync';
+import { fetchConversations, fetchRecord } from '../../services/firestoreSync';
 import {
   markConversationRead,
   sendDirectMessage,
@@ -196,6 +196,12 @@ const getChatAttachmentKind = (attachment = {}) => {
   if (type === 'image' || type.startsWith('image/')) return 'image';
   if (type === 'video' || type.startsWith('video/')) return 'video';
   return 'document';
+};
+const conversationDisplayName = (item, currentUid) => {
+  const peerIds = (Array.isArray(item?.memberIds) ? item.memberIds : []).filter((id) => id !== currentUid);
+  const names = peerIds.map((id) => item.memberInfo?.[id]?.name || item.memberInfo?.[id]?.displayName).filter(Boolean);
+  if (names.length > 1) return item.title || `${names[0]} + ${names.length - 1}`;
+  return names[0] || item.title || 'Conversation';
 };
 
 const previewOf = (message) => {
@@ -600,6 +606,28 @@ const createStyles = (c) => ({
   sheetOptionText: { fontSize: 15, fontWeight: '700', color: c.textPrimary },
   sheetCancel: { marginTop: 6, paddingVertical: 13, alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.borderDefault },
   sheetCancelText: { fontSize: 15, fontWeight: '700', color: c.textSecondary },
+  forwardSheet: { height: '84%', maxHeight: '90%' },
+  forwardSearchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 13, borderWidth: 1, borderColor: c.borderDefault, backgroundColor: c.inputBackground, paddingHorizontal: 12, marginBottom: 10 },
+  forwardSearchInput: { flex: 1, color: c.textPrimary, paddingVertical: 11, fontSize: 14 },
+  forwardPreview: { color: c.textSecondary, fontSize: 12, marginBottom: 9 },
+  forwardList: { flex: 1 },
+  forwardRecipient: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 10, paddingHorizontal: 9, borderRadius: 13, borderWidth: 1, borderColor: 'transparent' },
+  forwardRecipientSelected: { backgroundColor: c.brandLight, borderColor: c.brand },
+  forwardAvatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', backgroundColor: c.surfaceSecondary },
+  forwardAvatarImage: { width: '100%', height: '100%' },
+  forwardAvatarText: { color: c.brandText, fontSize: 15, fontWeight: '800' },
+  forwardRecipientName: { flex: 1, color: c.textPrimary, fontSize: 14, fontWeight: '700' },
+  forwardCheck: { width: 23, height: 23, borderRadius: 12, borderWidth: 1.5, borderColor: c.borderDefault, alignItems: 'center', justifyContent: 'center' },
+  forwardCheckSelected: { backgroundColor: c.brand, borderColor: c.brand },
+  forwardEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 30 },
+  forwardEmptyText: { color: c.textSecondary, fontSize: 13, textAlign: 'center' },
+  forwardFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.borderDefault, paddingTop: 12, marginTop: 8 },
+  forwardCount: { flex: 1, color: c.textSecondary, fontSize: 12, fontWeight: '700' },
+  forwardSendButton: { minWidth: 112, minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: 14, backgroundColor: c.brand, paddingHorizontal: 16 },
+  forwardSendDisabled: { opacity: 0.45 },
+  forwardSendText: { color: c.onBrand, fontSize: 13, fontWeight: '800' },
+  forwardedLabel: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
+  forwardedLabelText: { color: c.textTertiary, fontSize: 10.5, fontStyle: 'italic' },
 
   selectionBar: { position: 'absolute', left: 12, right: 12, bottom: 12, zIndex: 20, backgroundColor: c.surfacePrimary, borderRadius: 18, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: c.borderDefault, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
   selectionTitle: { color: c.textPrimary, fontSize: 13, fontWeight: '800', marginBottom: 8 },
@@ -1499,6 +1527,12 @@ const MessageRow = React.memo(function MessageRow({
           ]}
         >
           <View style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '100%' }}>
+            {message.forwarded ? (
+              <View style={[styles.forwardedLabel, { alignSelf: mine ? 'flex-end' : 'flex-start' }]}>
+                <Ionicons name="arrow-redo-outline" size={12} color={colors.textTertiary} />
+                <Text style={styles.forwardedLabelText}>Forwarded</Text>
+              </View>
+            ) : null}
             {body}
             {reactionEntries.length ? (
               <View style={[styles.reactionsRow, mine && styles.reactionsRowMine]}>
@@ -1577,6 +1611,13 @@ function ConversationScreen({ conversationId }) {
   const [activeMessage, setActiveMessage] = useState(null);
   const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState([]);
+  const [forwardVisible, setForwardVisible] = useState(false);
+  const [forwardMessages, setForwardMessages] = useState([]);
+  const [forwardConversations, setForwardConversations] = useState([]);
+  const [forwardSelectedIds, setForwardSelectedIds] = useState([]);
+  const [forwardSearch, setForwardSearch] = useState('');
+  const [forwardLoading, setForwardLoading] = useState(false);
+  const [forwardSending, setForwardSending] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [roomBusy, setRoomBusy] = useState('');
   const [relationship, setRelationship] = useState(() => RELATIONSHIP_CACHE.get(conversationId) || { state: RELATIONSHIP.NONE });
@@ -2655,6 +2696,90 @@ function ConversationScreen({ conversationId }) {
   );
   const selectionCanDelete = selectedMessages.length > 0 && selectedMessages.every(canDeleteMessage);
 
+  const openForwardSheet = async (targets = []) => {
+    const forwardable = targets.filter((message) => (
+      message &&
+      !message.deleted &&
+      !['failed', 'sending'].includes(message.status) &&
+      ['text', 'voice', 'sticker', 'image', 'video'].includes(message.type || 'text')
+    ));
+    if (!forwardable.length) {
+      showAlertDialog('Cannot forward message', 'This message is no longer available to forward.');
+      return;
+    }
+
+    setForwardMessages(forwardable);
+    setForwardConversations([]);
+    setForwardSelectedIds([]);
+    setForwardSearch('');
+    setForwardVisible(true);
+    setForwardLoading(true);
+    closeSheet();
+    clearMessageSelection();
+
+    try {
+      const available = await fetchConversations(currentUid);
+      setForwardConversations(available.filter((item) => (
+        item.id !== conversationId &&
+        Array.isArray(item.memberIds) &&
+        item.memberIds.includes(currentUid) &&
+        item.memberIds.length === 2
+      )));
+    } catch (error) {
+      setForwardVisible(false);
+      showAlertDialog('Could not load chats', error?.message || 'Please try again.');
+    } finally {
+      setForwardLoading(false);
+    }
+  };
+
+  const toggleForwardRecipient = (recipientId) => {
+    setForwardSelectedIds((selected) => (
+      selected.includes(recipientId)
+        ? selected.filter((id) => id !== recipientId)
+        : [...selected, recipientId]
+    ));
+  };
+
+  const sendForwardedMessages = async () => {
+    if (forwardSending || !user || !forwardSelectedIds.length) return;
+    const destinations = forwardConversations.filter((item) => forwardSelectedIds.includes(item.id));
+    if (!destinations.length) return;
+
+    setForwardSending(true);
+    const deliveryResults = await Promise.all(destinations.map(async (destination) => {
+      const results = [];
+      for (const message of forwardMessages) {
+        try {
+          await sendDirectMessage(
+            destination,
+            user,
+            profile,
+            { ...payloadFromMessage(message), replyTo: null, forwarded: true }
+          );
+          results.push(true);
+        } catch (_error) {
+          results.push(false);
+        }
+      }
+      return results;
+    }));
+    const sent = deliveryResults.flat().filter(Boolean).length;
+    const total = deliveryResults.reduce((count, results) => count + results.length, 0);
+    const failed = total - sent;
+    setForwardSending(false);
+    setForwardVisible(false);
+
+    if (failed) {
+      showAlertDialog(
+        sent ? 'Forwarded with some issues' : 'Forward failed',
+        `${sent} of ${total} message${total === 1 ? '' : 's'} sent. Some chats may not allow messages yet.`
+      );
+    } else {
+      showToast(`${forwardMessages.length} message${forwardMessages.length === 1 ? '' : 's'} forwarded to ${destinations.length} chat${destinations.length === 1 ? '' : 's'}`);
+    }
+  };
+
   const handleCopySelectedMessages = async () => {
     const text = selectedMessages
       .map((message) => {
@@ -3253,6 +3378,7 @@ function ConversationScreen({ conversationId }) {
           <>
             {!sending ? <SheetOption {...opt} icon="arrow-undo-outline" label="Reply" onPress={handleReplyFromSheet} /> : null}
             {textOf(m) ? <SheetOption {...opt} icon="copy-outline" label="Copy text" onPress={handleCopyFromSheet} /> : null}
+            {!sending && !m.deleted ? <SheetOption {...opt} icon="arrow-redo-outline" label="Forward" onPress={() => openForwardSheet([m])} /> : null}
             {editable && isText ? <SheetOption {...opt} icon="create-outline" label="Edit message" onPress={startEditingMessage} /> : null}
             {!sending && !m.deleted ? (
               <SheetOption {...opt} icon="checkbox-outline" label="Select" onPress={() => { setSelection([m.id], true); closeSheet(); }} />
@@ -3488,6 +3614,15 @@ function ConversationScreen({ conversationId }) {
                     <Text style={styles.selectionButtonText}>Copy</Text>
                   </Pressable>
                   <Pressable
+                    style={[styles.selectionButton, !selectedMessageIds.length && styles.selectionButtonDisabled]}
+                    onPress={() => openForwardSheet(selectedMessages)}
+                    disabled={!selectedMessageIds.length}
+                    accessibilityRole="button"
+                  >
+                    <Ionicons name="arrow-redo-outline" size={16} color={colors.textPrimary} />
+                    <Text style={styles.selectionButtonText}>Forward</Text>
+                  </Pressable>
+                  <Pressable
                     style={[styles.selectionButton, styles.selectionButtonDanger, !selectionCanDelete && styles.selectionButtonDisabled]}
                     onPress={handleDeleteSelectedMessages}
                     disabled={!selectionCanDelete}
@@ -3509,11 +3644,9 @@ function ConversationScreen({ conversationId }) {
               </Animated.View>
             ) : null}
           </View>
-
           {renderRelationshipPrompt()}
-
           {canChat ? (
-            <View style={[styles.composerContainer, keyboardVisible && { paddingBottom: 8 }]}>
+            <View style={[styles.composerContainer, keyboardVisible && { paddingBottom: 36 }]}>
               {!editingMessage && pendingAttachments.length ? (
                 <ScrollView style={styles.attachmentPreviewList} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                   {pendingAttachments.map((attachment, index) => (
@@ -3685,6 +3818,117 @@ function ConversationScreen({ conversationId }) {
                   </Pressable>
                 </>
               )}
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={forwardVisible}
+          transparent
+          animationType="slide"
+          statusBarTranslucent
+          onRequestClose={() => !forwardSending && setForwardVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => !forwardSending && setForwardVisible(false)}
+            />
+            <View style={[styles.sheet, styles.forwardSheet]}>
+              <View style={styles.sheetHandle} />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.sheetTitle, { textAlign: 'left' }]}>
+                    Forward {forwardMessages.length === 1 ? 'message' : 'messages'}
+                  </Text>
+                  <Text style={[styles.forwardPreview]} numberOfLines={1}>
+                    {forwardMessages.length === 1 ? previewOf(forwardMessages[0]) : `${forwardMessages.length} messages selected`}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => !forwardSending && setForwardVisible(false)}
+                  disabled={forwardSending}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close forward picker"
+                >
+                  <Ionicons name="close-circle" size={27} color={colors.textTertiary} />
+                </Pressable>
+              </View>
+
+              <View style={styles.forwardSearchWrap}>
+                <Ionicons name="search-outline" size={18} color={colors.textTertiary} />
+                <TextInput
+                  value={forwardSearch}
+                  onChangeText={setForwardSearch}
+                  placeholder="Search chats"
+                  placeholderTextColor={colors.placeholder}
+                  style={styles.forwardSearchInput}
+                  accessibilityLabel="Search chats to forward to"
+                />
+              </View>
+
+              <FlatList
+                style={styles.forwardList}
+                data={forwardConversations.filter((item) => conversationDisplayName(item, currentUid).toLowerCase().includes(forwardSearch.trim().toLowerCase()))}
+                keyExtractor={(item) => item.id}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingBottom: 8, flexGrow: 1 }}
+                ListEmptyComponent={(
+                  <View style={styles.forwardEmpty}>
+                    {forwardLoading ? (
+                      <ActivityIndicator size="small" color={colors.brand} />
+                    ) : (
+                      <Text style={styles.forwardEmptyText}>
+                        {forwardSearch ? 'No chats match that search.' : 'No other chats are available to forward to.'}
+                      </Text>
+                    )}
+                  </View>
+                )}
+                renderItem={({ item }) => {
+                  const peerId = item.memberIds?.find((id) => id !== currentUid);
+                  const peer = item.memberInfo?.[peerId] || {};
+                  const name = conversationDisplayName(item, currentUid);
+                  const avatar = peer.avatar || peer.photoURL || peer.photoUrl;
+                  const selected = forwardSelectedIds.includes(item.id);
+                  return (
+                    <Pressable
+                      style={[styles.forwardRecipient, selected && styles.forwardRecipientSelected]}
+                      onPress={() => toggleForwardRecipient(item.id)}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: selected }}
+                      accessibilityLabel={`Forward to ${name}`}
+                    >
+                      <View style={styles.forwardAvatar}>
+                        {avatar ? (
+                          <Image source={{ uri: avatar }} style={styles.forwardAvatarImage} />
+                        ) : (
+                          <Text style={styles.forwardAvatarText}>{name.trim().charAt(0).toUpperCase()}</Text>
+                        )}
+                      </View>
+                      <Text style={styles.forwardRecipientName} numberOfLines={1}>{name}</Text>
+                      <View style={[styles.forwardCheck, selected && styles.forwardCheckSelected]}>
+                        {selected ? <Ionicons name="checkmark" size={15} color={colors.onBrand} /> : null}
+                      </View>
+                    </Pressable>
+                  );
+                }}
+              />
+
+              <View style={styles.forwardFooter}>
+                <Text style={styles.forwardCount}>
+                  {forwardSelectedIds.length} selected
+                </Text>
+                <Pressable
+                  style={[styles.forwardSendButton, (!forwardSelectedIds.length || forwardSending || forwardLoading) && styles.forwardSendDisabled]}
+                  onPress={sendForwardedMessages}
+                  disabled={!forwardSelectedIds.length || forwardSending || forwardLoading}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Forward to ${forwardSelectedIds.length} chats`}
+                >
+                  {forwardSending ? <ActivityIndicator size="small" color={colors.onBrand} /> : <Ionicons name="send" size={16} color={colors.onBrand} />}
+                  <Text style={styles.forwardSendText}>{forwardSending ? 'Sending' : 'Send'}</Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         </Modal>
