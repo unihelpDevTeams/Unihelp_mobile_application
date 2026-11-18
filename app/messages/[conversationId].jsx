@@ -22,7 +22,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useIsFocused, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useIsFocused, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
@@ -3111,25 +3111,26 @@ function ConversationScreen({ conversationId }) {
   /* ------------------------------ List behavior --------------------------- */
 
   // Android back button: leave selection / edit / reply mode first, then navigate.
-  useEffect(() => {
-    if (!isFocused) return undefined;
-    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (multiSelectMode) {
-        clearMessageSelection();
-        return true;
-      }
-      if (editingMessage) {
-        cancelEditingMessage();
-        return true;
-      }
-      if (replyTo) {
-        setReplyTo(null);
-        return true;
-      }
-      return false;
-    });
-    return () => subscription.remove();
-  }, [isFocused, multiSelectMode, editingMessage, replyTo, clearMessageSelection, cancelEditingMessage]);
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (multiSelectMode) {
+          clearMessageSelection();
+          return true;
+        }
+        if (editingMessage) {
+          cancelEditingMessage();
+          return true;
+        }
+        if (replyTo) {
+          setReplyTo(null);
+          return true;
+        }
+        return false;
+      });
+      return () => subscription.remove();
+    }, [multiSelectMode, editingMessage, replyTo, clearMessageSelection, cancelEditingMessage])
+  );
 
   const jumpToMessage = useCallback(
     (id) => {

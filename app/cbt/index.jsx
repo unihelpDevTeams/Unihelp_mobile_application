@@ -13,7 +13,7 @@ import {
   Platform,
   StyleSheet,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
@@ -1208,38 +1208,40 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
   };
 
   // Hardware back: close overlays first, then step back through the flow.
-  useEffect(() => {
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      const cur = live.current;
-      if (cur.dialog) {
-        setDialog(null);
-        return true;
-      }
-      if (cur.showCalc) {
-        setShowCalc(false);
-        return true;
-      }
-      switch (cur.stage) {
-        case 'exam':
-          if (cur.loadingQuestions) cancelLoading();
-          else cur.confirmExit();
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        const cur = live.current;
+        if (cur.dialog) {
+          setDialog(null);
           return true;
-        case 'results':
-          resetAll();
+        }
+        if (cur.showCalc) {
+          setShowCalc(false);
           return true;
-        case 'instructions':
-          setStage('setup');
-          return true;
-        case 'setup':
-        case 'history':
-          setStage('browse');
-          return true;
-        default:
-          return false;
-      }
-    });
-    return () => sub.remove();
-  }, [cancelLoading, resetAll]);
+        }
+        switch (cur.stage) {
+          case 'exam':
+            if (cur.loadingQuestions) cancelLoading();
+            else cur.confirmExit();
+            return true;
+          case 'results':
+            resetAll();
+            return true;
+          case 'instructions':
+            setStage('setup');
+            return true;
+          case 'setup':
+          case 'history':
+            setStage('browse');
+            return true;
+          default:
+            return false;
+        }
+      });
+      return () => sub.remove();
+    }, [cancelLoading, resetAll])
+  );
 
   /* ------------------------------- Calculator ------------------------------- */
 

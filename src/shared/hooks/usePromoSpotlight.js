@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { useAuth } from '../../../context/AuthContext';
@@ -13,7 +14,10 @@ export function usePromoSpotlight() {
   const { user, loading } = useAuth();
   const [promo, setPromo] = useState(null);
   const [visible, setVisible] = useState(false);
+  const [decisionComplete, setDecisionComplete] = useState(false);
+  const [decisionUserId, setDecisionUserId] = useState(null);
   const visibleRef = useRef(false);
+  const loadingRef = useRef(false);
   const interactionLockedRef = useRef(false);
   const launchLoadedRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
@@ -24,10 +28,17 @@ export function usePromoSpotlight() {
   }, [visible]);
 
   const loadPromoForOpen = useCallback(async () => {
+    if (visibleRef.current || loadingRef.current) return;
+    loadingRef.current = true;
+    setDecisionUserId(user?.uid || null);
+    setDecisionComplete(false);
     try {
-      if (visibleRef.current) return;
       const nextPromo = await fetchNextPromoSpotlight();
-      if (!nextPromo) return;
+      if (!nextPromo) {
+        setPromo(null);
+        setVisible(false);
+        return;
+      }
       interactionLockedRef.current = false;
       setPromo(nextPromo);
       setVisible(true);
@@ -35,31 +46,26 @@ export function usePromoSpotlight() {
       trackPromoSpotlightEvent('promo_impression', nextPromo);
     } catch (error) {
       console.log('PromoSpotlight load skipped:', error?.message);
+    } finally {
+      loadingRef.current = false;
+      setDecisionComplete(true);
     }
-  }, []);
+  }, [user?.uid]);
 
   useEffect(() => {
-    let cancelled = false;
-    let timer = null;
+    if (loading) return undefined;
 
-    if (loading || !user || !user.emailVerified) {
+    if (!user || !user.emailVerified) {
       launchLoadedRef.current = false;
       setPromo(null);
       setVisible(false);
-      return () => {};
+      return undefined;
     }
 
     if (launchLoadedRef.current) return () => {};
     launchLoadedRef.current = true;
-
-    timer = setTimeout(async () => {
-      if (!cancelled) await loadPromoForOpen();
-    }, 700);
-
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
+    loadPromoForOpen();
+    return undefined;
   }, [loadPromoForOpen, loading, user]);
 
   useEffect(() => {
@@ -104,5 +110,14 @@ export function usePromoSpotlight() {
     trackPromoSpotlightEvent('promo_click', current);
   }, [promo]);
 
-  return { promo, visible, dismiss, markClicked };
+  return {
+    promo,
+    visible,
+    decisionComplete: !loading && (
+      !user?.emailVerified
+      || (decisionUserId === user?.uid && decisionComplete)
+    ),
+    dismiss,
+    markClicked,
+  };
 }

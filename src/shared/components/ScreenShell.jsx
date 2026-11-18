@@ -5,7 +5,7 @@ import { useNetInfo } from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FullScreenLoader } from './AILoaders';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, usePathname, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { layout } from '../theme';
 import { useTheme } from '../theme/ThemeContext';
@@ -23,6 +23,13 @@ import logo from '../../../assets/images/favicon.png';
 const ROLE_LABELS = {
   university: 'University Student',
 };
+
+const HOME_NAV_ITEMS = [
+  { key: 'feed', path: '/feed', label: 'Feed', icon: 'newspaper-outline', route: '/feed' },
+  { key: 'friends', path: '/friends', label: 'Requests', icon: 'person-add-outline', route: '/friends?tab=requests' },
+  { key: 'marketplace', path: '/studentmarketplace', label: 'Marketplace', icon: 'storefront-outline', route: '/studentmarketplace' },
+  { key: 'notifications', path: '/notifications', label: 'Notifications', icon: 'notifications-outline', route: '/notifications' },
+];
 
 // Item counts large enough to need a search box in the drawer.
 const MENU_SEARCH_THRESHOLD = 7;
@@ -68,6 +75,8 @@ export default function ScreenShell({
   keyboardAvoiding = true,
 }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const activeHomeNavItem = HOME_NAV_ITEMS.find((item) => item.path === pathname);
   const { profile, user, logout } = useAuth();
   const { colors } = useTheme();
   const { isConnected } = useNetInfo();
@@ -89,6 +98,18 @@ export default function ScreenShell({
       shadowColor: c.shadow, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
       zIndex: 5,
     },
+    homeNav: {
+      flexDirection: 'row',
+      backgroundColor: c.card,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.borderDefault,
+    },
+    homeNavTab: { flex: 1, minWidth: 0, height: 50, alignItems: 'center', justifyContent: 'center', gap: 3, position: 'relative' },
+    homeNavIcon: { color: c.textTertiary },
+    homeNavIconActive: { color: c.brand },
+    homeNavLabel: { color: c.textTertiary, fontSize: 10, fontWeight: '700' },
+    homeNavLabelActive: { color: c.brandText, fontWeight: '900' },
+    homeNavIndicator: { position: 'absolute', bottom: 0, left: '22%', right: '22%', height: 2, borderRadius: 1, backgroundColor: c.brand },
     headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     headerLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: s.md, marginRight: s.md },
     headerRight: { flexDirection: 'row', alignItems: 'center', gap: s.sm },
@@ -448,6 +469,27 @@ export default function ScreenShell({
             />
           </Animated.View>
         )}
+        {activeHomeNavItem ? (
+          <View style={styles.homeNav}>
+            {HOME_NAV_ITEMS.map((item) => {
+              const active = item.key === activeHomeNavItem.key;
+              return (
+                <Pressable
+                  key={item.key}
+                  style={({ pressed }) => [styles.homeNavTab, pressed && { opacity: 0.72 }]}
+                  onPress={() => router.navigate(item.route)}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={item.label}
+                >
+                  <Ionicons name={item.icon} size={19} style={active ? styles.homeNavIconActive : styles.homeNavIcon} />
+                  <Text numberOfLines={1} style={[styles.homeNavLabel, active && styles.homeNavLabelActive]}>{item.label}</Text>
+                  {active ? <View style={styles.homeNavIndicator} /> : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
         {content}
         {overlayContent ? (
           <View pointerEvents="box-none" style={styles.overlay}>{overlayContent}</View>

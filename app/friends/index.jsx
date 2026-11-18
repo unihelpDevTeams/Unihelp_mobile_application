@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Pressable, RefreshControl, Text, View } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
@@ -103,13 +103,14 @@ function ActionButton({ label, icon, variant = 'primary', loading, onPress, styl
 
 export default function FriendsPage() {
   const router = useRouter();
+  const { tab: requestedTab } = useLocalSearchParams();
   const { user, profile } = useAuth();
   const { colors } = useTheme();
   const styles = useThemeStyles(createStyles);
   const uid = user?.uid || profile?.uid;
   const profileRef = useRef(profile);
   profileRef.current = profile;
-  const [activeTab, setActiveTab] = useState('friends');
+  const [activeTab, setActiveTab] = useState(requestedTab === 'requests' ? 'requests' : 'friends');
   const [friends, setFriends] = useState([]);
   const [incoming, setIncoming] = useState([]);
   const [outgoing, setOutgoing] = useState([]);

@@ -241,12 +241,14 @@ export default function Groups() {
     sectionTitle: { color: c.textPrimary, fontSize: 17, fontWeight: '700', letterSpacing: -0.2 },
     sectionSubtitle: { color: c.textTertiary, fontSize: 13 },
 
-    /* your-groups rail */
-    rail: { gap: s.sm, paddingRight: s.md },
+    /* joined groups: intentionally vertical so the page has one calm reading flow */
+    rail: { gap: s.sm },
     railCard: {
-      width: 148, backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault,
-      borderRadius: r['2xl'], padding: s.md, gap: s.md,
+      flexDirection: 'row', alignItems: 'center', gap: s.sm, backgroundColor: c.card,
+      borderWidth: 1, borderColor: c.borderDefault, borderRadius: r['2xl'], padding: s.md,
     },
+    railMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: s.sm },
+    railCopy: { flex: 1 },
     railName: { color: c.textPrimary, fontSize: 14, fontWeight: '700' },
     railRole: { color: c.textTertiary, fontSize: 12, fontWeight: '500', marginTop: 2 },
 
@@ -264,8 +266,9 @@ export default function Groups() {
     avatarFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brandLight },
     avatarFallbackText: { color: c.brand, fontSize: 20, fontWeight: '700' },
     cardContent: { flex: 1, gap: 4 },
-    cardTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: s.xs },
+    cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: s.xs },
     cardTitle: { flex: 1, color: c.textPrimary, fontSize: 15.5, fontWeight: '700', letterSpacing: -0.1 },
+    cardStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 21 },
     badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: r.full },
     joinedBadge: { backgroundColor: c.greenLight },
     privateBadge: { backgroundColor: c.amberLight },
@@ -446,9 +449,12 @@ export default function Groups() {
 
   const handleShare = async (group) => {
     try {
+      const requiresApproval = group?.privacy === 'private' && group?.requireApproval !== false;
       const result = await shareContent({
         title: groupTitle(group),
-        text: `Join ${groupTitle(group)} on UniHelp.`,
+        text: requiresApproval
+          ? `Request to join ${groupTitle(group)} on UniHelp.`
+          : `Join ${groupTitle(group)} on UniHelp.`,
         url: buildShareUrl(`/community/${group.id}`),
       });
       if (result === 'dismissed' || result === 'cancelled') return;
@@ -661,11 +667,11 @@ export default function Groups() {
                       <Text style={styles.sectionTitle}>Your groups</Text>
                       <Text style={styles.sectionSubtitle}>Jump back into the conversation</Text>
                     </View>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
+                    <View style={styles.rail}>
                       {myGroups.map((entry) => (
-                        <RailCard key={entry.group.id} entry={entry} onOpen={() => openGroup(entry.group)} styles={styles} colors={colors} />
+                        <RailCard key={entry.group.id} entry={entry} onOpen={() => openGroup(entry.group)} onShare={() => handleShare(entry.group)} styles={styles} colors={colors} />
                       ))}
-                    </ScrollView>
+                    </View>
                   </View>
                 ) : null}
 
@@ -796,25 +802,34 @@ function GroupAvatar({ group, style, styles, textSize = 20 }) {
   );
 }
 
-function RailCard({ entry, onOpen, styles, colors }) {
+function RailCard({ entry, onOpen, onShare, styles, colors }) {
   const { group, role } = entry;
   const isAdmin = role === 'owner' || role === 'admin';
   return (
-    <Pressable
-      onPress={onOpen}
-      accessibilityRole="button"
-      accessibilityLabel={`Open ${groupTitle(group)}`}
-      style={({ pressed }) => [styles.railCard, pressed && styles.cardPressed]}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+    <View style={[styles.railCard, shadows.sm]}>
+      <Pressable
+        onPress={onOpen}
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${groupTitle(group)}`}
+        style={({ pressed }) => [styles.railMain, pressed && styles.cardPressed]}
+      >
         <GroupAvatar group={group} style={styles.avatarSmall} styles={styles} textSize={16} />
+        <View style={styles.railCopy}>
+          <Text style={styles.railName} numberOfLines={1}>{groupTitle(group)}</Text>
+          <Text style={styles.railRole}>{isAdmin ? 'Admin · Your community' : 'Member · Your community'}</Text>
+        </View>
         {isAdmin ? <Ionicons name="shield-checkmark" size={16} color={colors.green} /> : null}
-      </View>
-      <View>
-        <Text style={styles.railName} numberOfLines={1}>{groupTitle(group)}</Text>
-        <Text style={styles.railRole}>{isAdmin ? 'Admin' : 'Member'}</Text>
-      </View>
-    </Pressable>
+      </Pressable>
+      <Pressable
+        onPress={onShare}
+        hitSlop={6}
+        style={({ pressed }) => [styles.iconActionButton, pressed && { opacity: 0.75 }]}
+        accessibilityRole="button"
+        accessibilityLabel={`Share ${groupTitle(group)}`}
+      >
+        <Ionicons name="share-social-outline" size={17} color={colors.brand} />
+      </Pressable>
+    </View>
   );
 }
 
@@ -834,9 +849,23 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
     >
       <View style={styles.cardHeader}>
         <GroupAvatar group={group} style={styles.avatar} styles={styles} />
-        <View style={styles.cardContent}>
-          <View style={styles.cardTitleRow}>
-            <Text style={styles.cardTitle} numberOfLines={1}>{title}</Text>
+          <View style={styles.cardContent}>
+            <View style={styles.cardTitleRow}>
+              <Text style={styles.cardTitle} numberOfLines={1}>{title}</Text>
+              <Pressable
+                onPress={(event) => {
+                  event.stopPropagation();
+                  onShare();
+                }}
+                hitSlop={7}
+                style={({ pressed }) => [styles.iconActionButton, pressed && { opacity: 0.75 }]}
+                accessibilityRole="button"
+                accessibilityLabel={`Share ${title}`}
+              >
+                <Ionicons name="share-social-outline" size={17} color={colors.brand} />
+              </Pressable>
+            </View>
+            <View style={styles.cardStatusRow}>
             {isJoined ? (
               <View style={[styles.badge, styles.joinedBadge]}>
                 <Ionicons name={isAdmin ? 'shield-checkmark' : 'checkmark-circle'} size={12} color={colors.green} />
@@ -848,9 +877,9 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
                 <Text style={[styles.badgeText, { color: colors.amber }]}>Private</Text>
               </View>
             ) : null}
-          </View>
+            </View>
 
-          {description ? <Text style={styles.cardDescription} numberOfLines={2}>{description}</Text> : null}
+            {description ? <Text style={styles.cardDescription} numberOfLines={2}>{description}</Text> : null}
 
           <View style={styles.metaRow}>
             {group.category ? <Meta icon="pricetag-outline" text={group.category} styles={styles} colors={colors} /> : null}
@@ -865,18 +894,6 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
       </View>
 
       <View style={styles.cardFooter}>
-        <Pressable
-          onPress={(event) => {
-            event.stopPropagation();
-            onShare();
-          }}
-          style={({ pressed }) => [styles.iconActionButton, pressed && { opacity: 0.8 }]}
-          accessibilityRole="button"
-          accessibilityLabel={`Share ${title}`}
-        >
-          <Ionicons name="share-social-outline" size={17} color={colors.textSecondary} />
-        </Pressable>
-
         {isJoined ? (
           <Pressable
             onPress={(event) => {

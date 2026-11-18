@@ -41,7 +41,7 @@ export default function VerifyEmailScreen() {
     try {
       const refreshedUser = reloadUser ? await reloadUser() : (await auth.currentUser.reload(), auth.currentUser);
       if (refreshedUser?.emailVerified) {
-        router.replace('/(tabs)');
+        router.replace('/(tabs)/feed');
       } else {
         Alert.alert('Not verified yet', 'Open the link in your email, then tap "I verified my email".');
       }

@@ -154,7 +154,7 @@ export default function Login() {
       const pending = await readPendingDeepLink();
       if (pending) return;
 
-      router.replace('/(tabs)');
+      router.replace('/(tabs)/feed');
     } catch (submitError) {
       logError('Login', submitError, { email: email.trim() });
       if (submitError?.code === 'auth/email-not-verified') {
@@ -176,7 +176,7 @@ export default function Login() {
 
       const pending = await readPendingDeepLink();
       if (pending) return;
-      router.replace('/(tabs)');
+      router.replace('/(tabs)/feed');
     } catch (googleError) {
       logError('Google login', googleError);
       setError(translateError(googleError));

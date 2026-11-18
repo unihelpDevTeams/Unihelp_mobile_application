@@ -670,11 +670,25 @@ export const loadMoreFriends = async (uid, cursor, pageSize = FRIEND_PAGE_SIZE) 
 export const listSuggestedFriends = async ({ uid, profile = {}, pageSize = 40 } = {}) => {
   if (!uid) return [];
 
+  let outgoingSnap = null;
+  const pendingOutgoingIds = new Set();
+
   // 1. First attempt: fetch recommendations from PostgreSQL backend
   try {
+    outgoingSnap = await getDocs(query(
+      collection(db, COLLECTIONS.friendRequests),
+      where('from', '==', uid),
+      where('status', '==', 'pending')
+    ));
+    outgoingSnap.docs.forEach((requestDoc) => {
+      const targetUid = requestDoc.data()?.to;
+      if (targetUid) pendingOutgoingIds.add(targetUid);
+    });
+
     const res = await getJson('/api/friendships/suggestions');
     if (Array.isArray(res) && res.length > 0) {
-      return res.slice(0, pageSize);
+      const suggestions = res.filter((student) => !pendingOutgoingIds.has(student.id || student.uid));
+      if (suggestions.length > 0) return suggestions.slice(0, pageSize);
     }
   } catch (error) {
     // Non-fatal: fall back to Firestore
@@ -683,15 +697,15 @@ export const listSuggestedFriends = async ({ uid, profile = {}, pageSize = 40 } 
   // 2. Fallback: fetch from Firestore users collection
   try {
     const usersSnap = await getDocs(query(collection(db, COLLECTIONS.users), limit(120)));
-    const [friendsSnap, outgoingSnap, incomingSnap, blockedSnap] = await Promise.all([
+    const [friendsSnap, outgoingRequestsSnap, incomingSnap, blockedSnap] = await Promise.all([
       getDocs(query(collection(db, COLLECTIONS.friends), where('users', 'array-contains', uid))),
-      getDocs(query(collection(db, COLLECTIONS.friendRequests), where('from', '==', uid), where('status', '==', 'pending'))),
+      outgoingSnap || getDocs(query(collection(db, COLLECTIONS.friendRequests), where('from', '==', uid), where('status', '==', 'pending'))),
       getDocs(query(collection(db, COLLECTIONS.friendRequests), where('to', '==', uid), where('status', '==', 'pending'))),
       getDocs(query(collection(db, COLLECTIONS.blockedUsers), where('blockerId', '==', uid))),
     ]);
     const excluded = new Set([uid]);
     friendsSnap.docs.forEach((friendDoc) => friendDoc.data()?.users?.forEach?.((id) => id !== uid && excluded.add(id)));
-    outgoingSnap.docs.forEach((requestDoc) => excluded.add(requestDoc.data()?.to));
+    outgoingRequestsSnap.docs.forEach((requestDoc) => excluded.add(requestDoc.data()?.to));
     incomingSnap.docs.forEach((requestDoc) => excluded.add(requestDoc.data()?.from));
     blockedSnap.docs.forEach((blockDoc) => excluded.add(blockDoc.data()?.blockedId));
 

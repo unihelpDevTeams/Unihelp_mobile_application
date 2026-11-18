@@ -98,7 +98,7 @@ export default function SignupFlow() {
       setLoading(true);
       setSubmitError('');
       const result = await signInWithGoogle();
-      if (!result?.cancelled) router.replace('/(tabs)');
+      if (!result?.cancelled) router.replace('/(tabs)/feed');
     } catch (error) {
       setSubmitError(getSignupErrorMessage(error));
     } finally {

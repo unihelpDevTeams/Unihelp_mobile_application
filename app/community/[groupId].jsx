@@ -68,6 +68,7 @@ import {
 } from '../../src/shared/services/community';
 import { uploadChatAttachment, uploadFeatureMedia } from '../../src/shared/services/backend';
 import { DOCUMENT_MIME_TYPES, prepareChatAttachment } from '../../src/shared/services/chatAttachments';
+import { buildShareUrl, shareContent } from '../../utils/share';
 import {
   BUBBLE_PRESETS,
   BUBBLE_SHAPES,
@@ -688,6 +689,20 @@ const createStyles = (c) => ({
   groupOptionsAvatarText: { color: c.brandDark, fontWeight: '800', fontSize: 15 },
   groupOptionsName: { fontSize: 15, fontWeight: '800', color: c.textPrimary },
   groupOptionsMeta: { fontSize: 12, color: c.textSecondary, marginTop: 1 },
+  groupShareHeading: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, marginBottom: 14 },
+  groupShareIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brandLight },
+  groupShareTitle: { color: c.textPrimary, fontSize: 16, fontWeight: '900' },
+  groupShareHint: { color: c.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  qrWrap: { alignItems: 'center', paddingVertical: 14, borderRadius: 18, backgroundColor: '#FFFFFF', marginBottom: 12 },
+  qrCode: { width: 190, height: 190 },
+  qrCaption: { color: '#475569', fontSize: 11.5, fontWeight: '700', marginTop: 9 },
+  inviteLinkRow: { flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: c.borderDefault, borderRadius: 12, backgroundColor: c.inputBackground, paddingHorizontal: 11, paddingVertical: 11 },
+  inviteLink: { flex: 1, color: c.textSecondary, fontSize: 12 },
+  groupShareActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  copyInviteButton: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 7, paddingVertical: 12, borderRadius: 12, backgroundColor: c.brandLight },
+  copyInviteText: { color: c.brandText, fontSize: 13, fontWeight: '900' },
+  shareInviteButton: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 7, paddingVertical: 12, borderRadius: 12, backgroundColor: c.brand },
+  shareInviteText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
   requestsCard: { backgroundColor: c.surface, borderRadius: 16, borderWidth: 1, borderColor: c.borderDefault, padding: 12, marginBottom: 12 },
   requestsTitle: { fontSize: 13, fontWeight: '800', color: c.textPrimary, marginBottom: 8 },
   requestRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.borderDefault },
@@ -1259,6 +1274,7 @@ function GroupDetailScreen({ groupId }) {
   const [activeMessage, setActiveMessage] = useState(null);
   const [reactionViewer, setReactionViewer] = useState(null);
   const [groupOptionsVisible, setGroupOptionsVisible] = useState(false);
+  const [groupShareVisible, setGroupShareVisible] = useState(false);
   const [bubbleCustomizerVisible, setBubbleCustomizerVisible] = useState(false);
   const [bubbleAppearanceDraft, setBubbleAppearanceDraft] = useState(() => normalizeBubbleAppearance(profile?.chatBubbleAppearance));
   const [appearanceSaving, setAppearanceSaving] = useState(false);
@@ -1746,6 +1762,30 @@ function GroupDetailScreen({ groupId }) {
   };
 
   const openProfile = useCallback((senderId) => router.navigate(`/view-user-profile/${senderId}`), [router]);
+
+  const groupShareUrl = useMemo(() => groupId ? buildShareUrl(`/community/${groupId}`) : '', [groupId]);
+  const groupJoinDescription = group?.privacy === 'private' && group?.requireApproval !== false
+    ? 'Scanning opens this private group and lets students request access. An admin still approves each request.'
+    : 'Scanning opens this group so eligible students can join directly.';
+  const qrCodeUrl = useMemo(() => groupShareUrl
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=420x420&format=png&data=${encodeURIComponent(groupShareUrl)}`
+    : '', [groupShareUrl]);
+
+  const copyGroupLink = useCallback(async () => {
+    if (!groupShareUrl) return;
+    await Clipboard.setStringAsync(groupShareUrl);
+    showToast('Group link copied');
+  }, [groupShareUrl]);
+
+  const shareGroupLink = useCallback(async () => {
+    if (!groupShareUrl || !group) return;
+    const result = await shareContent({
+      title: group.name || 'UniHelp group',
+      text: `Join ${group.name || 'this group'} on UniHelp.`,
+      url: groupShareUrl,
+    });
+    if (result !== 'dismissed' && result !== 'cancelled') showToast(result === 'shared' ? 'Ready to share' : 'Group link copied');
+  }, [group, groupShareUrl]);
 
   const openDm = async (message) => {
     if (!user || !message?.senderId || message.senderId === uid) return;
@@ -2596,6 +2636,9 @@ function GroupDetailScreen({ groupId }) {
               <Text style={styles.conversationName} numberOfLines={1}>{group.name}</Text>
               <Text style={styles.conversationStatus} numberOfLines={1}>{group.allowMemberMessages === false ? 'Announcements' : `${pluralize(Number(group.memberCount || 0), 'member')} · Group chat`}</Text>
             </Pressable>
+            <Pressable style={styles.conversationAction} onPress={() => setGroupShareVisible(true)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Share group invite">
+              <Ionicons name="share-social-outline" size={18} color={colors.brand} />
+            </Pressable>
             {isAdmin ? (
               <Pressable style={styles.conversationAction} onPress={openEdit} hitSlop={8} accessibilityRole="button" accessibilityLabel="Edit group">
                 <Ionicons name="create-outline" size={18} color={colors.brand} />
@@ -2975,6 +3018,7 @@ function GroupDetailScreen({ groupId }) {
             </View>
 
             {[
+              { icon: 'share-social-outline', label: 'Share group invite', onPress: () => { setGroupOptionsVisible(false); setGroupShareVisible(true); } },
               { icon: 'color-palette-outline', label: 'Customize chat bubbles', onPress: openBubbleCustomizer },
               { icon: 'mail-outline', label: 'Open messages', onPress: () => { setGroupOptionsVisible(false); router.navigate('/messages'); } },
               { icon: 'settings-outline', label: isAdmin ? 'Members and settings' : 'Group settings', onPress: () => { setGroupOptionsVisible(false); router.navigate({ pathname: '/community-settings', params: { groupId } }); } },
@@ -2990,6 +3034,32 @@ function GroupDetailScreen({ groupId }) {
               </Pressable>
             ))}
           </Animated.View>
+        </View>
+      </Modal>
+
+      {/* Group invite: native share for destinations, clipboard for quick reuse,
+          and a scannable code for in-person sharing. Private groups still keep
+          their approval rule; the code never bypasses group settings. */}
+      <Modal visible={groupShareVisible} transparent animationType="slide" onRequestClose={() => setGroupShareVisible(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setGroupShareVisible(false)} />
+        <View style={styles.sheetWrap}>
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandleWrap}><View style={styles.sheetHandle} /></View>
+            <View style={styles.groupShareHeading}>
+              <View style={styles.groupShareIcon}><Ionicons name="people-outline" size={21} color={colors.brand} /></View>
+              <View style={{ flex: 1 }}><Text style={styles.groupShareTitle}>Invite to {group?.name || 'group'}</Text><Text style={styles.groupShareHint}>{groupJoinDescription}</Text></View>
+            </View>
+            {qrCodeUrl ? <View style={styles.qrWrap}><Image source={{ uri: qrCodeUrl }} style={styles.qrCode} accessibilityLabel="QR code for this group invite" /><Text style={styles.qrCaption}>Scan to open this group in UniHelp</Text></View> : null}
+            <View style={styles.inviteLinkRow}>
+              <Ionicons name="link-outline" size={18} color={colors.textSecondary} />
+              <Text style={styles.inviteLink} numberOfLines={1}>{groupShareUrl}</Text>
+              <Pressable onPress={copyGroupLink} hitSlop={8} accessibilityRole="button" accessibilityLabel="Copy group link"><Ionicons name="copy-outline" size={19} color={colors.brand} /></Pressable>
+            </View>
+            <View style={styles.groupShareActions}>
+              <Pressable style={styles.copyInviteButton} onPress={copyGroupLink} accessibilityRole="button"><Ionicons name="copy-outline" size={17} color={colors.brandText} /><Text style={styles.copyInviteText}>Copy link</Text></Pressable>
+              <Pressable style={styles.shareInviteButton} onPress={shareGroupLink} accessibilityRole="button"><Ionicons name="share-social-outline" size={17} color="#FFFFFF" /><Text style={styles.shareInviteText}>Share invite</Text></Pressable>
+            </View>
+          </View>
         </View>
       </Modal>
 

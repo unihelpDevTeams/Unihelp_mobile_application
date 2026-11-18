@@ -25,16 +25,32 @@ import { PushNotificationBootstrap } from '../hooks/usePushNotifications';
 import { ThemeProvider, useTheme, ThemeGate } from '../src/shared/theme/ThemeContext';
 import PromoSpotlight from '../src/shared/components/PromoSpotlight/PromoSpotlight';
 import { usePromoSpotlight } from '../src/shared/hooks/usePromoSpotlight';
+import { useAppUpdate } from '../src/shared/hooks/useAppUpdate';
+import PlayStoreUpdatePrompt from '../src/shared/components/PlayStoreUpdatePrompt';
 import { FullScreenLoader } from '../src/shared/components/AILoaders';
 import { NetworkProvider, useNetwork } from '../context/NetworkContext';
 import OfflineBanner from '../components/OfflineBanner';
 import { isPremiumActive } from '../src/shared/services/premium';
 import { submitReport } from '../src/shared/services/support';
 
+export const unstable_settings = {
+  anchor: '(tabs)',
+};
+
 function AppContent() {
   const { colors, isDark, themeLoaded } = useTheme();
   const { loading: authLoading, profile, profileSyncing, user } = useAuth();
-  const { promo, visible: promoVisible, dismiss: dismissPromo, markClicked: markPromoClicked } = usePromoSpotlight();
+  const {
+    promo,
+    visible: promoVisible,
+    decisionComplete: promoDecisionComplete,
+    dismiss: dismissPromo,
+    markClicked: markPromoClicked,
+  } = usePromoSpotlight();
+  const appUpdate = useAppUpdate({
+    enabled: !authLoading,
+    spotlightReady: promoDecisionComplete && !promoVisible,
+  });
   const { isOnline } = useNetwork();
   const router = useRouter();
   const rootNavigationState = useRootNavigationState();
@@ -226,6 +242,12 @@ function AppContent() {
         onDismiss={dismissPromo}
         onAction={markPromoClicked}
         blurTarget={promoBlurTarget}
+      />
+      <PlayStoreUpdatePrompt
+        visible={appUpdate.promptVisible}
+        updating={appUpdate.updating}
+        onUpdate={appUpdate.updateNow}
+        onDismiss={appUpdate.maybeLater}
       />
       <OfflineBanner />
       <Modal

@@ -16,15 +16,21 @@ import ScreenShell from '../../src/shared/components/ScreenShell';
 import EmptyState from '../../src/shared/components/EmptyState';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
-import { spacing, borderRadius, shadows } from '../../src/shared/theme';
+import { shadows } from '../../src/shared/theme';
 import { useAuth } from '../../context/AuthContext';
 import { searchUsers } from '../../src/shared/services/community';
-import {
-  RELATIONSHIP,
-  listenRelationship,
-  listSuggestedFriends,
-  sendFriendRequest,
-} from '../../src/shared/services/friendships';
+import * as friendships from '../../src/shared/services/friendships';
+
+const { RELATIONSHIP, listenRelationship, listSuggestedFriends, sendFriendRequest } = friendships;
+
+// Optional service functions. If your friendships service exports any of these names, the
+// matching action (Cancel request / Confirm / Delete) is performed right from the list.
+// If none exist, the button simply opens the person's profile, where those actions live.
+// Each one is called with { currentUid, targetUid, currentProfile, targetProfile }.
+const pickFn = (...names) => names.map((name) => friendships[name]).find((fn) => typeof fn === 'function');
+const cancelRequestFn = pickFn('cancelFriendRequest', 'cancelSentFriendRequest', 'withdrawFriendRequest');
+const acceptRequestFn = pickFn('acceptFriendRequest', 'confirmFriendRequest');
+const declineRequestFn = pickFn('declineFriendRequest', 'rejectFriendRequest', 'deleteFriendRequest', 'ignoreFriendRequest');
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -42,6 +48,15 @@ const MISSING_PROFILE_HINT = {
 };
 
 const TOAST_DURATION = 2600;
+const TOAST_DURATION_WITH_ACTION = 4200;
+const OVERRIDE_FALLBACK_MS = 4000;
+const RELATIONSHIP_TIMEOUT_MS = 1500;
+const SEARCH_DEBOUNCE_MS = 250;
+const SEARCH_DEBOUNCE_CACHED_MS = 120;
+const SEARCH_CACHE_LIMIT = 25;
+const SKELETON_ROWS = [0, 1, 2, 3, 4];
+
+/* ------------------------------ helpers ------------------------------ */
 
 const nameOf = (person = {}) => {
   const possible = (
@@ -86,6 +101,12 @@ const interestsOf = (person = {}) => (
 
 const mySchoolOf = (profile) => schoolOf(profile || {});
 
+const omitKey = (obj, key) => {
+  const next = { ...obj };
+  delete next[key];
+  return next;
+};
+
 // Whether the current user has the profile data needed for a given filter.
 const isFilterReady = (key, profile) => {
   if (key === 'all') return true;
@@ -108,6 +129,24 @@ const matchesFilter = (person, key, profile) => {
   return true;
 };
 
+// Facebook-style "mutual friends" line, built from what students actually share.
+const commonalityOf = (person, profile) => {
+  const parts = [];
+  const sameSchool = !!schoolOf(person) && norm(schoolOf(person)) === norm(mySchoolOf(profile));
+  const sameDept = !!departmentOf(person) && norm(departmentOf(person)) === norm(departmentOf(profile));
+  const sameLevel = !!person.level && norm(person.level) === norm(profile?.level);
+  const mine = interestsOf(profile);
+  const shared = mine.length ? interestsOf(person).filter((item) => mine.includes(item)).length : 0;
+
+  if (sameDept) parts.push('Same department');
+  else if (sameSchool) parts.push('Same school');
+  if (shared > 0) parts.push(`${shared} shared interest${shared > 1 ? 's' : ''}`);
+  if (sameLevel) parts.push('Same level');
+  return parts.slice(0, 2).join(' | ');
+};
+
+/* ------------------------------ small components ------------------------------ */
+
 const Avatar = memo(function Avatar({ person, styles }) {
   const uri = person.photo || person.avatar || person.photoURL || '';
   const [failed, setFailed] = useState(false);
@@ -125,122 +164,249 @@ const Avatar = memo(function Avatar({ person, styles }) {
   );
 });
 
-function RelationshipAction({ person, currentUid, currentProfile, styles, onNotify }) {
-  const { colors } = useTheme();
-  const router = useRouter();
-  const targetUid = uidOf(person);
-  const [relationship, setRelationship] = useState({ state: RELATIONSHIP.NONE });
-  const [busy, setBusy] = useState(false);
-  const mounted = useRef(true);
+// Gives the action area a quick spring "pop" whenever the relationship state changes,
+// so the swap (Add friend -> Cancel request) feels alive instead of just blinking.
+function Pop({ trigger, style, children }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const previous = useRef(trigger);
 
   useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
+    const before = previous.current;
+    previous.current = trigger;
+    if (before == null || before === trigger) return;
+    scale.setValue(0.94);
+    Animated.spring(scale, { toValue: 1, friction: 5, tension: 200, useNativeDriver: true }).start();
+  }, [trigger, scale]);
 
-  useEffect(() => {
-    if (!currentUid || !targetUid) return undefined;
-    return listenRelationship(currentUid, targetUid, (next) => {
-      setRelationship(next || { state: RELATIONSHIP.NONE });
-    });
-  }, [currentUid, targetUid]);
+  return <Animated.View style={[style, { transform: [{ scale }] }]}>{children}</Animated.View>;
+}
 
-  const openProfile = () => router.navigate(`/view-user-profile/${targetUid}`);
-
-  const addFriend = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await sendFriendRequest({
-        currentUid,
-        targetUid,
-        currentProfile,
-        targetProfile: person,
-      });
-      onNotify?.(`Friend request sent to ${nameOf(person)}`, 'success');
-    } catch (error) {
-      onNotify?.(error?.message || 'Could not send the request. Try again.', 'error');
-    } finally {
-      if (mounted.current) setBusy(false);
-    }
-  };
-
-  if (relationship.state === RELATIONSHIP.BLOCKED) return null;
-
-  if (relationship.state === RELATIONSHIP.FRIENDS) {
-    return (
-      <Pressable
-        style={({ pressed }) => [styles.smallButton, styles.friendButton, pressed && styles.buttonPressed]}
-        onPress={openProfile}
-        accessibilityRole="button"
-        accessibilityLabel={`You are friends with ${nameOf(person)}. Open profile`}
-      >
-        <Ionicons name="checkmark-circle" size={15} color={colors.green} />
-        <Text style={styles.friendButtonText}>Friends</Text>
-      </Pressable>
-    );
-  }
-
-  if (relationship.state === RELATIONSHIP.SENT) {
-    return (
-      <View style={[styles.smallButton, styles.sentButton]} accessibilityLabel="Friend request sent">
-        <Ionicons name="time-outline" size={15} color={colors.grey} />
-        <Text style={styles.sentButtonText}>Sent</Text>
-      </View>
-    );
-  }
-
-  if (relationship.state === RELATIONSHIP.RECEIVED) {
-    return (
-      <Pressable
-        style={({ pressed }) => [styles.smallButton, styles.secondaryButton, pressed && styles.buttonPressed]}
-        onPress={openProfile}
-        accessibilityRole="button"
-        accessibilityLabel={`Respond to friend request from ${nameOf(person)}`}
-      >
-        <Ionicons name="mail-unread-outline" size={15} color={colors.brand} />
-        <Text style={styles.secondaryButtonText}>Respond</Text>
-      </Pressable>
-    );
-  }
+const ActionButton = memo(function ActionButton({
+  label,
+  icon,
+  variant = 'primary',
+  onPress,
+  styles,
+  colors,
+  accessibilityLabel,
+}) {
+  const foreground = variant === 'primary'
+    ? colors.onBrand
+    : variant === 'friend'
+      ? colors.green
+      : colors.ink;
+  const variantStyle = variant === 'primary'
+    ? styles.btnPrimary
+    : variant === 'friend'
+      ? styles.btnFriend
+      : styles.btnSecondary;
 
   return (
     <Pressable
-      style={({ pressed }) => [styles.smallButton, (pressed || busy) && styles.buttonPressed]}
-      onPress={addFriend}
-      disabled={busy}
+      style={({ pressed }) => [styles.btn, variantStyle, pressed && styles.btnPressed]}
+      onPress={onPress}
+      hitSlop={4}
       accessibilityRole="button"
-      accessibilityLabel={`Add ${nameOf(person)} as a friend`}
-      accessibilityState={{ busy, disabled: busy }}
+      accessibilityLabel={accessibilityLabel || label}
     >
-      {busy ? (
-        <ActivityIndicator size="small" color={colors.onBrand} />
-      ) : (
-        <Ionicons name="person-add-outline" size={15} color={colors.onBrand} />
-      )}
-      <Text style={styles.smallButtonText}>{busy ? 'Sending' : 'Add'}</Text>
+      <Ionicons name={icon} size={16} color={foreground} />
+      <Text style={[styles.btnText, { color: foreground }]} numberOfLines={1}>{label}</Text>
     </Pressable>
+  );
+});
+
+const SkeletonRow = memo(function SkeletonRow({ styles }) {
+  return (
+    <View style={styles.card}>
+      <View style={styles.skeletonAvatar} />
+      <View style={styles.cardBody}>
+        <View style={[styles.skeletonLine, { width: '55%', height: 14 }]} />
+        <View style={[styles.skeletonLine, { width: '80%', marginTop: 8 }]} />
+        <View style={styles.actions}>
+          <View style={styles.skeletonButton} />
+          <View style={styles.skeletonButton} />
+        </View>
+      </View>
+    </View>
+  );
+});
+
+function SkeletonList({ styles }) {
+  const pulse = useRef(new Animated.Value(0.55)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.55, duration: 700, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+
+  return (
+    <Animated.View style={[styles.skeletonWrap, { opacity: pulse }]}>
+      {SKELETON_ROWS.map((key) => <SkeletonRow key={key} styles={styles} />)}
+    </Animated.View>
   );
 }
 
-const StudentRow = memo(function StudentRow({ person, currentUid, currentProfile, colors, styles, onNotify }) {
-  const router = useRouter();
+/* ------------------------------ student row ------------------------------ */
+
+const StudentRow = memo(function StudentRow({
+  person,
+  currentUid,
+  currentProfile,
+  mode,
+  override,
+  colors,
+  styles,
+  onAction,
+  onDismiss,
+  onOpenProfile,
+  onRelationship,
+}) {
   const targetUid = uidOf(person);
+  const name = nameOf(person);
+  const [relState, setRelState] = useState(RELATIONSHIP.NONE);
+  const [ready, setReady] = useState(false);
+
+  // One listener per visible row. If the first snapshot never arrives, fall back to "none"
+  // after a short wait so the row never gets stuck on placeholders.
+  useEffect(() => {
+    if (!currentUid || !targetUid) return undefined;
+    setReady(false);
+    const timer = setTimeout(() => setReady(true), RELATIONSHIP_TIMEOUT_MS);
+    const unsubscribe = listenRelationship(currentUid, targetUid, (next) => {
+      clearTimeout(timer);
+      const state = next?.state || RELATIONSHIP.NONE;
+      setRelState(state);
+      setReady(true);
+      onRelationship?.(targetUid, state);
+    });
+    return () => {
+      clearTimeout(timer);
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [currentUid, targetUid, onRelationship]);
+
+  // Optimistic state wins until the real listener catches up.
+  const state = override ?? (ready ? relState : null);
+
+  const context = useMemo(() => commonalityOf(person, currentProfile), [person, currentProfile]);
   const interests = Array.isArray(person.interests) ? person.interests.slice(0, 3).join(', ') : '';
+
+  let statusLine = context || interests;
+  let statusIsAccent = false;
+  if (state === RELATIONSHIP.RECEIVED) {
+    statusLine = 'Sent you a friend request';
+    statusIsAccent = true;
+  } else if (state === RELATIONSHIP.SENT) {
+    statusLine = 'Friend request sent';
+    statusIsAccent = true;
+  }
+
+  const open = useCallback(() => onOpenProfile(targetUid), [onOpenProfile, targetUid]);
+  const add = useCallback(() => onAction(person, 'add'), [onAction, person]);
+  const cancel = useCallback(() => onAction(person, 'cancel'), [onAction, person]);
+  const confirm = useCallback(() => onAction(person, 'confirm'), [onAction, person]);
+  const remove = useCallback(() => onAction(person, 'delete'), [onAction, person]);
+  const dismiss = useCallback(() => onDismiss(targetUid), [onDismiss, targetUid]);
+
+  let buttons = null;
+  if (state === null) {
+    buttons = (
+      <>
+        <View style={styles.btnPlaceholder} />
+        {mode === 'suggested' ? <View style={styles.btnPlaceholder} /> : null}
+      </>
+    );
+  } else if (state === RELATIONSHIP.FRIENDS) {
+    buttons = (
+      <ActionButton
+        label="Friends"
+        icon="checkmark-circle"
+        variant="friend"
+        onPress={open}
+        styles={styles}
+        colors={colors}
+        accessibilityLabel={`You are friends with ${name}. Open profile`}
+      />
+    );
+  } else if (state === RELATIONSHIP.SENT) {
+    buttons = (
+      <ActionButton
+        label={cancelRequestFn ? 'Cancel request' : 'Request sent'}
+        icon={cancelRequestFn ? 'close' : 'time-outline'}
+        variant="secondary"
+        onPress={cancelRequestFn ? cancel : open}
+        styles={styles}
+        colors={colors}
+        accessibilityLabel={cancelRequestFn ? `Cancel friend request to ${name}` : `Friend request sent to ${name}. Open profile`}
+      />
+    );
+  } else if (state === RELATIONSHIP.RECEIVED) {
+    buttons = (
+      <>
+        <ActionButton
+          label="Confirm"
+          icon="checkmark"
+          variant="primary"
+          onPress={acceptRequestFn ? confirm : open}
+          styles={styles}
+          colors={colors}
+          accessibilityLabel={`Confirm friend request from ${name}`}
+        />
+        <ActionButton
+          label="Delete"
+          icon="trash-outline"
+          variant="secondary"
+          onPress={declineRequestFn ? remove : open}
+          styles={styles}
+          colors={colors}
+          accessibilityLabel={`Delete friend request from ${name}`}
+        />
+      </>
+    );
+  } else {
+    buttons = (
+      <>
+        <ActionButton
+          label="Add friend"
+          icon="person-add"
+          variant="primary"
+          onPress={add}
+          styles={styles}
+          colors={colors}
+          accessibilityLabel={`Add ${name} as a friend`}
+        />
+        {mode === 'suggested' ? (
+          <ActionButton
+            label="Remove"
+            icon="close"
+            variant="secondary"
+            onPress={dismiss}
+            styles={styles}
+            colors={colors}
+            accessibilityLabel={`Remove ${name} from suggestions`}
+          />
+        ) : null}
+      </>
+    );
+  }
 
   return (
     <Pressable
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-      onPress={() => router.navigate(`/view-user-profile/${targetUid}`)}
+      onPress={open}
       accessibilityRole="button"
-      accessibilityLabel={`View ${nameOf(person)}'s profile`}
+      accessibilityLabel={`View ${name}'s profile`}
     >
       <Avatar person={person} styles={styles} />
       <View style={styles.cardBody}>
         <View style={styles.cardTop}>
-          <Text style={styles.name} numberOfLines={1}>{nameOf(person)}</Text>
+          <Text style={styles.name} numberOfLines={1}>{name}</Text>
           {person.verifiedTutor ? (
             <View style={styles.tutorPill}>
               <Ionicons name="shield-checkmark-outline" size={12} color={colors.teal} />
@@ -249,112 +415,294 @@ const StudentRow = memo(function StudentRow({ person, currentUid, currentProfile
           ) : null}
         </View>
         <Text style={styles.meta} numberOfLines={1}>{metaOf(person) || person.email || 'UniHelp student'}</Text>
-        {interests ? <Text style={styles.interests} numberOfLines={1}>{interests}</Text> : null}
+        {statusLine ? (
+          <View style={styles.statusRow}>
+            <Ionicons
+              name={statusIsAccent ? 'person-outline' : 'people-outline'}
+              size={13}
+              color={statusIsAccent ? colors.brand : colors.brandText}
+            />
+            <Text style={[styles.statusText, statusIsAccent && styles.statusTextAccent]} numberOfLines={1}>
+              {statusLine}
+            </Text>
+          </View>
+        ) : null}
+        <Pop trigger={state} style={styles.actions}>
+          {buttons}
+        </Pop>
       </View>
-      <RelationshipAction
-        person={person}
-        currentUid={currentUid}
-        currentProfile={currentProfile}
-        styles={styles}
-        onNotify={onNotify}
-      />
     </Pressable>
   );
 });
 
+/* ------------------------------ screen ------------------------------ */
+
 export default function FindFriendsPage() {
+  const router = useRouter();
   const { user, profile } = useAuth();
   const { colors } = useTheme();
   const styles = useThemeStyles(createStyles);
   const uid = user?.uid || profile?.uid;
+
   const [search, setSearch] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
   const [filter, setFilter] = useState('all');
-  const [results, setResults] = useState([]);
   const [suggested, setSuggested] = useState([]);
+  const [searchState, setSearchState] = useState({ key: '', rows: [], error: false });
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(false);
-  const [searchError, setSearchError] = useState(false);
   const [toast, setToast] = useState(null);
+  // Optimistic relationship overrides: { [uid]: { state, id } }
+  const [overrides, setOverrides] = useState({});
+  const [blocked, setBlocked] = useState({});
+  const [dismissed, setDismissed] = useState({});
 
+  const mounted = useRef(true);
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+  const suggestRequest = useRef(0);
+  const latestSearchKey = useRef('');
+  const searchCache = useRef(new Map());
+  const actionQueue = useRef({});
+  const overrideCounter = useRef(0);
   const toastAnim = useRef(new Animated.Value(0)).current;
   const toastTimer = useRef(null);
 
-  const query = search.trim();
-  const isSearching = query.length >= 2;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
 
-  const showToast = useCallback((message, tone = 'success') => {
+  const query = search.trim();
+  const queryKey = query.toLowerCase();
+  const isSearching = query.length >= 2;
+  const mode = isSearching ? 'search' : 'suggested';
+  latestSearchKey.current = isSearching ? queryKey : '';
+
+  // Only refetch suggestions when something that affects them changes, not on every
+  // auth-context object refresh.
+  const profileKey = [
+    uid,
+    mySchoolOf(profile),
+    departmentOf(profile),
+    profile?.level,
+    interestsOf(profile).join(','),
+  ].join('|');
+
+  /* ---- toast ---- */
+
+  const hideToast = useCallback(() => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    setToast({ message, tone });
-    Animated.timing(toastAnim, { toValue: 1, duration: 180, useNativeDriver: true }).start();
-    toastTimer.current = setTimeout(() => {
-      Animated.timing(toastAnim, { toValue: 0, duration: 180, useNativeDriver: true }).start(() => setToast(null));
-    }, TOAST_DURATION);
+    Animated.timing(toastAnim, { toValue: 0, duration: 160, useNativeDriver: true }).start(({ finished }) => {
+      // An interrupted animation means a newer toast took over; don't wipe it.
+      if (finished && mounted.current) setToast(null);
+    });
   }, [toastAnim]);
 
-  useEffect(() => () => {
+  const showToast = useCallback((message, tone = 'success', action = null) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
-  }, []);
+    setToast({ id: Date.now(), message, tone, action });
+    Animated.timing(toastAnim, { toValue: 1, duration: 180, useNativeDriver: true }).start();
+    toastTimer.current = setTimeout(hideToast, action ? TOAST_DURATION_WITH_ACTION : TOAST_DURATION);
+  }, [hideToast, toastAnim]);
+
+  /* ---- suggestions ---- */
 
   const loadSuggested = useCallback(async () => {
     if (!uid) return;
+    const requestId = ++suggestRequest.current;
     try {
-      const rows = await listSuggestedFriends({ uid, profile, pageSize: 40 });
+      const rows = await listSuggestedFriends({ uid, profile: profileRef.current, pageSize: 40 });
+      if (requestId !== suggestRequest.current || !mounted.current) return;
       setSuggested(Array.isArray(rows) ? rows : []);
       setLoadError(false);
     } catch (error) {
+      if (requestId !== suggestRequest.current || !mounted.current) return;
       setLoadError(true);
     }
-  }, [profile, uid]);
+  }, [uid]);
 
   useEffect(() => {
-    let active = true;
+    if (!uid) {
+      setLoading(false);
+      return;
+    }
     loadSuggested().finally(() => {
-      if (active) setLoading(false);
+      if (mounted.current) setLoading(false);
     });
-    return () => {
-      active = false;
-    };
-  }, [loadSuggested]);
+  }, [loadSuggested, profileKey, uid]);
 
-  // Debounced search. The cancelled flag stops a slow older request from overwriting newer results.
+  /* ---- search (debounced, cached, race-safe) ---- */
+
+  const runSearch = useCallback(async (key, text) => {
+    if (!uid) return;
+    try {
+      const rows = await searchUsers(text, uid, 30);
+      const list = Array.isArray(rows) ? rows : [];
+      const cache = searchCache.current;
+      cache.delete(key);
+      cache.set(key, list);
+      if (cache.size > SEARCH_CACHE_LIMIT) cache.delete(cache.keys().next().value);
+      if (mounted.current && latestSearchKey.current === key) {
+        setSearchState({ key, rows: list, error: false });
+      }
+    } catch (error) {
+      if (mounted.current && latestSearchKey.current === key) {
+        setSearchState({ key, rows: searchCache.current.get(key) || [], error: true });
+      }
+    }
+  }, [uid]);
+
   useEffect(() => {
-    if (!uid || query.length < 2) {
-      setResults([]);
+    if (!uid || !isSearching) {
       setSearching(false);
-      setSearchError(false);
       return undefined;
     }
 
     let cancelled = false;
     setSearching(true);
+    const delay = searchCache.current.has(queryKey) ? SEARCH_DEBOUNCE_CACHED_MS : SEARCH_DEBOUNCE_MS;
 
     const timer = setTimeout(async () => {
-      try {
-        const rows = await searchUsers(query, uid, 30);
-        if (cancelled) return;
-        setResults(Array.isArray(rows) ? rows : []);
-        setSearchError(false);
-      } catch (error) {
-        if (cancelled) return;
-        setResults([]);
-        setSearchError(true);
-      } finally {
-        if (!cancelled) setSearching(false);
-      }
-    }, 250);
+      await runSearch(queryKey, query);
+      if (!cancelled && mounted.current) setSearching(false);
+    }, delay);
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, uid]);
+    // query is derived from queryKey for the trimmed text; both change together.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryKey, uid, isSearching, runSearch]);
+
+  // Cached results show instantly while a fresh request revalidates in the background.
+  const searchRows = isSearching
+    ? (searchState.key === queryKey ? searchState.rows : searchCache.current.get(queryKey) || null)
+    : null;
+  const searchError = isSearching && searchState.key === queryKey && searchState.error;
+
+  /* ---- relationship callbacks ---- */
+
+  const handleRelationship = useCallback((targetUid, state) => {
+    setOverrides((prev) => (
+      prev[targetUid] && prev[targetUid].state === state ? omitKey(prev, targetUid) : prev
+    ));
+    setBlocked((prev) => {
+      const isBlocked = !!prev[targetUid];
+      if (state === RELATIONSHIP.BLOCKED) return isBlocked ? prev : { ...prev, [targetUid]: true };
+      return isBlocked ? omitKey(prev, targetUid) : prev;
+    });
+  }, []);
+
+  const clearOverride = useCallback((targetUid, id) => {
+    if (!mounted.current) return;
+    setOverrides((prev) => (
+      prev[targetUid] && (id === undefined || prev[targetUid].id === id) ? omitKey(prev, targetUid) : prev
+    ));
+  }, []);
+
+  // Actions on the same person run one after another so rapid taps can't race each other.
+  const enqueue = useCallback((targetUid, task) => {
+    const previous = actionQueue.current[targetUid] || Promise.resolve();
+    const next = previous.then(task, task);
+    actionQueue.current[targetUid] = next;
+    next.then(() => {
+      if (actionQueue.current[targetUid] === next) delete actionQueue.current[targetUid];
+    });
+    return next;
+  }, []);
+
+  const openProfile = useCallback((targetUid) => {
+    if (targetUid) router.push(`/view-user-profile/${targetUid}`);
+  }, [router]);
+
+  const handleAction = useCallback((person, kind) => {
+    const targetUid = uidOf(person);
+    if (!uid || !targetUid) return;
+    const name = nameOf(person);
+    const payload = {
+      currentUid: uid,
+      targetUid,
+      currentProfile: profileRef.current,
+      targetProfile: person,
+    };
+
+    const plans = {
+      add: {
+        next: RELATIONSHIP.SENT,
+        run: () => sendFriendRequest(payload),
+        message: `Friend request sent to ${name}`,
+        failure: 'Could not send the request. Try again.',
+      },
+      cancel: {
+        next: RELATIONSHIP.NONE,
+        run: cancelRequestFn && (() => cancelRequestFn(payload)),
+        message: 'Friend request cancelled',
+        failure: 'Could not cancel the request. Try again.',
+      },
+      confirm: {
+        next: RELATIONSHIP.FRIENDS,
+        run: acceptRequestFn && (() => acceptRequestFn(payload)),
+        message: `You and ${name} are now friends`,
+        failure: 'Could not confirm the request. Try again.',
+      },
+      delete: {
+        next: RELATIONSHIP.NONE,
+        run: declineRequestFn && (() => declineRequestFn(payload)),
+        message: 'Friend request deleted',
+        failure: 'Could not delete the request. Try again.',
+      },
+    };
+
+    const plan = plans[kind];
+    if (!plan) return;
+    if (!plan.run) {
+      openProfile(targetUid);
+      return;
+    }
+
+    // Instant feedback: flip the UI first, talk to the server second.
+    const id = ++overrideCounter.current;
+    setOverrides((prev) => ({ ...prev, [targetUid]: { state: plan.next, id } }));
+
+    const undo = kind === 'add' && cancelRequestFn
+      ? { label: 'Undo', onPress: () => handleAction(person, 'cancel') }
+      : null;
+    showToast(plan.message, 'success', undo);
+
+    enqueue(targetUid, async () => {
+      try {
+        await plan.run();
+        // The listener normally clears the override; this is only a safety net.
+        setTimeout(() => clearOverride(targetUid, id), OVERRIDE_FALLBACK_MS);
+      } catch (error) {
+        clearOverride(targetUid, id);
+        if (mounted.current) showToast(error?.message || plan.failure, 'error');
+      }
+    });
+  }, [clearOverride, enqueue, openProfile, showToast, uid]);
+
+  const handleDismiss = useCallback((targetUid) => {
+    setDismissed((prev) => (prev[targetUid] ? prev : { ...prev, [targetUid]: true }));
+  }, []);
+
+  /* ---- derived lists ---- */
 
   const baseRows = useMemo(() => {
-    const rows = isSearching ? results : suggested;
-    return rows.filter((person) => uidOf(person) && uidOf(person) !== uid);
-  }, [isSearching, results, suggested, uid]);
+    const rows = isSearching ? (searchRows || []) : suggested;
+    return rows.filter((person) => {
+      const id = uidOf(person);
+      if (!id || id === uid || blocked[id]) return false;
+      if (!isSearching && dismissed[id]) return false;
+      return true;
+    });
+  }, [blocked, dismissed, isSearching, searchRows, suggested, uid]);
 
   const filterCounts = useMemo(() => {
     const counts = {};
@@ -372,48 +720,76 @@ export default function FindFriendsPage() {
   );
 
   const filterReady = isFilterReady(filter, profile);
+  const hasError = isSearching ? searchError : loadError;
+  const showSkeleton = isSearching
+    ? searchRows === null && !searchError
+    : loading && suggested.length === 0;
 
-  const onRefresh = async () => {
+  /* ---- refresh / retry ---- */
+
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await loadSuggested();
-      if (isSearching && uid) {
-        try {
-          const rows = await searchUsers(query, uid, 30);
-          setResults(Array.isArray(rows) ? rows : []);
-          setSearchError(false);
-        } catch (error) {
-          setSearchError(true);
-        }
-      }
+      await Promise.all([
+        loadSuggested(),
+        isSearching ? runSearch(queryKey, query) : Promise.resolve(),
+      ]);
     } finally {
-      setRefreshing(false);
+      if (mounted.current) setRefreshing(false);
     }
-  };
+  }, [isSearching, loadSuggested, query, queryKey, runSearch]);
 
-  const retry = () => {
+  const retry = useCallback(() => {
     if (isSearching) {
       onRefresh();
     } else {
       setLoading(true);
-      loadSuggested().finally(() => setLoading(false));
+      loadSuggested().finally(() => {
+        if (mounted.current) setLoading(false);
+      });
     }
-  };
+  }, [isSearching, loadSuggested, onRefresh]);
 
-  const clearSearch = () => setSearch('');
+  const clearSearch = useCallback(() => setSearch(''), []);
+
+  /* ---- render ---- */
 
   const renderItem = useCallback(({ item }) => (
     <StudentRow
       person={item}
       currentUid={uid}
       currentProfile={profile}
+      mode={mode}
+      override={overrides[uidOf(item)]?.state}
       colors={colors}
       styles={styles}
-      onNotify={showToast}
+      onAction={handleAction}
+      onDismiss={handleDismiss}
+      onOpenProfile={openProfile}
+      onRelationship={handleRelationship}
     />
-  ), [colors, profile, showToast, styles, uid]);
+  ), [colors, handleAction, handleDismiss, handleRelationship, mode, openProfile, overrides, profile, styles, uid]);
 
-  const hasError = isSearching ? searchError : loadError;
+  const renderFilter = useCallback(({ item }) => {
+    const active = filter === item.key;
+    const count = filterCounts[item.key];
+    return (
+      <Pressable
+        style={({ pressed }) => [styles.filterChip, active && styles.filterChipActive, pressed && styles.btnPressed]}
+        onPress={() => setFilter(item.key)}
+        accessibilityRole="button"
+        accessibilityState={{ selected: active }}
+        accessibilityLabel={`${item.label} filter, ${count} students`}
+      >
+        <Text style={[styles.filterText, active && styles.filterTextActive]}>{item.label}</Text>
+        {count > 0 ? (
+          <View style={[styles.countBadge, active && styles.countBadgeActive]}>
+            <Text style={[styles.countText, active && styles.countTextActive]}>{count}</Text>
+          </View>
+        ) : null}
+      </Pressable>
+    );
+  }, [filter, filterCounts, styles]);
 
   const emptyCopy = (() => {
     if (hasError) {
@@ -434,6 +810,9 @@ export default function FindFriendsPage() {
     if (isSearching) {
       return { title: 'No students found', description: 'Try another name, school, or department.' };
     }
+    if (suggested.length > 0) {
+      return { title: 'You are all caught up', description: 'Pull down to refresh for new suggestions.' };
+    }
     return {
       title: 'No suggestions yet',
       description: 'Complete your profile details to improve friend suggestions.',
@@ -442,15 +821,17 @@ export default function FindFriendsPage() {
 
   const listTitle = isSearching
     ? `Search results (${visibleRows.length})`
-    : `Suggested for you (${visibleRows.length})`;
+    : `People you may know (${visibleRows.length})`;
 
   return (
-    <ScreenShell title="Find Friends" subtitle="Discover classmates and friends in other schools" showBack loading={loading} scrollable={false}>
-      <View style={styles.searchCard}>
-        <Ionicons name="search-outline" size={18} color={colors.grey} />
+    <ScreenShell title="Find Friends" subtitle="Discover classmates and friends in other schools" showBack scrollable={false}>
+      <View style={[styles.searchCard, searchFocused && styles.searchCardFocused]}>
+        <Ionicons name="search" size={18} color={searchFocused ? colors.brand : colors.grey} />
         <TextInput
           value={search}
           onChangeText={setSearch}
+          onFocus={() => setSearchFocused(true)}
+          onBlur={() => setSearchFocused(false)}
           placeholder="Search by name, school, department..."
           placeholderTextColor={colors.greyLight}
           style={styles.searchInput}
@@ -482,27 +863,8 @@ export default function FindFriendsPage() {
         style={styles.filtersList}
         contentContainerStyle={styles.filters}
         keyboardShouldPersistTaps="handled"
-        extraData={filterCounts}
-        renderItem={({ item }) => {
-          const active = filter === item.key;
-          const count = filterCounts[item.key];
-          return (
-            <Pressable
-              style={({ pressed }) => [styles.filterChip, active && styles.filterChipActive, pressed && styles.buttonPressed]}
-              onPress={() => setFilter(item.key)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              accessibilityLabel={`${item.label} filter, ${count} students`}
-            >
-              <Text style={[styles.filterText, active && styles.filterTextActive]}>{item.label}</Text>
-              {count > 0 ? (
-                <View style={[styles.countBadge, active && styles.countBadgeActive]}>
-                  <Text style={[styles.countText, active && styles.countTextActive]}>{count}</Text>
-                </View>
-              ) : null}
-            </Pressable>
-          );
-        }}
+        extraData={`${filter}|${JSON.stringify(filterCounts)}`}
+        renderItem={renderFilter}
       />
 
       {filter !== 'all' && !filterReady ? (
@@ -522,40 +884,53 @@ export default function FindFriendsPage() {
         </View>
       ) : null}
 
-      <FlatList
-        data={visibleRows}
-        keyExtractor={(item, index) => String(uidOf(item) || index)}
-        renderItem={renderItem}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} colors={[colors.brand]} />}
-        contentContainerStyle={visibleRows.length ? styles.listContent : styles.emptyContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        initialNumToRender={10}
-        windowSize={7}
-        removeClippedSubviews
-        ListHeaderComponent={visibleRows.length ? <Text style={styles.sectionTitle}>{listTitle}</Text> : null}
-        ListEmptyComponent={!loading ? (
-          <View>
-            <EmptyState title={emptyCopy.title} description={emptyCopy.description} />
-            {hasError ? (
-              <Pressable
-                style={({ pressed }) => [styles.retryButton, pressed && styles.buttonPressed]}
-                onPress={retry}
-                accessibilityRole="button"
-                accessibilityLabel="Try again"
-              >
-                <Ionicons name="refresh-outline" size={16} color={colors.onBrand} />
-                <Text style={styles.smallButtonText}>Try again</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : null}
-      />
+      {showSkeleton ? (
+        <SkeletonList styles={styles} />
+      ) : (
+        <FlatList
+          data={visibleRows}
+          extraData={overrides}
+          keyExtractor={(item, index) => String(uidOf(item) || index)}
+          renderItem={renderItem}
+          refreshControl={(
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={colors.brand}
+              colors={[colors.brand]}
+            />
+          )}
+          contentContainerStyle={visibleRows.length ? styles.listContent : styles.emptyContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          removeClippedSubviews
+          ListHeaderComponent={visibleRows.length ? <Text style={styles.sectionTitle}>{listTitle}</Text> : null}
+          ListEmptyComponent={(
+            <View>
+              <EmptyState title={emptyCopy.title} description={emptyCopy.description} />
+              {hasError ? (
+                <Pressable
+                  style={({ pressed }) => [styles.retryButton, pressed && styles.btnPressed]}
+                  onPress={retry}
+                  accessibilityRole="button"
+                  accessibilityLabel="Try again"
+                >
+                  <Ionicons name="refresh-outline" size={16} color={colors.onBrand} />
+                  <Text style={styles.btnTextOnBrand}>Try again</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          )}
+        />
+      )}
 
       {toast ? (
         <Animated.View
-          pointerEvents="none"
+          pointerEvents={toast.action ? 'auto' : 'none'}
           accessibilityLiveRegion="polite"
           style={[
             styles.toast,
@@ -571,6 +946,18 @@ export default function FindFriendsPage() {
             color={toast.tone === 'error' ? colors.greyLight : colors.green}
           />
           <Text style={styles.toastText} numberOfLines={2}>{toast.message}</Text>
+          {toast.action ? (
+            <Pressable
+              hitSlop={10}
+              onPress={() => {
+                toast.action.onPress();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={toast.action.label}
+            >
+              <Text style={styles.toastAction}>{toast.action.label}</Text>
+            </Pressable>
+          ) : null}
         </Animated.View>
       ) : null}
     </ScreenShell>
@@ -579,17 +966,20 @@ export default function FindFriendsPage() {
 
 const createStyles = (c, s, r) => ({
   searchCard: {
-    minHeight: 50,
+    minHeight: 46,
     flexDirection: 'row',
     alignItems: 'center',
     gap: s.sm,
-    backgroundColor: c.card,
-    borderRadius: r['2xl'],
-    borderWidth: 1,
-    borderColor: c.border,
+    backgroundColor: c.surface,
+    borderRadius: r.full,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
     paddingHorizontal: s.md,
     marginBottom: s.md,
-    ...shadows.card,
+  },
+  searchCardFocused: {
+    backgroundColor: c.card,
+    borderColor: c.brand,
   },
   searchInput: {
     flex: 1,
@@ -689,9 +1079,14 @@ const createStyles = (c, s, r) => ({
     paddingHorizontal: s.lg,
     marginTop: s.md,
   },
+  btnTextOnBrand: {
+    color: c.onBrand,
+    fontSize: 12,
+    fontWeight: '900',
+  },
   sectionTitle: {
     color: c.ink,
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '900',
     marginBottom: s.sm,
   },
@@ -705,7 +1100,7 @@ const createStyles = (c, s, r) => ({
   },
   card: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: s.md,
     backgroundColor: c.card,
     borderWidth: 1,
@@ -718,26 +1113,23 @@ const createStyles = (c, s, r) => ({
   cardPressed: {
     backgroundColor: c.canvasLight,
   },
-  buttonPressed: {
-    opacity: 0.75,
-  },
   avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 18,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     backgroundColor: c.brandLight,
   },
   avatarFallback: {
-    width: 52,
-    height: 52,
-    borderRadius: 18,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     backgroundColor: c.brandLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitial: {
     color: c.brandDark,
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: '900',
   },
   cardBody: {
@@ -752,19 +1144,29 @@ const createStyles = (c, s, r) => ({
   name: {
     flexShrink: 1,
     color: c.ink,
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '900',
   },
   meta: {
-    marginTop: 4,
+    marginTop: 3,
     color: c.grey,
     fontSize: 12.5,
     lineHeight: 17,
   },
-  interests: {
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     marginTop: 4,
+  },
+  statusText: {
+    flexShrink: 1,
     color: c.brandText,
-    fontSize: 11.5,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  statusTextAccent: {
+    color: c.brand,
     fontWeight: '800',
   },
   tutorPill: {
@@ -781,50 +1183,67 @@ const createStyles = (c, s, r) => ({
     fontSize: 10,
     fontWeight: '900',
   },
-  smallButton: {
-    minWidth: 76,
-    height: 36,
-    borderRadius: r.full,
-    backgroundColor: c.brand,
+  actions: {
+    flexDirection: 'row',
+    gap: s.sm,
+    marginTop: 10,
+  },
+  btn: {
+    flex: 1,
+    height: 38,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: c.brand,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
+    gap: 6,
     paddingHorizontal: s.sm,
   },
-  smallButtonText: {
-    color: c.onBrand,
-    fontSize: 12,
-    fontWeight: '900',
+  btnPrimary: {
+    backgroundColor: c.brand,
+    borderColor: c.brand,
   },
-  secondaryButton: {
-    backgroundColor: c.brandLight,
-    borderColor: c.brandBorder,
-  },
-  secondaryButtonText: {
-    color: c.brand,
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  sentButton: {
+  btnSecondary: {
     backgroundColor: c.canvasLight,
     borderColor: c.border,
   },
-  sentButtonText: {
-    color: c.grey,
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  friendButton: {
+  btnFriend: {
     backgroundColor: c.greenLight,
     borderColor: '#A7F3D0',
   },
-  friendButtonText: {
-    color: c.green,
-    fontSize: 12,
+  btnPressed: {
+    opacity: 0.7,
+    transform: [{ scale: 0.97 }],
+  },
+  btnText: {
+    fontSize: 13,
     fontWeight: '900',
+  },
+  btnPlaceholder: {
+    flex: 1,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: c.canvasLight,
+  },
+  skeletonWrap: {
+    flex: 1,
+  },
+  skeletonAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: c.canvasLight,
+  },
+  skeletonLine: {
+    height: 11,
+    borderRadius: 6,
+    backgroundColor: c.canvasLight,
+  },
+  skeletonButton: {
+    flex: 1,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: c.canvasLight,
   },
   toast: {
     position: 'absolute',
@@ -845,5 +1264,11 @@ const createStyles = (c, s, r) => ({
     color: c.card,
     fontSize: 13,
     fontWeight: '700',
+  },
+  toastAction: {
+    color: c.card,
+    fontSize: 13,
+    fontWeight: '900',
+    textDecorationLine: 'underline',
   },
 });
