@@ -2636,9 +2636,7 @@ function GroupDetailScreen({ groupId }) {
               <Text style={styles.conversationName} numberOfLines={1}>{group.name}</Text>
               <Text style={styles.conversationStatus} numberOfLines={1}>{group.allowMemberMessages === false ? 'Announcements' : `${pluralize(Number(group.memberCount || 0), 'member')} · Group chat`}</Text>
             </Pressable>
-            <Pressable style={styles.conversationAction} onPress={() => setGroupShareVisible(true)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Share group invite">
-              <Ionicons name="share-social-outline" size={18} color={colors.brand} />
-            </Pressable>
+
             {isAdmin ? (
               <Pressable style={styles.conversationAction} onPress={openEdit} hitSlop={8} accessibilityRole="button" accessibilityLabel="Edit group">
                 <Ionicons name="create-outline" size={18} color={colors.brand} />

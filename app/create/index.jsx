@@ -1,31 +1,29 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Image, StyleSheet, Text, TextInput, View, Pressable } from 'react-native';
+import { ActivityIndicator, Image, Text, TextInput, View, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { createGroup } from '../../services/firestoreSync';
 import { uploadFeatureMedia } from '../../src/shared/services/backend';
-import { colors } from '../../src/shared/theme';
-
-const COLORS = {
-  indigo: colors.brand,
-  indigoDark: colors.brandDark,
-  indigoSoft: colors.brandLight,
-  white: colors.onBrand,
-  ink: colors.textPrimary,
-  inkSoft: colors.textSecondary,
-  border: colors.borderDefault,
-  success: colors.teal,
-  successSoft: colors.greenLight,
-  danger: colors.danger,
-  dangerSoft: colors.redLight,
-};
+import { useTheme } from '../../src/shared/theme/ThemeContext';
+import { useThemeStyles } from '../../src/shared/theme/createStyles';
 
 const CATEGORIES = ['Academics', 'Career', 'Health', 'Social', 'Tech', 'Other'];
 
 export default function CreatePage() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const COLORS = {
+    indigo: colors.brand,
+    indigoSoft: colors.brandLight,
+    white: colors.onBrand,
+    ink: colors.textPrimary,
+    inkSoft: colors.textSecondary,
+    success: colors.teal,
+    danger: colors.danger,
+  };
+  const styles = useThemeStyles(createStyles);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('Academics');
@@ -266,12 +264,12 @@ export default function CreatePage() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => ({
   heroIconWrap: {
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: COLORS.indigoSoft,
+    backgroundColor: colors.brandLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 14,
@@ -280,13 +278,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.borderDefault,
     padding: 16,
     marginBottom: 14,
   },
   label: {
     marginBottom: 6,
-    color: COLORS.ink,
+    color: colors.textPrimary,
     fontWeight: '700',
     fontSize: 12.5,
   },
@@ -306,25 +304,25 @@ const styles = StyleSheet.create({
     height: 84,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.indigoSoft,
+    borderColor: colors.borderDefault,
+    backgroundColor: colors.brandLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
   },
   avatarText: {
-    color: COLORS.indigo,
+    color: colors.brand,
     fontSize: 13,
     fontWeight: '700',
   },
   input: {
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.borderDefault,
     borderRadius: 14,
     padding: 12,
     marginBottom: 14,
     backgroundColor: colors.canvasLight,
-    color: COLORS.ink,
+    color: colors.textPrimary,
     fontSize: 14,
   },
   textArea: {
@@ -339,23 +337,23 @@ const styles = StyleSheet.create({
   },
   chip: {
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: colors.borderDefault,
     borderRadius: 999,
     paddingHorizontal: 13,
     paddingVertical: 8,
     backgroundColor: colors.canvasLight,
   },
   chipActive: {
-    backgroundColor: COLORS.indigo,
-    borderColor: COLORS.indigo,
+    backgroundColor: colors.brand,
+    borderColor: colors.brand,
   },
   chipText: {
     fontSize: 12.5,
     fontWeight: '700',
-    color: COLORS.inkSoft,
+    color: colors.textSecondary,
   },
   chipTextActive: {
-    color: COLORS.white,
+    color: colors.onBrand,
   },
   segmented: {
     flexDirection: 'row',
@@ -374,20 +372,20 @@ const styles = StyleSheet.create({
     borderRadius: 11,
   },
   segmentOptionActive: {
-    backgroundColor: COLORS.indigo,
+    backgroundColor: colors.brand,
   },
   segmentText: {
     fontSize: 13,
     fontWeight: '700',
-    color: COLORS.inkSoft,
+    color: colors.textSecondary,
   },
   segmentTextActive: {
-    color: COLORS.white,
+    color: colors.onBrand,
   },
   segmentHint: {
     marginTop: 8,
     fontSize: 12,
-    color: COLORS.inkSoft,
+    color: colors.textSecondary,
   },
   messageBox: {
     flexDirection: 'row',
@@ -398,10 +396,10 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   messageSuccess: {
-    backgroundColor: COLORS.successSoft,
+    backgroundColor: colors.greenLight,
   },
   messageError: {
-    backgroundColor: COLORS.dangerSoft,
+    backgroundColor: colors.dangerLight,
   },
   messageText: {
     fontSize: 13,
@@ -411,7 +409,7 @@ const styles = StyleSheet.create({
   button: {
     flexDirection: 'row',
     gap: 8,
-    backgroundColor: COLORS.indigo,
+    backgroundColor: colors.brand,
     paddingVertical: 14,
     borderRadius: 14,
     alignItems: 'center',
@@ -422,7 +420,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    color: COLORS.white,
+    color: colors.onBrand,
     fontWeight: '800',
     fontSize: 14,
   },

@@ -15,6 +15,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchGroupRecommendations, fetchUserGroups } from '../../services/firestoreSync';
 import { joinPublicGroup, requestJoinGroup } from '../../src/shared/services/community';
 import ScreenShell from '../../src/shared/components/ScreenShell';
@@ -49,12 +50,16 @@ const animateNext = () => {
 const haptic = {
   select: () => Haptics.selectionAsync().catch(() => {}),
   light: () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}),
+  medium: () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}),
   success: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}),
   error: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {}),
 };
 
 const JOIN_ERROR_AUTO_DISMISS_MS = 4000;
 const SHARE_MESSAGE_AUTO_DISMISS_MS = 2600;
+const FAB_LABEL_VISIBLE_MS = 3500;
+const RAIL_PREVIEW_LIMIT = 3;
+const NEW_GROUP_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 const MEMBERSHIP_FILTERS = [
   { key: 'all', label: 'All', icon: 'albums-outline' },
@@ -64,10 +69,14 @@ const MEMBERSHIP_FILTERS = [
 ];
 
 const SORT_OPTIONS = [
-  { key: 'forYou', label: 'For you', icon: 'home' },
+  { key: 'forYou', label: 'For you', icon: 'sparkles-outline' },
   { key: 'popular', label: 'Most members', icon: 'people-outline' },
   { key: 'newest', label: 'Newest', icon: 'time-outline' },
 ];
+
+// Accent tones for avatar fallbacks. Backgrounds use the same hue with alpha,
+// so they stay readable in both light and dark themes.
+const AVATAR_TONES = ['#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#10B981', '#06B6D4', '#EF4444', '#6366F1'];
 
 /* -------------------------------------------------------------------------- */
 /*  Helpers                                                                   */
@@ -95,20 +104,42 @@ const groupDescription = (group) => group?.description || group?.summary || '';
 const normalize = (value = '') => String(value).trim().toLowerCase();
 const getMemberCount = (group = {}) => Number(group.memberCount || group.members?.length || 0);
 
-// Stable per-user jitter so the order feels personal but doesn't reshuffle on each render.
-const personalizedGroupRandom = (uid, groupId) => {
-  const value = `${uid || 'guest'}:${groupId}`;
+const formatCount = (value) => {
+  const n = Number(value) || 0;
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1).replace(/\.0$/, '')}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  return String(n);
+};
+
+const hashString = (value) => {
   let hash = 5381;
   for (let index = 0; index < value.length; index += 1) {
     hash = ((hash << 5) + hash + value.charCodeAt(index)) | 0;
   }
-  return (hash >>> 0) / 0xffffffff;
+  return hash >>> 0;
 };
+
+// Stable per-user jitter so the order feels personal but doesn't reshuffle on each render.
+const personalizedGroupRandom = (uid, groupId) => hashString(`${uid || 'guest'}:${groupId}`) / 0xffffffff;
+
+const avatarTone = (group) => AVATAR_TONES[hashString(String(group?.id || groupTitle(group))) % AVATAR_TONES.length];
 
 const pickImage = (group = {}) => {
   const candidates = [group.avatarUrl, group.photoURL, group.coverUrl, group.imageUrl, group.avatar, group.cover];
   const found = candidates.find((item) => typeof item === 'string' && item.trim());
   return found ? found.trim() : '';
+};
+
+const toTime = (value) => {
+  if (!value) return 0;
+  const raw = value?.toDate ? value.toDate() : value?.seconds ? new Date(value.seconds * 1000) : new Date(value);
+  const time = raw instanceof Date ? raw.getTime() : NaN;
+  return Number.isNaN(time) ? 0 : time;
+};
+
+const isRecentlyCreated = (group) => {
+  const created = toTime(group?.createdAt);
+  return created > 0 && Date.now() - created < NEW_GROUP_WINDOW_MS;
 };
 
 // Single place that decides a group's state for the current user.
@@ -120,13 +151,6 @@ const getGroupState = (group, user, userGroupsById, joinStates) => {
   const isPrivate = group.privacy === 'private';
   const needsApproval = isPrivate && group.requireApproval !== false;
   return { role, isJoined, isRequested, isPrivate, needsApproval };
-};
-
-const toTime = (value) => {
-  if (!value) return 0;
-  const raw = value?.toDate ? value.toDate() : value?.seconds ? new Date(value.seconds * 1000) : new Date(value);
-  const time = raw instanceof Date ? raw.getTime() : NaN;
-  return Number.isNaN(time) ? 0 : time;
 };
 
 const forYouScore = (entry, uid) =>
@@ -146,6 +170,7 @@ const sorters = {
 
 export default function Groups() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user, profile } = useAuth();
   const { colors } = useTheme();
   const [groups, setGroups] = useState([]);
@@ -162,12 +187,13 @@ export default function Groups() {
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [membershipFilter, setMembershipFilter] = useState('all');
   const [sortKey, setSortKey] = useState('forYou');
+  const [showAllMine, setShowAllMine] = useState(false);
   const joinErrorTimer = useRef(null);
   const shareTimer = useRef(null);
   const hasLoadedRef = useRef(false);
 
   const styles = useThemeStyles((c, s, r) => ({
-    container: { gap: s.lg, paddingBottom: s['2xl'] },
+    container: { gap: s.lg, paddingBottom: 120 },
 
     /* notices */
     errorBox: {
@@ -186,27 +212,41 @@ export default function Groups() {
     noticeText: { flex: 1, fontSize: 13, fontWeight: '600' },
 
     /* toolbar */
+    toolbar: { gap: s.sm },
     searchRow: { flexDirection: 'row', alignItems: 'center', gap: s.sm },
     searchContainer: {
       flex: 1, flexDirection: 'row', alignItems: 'center', gap: s.sm, backgroundColor: c.inputBackground,
-      borderWidth: 1, borderColor: c.inputBorder, borderRadius: r.xl, paddingHorizontal: s.md, height: 48,
+      borderWidth: 1, borderColor: c.inputBorder, borderRadius: r.full, paddingHorizontal: s.md, height: 48,
     },
     searchInput: { flex: 1, color: c.textPrimary, fontSize: 14, fontWeight: '500', paddingVertical: 0 },
     clearButton: { padding: 2 },
     filterToggle: {
-      width: 48, height: 48, borderRadius: r.xl, alignItems: 'center', justifyContent: 'center',
+      width: 48, height: 48, borderRadius: r.full, alignItems: 'center', justifyContent: 'center',
       backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault,
     },
     filterToggleActive: { backgroundColor: c.brandLight, borderColor: c.brand },
     filterDot: {
-      position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: 4,
+      position: 'absolute', top: 10, right: 11, width: 9, height: 9, borderRadius: 5,
       backgroundColor: c.brand, borderWidth: 1.5, borderColor: c.card,
     },
-    createButton: {
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, height: 48,
-      paddingHorizontal: s.md, borderRadius: r.xl, backgroundColor: c.brand,
+
+    /* always-visible membership chips */
+    quickChips: { flexGrow: 0 },
+    quickChipsContent: { gap: s.xs, paddingRight: s.md },
+    chip: {
+      flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: s.md, height: 36,
+      borderRadius: r.full, backgroundColor: c.surfaceSecondary, borderWidth: 1, borderColor: c.borderDefault,
     },
-    createButtonText: { color: c.onBrand, fontSize: 14, fontWeight: '700' },
+    chipActive: { backgroundColor: c.brand, borderColor: c.brand },
+    chipText: { color: c.textSecondary, fontSize: 12.5, fontWeight: '600' },
+    chipTextActive: { color: c.onBrand },
+    chipCount: {
+      minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, alignItems: 'center',
+      justifyContent: 'center', backgroundColor: c.card,
+    },
+    chipCountActive: { backgroundColor: 'rgba(255,255,255,0.22)' },
+    chipCountText: { color: c.textSecondary, fontSize: 11, fontWeight: '700' },
+    chipCountTextActive: { color: c.onBrand },
 
     /* filter panel */
     filterPanel: {
@@ -217,13 +257,6 @@ export default function Groups() {
     filterLabel: { color: c.textTertiary, fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' },
     chipsScroll: { flexGrow: 0 },
     chipsContainer: { gap: s.xs, paddingRight: s.md },
-    chip: {
-      flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: s.md, height: 36,
-      borderRadius: r.full, backgroundColor: c.surfaceSecondary, borderWidth: 1, borderColor: c.borderDefault,
-    },
-    chipActive: { backgroundColor: c.brand, borderColor: c.brand },
-    chipText: { color: c.textSecondary, fontSize: 12.5, fontWeight: '600' },
-    chipTextActive: { color: c.onBrand },
     sortRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: s.xs },
     sortPill: {
       flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: s.sm, paddingVertical: 7,
@@ -237,46 +270,49 @@ export default function Groups() {
 
     /* sections */
     section: { gap: s.sm },
-    sectionHeader: { gap: 2 },
+    sectionHeaderRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: s.sm },
+    sectionHeader: { flex: 1, gap: 2 },
     sectionTitle: { color: c.textPrimary, fontSize: 17, fontWeight: '700', letterSpacing: -0.2 },
     sectionSubtitle: { color: c.textTertiary, fontSize: 13 },
+    sectionAction: { color: c.brand, fontSize: 13, fontWeight: '700' },
 
-    /* joined groups: intentionally vertical so the page has one calm reading flow */
+    /* joined groups: compact vertical list for one calm reading flow */
     rail: { gap: s.sm },
     railCard: {
       flexDirection: 'row', alignItems: 'center', gap: s.sm, backgroundColor: c.card,
-      borderWidth: 1, borderColor: c.borderDefault, borderRadius: r['2xl'], padding: s.md,
+      borderWidth: 1, borderColor: c.borderDefault, borderRadius: r['2xl'], padding: s.sm + 2,
     },
     railMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: s.sm },
-    railCopy: { flex: 1 },
-    railName: { color: c.textPrimary, fontSize: 14, fontWeight: '700' },
-    railRole: { color: c.textTertiary, fontSize: 12, fontWeight: '500', marginTop: 2 },
+    railCopy: { flex: 1, gap: 2 },
+    railName: { color: c.textPrimary, fontSize: 14.5, fontWeight: '700' },
+    railRole: { color: c.textTertiary, fontSize: 12, fontWeight: '500' },
 
     /* cards */
-    list: { gap: s.sm },
+    list: { gap: s.md },
     card: {
       backgroundColor: c.card, borderWidth: 1, borderColor: c.borderDefault,
       borderRadius: r['2xl'], padding: s.md, gap: s.md,
     },
-    cardPressed: { opacity: 0.96, transform: [{ scale: 0.995 }] },
+    cardPressed: { opacity: 0.96, transform: [{ scale: 0.99 }] },
     cardHeader: { flexDirection: 'row', gap: s.md },
-    avatar: { width: 52, height: 52, borderRadius: r.xl, overflow: 'hidden', backgroundColor: c.brandLight },
-    avatarSmall: { width: 40, height: 40, borderRadius: r.lg, overflow: 'hidden', backgroundColor: c.brandLight },
+    avatar: { width: 56, height: 56, borderRadius: r.xl, overflow: 'hidden' },
+    avatarSmall: { width: 44, height: 44, borderRadius: r.lg, overflow: 'hidden' },
     avatarImage: { width: '100%', height: '100%' },
-    avatarFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brandLight },
-    avatarFallbackText: { color: c.brand, fontSize: 20, fontWeight: '700' },
-    cardContent: { flex: 1, gap: 4 },
+    avatarFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    avatarFallbackText: { fontSize: 20, fontWeight: '800' },
+    cardContent: { flex: 1, gap: 6 },
     cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: s.xs },
-    cardTitle: { flex: 1, color: c.textPrimary, fontSize: 15.5, fontWeight: '700', letterSpacing: -0.1 },
-    cardStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 21 },
+    cardTitle: { flexShrink: 1, color: c.textPrimary, fontSize: 16, fontWeight: '700', letterSpacing: -0.15 },
     badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: r.full },
     joinedBadge: { backgroundColor: c.greenLight },
     privateBadge: { backgroundColor: c.amberLight },
-    badgeText: { fontSize: 11, fontWeight: '700' },
+    newBadge: { backgroundColor: c.brandLight },
+    badgeText: { fontSize: 10.5, fontWeight: '700' },
     cardDescription: { color: c.textSecondary, fontSize: 13, lineHeight: 19 },
-    metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: s.md, rowGap: 4, paddingTop: 2 },
+    metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: s.md, rowGap: 4 },
     metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     metaText: { color: c.textTertiary, fontSize: 12, fontWeight: '500' },
+    divider: { height: 1, backgroundColor: c.borderDefault, opacity: 0.6 },
     cardFooter: { flexDirection: 'row', alignItems: 'center', gap: s.xs },
     iconActionButton: {
       width: 42, height: 42, borderRadius: r.xl, backgroundColor: c.surfaceSecondary,
@@ -295,6 +331,14 @@ export default function Groups() {
     },
     clearSearchText: { color: c.brand, fontSize: 13, fontWeight: '700' },
     skeletonBlock: { backgroundColor: c.borderDefault, borderRadius: r.md },
+
+    /* floating action button */
+    fabWrap: { position: 'absolute', right: 18 },
+    fab: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+      height: 58, minWidth: 58, paddingHorizontal: 17, borderRadius: 29, backgroundColor: c.brand,
+    },
+    fabLabel: { color: c.onBrand, fontSize: 14.5, fontWeight: '700', letterSpacing: 0.1 },
   }));
 
   /* ------------------------------ derived data ----------------------------- */
@@ -309,6 +353,16 @@ export default function Groups() {
     [groups, joinStates, user, userGroupsById],
   );
 
+  const membershipCounts = useMemo(
+    () => ({
+      all: entries.length,
+      joined: entries.filter((e) => e.isJoined).length,
+      available: entries.filter((e) => !e.isJoined && !e.isRequested).length,
+      private: entries.filter((e) => e.isPrivate).length,
+    }),
+    [entries],
+  );
+
   const categories = useMemo(() => {
     const values = groups.map((group) => group.category).filter(Boolean);
     return ['All', ...Array.from(new Set(values)).sort((a, b) => String(a).localeCompare(String(b)))];
@@ -319,6 +373,7 @@ export default function Groups() {
   const searchTerm = normalize(query);
   const isSearching = Boolean(searchTerm);
   const hasActiveFilters = resolvedCategoryFilter !== 'All' || membershipFilter !== 'all';
+  const hasPanelRefinements = resolvedCategoryFilter !== 'All' || sortKey !== 'forYou';
   const isRefined = isSearching || hasActiveFilters || sortKey !== 'forYou';
 
   const filteredEntries = useMemo(() => {
@@ -338,14 +393,15 @@ export default function Groups() {
       .sort(compare);
   }, [entries, membershipFilter, resolvedCategoryFilter, searchTerm, sortKey, user?.uid]);
 
-  // With nothing applied, "Your groups" is a quick-access rail and the main
+  // With nothing applied, "Your groups" is a quick-access section and the main
   // list focuses on discovery. Any search or filter switches to one flat list.
-  const hasJoined = useMemo(() => entries.some((entry) => entry.isJoined), [entries]);
+  const hasJoined = membershipCounts.joined > 0;
   const showSplitView = !isSearching && !hasActiveFilters && hasJoined;
   const myGroups = useMemo(
     () => (showSplitView ? filteredEntries.filter((entry) => entry.isJoined) : []),
     [filteredEntries, showSplitView],
   );
+  const visibleMyGroups = showAllMine ? myGroups : myGroups.slice(0, RAIL_PREVIEW_LIMIT);
   const listEntries = useMemo(
     () => (showSplitView ? filteredEntries.filter((entry) => !entry.isJoined) : filteredEntries),
     [filteredEntries, showSplitView],
@@ -361,6 +417,8 @@ export default function Groups() {
     [],
   );
 
+  const uid = user?.uid;
+
   useFocusEffect(
     useCallback(() => {
       let active = true;
@@ -368,8 +426,8 @@ export default function Groups() {
       if (!hasLoadedRef.current) setLoading(true);
       setError('');
       Promise.all([
-        fetchGroupRecommendations(user?.uid),
-        user?.uid ? fetchUserGroups(user.uid) : Promise.resolve([]),
+        fetchGroupRecommendations(uid),
+        uid ? fetchUserGroups(uid) : Promise.resolve([]),
       ])
         .then(([items, memberships]) => {
           if (!active) return;
@@ -396,7 +454,7 @@ export default function Groups() {
       return () => {
         active = false;
       };
-    }, [user, reloadKey]),
+    }, [uid, reloadKey]),
   );
 
   /* -------------------------------- actions -------------------------------- */
@@ -490,253 +548,341 @@ export default function Groups() {
     setSortKey('forYou');
   };
 
+  const handleCreate = () => {
+    haptic.medium();
+    if (!user) {
+      router.navigate('/login');
+      return;
+    }
+    router.navigate('/create');
+  };
+
   const openGroup = (group) => router.navigate(`/community/${group.id}`);
 
   const hasNothingToShow = Boolean(error) && !groups.length;
+  const resultCount = filteredEntries.length;
   const listTitle = showSplitView ? 'Discover' : isSearching || hasActiveFilters ? 'Results' : 'Recommended for you';
   const listSubtitle = showSplitView
     ? 'Communities you might like'
     : isSearching || hasActiveFilters
-      ? 'Matching your search and filters'
+      ? `${resultCount} ${resultCount === 1 ? 'group' : 'groups'} matching your search and filters`
       : 'Based on your campus and connections';
 
   /* -------------------------------- render --------------------------------- */
 
   return (
-    <ScreenShell title="Study Groups" subtitle="Find, join, and share campus communities." showBack>
-      <View style={styles.container}>
-        {error ? (
-          <View style={styles.errorBox} accessibilityRole="alert">
-            <Ionicons name="alert-circle-outline" size={20} color={colors.red} />
-            <Text style={styles.errorText}>{error}</Text>
-            <Pressable
-              onPress={handleRetry}
-              accessibilityRole="button"
-              accessibilityLabel="Retry loading groups"
-              style={({ pressed }) => [styles.retryButton, pressed && { opacity: 0.85 }]}
-            >
-              <Ionicons name="refresh" size={14} color={colors.onBrand} />
-              <Text style={styles.retryText}>Retry</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {joinError ? (
-          <Notice icon="alert-circle-outline" color={colors.red} text={joinError} styles={styles} variant="error" onClose={() => setJoinError('')} />
-        ) : null}
-        {shareMessage ? (
-          <Notice icon="checkmark-circle-outline" color={colors.green} text={shareMessage} styles={styles} variant="success" onClose={() => setShareMessage('')} />
-        ) : null}
-
-        {hasNothingToShow ? null : (
-          <>
-            {/* Search + create */}
-            <View style={styles.searchRow}>
-              <View style={styles.searchContainer}>
-                <Ionicons name="search-outline" size={18} color={colors.iconSecondary} />
-                <TextInput
-                  value={query}
-                  onChangeText={setQuery}
-                  placeholder="Search groups or topics"
-                  placeholderTextColor={colors.inputPlaceholder}
-                  style={styles.searchInput}
-                  autoCorrect={false}
-                  autoCapitalize="none"
-                  returnKeyType="search"
-                  accessibilityLabel="Search groups"
-                />
-                {query ? (
-                  <Pressable style={styles.clearButton} onPress={() => setQuery('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
-                    <Ionicons name="close-circle" size={18} color={colors.iconSecondary} />
-                  </Pressable>
-                ) : null}
-              </View>
+    <View style={{ flex: 1 }}>
+      <ScreenShell title="Study Groups" subtitle="Find, join, and share campus communities." showBack>
+        <View style={styles.container}>
+          {error ? (
+            <View style={styles.errorBox} accessibilityRole="alert">
+              <Ionicons name="alert-circle-outline" size={20} color={colors.red} />
+              <Text style={styles.errorText}>{error}</Text>
               <Pressable
-                onPress={toggleFilters}
+                onPress={handleRetry}
                 accessibilityRole="button"
-                accessibilityLabel={showFilters ? 'Hide filters' : 'Show filters'}
-                accessibilityState={{ expanded: showFilters }}
-                style={({ pressed }) => [styles.filterToggle, showFilters && styles.filterToggleActive, pressed && { opacity: 0.85 }]}
+                accessibilityLabel="Retry loading groups"
+                style={({ pressed }) => [styles.retryButton, pressed && { opacity: 0.85 }]}
               >
-                <Ionicons
-                  name={showFilters ? 'options' : 'options-outline'}
-                  size={20}
-                  color={showFilters ? colors.brand : colors.textSecondary}
-                />
-                {!showFilters && (hasActiveFilters || sortKey !== 'forYou') ? <View style={styles.filterDot} /> : null}
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.createButton, pressed && { opacity: 0.9 }]}
-                onPress={() => router.navigate('/create')}
-                accessibilityRole="button"
-                accessibilityLabel="Create group"
-              >
-                <Ionicons name="add" size={18} color={colors.onBrand} />
-                <Text style={styles.createButtonText}>Create</Text>
+                <Ionicons name="refresh" size={14} color={colors.onBrand} />
+                <Text style={styles.retryText}>Retry</Text>
               </Pressable>
             </View>
+          ) : null}
 
-            {/* Collapsible filters + sort */}
-            {showFilters && !loading ? (
-              <View style={styles.filterPanel}>
-                <View style={styles.filterGroup}>
-                  <Text style={styles.filterLabel}>Show</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chipsContainer} keyboardShouldPersistTaps="handled">
-                    {MEMBERSHIP_FILTERS.map((item) => (
-                      <FilterChip
-                        key={item.key}
-                        item={item}
-                        active={membershipFilter === item.key}
-                        onPress={() => {
-                          haptic.select();
-                          animateNext();
-                          setMembershipFilter(item.key);
-                        }}
-                        styles={styles}
-                        colors={colors}
-                      />
-                    ))}
-                  </ScrollView>
+          {joinError ? (
+            <Notice icon="alert-circle-outline" color={colors.red} text={joinError} styles={styles} variant="error" onClose={() => setJoinError('')} />
+          ) : null}
+          {shareMessage ? (
+            <Notice icon="checkmark-circle-outline" color={colors.green} text={shareMessage} styles={styles} variant="success" onClose={() => setShareMessage('')} />
+          ) : null}
+
+          {hasNothingToShow ? null : (
+            <>
+              {/* Search + quick filters */}
+              <View style={styles.toolbar}>
+                <View style={styles.searchRow}>
+                  <View style={styles.searchContainer}>
+                    <Ionicons name="search-outline" size={18} color={colors.iconSecondary} />
+                    <TextInput
+                      value={query}
+                      onChangeText={setQuery}
+                      placeholder="Search groups or topics"
+                      placeholderTextColor={colors.inputPlaceholder}
+                      style={styles.searchInput}
+                      autoCorrect={false}
+                      autoCapitalize="none"
+                      returnKeyType="search"
+                      accessibilityLabel="Search groups"
+                    />
+                    {query ? (
+                      <Pressable style={styles.clearButton} onPress={() => setQuery('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
+                        <Ionicons name="close-circle" size={18} color={colors.iconSecondary} />
+                      </Pressable>
+                    ) : null}
+                  </View>
+                  <Pressable
+                    onPress={toggleFilters}
+                    accessibilityRole="button"
+                    accessibilityLabel={showFilters ? 'Hide filters' : 'Show filters'}
+                    accessibilityState={{ expanded: showFilters }}
+                    style={({ pressed }) => [styles.filterToggle, showFilters && styles.filterToggleActive, pressed && { opacity: 0.85 }]}
+                  >
+                    <Ionicons
+                      name={showFilters ? 'options' : 'options-outline'}
+                      size={20}
+                      color={showFilters ? colors.brand : colors.textSecondary}
+                    />
+                    {!showFilters && hasPanelRefinements ? <View style={styles.filterDot} /> : null}
+                  </Pressable>
                 </View>
 
-                {categories.length > 2 ? (
-                  <View style={styles.filterGroup}>
-                    <Text style={styles.filterLabel}>Category</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chipsContainer} keyboardShouldPersistTaps="handled">
-                      {categories.map((category) => (
-                        <FilterChip
-                          key={category}
-                          item={{ key: category, label: category, icon: category === 'All' ? 'grid-outline' : 'pricetag-outline' }}
-                          active={resolvedCategoryFilter === category}
-                          onPress={() => {
-                            haptic.select();
-                            animateNext();
-                            setCategoryFilter(category);
-                          }}
-                          styles={styles}
-                          colors={colors}
-                        />
-                      ))}
-                    </ScrollView>
-                  </View>
-                ) : null}
-
-                <View style={styles.filterGroup}>
-                  <Text style={styles.filterLabel}>Sort by</Text>
-                  <View style={styles.sortRow}>
-                    {SORT_OPTIONS.map((option) => {
-                      const active = sortKey === option.key;
-                      return (
-                        <Pressable
-                          key={option.key}
-                          onPress={() => {
-                            haptic.select();
-                            animateNext();
-                            setSortKey(option.key);
-                          }}
-                          accessibilityRole="button"
-                          accessibilityState={{ selected: active }}
-                          style={[styles.sortPill, active && styles.sortPillActive]}
-                        >
-                          <Ionicons name={option.icon} size={14} color={active ? colors.brand : colors.iconSecondary} />
-                          <Text style={[styles.sortPillText, active && styles.sortPillTextActive]}>{option.label}</Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                </View>
-
-                {isRefined ? (
-                  <View style={styles.panelFooter}>
-                    <Pressable onPress={resetFilters} hitSlop={8} accessibilityRole="button">
-                      <Text style={styles.clearFiltersText}>Reset all</Text>
-                    </Pressable>
-                  </View>
-                ) : null}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.quickChips}
+                  contentContainerStyle={styles.quickChipsContent}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {MEMBERSHIP_FILTERS.map((item) => (
+                    <FilterChip
+                      key={item.key}
+                      item={item}
+                      count={loading ? undefined : membershipCounts[item.key]}
+                      active={membershipFilter === item.key}
+                      onPress={() => {
+                        haptic.select();
+                        animateNext();
+                        setMembershipFilter(item.key);
+                      }}
+                      styles={styles}
+                      colors={colors}
+                    />
+                  ))}
+                </ScrollView>
               </View>
-            ) : null}
 
-            {loading ? (
-              <GroupSkeletons styles={styles} />
-            ) : (
-              <>
-                {/* Your groups rail */}
-                {myGroups.length ? (
+              {/* Collapsible category + sort */}
+              {showFilters && !loading ? (
+                <View style={styles.filterPanel}>
+                  {categories.length > 2 ? (
+                    <View style={styles.filterGroup}>
+                      <Text style={styles.filterLabel}>Category</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chipsContainer} keyboardShouldPersistTaps="handled">
+                        {categories.map((category) => (
+                          <FilterChip
+                            key={category}
+                            item={{ key: category, label: category, icon: category === 'All' ? 'grid-outline' : 'pricetag-outline' }}
+                            active={resolvedCategoryFilter === category}
+                            onPress={() => {
+                              haptic.select();
+                              animateNext();
+                              setCategoryFilter(category);
+                            }}
+                            styles={styles}
+                            colors={colors}
+                          />
+                        ))}
+                      </ScrollView>
+                    </View>
+                  ) : null}
+
+                  <View style={styles.filterGroup}>
+                    <Text style={styles.filterLabel}>Sort by</Text>
+                    <View style={styles.sortRow}>
+                      {SORT_OPTIONS.map((option) => {
+                        const active = sortKey === option.key;
+                        return (
+                          <Pressable
+                            key={option.key}
+                            onPress={() => {
+                              haptic.select();
+                              animateNext();
+                              setSortKey(option.key);
+                            }}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: active }}
+                            style={[styles.sortPill, active && styles.sortPillActive]}
+                          >
+                            <Ionicons name={option.icon} size={14} color={active ? colors.brand : colors.iconSecondary} />
+                            <Text style={[styles.sortPillText, active && styles.sortPillTextActive]}>{option.label}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+
+                  {isRefined ? (
+                    <View style={styles.panelFooter}>
+                      <Pressable onPress={resetFilters} hitSlop={8} accessibilityRole="button">
+                        <Text style={styles.clearFiltersText}>Reset all</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+
+              {loading ? (
+                <GroupSkeletons styles={styles} />
+              ) : (
+                <>
+                  {/* Your groups */}
+                  {myGroups.length ? (
+                    <View style={styles.section}>
+                      <View style={styles.sectionHeaderRow}>
+                        <View style={styles.sectionHeader}>
+                          <Text style={styles.sectionTitle}>Your groups</Text>
+                          <Text style={styles.sectionSubtitle}>Jump back into the conversation</Text>
+                        </View>
+                        {myGroups.length > RAIL_PREVIEW_LIMIT ? (
+                          <Pressable
+                            onPress={() => {
+                              haptic.select();
+                              animateNext();
+                              setShowAllMine((value) => !value);
+                            }}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel={showAllMine ? 'Show fewer of your groups' : 'See all of your groups'}
+                          >
+                            <Text style={styles.sectionAction}>{showAllMine ? 'Show less' : `See all (${myGroups.length})`}</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                      <View style={styles.rail}>
+                        {visibleMyGroups.map((entry) => (
+                          <RailCard key={entry.group.id} entry={entry} onOpen={() => openGroup(entry.group)} onShare={() => handleShare(entry.group)} styles={styles} colors={colors} />
+                        ))}
+                      </View>
+                    </View>
+                  ) : null}
+
+                  {/* Main list */}
                   <View style={styles.section}>
                     <View style={styles.sectionHeader}>
-                      <Text style={styles.sectionTitle}>Your groups</Text>
-                      <Text style={styles.sectionSubtitle}>Jump back into the conversation</Text>
+                      <Text style={styles.sectionTitle}>{listTitle}</Text>
+                      <Text style={styles.sectionSubtitle}>{listSubtitle}</Text>
                     </View>
-                    <View style={styles.rail}>
-                      {myGroups.map((entry) => (
-                        <RailCard key={entry.group.id} entry={entry} onOpen={() => openGroup(entry.group)} onShare={() => handleShare(entry.group)} styles={styles} colors={colors} />
-                      ))}
-                    </View>
-                  </View>
-                ) : null}
 
-                {/* Main list */}
-                <View style={styles.section}>
-                  <View style={styles.sectionHeader}>
-                    <Text style={styles.sectionTitle}>{listTitle}</Text>
-                    <Text style={styles.sectionSubtitle}>{listSubtitle}</Text>
-                  </View>
-
-                  {listEntries.length ? (
-                    <View style={styles.list}>
-                      {listEntries.map((entry) => (
-                        <GroupCard
-                          key={entry.group.id}
-                          entry={entry}
-                          joining={joiningId === entry.group.id}
-                          onOpen={() => openGroup(entry.group)}
-                          onJoin={() => handleJoin(entry)}
-                          onShare={() => handleShare(entry.group)}
-                          styles={styles}
-                          colors={colors}
+                    {listEntries.length ? (
+                      <View style={styles.list}>
+                        {listEntries.map((entry) => (
+                          <GroupCard
+                            key={entry.group.id}
+                            entry={entry}
+                            joining={joiningId === entry.group.id}
+                            onOpen={() => openGroup(entry.group)}
+                            onJoin={() => handleJoin(entry)}
+                            onShare={() => handleShare(entry.group)}
+                            styles={styles}
+                            colors={colors}
+                          />
+                        ))}
+                      </View>
+                    ) : showSplitView && !groups.length ? null : (
+                      <>
+                        <EmptyState
+                          title={
+                            showSplitView
+                              ? "You've joined every group"
+                              : groups.length
+                                ? 'No groups found'
+                                : 'No groups yet'
+                          }
+                          description={
+                            showSplitView
+                              ? 'Start a new community for your course or hostel.'
+                              : groups.length
+                                ? 'Try a different search or adjust your filters.'
+                                : 'Study groups created on UniHelp will show up here.'
+                          }
+                          actionLabel={!groups.length || showSplitView ? 'Create group' : undefined}
+                          onAction={!groups.length || showSplitView ? handleCreate : undefined}
                         />
-                      ))}
-                    </View>
-                  ) : showSplitView && !groups.length ? null : (
-                    <>
-                      <EmptyState
-                        title={
-                          showSplitView
-                            ? "You've joined every group"
-                            : groups.length
-                              ? 'No groups found'
-                              : 'No groups yet'
-                        }
-                        description={
-                          showSplitView
-                            ? 'Start a new community for your course or hostel.'
-                            : groups.length
-                              ? 'Try a different search or adjust your filters.'
-                              : 'Study groups created on UniHelp will show up here.'
-                        }
-                        actionLabel={!groups.length || showSplitView ? 'Create group' : undefined}
-                        onAction={!groups.length || showSplitView ? () => router.navigate('/create') : undefined}
-                      />
-                      {groups.length && (isSearching || hasActiveFilters) ? (
-                        <Pressable onPress={resetFilters} style={({ pressed }) => [styles.clearSearchButton, pressed && { opacity: 0.85 }]} accessibilityRole="button">
-                          <Text style={styles.clearSearchText}>Clear all filters</Text>
-                        </Pressable>
-                      ) : null}
-                    </>
-                  )}
-                </View>
-              </>
-            )}
-          </>
-        )}
-      </View>
-    </ScreenShell>
+                        {groups.length && (isSearching || hasActiveFilters) ? (
+                          <Pressable onPress={resetFilters} style={({ pressed }) => [styles.clearSearchButton, pressed && { opacity: 0.85 }]} accessibilityRole="button">
+                            <Text style={styles.clearSearchText}>Clear all filters</Text>
+                          </Pressable>
+                        ) : null}
+                      </>
+                    )}
+                  </View>
+                </>
+              )}
+            </>
+          )}
+        </View>
+      </ScreenShell>
+
+      <CreateFab onPress={handleCreate} bottomInset={insets.bottom} styles={styles} colors={colors} />
+    </View>
   );
 }
 
 /* -------------------------------------------------------------------------- */
 /*  Subcomponents                                                             */
 /* -------------------------------------------------------------------------- */
+
+// WhatsApp-style floating action button: pops in, shows its label briefly, then
+// collapses to a round icon button.
+function CreateFab({ onPress, bottomInset, styles, colors }) {
+  const [expanded, setExpanded] = useState(true);
+  const scale = useRef(new Animated.Value(0)).current;
+  const pressScale = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const popIn = Animated.spring(scale, {
+      toValue: 1,
+      delay: 250,
+      friction: 6,
+      tension: 90,
+      useNativeDriver: true,
+    });
+    popIn.start();
+    const timer = setTimeout(() => {
+      animateNext();
+      setExpanded(false);
+    }, FAB_LABEL_VISIBLE_MS);
+    return () => {
+      popIn.stop();
+      clearTimeout(timer);
+    };
+  }, [scale]);
+
+  const animatePress = (toValue) =>
+    Animated.spring(pressScale, { toValue, friction: 7, tension: 200, useNativeDriver: true }).start();
+
+  return (
+    <Animated.View
+      pointerEvents="box-none"
+      style={[
+        styles.fabWrap,
+        { bottom: Math.max(bottomInset, 12) + 16, transform: [{ scale: Animated.multiply(scale, pressScale) }] },
+      ]}
+    >
+      <Pressable
+        onPress={onPress}
+        onPressIn={() => animatePress(0.92)}
+        onPressOut={() => animatePress(1)}
+        accessibilityRole="button"
+        accessibilityLabel="Create group"
+        style={[
+          styles.fab,
+          {
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 6 },
+            shadowOpacity: 0.28,
+            shadowRadius: 10,
+            elevation: 8,
+          },
+        ]}
+      >
+        <Ionicons name={expanded ? 'people' : 'add'} size={expanded ? 22 : 28} color={colors.onBrand} />
+        {expanded ? <Text style={styles.fabLabel}>New group</Text> : null}
+      </Pressable>
+    </Animated.View>
+  );
+}
 
 function Notice({ icon, color, text, styles, variant, onClose }) {
   return (
@@ -754,32 +900,38 @@ function Notice({ icon, color, text, styles, variant, onClose }) {
   );
 }
 
-function FilterChip({ item, active, onPress, styles, colors }) {
+function FilterChip({ item, active, count, onPress, styles, colors }) {
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
-      accessibilityLabel={item.label}
+      accessibilityLabel={count === undefined ? item.label : `${item.label}, ${count}`}
       style={({ pressed }) => [styles.chip, active && styles.chipActive, pressed && { opacity: 0.85 }]}
     >
       <Ionicons name={item.icon} size={14} color={active ? colors.onBrand : colors.iconSecondary} />
       <Text style={[styles.chipText, active && styles.chipTextActive]}>{item.label}</Text>
+      {count !== undefined ? (
+        <View style={[styles.chipCount, active && styles.chipCountActive]}>
+          <Text style={[styles.chipCountText, active && styles.chipCountTextActive]}>{formatCount(count)}</Text>
+        </View>
+      ) : null}
     </Pressable>
   );
 }
 
-function Meta({ icon, text, styles, colors }) {
+function Meta({ icon, text, styles, colors, tint }) {
   return (
     <View style={styles.metaItem}>
-      <Ionicons name={icon} size={13} color={colors.iconSecondary} />
-      <Text style={styles.metaText}>{text}</Text>
+      <Ionicons name={icon} size={13} color={tint || colors.iconSecondary} />
+      <Text style={[styles.metaText, tint ? { color: tint, fontWeight: '600' } : null]}>{text}</Text>
     </View>
   );
 }
 
 function GroupAvatar({ group, style, styles, textSize = 20 }) {
   const imageUrl = pickImage(group);
+  const tone = avatarTone(group);
   const [failed, setFailed] = useState(false);
   const previousImageRef = useRef(null);
   useEffect(() => {
@@ -790,12 +942,12 @@ function GroupAvatar({ group, style, styles, textSize = 20 }) {
   }, [imageUrl]);
   const showImage = Boolean(imageUrl) && !failed;
   return (
-    <View style={style}>
+    <View style={[style, { backgroundColor: `${tone}26` }]}>
       {showImage ? (
         <Image source={{ uri: imageUrl }} style={styles.avatarImage} contentFit="cover" cachePolicy="disk" transition={200} onError={() => setFailed(true)} />
       ) : (
         <View style={styles.avatarFallback}>
-          <Text style={[styles.avatarFallbackText, { fontSize: textSize }]}>{groupTitle(group).charAt(0).toUpperCase()}</Text>
+          <Text style={[styles.avatarFallbackText, { fontSize: textSize, color: tone }]}>{groupTitle(group).charAt(0).toUpperCase()}</Text>
         </View>
       )}
     </View>
@@ -803,8 +955,9 @@ function GroupAvatar({ group, style, styles, textSize = 20 }) {
 }
 
 function RailCard({ entry, onOpen, onShare, styles, colors }) {
-  const { group, role } = entry;
+  const { group, role, memberCount } = entry;
   const isAdmin = role === 'owner' || role === 'admin';
+  const roleLabel = isAdmin ? 'Admin' : 'Member';
   return (
     <View style={[styles.railCard, shadows.sm]}>
       <Pressable
@@ -816,9 +969,12 @@ function RailCard({ entry, onOpen, onShare, styles, colors }) {
         <GroupAvatar group={group} style={styles.avatarSmall} styles={styles} textSize={16} />
         <View style={styles.railCopy}>
           <Text style={styles.railName} numberOfLines={1}>{groupTitle(group)}</Text>
-          <Text style={styles.railRole}>{isAdmin ? 'Admin · Your community' : 'Member · Your community'}</Text>
+          <Text style={styles.railRole} numberOfLines={1}>
+            {memberCount > 0 ? `${roleLabel} · ${formatCount(memberCount)} ${memberCount === 1 ? 'member' : 'members'}` : roleLabel}
+          </Text>
         </View>
         {isAdmin ? <Ionicons name="shield-checkmark" size={16} color={colors.green} /> : null}
+        <Ionicons name="chevron-forward" size={16} color={colors.iconSecondary} />
       </Pressable>
       <Pressable
         onPress={onShare}
@@ -834,11 +990,13 @@ function RailCard({ entry, onOpen, onShare, styles, colors }) {
 }
 
 function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) {
-  const { group, role, isJoined, isRequested, isPrivate, needsApproval } = entry;
+  const { group, role, memberCount, isJoined, isRequested, isPrivate, needsApproval } = entry;
   const title = groupTitle(group);
   const description = groupDescription(group);
   const isAdmin = role === 'owner' || role === 'admin';
   const joinLabel = needsApproval ? 'Request access' : 'Join group';
+  const friendCount = Number(group.friendMemberCount || 0);
+  const isNew = isRecentlyCreated(group);
 
   return (
     <Pressable
@@ -849,26 +1007,12 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
     >
       <View style={styles.cardHeader}>
         <GroupAvatar group={group} style={styles.avatar} styles={styles} />
-          <View style={styles.cardContent}>
-            <View style={styles.cardTitleRow}>
-              <Text style={styles.cardTitle} numberOfLines={1}>{title}</Text>
-              <Pressable
-                onPress={(event) => {
-                  event.stopPropagation();
-                  onShare();
-                }}
-                hitSlop={7}
-                style={({ pressed }) => [styles.iconActionButton, pressed && { opacity: 0.75 }]}
-                accessibilityRole="button"
-                accessibilityLabel={`Share ${title}`}
-              >
-                <Ionicons name="share-social-outline" size={17} color={colors.brand} />
-              </Pressable>
-            </View>
-            <View style={styles.cardStatusRow}>
+        <View style={styles.cardContent}>
+          <View style={styles.cardTitleRow}>
+            <Text style={styles.cardTitle} numberOfLines={1}>{title}</Text>
             {isJoined ? (
               <View style={[styles.badge, styles.joinedBadge]}>
-                <Ionicons name={isAdmin ? 'shield-checkmark' : 'checkmark-circle'} size={12} color={colors.green} />
+                <Ionicons name={isAdmin ? 'shield-checkmark' : 'checkmark-circle'} size={11} color={colors.green} />
                 <Text style={[styles.badgeText, { color: colors.green }]}>{isAdmin ? 'Admin' : 'Joined'}</Text>
               </View>
             ) : isPrivate ? (
@@ -876,12 +1020,23 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
                 <Ionicons name="lock-closed" size={10} color={colors.amber} />
                 <Text style={[styles.badgeText, { color: colors.amber }]}>Private</Text>
               </View>
+            ) : isNew ? (
+              <View style={[styles.badge, styles.newBadge]}>
+                <Ionicons name="sparkles" size={10} color={colors.brand} />
+                <Text style={[styles.badgeText, { color: colors.brand }]}>New</Text>
+              </View>
             ) : null}
-            </View>
+          </View>
 
-            {description ? <Text style={styles.cardDescription} numberOfLines={2}>{description}</Text> : null}
+          {description ? <Text style={styles.cardDescription} numberOfLines={2}>{description}</Text> : null}
 
           <View style={styles.metaRow}>
+            <Meta
+              icon="people-outline"
+              text={`${formatCount(memberCount)} ${memberCount === 1 ? 'member' : 'members'}`}
+              styles={styles}
+              colors={colors}
+            />
             {group.category ? <Meta icon="pricetag-outline" text={group.category} styles={styles} colors={colors} /> : null}
             <Meta
               icon={isPrivate ? 'lock-closed-outline' : 'globe-outline'}
@@ -889,9 +1044,20 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
               styles={styles}
               colors={colors}
             />
+            {friendCount > 0 ? (
+              <Meta
+                icon="people-circle-outline"
+                text={`${friendCount} ${friendCount === 1 ? 'friend' : 'friends'} here`}
+                styles={styles}
+                colors={colors}
+                tint={colors.brand}
+              />
+            ) : null}
           </View>
         </View>
       </View>
+
+      <View style={styles.divider} />
 
       <View style={styles.cardFooter}>
         {isJoined ? (
@@ -934,6 +1100,18 @@ function GroupCard({ entry, joining, onOpen, onJoin, onShare, styles, colors }) 
             )}
           </Pressable>
         )}
+        <Pressable
+          onPress={(event) => {
+            event.stopPropagation();
+            onShare();
+          }}
+          hitSlop={6}
+          style={({ pressed }) => [styles.iconActionButton, pressed && { opacity: 0.75 }]}
+          accessibilityRole="button"
+          accessibilityLabel={`Share ${title}`}
+        >
+          <Ionicons name="share-social-outline" size={18} color={colors.brand} />
+        </Pressable>
       </View>
     </Pressable>
   );
@@ -957,7 +1135,7 @@ function GroupSkeletons({ styles }) {
       {[0, 1, 2].map((key) => (
         <View key={key} style={styles.card}>
           <View style={styles.cardHeader}>
-            {bar({ width: 52, height: 52, borderRadius: 16 })}
+            {bar({ width: 56, height: 56, borderRadius: 16 })}
             <View style={{ flex: 1, gap: 8 }}>
               {bar({ width: '60%', height: 14 })}
               {bar({ width: '90%', height: 11 })}

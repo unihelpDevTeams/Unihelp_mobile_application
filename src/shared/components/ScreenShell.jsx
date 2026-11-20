@@ -162,11 +162,8 @@ export default function ScreenShell({
       position: 'absolute', top: 4, right: 4, width: 10, height: 10, borderRadius: 5,
       backgroundColor: c.red, borderWidth: 2, borderColor: c.surface,
     },
-    logoFrame: {
-      width: 44, height: 44, borderRadius: r.lg, alignItems: 'center', justifyContent: 'center',
-      backgroundColor: c.brandLight, borderWidth: 1, borderColor: c.brandBorder,
-    },
-    logo: { width: 26, height: 26 },
+
+    logo: { width: 40, height: 40, borderRadius: r.lg },
     headingWrap: { flex: 1 },
     title: { fontSize: 20, fontWeight: '800', color: c.headerText, letterSpacing: -0.2 },
     subtitle: { marginTop: s.xs, fontSize: 13, color: c.textSecondary },
