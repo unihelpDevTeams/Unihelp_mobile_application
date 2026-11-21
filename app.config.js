@@ -109,7 +109,7 @@ module.exports = {
     name: "UniHelp",
     slug: "unihelpteam",
     owner: "unihelpdevteam",
-    version: "1.1.0",
+    version: "1.2.0",
 
     orientation: "default",
 

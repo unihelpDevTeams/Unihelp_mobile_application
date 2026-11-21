@@ -1,6 +1,0 @@
-{
-  "platforms": ["android"],
-  "android": {
-    "modules": ["com.zenithdev.unihelp.playupdates.PlayStoreUpdatesModule"]
-  }
-}
