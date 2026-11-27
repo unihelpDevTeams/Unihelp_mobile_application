@@ -17,7 +17,8 @@ const googleServicesPath = path.resolve(
   googleServicesFile
 );
 
-const googleServicesConfig = fs.existsSync(googleServicesPath)
+const googleServicesExists = fs.existsSync(googleServicesPath);
+const googleServicesConfig = googleServicesExists
   ? JSON.parse(fs.readFileSync(googleServicesPath, "utf8"))
   : null;
 
@@ -158,7 +159,7 @@ module.exports = {
     android: {
       package: "com.zenithdev.unihelp",
 
-      googleServicesFile,
+      ...(googleServicesExists ? { googleServicesFile } : {}),
 
       softwareKeyboardLayoutMode: "resize",
 
