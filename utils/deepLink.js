@@ -69,6 +69,10 @@ export function parseDeepLink(rawUrl) {
       return { pathname: '/(tabs)', params: {} };
     }
 
+    if (pathname === '/premium' || parts[0] === 'premium') {
+      return { pathname: '/premium', params: query };
+    }
+
     if (pathname === '/feed' || pathname === '/newsfeed') {
       const postId = pickValue(query.post, query.id, query.postId, query.pid);
       if (postId) {
