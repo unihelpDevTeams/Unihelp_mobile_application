@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   Alert,
@@ -690,9 +691,9 @@ const createStyles = (c) => ({
   groupOptionsName: { fontSize: 15, fontWeight: '800', color: c.textPrimary },
   groupOptionsMeta: { fontSize: 12, color: c.textSecondary, marginTop: 1 },
   groupShareHeading: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, marginBottom: 14 },
-  groupShareIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brandLight },
-  groupShareTitle: { color: c.textPrimary, fontSize: 16, fontWeight: '900' },
-  groupShareHint: { color: c.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  groupShareIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brandLight, flexShrink: 0 },
+  groupShareTitle: { color: c.textPrimary, fontSize: 16, fontWeight: '900', letterSpacing: -0.2 },
+  groupShareHint: { color: c.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: 4, flexShrink: 1 },
   qrWrap: { alignItems: 'center', paddingVertical: 14, borderRadius: 18, backgroundColor: '#FFFFFF', marginBottom: 12 },
   qrCode: { width: 190, height: 190 },
   qrCaption: { color: '#475569', fontSize: 11.5, fontWeight: '700', marginTop: 9 },
@@ -1582,6 +1583,22 @@ function GroupDetailScreen({ groupId }) {
     };
   }, [load]);
 
+  // Restore messages from local AsyncStorage when mounting if memory cache is empty
+  useEffect(() => {
+    if (!groupId || messages.length) return;
+    AsyncStorage.getItem(`@unihelp_group_${groupId}`).then((raw) => {
+      if (raw) {
+        try {
+          const stored = JSON.parse(raw);
+          if (Array.isArray(stored) && stored.length) {
+            setMessages((prev) => (prev.length ? prev : stored));
+            setMessagesLoading(false);
+          }
+        } catch {}
+      }
+    }).catch(() => {});
+  }, [groupId, messages.length]);
+
   // Keep the cache in sync with local changes (optimistic edits, approved requests) without extra reads.
   useEffect(() => {
     if (!group) return;
@@ -1597,6 +1614,9 @@ function GroupDetailScreen({ groupId }) {
       return;
     }
     putCache(MESSAGE_CACHE, groupId, { messages, cursor: messageCursor, hasMore: hasMoreMessages, ts: syncedAtRef.current });
+    if (messages.length) {
+      AsyncStorage.setItem(`@unihelp_group_${groupId}`, JSON.stringify(messages.slice(-80))).catch(() => {});
+    }
   }, [messages, messageCursor, hasMoreMessages, messagesLoading, groupId]);
 
   const loadOlderMessages = useCallback(async () => {

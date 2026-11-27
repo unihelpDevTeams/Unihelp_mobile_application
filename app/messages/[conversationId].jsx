@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   Animated,
@@ -1697,6 +1698,22 @@ function ConversationScreen({ conversationId }) {
     currentUidRef.current = currentUid;
   }, [currentUid]);
 
+  // Restore messages from local AsyncStorage when mounting if memory cache is empty
+  useEffect(() => {
+    if (!conversationId || messages.length) return;
+    AsyncStorage.getItem(`@unihelp_chat_${conversationId}`).then((raw) => {
+      if (raw) {
+        try {
+          const stored = JSON.parse(raw);
+          if (Array.isArray(stored) && stored.length) {
+            setMessages((prev) => (prev.length ? prev : stored));
+            setMessagesLoading(false);
+          }
+        } catch {}
+      }
+    }).catch(() => {});
+  }, [conversationId, messages.length]);
+
   // Depend on the appearance *content*, not the profile object's identity.
   const globalAppearanceKey = JSON.stringify(profile?.chatBubbleAppearance || null);
   useEffect(() => {
@@ -1963,6 +1980,9 @@ function ConversationScreen({ conversationId }) {
       hasMore: trimmed ? true : hasMoreMessages,
       ts: syncedAtRef.current,
     });
+    if (persisted.length) {
+      AsyncStorage.setItem(`@unihelp_chat_${conversationId}`, JSON.stringify(persisted)).catch(() => {});
+    }
   }, [messages, lastVisibleMessageId, hasMoreMessages, messagesLoading, conversationId]);
 
   const loadOlderMessages = useCallback(async () => {

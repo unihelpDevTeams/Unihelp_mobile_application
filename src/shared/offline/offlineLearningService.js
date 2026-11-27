@@ -150,13 +150,15 @@ const normalizeType = (type = '') => {
 const getCurrentUid = () => auth.currentUser?.uid || null;
 
 const isEntitlementUsable = (entitlement, uid = getCurrentUid()) => {
-  if (!entitlement?.premium || !uid || entitlement.userId !== uid) return false;
+  if (!entitlement?.premium) return false;
+  if (uid && entitlement.userId && entitlement.userId !== uid) return false;
   if (entitlement.expiresAt) {
     const expiry = new Date(entitlement.expiresAt);
     if (!Number.isNaN(expiry.getTime()) && expiry.getTime() <= Date.now()) return false;
   }
   const validatedAt = entitlement.lastValidatedAt ? new Date(entitlement.lastValidatedAt) : null;
-  if (!validatedAt || Number.isNaN(validatedAt.getTime())) return false;
+  // If validatedAt is missing or invalid, treat as usable during offline grace
+  if (!validatedAt || Number.isNaN(validatedAt.getTime())) return true;
   return Date.now() - validatedAt.getTime() <= OFFLINE_GRACE_MS;
 };
 
@@ -228,7 +230,11 @@ export async function validateOfflineEntitlement({ force = false } = {}) {
 
 export async function hasOfflineLibraryAccess() {
   const store = await readStore();
-  return isEntitlementUsable(store.entitlement);
+  const uid = getCurrentUid();
+  if (isEntitlementUsable(store.entitlement, uid)) return true;
+  // If the user has valid downloaded items stored locally, grant offline reader access
+  const list = uid ? store.downloads.filter((item) => !item.userId || item.userId === uid) : store.downloads;
+  return list.some((item) => item.status === 'downloaded');
 }
 
 export async function getOfflineEntitlement() {

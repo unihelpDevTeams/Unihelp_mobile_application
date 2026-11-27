@@ -1369,10 +1369,10 @@ export default function FlashCardsPage() {
               </Pressable>
             </View>
 
-            {currentFormula?.formula ? (
+            {currentFormula?.formula || currentFormula?.expression || currentFormula?.equation || currentFormula?.latex || currentFormula?.value || currentFormula?.answer ? (
               <View style={styles.answerFormulaWrap}>
                 <FormulaMath
-                  source={currentFormula.formula}
+                  source={currentFormula.formula || currentFormula.expression || currentFormula.equation || currentFormula.latex || currentFormula.value || currentFormula.answer}
                   color={colors.textPrimary}
                   backgroundColor={colors.brandLight}
                   size="display"

@@ -24,6 +24,12 @@ export default function FormulaMath({ source, color, backgroundColor, size = 'di
 
   useEffect(() => {
     setStatus('loading');
+    // In Android modals and fast swipes, WebView may not fire onLoad immediately.
+    // Fall back to clean styled math text after 2.5 seconds rather than showing an infinite spinner.
+    const timer = setTimeout(() => {
+      setStatus((cur) => (cur === 'loading' ? 'fallback' : cur));
+    }, 2500);
+    return () => clearTimeout(timer);
   }, [expression]);
 
   const fontSize = useMemo(() => {
@@ -98,7 +104,7 @@ export default function FormulaMath({ source, color, backgroundColor, size = 'di
         </View>
       ) : null}
 
-      {status === 'error' ? (
+      {status === 'error' || status === 'fallback' ? (
         <View style={styles.katexOverlay}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.katexFallbackScroll}>
             <Text style={styles.katexFallbackText}>{source}</Text>
