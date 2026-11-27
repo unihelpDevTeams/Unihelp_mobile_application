@@ -25,10 +25,10 @@ const ROLE_LABELS = {
 };
 
 const HOME_NAV_ITEMS = [
-  { key: 'feed', path: '/feed', label: 'Feed', icon: 'newspaper-outline', route: '/feed' },
-  { key: 'friends', path: '/friends', label: 'Requests', icon: 'person-add-outline', route: '/friends?tab=requests' },
-  { key: 'marketplace', path: '/studentmarketplace', label: 'Marketplace', icon: 'storefront-outline', route: '/studentmarketplace' },
-  { key: 'notifications', path: '/notifications', label: 'Notifications', icon: 'notifications-outline', route: '/notifications' },
+  { key: 'feed', paths: ['/', '/index', '/(tabs)', '/feed', '/newsfeed'], label: 'Feeds', icon: 'home-outline', route: '/(tabs)' },
+  { key: 'marketplace', paths: ['/studentmarketplace'], label: 'Marketplace', icon: 'storefront-outline', route: '/studentmarketplace' },
+  { key: 'requests', paths: ['/friends'], label: 'Requests', icon: 'people-outline', route: '/friends?tab=requests' },
+  { key: 'notifications', paths: ['/notifications'], label: 'Notifications', icon: 'notifications-outline', route: '/notifications' },
 ];
 
 // Item counts large enough to need a search box in the drawer.
@@ -76,7 +76,7 @@ export default function ScreenShell({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const activeHomeNavItem = HOME_NAV_ITEMS.find((item) => item.path === pathname);
+  const activeHomeNavItem = HOME_NAV_ITEMS.find((item) => item.paths.includes(pathname));
   const { profile, user, logout } = useAuth();
   const { colors } = useTheme();
   const { isConnected } = useNetInfo();
@@ -100,16 +100,25 @@ export default function ScreenShell({
     },
     homeNav: {
       flexDirection: 'row',
+      alignItems: 'center',
+      paddingLeft: 4,
+      paddingRight: 8,
       backgroundColor: c.card,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: c.borderDefault,
+      shadowColor: c.shadow,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 5,
+      elevation: 2,
     },
-    homeNavTab: { flex: 1, minWidth: 0, height: 50, alignItems: 'center', justifyContent: 'center', gap: 3, position: 'relative' },
+    homeNavTab: { flex: 1, minWidth: 0, height: 58, alignItems: 'center', justifyContent: 'center', gap: 3, position: 'relative' },
     homeNavIcon: { color: c.textTertiary },
     homeNavIconActive: { color: c.brand },
     homeNavLabel: { color: c.textTertiary, fontSize: 10, fontWeight: '700' },
     homeNavLabelActive: { color: c.brandText, fontWeight: '900' },
     homeNavIndicator: { position: 'absolute', bottom: 0, left: '22%', right: '22%', height: 2, borderRadius: 1, backgroundColor: c.brand },
+    homeNavMenu: { width: 42, height: 42, marginLeft: 2, borderRadius: 21, backgroundColor: c.canvasLight, alignItems: 'center', justifyContent: 'center' },
     headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     headerLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: s.md, marginRight: s.md },
     headerRight: { flexDirection: 'row', alignItems: 'center', gap: s.sm },
@@ -181,15 +190,17 @@ export default function ScreenShell({
     modalRoot: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end' },
     modalScrim: { backgroundColor: c.overlay },
     menuCard: {
-      width: '86%', maxWidth: 380, height: '100%', backgroundColor: c.modalBackground,
+      width: '88%', maxWidth: 400, height: '100%', backgroundColor: c.modalBackground,
       borderTopLeftRadius: r['2xl'], borderBottomLeftRadius: r['2xl'],
-      shadowColor: c.shadow, shadowOffset: { width: -4, height: 0 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 12,
+      shadowColor: c.shadow, shadowOffset: { width: -8, height: 0 }, shadowOpacity: 0.2, shadowRadius: 26, elevation: 16,
     },
     menuCardTouchable: { flex: 1 },
     menuTopRow: {
       flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
       paddingTop: s.xl, paddingHorizontal: layout.screenPadding, paddingBottom: s.sm,
     },
+    menuBrand: { flexDirection: 'row', alignItems: 'center', gap: s.sm },
+    menuBrandIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brand },
     menuEyebrow: { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, color: c.textTertiary, textTransform: 'uppercase' },
 
     menuProfileCard: {
@@ -278,12 +289,12 @@ export default function ScreenShell({
     },
     menuItem: {
       flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-      paddingVertical: s.md, paddingHorizontal: s.lg, borderBottomWidth: 1, borderBottomColor: c.borderDefault,
+      minHeight: 55, paddingVertical: s.sm, paddingHorizontal: s.lg, borderBottomWidth: 1, borderBottomColor: c.borderDefault,
     },
     menuItemLast: { borderBottomWidth: 0 },
     menuItemPressed: { backgroundColor: c.brandLight },
     menuItemLeft: { flexDirection: 'row', alignItems: 'center', gap: s.sm, flexShrink: 1 },
-    menuItemIconWrap: { width: 28, height: 28, borderRadius: r.sm, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
+    menuItemIconWrap: { width: 32, height: 32, borderRadius: 11, backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center' },
     menuItemText: { color: c.textPrimary, fontWeight: '700', fontSize: 14, flexShrink: 1 },
     menuItemRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
     menuItemBadge: { minWidth: 20, height: 20, paddingHorizontal: 5, borderRadius: 10, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center' },
@@ -430,7 +441,7 @@ export default function ScreenShell({
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" enabled={keyboardAvoiding}>
-        {showHeader && (
+        {showHeader && !activeHomeNavItem && (
           <Animated.View
             style={headerScrollY ? {
               transform: [{
@@ -466,7 +477,7 @@ export default function ScreenShell({
             />
           </Animated.View>
         )}
-        {activeHomeNavItem ? (
+        {showHeader && activeHomeNavItem ? (
           <View style={styles.homeNav}>
             {HOME_NAV_ITEMS.map((item) => {
               const active = item.key === activeHomeNavItem.key;
@@ -485,6 +496,16 @@ export default function ScreenShell({
                 </Pressable>
               );
             })}
+            {showMenu ? (
+              <Pressable
+                style={({ pressed }) => [styles.homeNavMenu, pressed && styles.iconButtonPressed]}
+                onPress={() => setMenuOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Open menu"
+              >
+                <Ionicons name="menu" size={22} color={colors.headerText} />
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
         {content}
@@ -686,14 +707,22 @@ function MenuDrawer({ visible, onClose, onNavigate, sections, profile, onProfile
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
       <View style={styles.modalRoot}>
-        <Animated.View style={[StyleSheet.absoluteFillObject, styles.modalScrim, { opacity: scrimOpacity }]}>
-          <Pressable style={StyleSheet.absoluteFillObject} onPress={handleClose} accessibilityRole="button" accessibilityLabel="Close menu" />
-        </Animated.View>
+        <Pressable
+          style={StyleSheet.absoluteFillObject}
+          onPress={handleClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close menu"
+        >
+          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFillObject, styles.modalScrim, { opacity: scrimOpacity }]} />
+        </Pressable>
 
         <Animated.View style={[styles.menuCard, { transform: [{ translateX: drawerX }] }]} accessibilityViewIsModal>
           <Pressable style={styles.menuCardTouchable} onPress={(event) => event.stopPropagation()}>
             <View style={styles.menuTopRow}>
-              <Text style={styles.menuEyebrow}>Menu</Text>
+              <View style={styles.menuBrand}>
+                <View style={styles.menuBrandIcon}><Ionicons name="grid" size={16} color={colors.onBrand} /></View>
+                <Text style={styles.menuEyebrow}>UniHelp menu</Text>
+              </View>
               <IconButton icon="close" onPress={handleClose} accessibilityLabel="Close menu" colors={colors} styles={styles} />
             </View>
 

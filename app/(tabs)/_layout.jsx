@@ -13,7 +13,7 @@ import {
   listenUnreadGroupMessageCount,
 } from '../../services/firestoreSync';
 
-const TAB_ROUTES = ['/feed', '/chat', '/studyMaterials', '/groups', '/tools'];
+const TAB_ROUTES = ['/', '/chat', '/studyMaterials', '/groups', '/tools'];
 const SWIPE_DISTANCE = 72;
 const SWIPE_VELOCITY = 0.45;
 const TRANSITION_DURATION = 180;
@@ -33,7 +33,7 @@ const tabIcon = (active, inactive) => function TabIcon({ color, size, focused })
 };
 
 const ICONS = {
-  feed: tabIcon('home', 'home-outline'),
+  home: tabIcon('home', 'home-outline'),
   chat: tabIcon('chatbubbles', 'chatbubbles-outline'),
   studyMaterials: tabIcon('folder', 'folder-outline'),
   groups: tabIcon('people', 'people-outline'),
@@ -250,8 +250,8 @@ export default function TabsLayout() {
       {/* Backdrop so sliding screens never reveal a blank/black edge. */}
       <View style={{ flex: 1, backgroundColor: colors.canvas || colors.background }}>
         <Animated.View style={{ flex: 1, transform: [{ translateX: swipeX }] }} {...swipeResponder.panHandlers}>
-          <Tabs initialRouteName="feed" backBehavior="history" screenOptions={screenOptions} tabBar={renderTabBar}>
-            <Tabs.Screen name="feed" options={{ title: 'Home', tabBarIcon: ICONS.feed }} />
+          <Tabs initialRouteName="index" backBehavior="history" screenOptions={screenOptions} tabBar={renderTabBar}>
+            <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: ICONS.home }} />
             <Tabs.Screen
               name="chat"
               options={{
@@ -273,7 +273,7 @@ export default function TabsLayout() {
               }}
             />
             <Tabs.Screen name="tools" options={{ title: 'Study Tools', tabBarIcon: ICONS.tools }} />
-            <Tabs.Screen name="index" options={{ href: null }} />
+            <Tabs.Screen name="feed" options={{ href: null }} />
             <Tabs.Screen name="profile" options={{ href: null }} />
           </Tabs>
         </Animated.View>

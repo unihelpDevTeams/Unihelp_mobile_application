@@ -22,14 +22,29 @@ import ScreenShell from '../../src/shared/components/ScreenShell';
 import { PageLoader } from '../../src/shared/components/AILoaders';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import { isPremiumActive } from '../../src/shared/services/premium';
 import { listResourceBookmarks, toggleResourceBookmark } from '../../src/shared/services/resourceBookmarks';
+import { getApiUrl } from '../../src/shared/services/backend';
 
 /* -------------------------------------------------------------------------- */
 /*                                  Constants                                 */
 /* -------------------------------------------------------------------------- */
 
-const COURSES_URL = 'https://taired-cbt.puter.site/api/v1/courses.json';
+const SUPER_DIGITS = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' };
+const SUB_DIGITS = { 0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉' };
+const formatNativeMath = (value) => String(value || '')
+  .replace(/\b(\d+)\/(\d+)\b/g, (_, numerator, denominator) => (
+    `${[...numerator].map((digit) => SUPER_DIGITS[digit]).join('')}⁄${[...denominator].map((digit) => SUB_DIGITS[digit]).join('')}`
+  ));
+
+function FormulaBlock({ expression, styles }) {
+  if (!expression) return null;
+  return (
+    <View pointerEvents="none" style={styles.formulaBlock}>
+      <Text style={styles.formulaText} selectable>{formatNativeMath(expression)}</Text>
+    </View>
+  );
+}
+
 const FETCH_TIMEOUT_MS = 15000;
 const PASS_MARK = 50;
 const MAX_MINUTES = 300;
@@ -51,9 +66,6 @@ const STATUS = {
   ANSWERED_MARKED: 'answered-marked',
 };
 
-// Question banks stay in memory for the session: retaking a paper costs no network.
-const BANK_CACHE = new Map();
-
 /* -------------------------------------------------------------------------- */
 /*                                   Helpers                                  */
 /* -------------------------------------------------------------------------- */
@@ -70,25 +82,21 @@ function formatClock(totalSeconds) {
 
 const digitsOnly = (text) => String(text || '').replace(/[^0-9]/g, '').slice(0, 4);
 
-// Fisher-Yates: the old `sort(() => 0.5 - Math.random())` is biased.
-function shuffle(list) {
-  const out = [...list];
-  for (let i = out.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
-}
-
-async function fetchJson(url, { timeout = FETCH_TIMEOUT_MS, signal } = {}) {
+async function cbtRequest(path, { method = 'GET', body, timeout = FETCH_TIMEOUT_MS, signal } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   const onAbort = () => controller.abort();
   signal?.addEventListener?.('abort', onAbort);
   try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
+    const res = await fetch(`${getApiUrl()}${path}`, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener?.('abort', onAbort);
@@ -98,41 +106,6 @@ async function fetchJson(url, { timeout = FETCH_TIMEOUT_MS, signal } = {}) {
 const suggestMinutes = (qty) => Math.max(5, Math.round((qty * 0.75) / 5) * 5);
 
 const pctOf = (score, total) => (total ? Math.round((score / total) * 100) : 0);
-
-// Turns a raw API question into a normalised one. Correct answers are stored as an INDEX
-// (not option text) so two options with identical text can never both be "correct".
-// Returns null for unusable questions so they are skipped instead of silently marking option A.
-function normalizeQuestion(q, index, courseTitle) {
-  if (!q || !String(q.question || '').trim()) return null;
-  const fromArray = Array.isArray(q.options);
-  const options = (fromArray ? q.options : [q.a, q.b, q.c, q.d, q.e].filter(Boolean)).map((o) => String(o).trim());
-  if (options.length < 2 || options.length > LETTERS.length) return null;
-
-  let correctIndex = -1;
-  const ans = q.answer ?? q.correct;
-  if (typeof ans === 'string') {
-    const t = ans.trim();
-    if (/^[A-Fa-f]$/.test(t)) {
-      if (fromArray) correctIndex = t.toUpperCase().charCodeAt(0) - 65;
-      else {
-        const v = q[t.toLowerCase()];
-        correctIndex = v != null ? options.indexOf(String(v).trim()) : -1;
-      }
-    } else {
-      correctIndex = options.findIndex((o) => o.toLowerCase() === t.toLowerCase());
-    }
-  }
-  if (correctIndex < 0 || correctIndex >= options.length) return null;
-
-  return {
-    id: `Q-${index}-${Math.random().toString(36).slice(2, 8)}`,
-    courseTitle,
-    question: String(q.question).trim(),
-    options,
-    correctIndex,
-    explanation: q.explanation ? String(q.explanation).trim() : '',
-  };
-}
 
 // Tiny safe expression parser for the calculator (replaces `Function(...)` eval).
 function evaluateExpression(input) {
@@ -301,13 +274,30 @@ const makeStyles = (T) =>
 
     searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: T.card, borderRadius: 16, paddingHorizontal: 14, borderWidth: 1, borderColor: T.border, marginBottom: 18 },
     searchInput: { flex: 1, marginLeft: 10, fontSize: 15.5, color: T.textPrimary, paddingVertical: 13 },
+    filterGroup: { marginBottom: 10 },
+    filterModalBackdrop: { flex: 1, backgroundColor: T.overlay, justifyContent: 'flex-end' },
+    filterModal: { backgroundColor: T.card, borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 20, paddingBottom: 30, maxHeight: '82%' },
+    filterModalHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 },
+    filterModalTitle: { fontSize: 20, fontWeight: '900', color: T.textPrimary },
+    filterModalSub: { fontSize: 12.5, color: T.textMuted, marginTop: 3 },
+    filterClear: { color: T.indigo, fontWeight: '800', fontSize: 13 },
+    filterLabel: { color: T.textSecondary, fontSize: 11, fontWeight: '800', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+    browseFilterRow: { gap: 8, paddingRight: 8 },
+    browseFilterChip: { backgroundColor: T.chip, borderColor: T.border, borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, maxWidth: 220 },
+    browseFilterChipActive: { backgroundColor: T.indigo, borderColor: T.indigo },
+    browseFilterChipText: { color: T.textSecondary, fontSize: 12, fontWeight: '700' },
+    browseFilterChipTextActive: { color: T.white },
     sectionLabel: { fontSize: 13, fontWeight: '800', color: T.textSecondary, marginBottom: 12 },
 
-    courseRow: { justifyContent: 'space-between' },
-    courseCard: { width: '48.5%', backgroundColor: T.card, padding: 16, borderRadius: 18, marginBottom: 12, borderWidth: 1, borderColor: T.border },
-    courseIcon: { backgroundColor: T.indigoTint, width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-    courseTitle: { fontWeight: '800', color: T.textPrimary, fontSize: 14.5, lineHeight: 19, marginBottom: 4, minHeight: 38 },
+    courseCard: { backgroundColor: T.card, padding: 17, borderRadius: 22, marginBottom: 12, borderWidth: 1, borderColor: T.border, borderLeftWidth: 4, borderLeftColor: T.indigo, shadowColor: '#0F172A', shadowOpacity: 0.07, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+    courseTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 13 },
+    courseIcon: { backgroundColor: T.indigoTint, width: 46, height: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+    courseTitle: { fontWeight: '900', color: T.textPrimary, fontSize: 16, lineHeight: 21, marginBottom: 4 },
+    courseCode: { color: T.indigo, fontSize: 12, fontWeight: '900', letterSpacing: 0.6 },
     courseMeta: { fontSize: 12, color: T.textMuted, fontWeight: '600' },
+    courseDetails: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 14 },
+    courseDetail: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: T.chip, borderRadius: 9, paddingHorizontal: 9, paddingVertical: 6, maxWidth: '100%' },
+    courseDetailText: { color: T.textSecondary, fontSize: 11.5, fontWeight: '700', flexShrink: 1 },
     bestPill: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, marginTop: 10 },
     bestText: { fontSize: 11, fontWeight: '800' },
     emptyWrap: { alignItems: 'center', paddingVertical: 48 },
@@ -374,19 +364,25 @@ const makeStyles = (T) =>
 
     /* Exam: question */
     qScroll: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 24 },
-    qCard: { backgroundColor: T.card, padding: 20, borderRadius: 22, borderWidth: 1, borderColor: T.border, marginBottom: 16 },
+    qCard: { backgroundColor: T.card, padding: 20, borderRadius: 22, borderWidth: 1, borderColor: T.border, borderLeftWidth: 4, borderLeftColor: T.indigo, marginBottom: 16, shadowColor: '#0F172A', shadowOpacity: 0.06, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
     qHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
     qLabel: { fontSize: 12.5, fontWeight: '800', color: T.indigo },
     flagPill: { backgroundColor: T.amberTint, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, flexDirection: 'row', alignItems: 'center', gap: 4 },
     flagPillText: { fontSize: 11, fontWeight: '800', color: T.amber },
     qText: { color: T.textPrimary, fontWeight: '500' },
+    // Mathematical symbols from the CBT API are delivered as real Unicode
+    // (e.g. x², log₂, √, ∩), so give calculations a more legible equation-like face.
+    mathQuestion: { fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }), letterSpacing: 0.15 },
+    mathOption: { fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }), letterSpacing: 0.1 },
+    formulaBlock: { marginTop: 12, borderRadius: 12, backgroundColor: T.indigoTint, borderWidth: 1, borderColor: T.border, paddingHorizontal: 13, paddingVertical: 11 },
+    formulaText: { color: T.indigo, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }), fontSize: 17, lineHeight: 24, fontWeight: '700', includeFontPadding: false },
     optionsWrap: { gap: 10 },
-    option: { flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 16, borderWidth: 1.5, borderColor: T.border, backgroundColor: T.card },
+    option: { flexDirection: 'row', alignItems: 'center', padding: 15, borderRadius: 16, borderWidth: 1.5, borderColor: T.border, backgroundColor: T.card, minHeight: 62 },
     optionOn: { borderColor: T.indigo, backgroundColor: T.indigoTint },
     optionLetter: { width: 32, height: 32, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginRight: 12, backgroundColor: T.chip },
     optionLetterOn: { backgroundColor: T.indigo },
     optionLetterText: { fontWeight: '800', fontSize: 12.5, color: T.textSecondary },
-    optionText: { flex: 1, fontWeight: '500', color: T.textPrimary },
+    optionText: { flex: 1, fontWeight: '500', color: T.textPrimary, lineHeight: 21, includeFontPadding: false },
     clearBtn: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 14, paddingVertical: 8, paddingHorizontal: 12 },
     clearText: { color: T.textMuted, fontWeight: '700', fontSize: 13 },
 
@@ -544,7 +540,7 @@ function ChoiceChip({ label, active, onPress, s }) {
   );
 }
 
-const CourseCard = React.memo(function CourseCard({ course, best, onPress, onToggleSaved, saved, saving, isPremium, s, T }) {
+const CourseCard = React.memo(function CourseCard({ course, best, onPress, onToggleSaved, saved, saving, s, T }) {
   const good = best != null && best >= PASS_MARK;
   return (
     <TouchableOpacity
@@ -554,19 +550,29 @@ const CourseCard = React.memo(function CourseCard({ course, best, onPress, onTog
       accessibilityRole="button"
       accessibilityLabel={`Practise ${course.title}, ${course.question_count} questions`}
     >
-      <View style={s.courseIcon}>
-        <MaterialCommunityIcons name="file-document-edit-outline" size={22} color={T.indigo} />
-      </View>
       <Pressable
         onPress={(event) => { event.stopPropagation?.(); onToggleSaved(course); }}
         style={{ position: 'absolute', right: 10, top: 10, width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: saved ? T.indigoTint : T.chip }}
         accessibilityRole="button"
         accessibilityLabel={saved ? `Remove ${course.title} from saved CBT papers` : `Save ${course.title} for later`}
       >
-        <Ionicons name={saving ? 'hourglass-outline' : saved ? 'bookmark' : isPremium ? 'bookmark-outline' : 'lock-closed-outline'} size={17} color={saved ? T.indigo : T.textSecondary} />
+        <Ionicons name={saving ? 'hourglass-outline' : saved ? 'bookmark' : 'bookmark-outline'} size={17} color={saved ? T.indigo : T.textSecondary} />
       </Pressable>
-      <Text style={s.courseTitle} numberOfLines={2}>{course.title}</Text>
-      <Text style={s.courseMeta}>{course.question_count} questions</Text>
+      <View style={s.courseTop}>
+        <View style={s.courseIcon}>
+          <MaterialCommunityIcons name="file-document-edit-outline" size={24} color={T.indigo} />
+        </View>
+        <View style={{ flex: 1, paddingRight: 28 }}>
+          <Text style={s.courseCode}>{course.code}</Text>
+          <Text style={s.courseTitle} numberOfLines={2}>{course.title}</Text>
+          <Text style={s.courseMeta} numberOfLines={1}>{course.department}</Text>
+        </View>
+      </View>
+      <View style={s.courseDetails}>
+        <View style={s.courseDetail}><Ionicons name="business-outline" size={13} color={T.textMuted} /><Text style={s.courseDetailText} numberOfLines={1}>{course.school}</Text></View>
+        <View style={s.courseDetail}><Ionicons name="layers-outline" size={13} color={T.textMuted} /><Text style={s.courseDetailText}>{course.level} level</Text></View>
+        <View style={s.courseDetail}><Ionicons name="help-circle-outline" size={13} color={T.textMuted} /><Text style={s.courseDetailText}>{course.question_count} questions</Text></View>
+      </View>
       {best != null ? (
         <View style={[s.bestPill, { backgroundColor: good ? T.greenTint : T.dangerTint }]}>
           <Ionicons name="ribbon-outline" size={12} color={good ? T.green : T.rose} />
@@ -585,7 +591,7 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
   const router = useRouter();
   const { courseId: rawCourseId } = useLocalSearchParams();
   const courseId = Array.isArray(rawCourseId) ? rawCourseId[0] : rawCourseId;
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
   const T = useCbtTheme(colors, isDark);
@@ -601,11 +607,12 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
   // 'browse' | 'history' | 'setup' | 'instructions' | 'exam' | 'results'
   const [stage, setStage] = useState('browse');
   const [searchTerm, setSearchTerm] = useState('');
+  const [filters, setFilters] = useState({ school: '', level: '', department: '', difficulty: '' });
+  const [showFilters, setShowFilters] = useState(false);
   const [history, setHistory] = useState([]);
   const [resumable, setResumable] = useState(null);
   const [savedCourseIds, setSavedCourseIds] = useState(new Set());
   const [savingCourseId, setSavingCourseId] = useState(null);
-  const premiumActive = isPremiumActive(profile);
 
   // Setup
   const [setupCourse, setSetupCourse] = useState(null);
@@ -635,6 +642,7 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
   const [fontLevel, setFontLevel] = useState(1);
 
   const [reviewFilter, setReviewFilter] = useState('all');
+  const [submission, setSubmission] = useState(null);
   const [dialog, setDialog] = useState(null);
   const closeDialog = useCallback(() => setDialog(null), []);
 
@@ -656,11 +664,15 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
     setLoading(true);
     setLoadError(false);
     try {
-      const data = await fetchJson(COURSES_URL);
-      if (data?.status !== 'success' || !Array.isArray(data.courses)) throw new Error('bad payload');
-      setCourses(data.courses);
+      const data = await cbtRequest('/api/cbt/meta');
+      if (!data?.success || !Array.isArray(data.courses)) throw new Error('bad payload');
+      const catalog = data.courses.map((course) => ({
+        ...course,
+        question_count: data.courseQuestionCounts?.[course.id] || 0,
+      }));
+      setCourses(catalog);
       setOffline(false);
-      AsyncStorage.setItem(COURSES_KEY, JSON.stringify(data.courses)).catch(() => {});
+      AsyncStorage.setItem(COURSES_KEY, JSON.stringify(catalog)).catch(() => {});
     } catch (e) {
       // Fall back to the last good catalogue so the screen stays useful offline.
       try {
@@ -718,9 +730,21 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
 
   const filteredCourses = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    if (!term) return courses;
-    return courses.filter((c) => c.title.toLowerCase().includes(term) || String(c.id).toLowerCase().includes(term));
-  }, [courses, searchTerm]);
+    return courses.filter((course) =>
+      (!filters.school || course.school === filters.school) &&
+      (!filters.level || course.level === filters.level) &&
+      (!filters.department || course.department === filters.department) &&
+      (!term || course.title.toLowerCase().includes(term) || course.code.toLowerCase().includes(term) || course.department.toLowerCase().includes(term))
+    );
+  }, [courses, searchTerm, filters]);
+
+  const filterOptions = useMemo(() => ({
+    schools: [...new Set(courses.map((course) => course.school))].sort(),
+    levels: [...new Set(courses.filter((course) => !filters.school || course.school === filters.school).map((course) => course.level))].sort(),
+    departments: [...new Set(courses.filter((course) =>
+      (!filters.school || course.school === filters.school) && (!filters.level || course.level === filters.level)
+    ).map((course) => course.department))].sort(),
+  }), [courses, filters.school, filters.level]);
 
   const bestByCourse = useMemo(() => {
     const map = {};
@@ -745,11 +769,11 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
     questions.forEach((q, idx) => {
       const a = answers[idx];
       if (a === undefined) skipped += 1;
-      else if (a === q.correctIndex) correct += 1;
+      else if (submission?.results?.find((result) => result.questionId === q.id)?.isCorrect) correct += 1;
       else wrong += 1;
     });
     return { correct, wrong, skipped };
-  }, [questions, answers]);
+  }, [questions, answers, submission]);
 
   const score = stats.correct;
   const percent = pctOf(score, questions.length);
@@ -759,9 +783,17 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
     () =>
       questions.map((q, idx) => {
         const selected = answers[idx];
-        return { q, idx, selected, isSkipped: selected === undefined, isCorrect: selected === q.correctIndex };
+        const result = submission?.results?.find((item) => item.questionId === q.id);
+        return {
+          q: { ...q, explanation: result?.explanation || '' },
+          idx,
+          selected,
+          isSkipped: selected === undefined,
+          isCorrect: Boolean(result?.isCorrect),
+          correctIndex: result?.correctIndex,
+        };
       }),
-    [questions, answers]
+    [questions, answers, submission]
   );
 
   const reviewCounts = useMemo(
@@ -837,10 +869,6 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
   }, [courseId, courses, stage, beginSetup]);
 
   const toggleSavedCourse = async (course) => {
-    if (!premiumActive) {
-      setDialog({ icon: 'lock-closed', title: 'Premium study library', message: 'Save individual CBT papers alongside your notes and past questions with UniHelp Premium.', actions: [{ key: 'cancel', label: 'Not now', variant: 'secondary', onPress: closeDialog }, { key: 'premium', label: 'Explore Premium', onPress: () => { closeDialog(); router.navigate('/premium'); } }] });
-      return;
-    }
     const id = String(course.id);
     if (savingCourseId) return;
     setSavingCourseId(id);
@@ -887,6 +915,7 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
     setShowCalc(false);
     setShowPalette(false);
     setLoadingQuestions(false);
+    setSubmission(null);
   }, []);
 
   const finishExam = useCallback(
@@ -907,17 +936,26 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
       setTimeSpent(taken);
       setShowCalc(false);
       setShowPalette(false);
-      setStage('results');
-
       try {
-        const correct = snap.questions.reduce((acc, q, idx) => (snap.answers[idx] === q.correctIndex ? acc + 1 : acc), 0);
+        const result = await cbtRequest('/api/cbt/submit', {
+          method: 'POST',
+          body: {
+            answers: snap.questions.map((question, index) => ({
+              questionId: question.id,
+              selectedIndex: snap.answers[index] ?? null,
+            })),
+          },
+        });
+        if (!result?.success) throw new Error('Could not mark this CBT session.');
+        setSubmission(result);
+        setStage('results');
         const record = {
           id: Date.now().toString(),
           candidate: snap.username.trim() || 'Candidate',
           courseId: snap.activeCourse?.id,
           courseTitle: snap.activeCourse?.title,
-          score: correct,
-          totalQuestions: snap.questions.length,
+          score: result.score,
+          totalQuestions: result.total,
           timeTaken: taken,
           date: new Date().toISOString(),
         };
@@ -927,10 +965,11 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
         await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(next));
         setHistory(next);
       } catch (e) {
-        // history is best-effort
+        submittedRef.current = false;
+        setDialog({ icon: 'cloud-offline', iconColor: T.rose, title: 'Could not submit the paper', message: e?.message || 'Check your internet connection and try again.', actions: [{ key: 'ok', label: 'OK', variant: 'primary', onPress: closeDialog }] });
       }
     },
-    [resetAll]
+    [T.rose, closeDialog, resetAll]
   );
 
   const cancelLoading = useCallback(() => {
@@ -940,7 +979,7 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
     setStage('setup');
   }, []);
 
-  const launchExam = useCallback(async (course, qty, mins) => {
+  const launchExam = useCallback(async (course, qty, mins, difficulty = filters.difficulty) => {
     const token = loadTokenRef.current + 1;
     loadTokenRef.current = token;
     abortRef.current?.abort();
@@ -948,7 +987,7 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
     abortRef.current = controller;
 
     submittedRef.current = false;
-    lastConfigRef.current = { course, qty, mins };
+    lastConfigRef.current = { course, qty, mins, difficulty };
     const name = live.current.username.trim();
     if (name) AsyncStorage.setItem(USER_KEY, name).catch(() => {});
 
@@ -960,6 +999,7 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
     setCurrentIndex(0);
     setEndsAt(null);
     setReviewFilter('all');
+    setSubmission(null);
     setLoadingQuestions(true);
     setStage('exam');
 
@@ -977,21 +1017,20 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
     };
 
     try {
-      let bank = BANK_CACHE.get(course.id);
-      if (!bank) {
-        const data = await fetchJson(course.endpoint, { signal: controller.signal });
-        if (data?.status !== 'success' || !Array.isArray(data.data)) throw new Error('bad payload');
-        bank = data.data;
-        BANK_CACHE.set(course.id, bank);
-      }
+      const params = new URLSearchParams({ school: course.school, level: course.level, department: course.department, course: course.code, limit: String(qty), shuffle: 'true', ...(difficulty ? { difficulty } : {}) });
+      const data = await cbtRequest(`/api/cbt?${params.toString()}`, { signal: controller.signal });
+      const bank = data?.questions || [];
       if (token !== loadTokenRef.current) return;
 
-      const picked = [];
-      const pool = shuffle(bank);
-      for (let i = 0; i < pool.length && picked.length < qty; i += 1) {
-        const q = normalizeQuestion(pool[i], picked.length + 1, course.title);
-        if (q) picked.push(q);
-      }
+      const picked = bank.map((question) => ({
+        id: question.id,
+        courseTitle: course.title,
+        question: question.prompt,
+        options: question.answers,
+        containsMath: Boolean(question.containsMath),
+        answerContainsMath: Array.isArray(question.answerContainsMath) ? question.answerContainsMath : [],
+        math: question.math || {},
+      }));
       if (!picked.length) {
         failWith('close-circle', 'No usable questions', 'This paper has no valid questions right now. Please try another paper.');
         return;
@@ -1009,7 +1048,7 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
     } finally {
       if (token === loadTokenRef.current) setLoadingQuestions(false);
     }
-  }, [T, closeDialog]);
+  }, [T, closeDialog, filters.difficulty]);
 
   const startFromSetup = () => {
     if (!setupCourseObj || !setupValid) return;
@@ -1018,7 +1057,7 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
 
   const retake = () => {
     const cfg = lastConfigRef.current;
-    if (cfg) launchExam(cfg.course, cfg.qty, cfg.mins);
+    if (cfg) launchExam(cfg.course, cfg.qty, cfg.mins, cfg.difficulty);
     else resetAll();
   };
 
@@ -1450,6 +1489,9 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
               <Ionicons name="close-circle" size={18} color={T.textMuted} />
             </TouchableOpacity>
           ) : null}
+          <TouchableOpacity onPress={() => setShowFilters((value) => !value)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Toggle CBT filters">
+            <Ionicons name="options-outline" size={21} color={Object.values(filters).some(Boolean) ? T.indigo : T.textMuted} />
+          </TouchableOpacity>
         </View>
 
         <Text style={s.sectionLabel}>Available papers ({filteredCourses.length})</Text>
@@ -1462,8 +1504,6 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
           <FlatList
             data={filteredCourses}
             keyExtractor={(c) => String(c.id)}
-            numColumns={2}
-            columnWrapperStyle={s.courseRow}
             ListHeaderComponent={header}
             ListEmptyComponent={
               <View style={s.emptyWrap}>
@@ -1479,7 +1519,6 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
                 onToggleSaved={toggleSavedCourse}
                 saved={savedCourseIds.has(String(item.id))}
                 saving={savingCourseId === String(item.id)}
-                isPremium={premiumActive}
                 s={s}
                 T={T}
               />
@@ -1489,6 +1528,31 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
             showsVerticalScrollIndicator={false}
           />
         </ScreenShell>
+        <Modal visible={showFilters} transparent animationType="slide" onRequestClose={() => setShowFilters(false)}>
+          <Pressable style={s.filterModalBackdrop} onPress={() => setShowFilters(false)}>
+            <Pressable style={s.filterModal} onPress={() => {}}>
+              <View style={s.filterModalHead}>
+                <View><Text style={s.filterModalTitle}>Filter CBT papers</Text><Text style={s.filterModalSub}>Narrow papers by your academic details.</Text></View>
+                <TouchableOpacity onPress={() => setFilters({ school: '', level: '', department: '', difficulty: '' })}><Text style={s.filterClear}>Clear all</Text></TouchableOpacity>
+              </View>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {[
+                  ['school', 'University', filterOptions.schools], ['level', 'Level', filterOptions.levels],
+                  ['department', 'Department', filterOptions.departments], ['difficulty', 'Difficulty', ['Easy', 'Medium', 'Hard']],
+                ].map(([key, label, options]) => (
+                  <View key={key} style={s.filterGroup}>
+                    <Text style={s.filterLabel}>{label}</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.browseFilterRow}>
+                      <TouchableOpacity onPress={() => setFilters((current) => ({ ...current, [key]: '', ...(key === 'school' ? { level: '', department: '' } : {}), ...(key === 'level' ? { department: '' } : {}) }))} style={[s.browseFilterChip, !filters[key] && s.browseFilterChipActive]}><Text style={[s.browseFilterChipText, !filters[key] && s.browseFilterChipTextActive]}>All</Text></TouchableOpacity>
+                      {options.map((option) => <TouchableOpacity key={option} onPress={() => setFilters((current) => ({ ...current, [key]: option, ...(key === 'school' ? { level: '', department: '' } : {}), ...(key === 'level' ? { department: '' } : {}) }))} style={[s.browseFilterChip, filters[key] === option && s.browseFilterChipActive]}><Text numberOfLines={1} style={[s.browseFilterChipText, filters[key] === option && s.browseFilterChipTextActive]}>{option}</Text></TouchableOpacity>)}
+                    </ScrollView>
+                  </View>
+                ))}
+                <TouchableOpacity style={s.primaryBtn} onPress={() => setShowFilters(false)}><Ionicons name="checkmark" size={18} color={T.white} /><Text style={s.primaryBtnText}>Show {filteredCourses.length} papers</Text></TouchableOpacity>
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </Modal>
         {dialogModal}
       </>
     );
@@ -1724,7 +1788,10 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
                       </View>
                     ) : null}
                   </View>
-                  <Text style={[s.qText, { fontSize: baseFont, lineHeight: baseFont * 1.5 }]}>{currentQ.question}</Text>
+                  <Text style={[s.qText, currentQ.containsMath && s.mathQuestion, { fontSize: baseFont, lineHeight: baseFont * 1.5 }]}>{currentQ.question}</Text>
+                  {currentQ.math?.promptDisplay ? (
+                    <FormulaBlock expression={currentQ.math.promptDisplay} styles={s} />
+                  ) : null}
                 </View>
 
                 <View style={s.optionsWrap}>
@@ -1743,7 +1810,7 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
                         <View style={[s.optionLetter, on && s.optionLetterOn]}>
                           <Text style={[s.optionLetterText, on && { color: T.white }]}>{LETTERS[idx]}</Text>
                         </View>
-                        <Text style={[s.optionText, { fontSize: baseFont - 1 }, on && { color: T.indigo }]}>{opt}</Text>
+                        <Text style={[s.optionText, currentQ.answerContainsMath?.[idx] && s.mathOption, { fontSize: baseFont - 1 }, on && { color: T.indigo }]}>{currentQ.answerContainsMath?.[idx] ? formatNativeMath(opt) : opt}</Text>
                       </TouchableOpacity>
                     );
                   })}
@@ -2009,7 +2076,7 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
                   <Text style={s.reviewQuestion}>{r.q.question}</Text>
 
                   {r.q.options.map((opt, i) => {
-                    const isRight = i === r.q.correctIndex;
+                    const isRight = i === r.correctIndex;
                     const wrongPick = i === r.selected && !isRight;
                     return (
                       <View

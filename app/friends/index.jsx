@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Pressable, RefreshControl, Text, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -54,9 +54,9 @@ function Avatar({ person, styles, size = 50 }) {
   const name = nameOf(person);
   const uri = person?.avatar || person?.photo || person?.photoURL || '';
   return uri ? (
-    <Image source={{ uri }} style={[styles.avatar, { width: size, height: size, borderRadius: Math.round(size / 3) }]} />
+    <Image source={{ uri }} style={[styles.avatar, { width: size, height: size, borderRadius: Math.round(size / 2) }]} />
   ) : (
-    <View style={[styles.avatarFallback, { width: size, height: size, borderRadius: Math.round(size / 3) }]}>
+    <View style={[styles.avatarFallback, { width: size, height: size, borderRadius: Math.round(size / 2) }]}>
       <Text style={styles.avatarInitial}>{name[0]?.toUpperCase() || 'S'}</Text>
     </View>
   );
@@ -74,11 +74,12 @@ function SkeletonCard({ styles }) {
   );
 }
 
-function StudentCard({ person, subtitle, children, onPress, styles }) {
+function StudentCard({ person, subtitle, eyebrow, children, onPress, styles }) {
   return (
     <Pressable style={({ pressed }) => [styles.card, pressed && onPress && styles.cardPressed]} onPress={onPress} disabled={!onPress}>
       <Avatar person={person} styles={styles} />
       <View style={styles.cardBody}>
+        {eyebrow ? <Text style={styles.cardEyebrow}>{eyebrow}</Text> : null}
         <View style={styles.nameRow}>
           <Text style={styles.cardTitle} numberOfLines={1}>{nameOf(person)}</Text>
           {person?.online ? <View style={styles.onlineDot} /> : null}
@@ -108,8 +109,6 @@ export default function FriendsPage() {
   const { colors } = useTheme();
   const styles = useThemeStyles(createStyles);
   const uid = user?.uid || profile?.uid;
-  const profileRef = useRef(profile);
-  profileRef.current = profile;
   const [activeTab, setActiveTab] = useState(requestedTab === 'requests' ? 'requests' : 'friends');
   const [friends, setFriends] = useState([]);
   const [incoming, setIncoming] = useState([]);
@@ -124,9 +123,9 @@ export default function FriendsPage() {
 
   const refreshSuggested = useCallback(async () => {
     if (!uid) return;
-    const rows = await listSuggestedFriends({ uid, profile: profileRef.current, pageSize: 24 });
+    const rows = await listSuggestedFriends({ uid, profile, pageSize: 24 });
     setSuggested(rows);
-  }, [uid]);
+  }, [profile, uid]);
 
   useFocusEffect(useCallback(() => {
     if (!uid) return undefined;
@@ -194,6 +193,7 @@ export default function FriendsPage() {
     if (activeTab === 'suggested') return suggested;
     return blocked;
   }, [activeTab, blocked, friends, incoming, messageRequests, outgoing, suggested]);
+  const requestCount = incoming.length + messageRequests.length;
 
   const renderItem = ({ item }) => {
     if (activeTab === 'friends') {
@@ -209,7 +209,7 @@ export default function FriendsPage() {
     if (activeTab === 'requests' && item.requestType === 'message') {
       const person = item.fromProfile || { uid: item.from };
       return (
-        <StudentCard person={person} subtitle={item.message} styles={styles}>
+        <StudentCard person={person} subtitle={item.message} eyebrow="MESSAGE REQUEST" styles={styles}>
           <ActionButton styles={styles} label="Accept" icon="checkmark" loading={busyId === item.id} onPress={() => handleAction(item.id, async () => {
             const conversationId = await acceptMessageRequest({ request: item, currentUid: uid, currentProfile: profile });
             router.navigate(`/messages/${conversationId}`);
@@ -222,7 +222,7 @@ export default function FriendsPage() {
     if (activeTab === 'requests') {
       const person = item.fromProfile || { uid: item.from };
       return (
-        <StudentCard person={person} onPress={() => router.navigate(`/view-user-profile/${item.from}`)} styles={styles}>
+        <StudentCard person={person} eyebrow="WANTS TO CONNECT" onPress={() => router.navigate(`/view-user-profile/${item.from}`)} styles={styles}>
           <ActionButton styles={styles} label="Accept" icon="checkmark" loading={busyId === item.id} onPress={() => handleAction(item.id, () => acceptFriendRequest({ request: item, currentUid: uid, currentProfile: profile }))} />
           <ActionButton styles={styles} label="Decline" icon="close" variant="secondary" loading={busyId === item.id} onPress={() => handleAction(item.id, () => declineFriendRequest({ request: item, currentUid: uid, currentProfile: profile }))} />
         </StudentCard>
@@ -280,6 +280,7 @@ export default function FriendsPage() {
         <Ionicons name="chevron-forward" size={18} color={colors.greyLight} />
       </Pressable>
 
+
       <FlatList
         horizontal
         data={TABS}
@@ -287,9 +288,10 @@ export default function FriendsPage() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.tabs}
         renderItem={({ item }) => (
-          <Pressable style={[styles.tab, activeTab === item.key && styles.tabActive]} onPress={() => setActiveTab(item.key)}>
+          <Pressable style={[styles.tab, activeTab === item.key && styles.tabActive]} onPress={() => setActiveTab(item.key)} accessibilityRole="tab" accessibilityState={{ selected: activeTab === item.key }}>
             <Ionicons name={item.icon} size={15} color={activeTab === item.key ? colors.surface : colors.grey} />
             <Text style={[styles.tabText, activeTab === item.key && styles.tabTextActive]}>{item.label}</Text>
+            {item.key === 'requests' && requestCount > 0 ? <View style={styles.tabBadge}><Text style={styles.tabBadgeText}>{requestCount > 99 ? '99+' : requestCount}</Text></View> : null}
           </Pressable>
         )}
       />
@@ -388,6 +390,16 @@ const createStyles = (c, s, r) => ({
   tabTextActive: {
     color: c.surface,
   },
+  tabBadge: {
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: c.red || '#EF4444',
+  },
+  tabBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '900' },
   listContent: {
     paddingBottom: s['3xl'],
   },
@@ -402,7 +414,7 @@ const createStyles = (c, s, r) => ({
     backgroundColor: c.surface,
     borderWidth: 1,
     borderColor: c.border,
-    borderRadius: r['2xl'],
+    borderRadius: r.xl,
     padding: s.md,
     marginBottom: s.sm,
     ...shadows.card,
@@ -412,6 +424,7 @@ const createStyles = (c, s, r) => ({
   },
   avatar: {
     backgroundColor: c.brandLight,
+    borderRadius: 999,
   },
   avatarFallback: {
     backgroundColor: c.brandLight,
@@ -425,6 +438,13 @@ const createStyles = (c, s, r) => ({
   },
   cardBody: {
     flex: 1,
+  },
+  cardEyebrow: {
+    marginBottom: 3,
+    color: c.brandText,
+    fontSize: 9.5,
+    fontWeight: '900',
+    letterSpacing: 0.8,
   },
   nameRow: {
     flexDirection: 'row',

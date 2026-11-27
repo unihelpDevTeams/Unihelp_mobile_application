@@ -1,4 +1,4 @@
-import { Stack, useRootNavigationState, useRouter } from 'expo-router';
+import { Stack, usePathname, useRootNavigationState, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -6,6 +6,7 @@ import { BlurTargetView } from 'expo-blur';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Modal,
+  BackHandler,
   Pressable,
   Text,
   TextInput,
@@ -47,6 +48,7 @@ function AppContent() {
   } = usePromoSpotlight();
   const { isOnline } = useNetwork();
   const router = useRouter();
+  const pathname = usePathname();
   const rootNavigationState = useRootNavigationState();
   const promoBlurTarget = useRef(null);
   const premiumUnlocked = isPremiumActive(profile);
@@ -139,6 +141,28 @@ function AppContent() {
       if (pending) router.replace('/(auth)/onboarding');
     }).catch(() => {});
   }, [authLoading, navigationReady, router, user]);
+
+  // Route-level handlers may decline a hardware-back press once their own
+  // overlays are closed. Do not let that fall through to Android and close the
+  // app: return through Expo Router's stack, then use the main feed as a safe
+  // destination when a screen was opened without history (e.g. deep links).
+  useEffect(() => {
+    if (!navigationReady) return undefined;
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (router.canGoBack()) {
+        router.back();
+        return true;
+      }
+
+      if (pathname !== '/' && pathname !== '/(tabs)') {
+        router.navigate('/(tabs)');
+      }
+      return true;
+    });
+
+    return () => subscription.remove();
+  }, [navigationReady, pathname, router]);
 
   useEffect(() => {
     if (isOnline === false && premiumUnlocked && router.pathname !== '/offline-center' && router.pathname !== '/premium') {

@@ -359,11 +359,25 @@ export const compressImageForUpload = async (file, options = {}) => {
   const maxHeight = Number(options.maxHeight || 1600);
   const quality = Number(options.quality ?? 0.72);
 
+  const sourceWidth = Number(file.width);
+  const sourceHeight = Number(file.height);
+  // Providing both max dimensions directly makes Expo stretch every image into
+  // that rectangle. Calculate a single proportional target instead.
+  const resize = sourceWidth > 0 && sourceHeight > 0
+    ? (() => {
+      const scale = Math.min(1, maxWidth / sourceWidth, maxHeight / sourceHeight);
+      return {
+        width: Math.max(1, Math.round(sourceWidth * scale)),
+        height: Math.max(1, Math.round(sourceHeight * scale)),
+      };
+    })()
+    : { width: maxWidth };
+
   try {
     const format = mimeType === "image/png" ? ImageManipulator.SaveFormat.PNG : ImageManipulator.SaveFormat.JPEG;
     const compressed = await ImageManipulator.manipulateAsync(
       uri,
-      [{ resize: { width: maxWidth, height: maxHeight } }],
+      [{ resize }],
       { compress: quality, format }
     );
 

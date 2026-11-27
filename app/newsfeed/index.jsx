@@ -277,6 +277,32 @@ function ActionButton({ icon, label, active, color, activeColor, onPress, disabl
 
 // A single post. Memoized so liking / commenting on one post doesn't
 // re-render every card in the list.
+function PostImage({ uri, onPress, burst, styles }) {
+  // Start at a compact landscape frame, then use the uploaded image's actual
+  // dimensions. This prevents a fixed empty-looking block below short photos.
+  const [aspectRatio, setAspectRatio] = useState(16 / 10);
+
+  const useSourceDimensions = (event) => {
+    const width = Number(event?.source?.width);
+    const height = Number(event?.source?.height);
+    if (width > 0 && height > 0) {
+      // Avoid impractically tall cards while retaining the photograph's shape.
+      setAspectRatio(Math.max(0.72, Math.min(width / height, 2.1)));
+    }
+  };
+
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel="Open full image. Double tap to like.">
+      <Image source={{ uri }} style={[styles.image, { aspectRatio }]} contentFit="cover" transition={150} onLoad={useSourceDimensions} />
+      <View style={styles.burstLayer} pointerEvents="none">
+        <Animated.View style={{ opacity: burst, transform: [{ scale: burst.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1.2] }) }] }}>
+          <Ionicons name="thumbs-up" size={84} color="#FFFFFF" />
+        </Animated.View>
+      </View>
+    </Pressable>
+  );
+}
+
 const PostCard = React.memo(function PostCard({
   item, liked, styles, colors, onOpenProfile, onMenu, onLike, onComment, onShare, onOpenImage, onTagPress, onOpenLink,
 }) {
@@ -377,14 +403,7 @@ const PostCard = React.memo(function PostCard({
       ) : null}
 
       {item.type === 'image' && item.imageUrl ? (
-        <Pressable onPress={onImageTap} accessibilityRole="button" accessibilityLabel="Open full image. Double tap to like.">
-          <Image source={{ uri: item.imageUrl }} style={styles.image} contentFit="cover" transition={150} />
-          <View style={styles.burstLayer} pointerEvents="none">
-            <Animated.View style={{ opacity: burst, transform: [{ scale: burst.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1.2] }) }] }}>
-              <Ionicons name="thumbs-up" size={84} color="#FFFFFF" />
-            </Animated.View>
-          </View>
-        </Pressable>
+        <PostImage key={item.imageUrl} uri={item.imageUrl} onPress={onImageTap} burst={burst} styles={styles} />
       ) : null}
 
       {tags.length ? (
@@ -790,7 +809,7 @@ export default function NewsFeedPage() {
     colored: { minHeight: 280, justifyContent: 'center', alignItems: 'center', padding: 28, marginTop: 12 },
     coloredText: { color: '#fff', fontSize: 22, lineHeight: 30, textAlign: 'center', fontWeight: '900' },
     coloredLink: { color: '#DBEAFE', textDecorationLine: 'underline' },
-    image: { height: 340, width: '100%', backgroundColor: c.surfacePrimary, marginTop: 12 },
+    image: { width: '100%', backgroundColor: c.surfacePrimary, marginTop: 12 },
     burstLayer: { ...StyleSheet.absoluteFillObject, marginTop: 12, alignItems: 'center', justifyContent: 'center' },
     hashtagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
     hashtag: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: r.lg, backgroundColor: c.brandLight },
@@ -2015,7 +2034,6 @@ export default function NewsFeedPage() {
       subtitle="Your campus, your people, your next move."
       showBack={false}
       scrollable={false}
-      loading={loading}
       onSearch={toggleSearch}
       showNotifications={false}
     >

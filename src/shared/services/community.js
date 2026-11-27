@@ -20,7 +20,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { auth, db } from '../../../firebase/config';
-import { getApiUrl, sendAppNotification, postJson, getJson } from './backend';
+import { getApiUrl, sendAppNotification, postJson, getJson, patchJson, deleteJson } from './backend';
 import { canSendDirectMessage, createOrOpenFriendConversation } from './friendships';
 
 export const PAGE_SIZE = 20;
@@ -758,11 +758,6 @@ export const deleteConversationForUser = async (conversationId, uid = auth.curre
 };
 
 export async function deleteDirectMessage(conversationId, messageId, options = {}) {
-  const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
-  const message = await assertMessageOwnerWithinWindow(messageRef, auth.currentUser?.uid);
-  if (message.type === 'voice' && Date.now() - messageCreatedAtMillis(message.createdAt) > VOICE_MESSAGE_DELETE_WINDOW_MS) {
-    throw new Error('Voice messages can only be deleted within 2 hours of sending.');
-  }
   if (options.voice) {
     try {
       const token = await auth.currentUser?.getIdToken();
@@ -782,19 +777,12 @@ export async function deleteDirectMessage(conversationId, messageId, options = {
     }
   }
 
-  await updateDoc(messageRef, {
-    deleted: true,
-    text: '',
-    attachments: [],
-    deletedAt: serverTimestamp(),
-  });
+  await deleteJson(`/api/chat/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`);
 }
 
 export async function updateDirectMessage(conversationId, messageId, text, uid = auth.currentUser?.uid) {
   if (!conversationId || !messageId || !uid || !text?.trim()) throw new Error('Message text is required.');
-  const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
-  await assertMessageOwnerWithinWindow(messageRef, uid);
-  await updateDoc(messageRef, { text: text.trim(), edited: true, editedAt: serverTimestamp() });
+  await patchJson(`/api/chat/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`, { text: text.trim() });
 }
 
 /**
