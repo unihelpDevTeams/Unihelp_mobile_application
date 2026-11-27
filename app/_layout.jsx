@@ -171,23 +171,34 @@ function AppContent() {
   }, [isOnline, premiumUnlocked, router]);
 
   useEffect(() => {
-    const subscription = Accelerometer.addListener(({ x, y, z }) => {
-      const magnitude = Math.sqrt(x * x + y * y + z * z);
-      const now = Date.now();
-      const delta = Math.abs(magnitude - shakeMagnitudeRef.current);
-      const shakeThreshold = 1.6;
-      const cooldownMs = 5000;
+    let subscription = null;
+    try {
+      if (typeof Accelerometer?.addListener === 'function') {
+        subscription = Accelerometer.addListener(({ x, y, z }) => {
+          const magnitude = Math.sqrt(x * x + y * y + z * z);
+          const now = Date.now();
+          const delta = Math.abs(magnitude - shakeMagnitudeRef.current);
+          const shakeThreshold = 1.6;
+          const cooldownMs = 5000;
 
-      if (delta > shakeThreshold && now - lastShakeRef.current > cooldownMs) {
-        lastShakeRef.current = now;
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-        setReportModalVisible(true);
+          if (delta > shakeThreshold && now - lastShakeRef.current > cooldownMs) {
+            lastShakeRef.current = now;
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+            setReportModalVisible(true);
+          }
+
+          shakeMagnitudeRef.current = magnitude;
+        });
       }
+    } catch (_err) {
+      // Sensor native module unavailable on web or certain preview clients
+    }
 
-      shakeMagnitudeRef.current = magnitude;
-    });
-
-    return () => subscription.remove();
+    return () => {
+      try {
+        subscription?.remove?.();
+      } catch (_err) {}
+    };
   }, []);
 
   const handleSubmitReport = async () => {
