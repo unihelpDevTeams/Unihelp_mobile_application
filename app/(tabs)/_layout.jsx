@@ -7,6 +7,7 @@ import { BottomTabBar } from 'expo-router/js-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import ProtectedRoute from '../../components/ProtectedRoute';
+import FloatingChallengeBadge from '../../components/FloatingChallengeBadge';
 import { useAuth } from '../../context/AuthContext';
 import {
   listenUnreadConversationCount,
@@ -46,9 +47,10 @@ export default function TabsLayout() {
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const [unreadChats, setUnreadChats] = React.useState(0);
   const [unreadGroupMessages, setUnreadGroupMessages] = React.useState(0);
+  const [challengeBadgeVisible, setChallengeBadgeVisible] = React.useState(true);
   const swipeX = React.useRef(new Animated.Value(0)).current;
   // Cancels the page translation so the tab bar stays put while screens slide.
   const counterX = React.useRef(Animated.multiply(swipeX, -1)).current;
@@ -277,6 +279,14 @@ export default function TabsLayout() {
             <Tabs.Screen name="profile" options={{ href: null }} />
           </Tabs>
         </Animated.View>
+        {challengeBadgeVisible && currentIndex !== -1 ? (
+          <FloatingChallengeBadge
+            screenWidth={width}
+            screenHeight={height}
+            onPress={() => router.navigate('/challenge')}
+            onHide={() => setChallengeBadgeVisible(false)}
+          />
+        ) : null}
       </View>
     </ProtectedRoute>
   );

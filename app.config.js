@@ -250,6 +250,7 @@ module.exports = {
       "expo-sharing",
 
       "expo-font",
+      "expo-asset",
 
       [
         "expo-image-picker",

@@ -18,6 +18,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -373,6 +374,7 @@ const formatFileSize = (bytes) => {
 };
 
 function GroupMediaViewer({ media, onClose }) {
+  const { width, height } = useWindowDimensions();
   const player = useVideoPlayer(media?.kind === 'video' && media?.url ? { uri: media.url } : null, (videoPlayer) => {
     videoPlayer.loop = true;
     videoPlayer.play();
@@ -389,7 +391,7 @@ function GroupMediaViewer({ media, onClose }) {
             centerContent
             contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center' }}
           >
-            <Image source={{ uri: media.url }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
+            <Image source={{ uri: media.url }} style={{ width, height: Math.max(1, height - 100) }} resizeMode="contain" />
           </ScrollView>
         ) : media.kind === 'video' ? (
           <VideoView player={player} style={{ width: '100%', aspectRatio: 16 / 9 }} nativeControls contentFit="contain" />
@@ -2680,8 +2682,9 @@ function GroupDetailScreen({ groupId }) {
             </View>
             {activeTab === 'Chat' ? <>
             <KeyboardAvoidingView
-              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-              keyboardVerticalOffset={0}
+              // Android already resizes the app window (see app.config.js). Applying
+              // `height` here as well makes the composer avoid the keyboard twice.
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
               style={styles.chatKeyboardAvoiding}
             >
             <View style={styles.chatArea}>

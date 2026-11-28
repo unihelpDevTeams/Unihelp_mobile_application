@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/refs, react-hooks/set-state-in-effect -- Animated values and promo lifecycle state intentionally persist without re-creating animations. */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -29,9 +30,9 @@ const AUTO_CLOSE_MS = 5000;
 
 // Portrait card: width / height = 4:5
 const CARD_ASPECT = 0.8;
-const CARD_WIDTH_RATIO = 0.86; // of screen width
-const CARD_MAX_WIDTH = 360;
-const SIDE_MARGIN = 16;
+const CARD_WIDTH_RATIO = 0.9; // of screen width
+const CARD_MAX_WIDTH = 390;
+const SIDE_MARGIN = 18;
 
 const HEX_REGEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
@@ -130,7 +131,7 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction, bl
     return () => {
       clearCountdown();
     };
-  }, [promo?.id, promo?.imageUrl, visible]);
+  }, [clearCountdown, countdownAnim, holdScale, promo?.id, promo?.imageUrl, startCountdown, visible]);
 
   const pauseCountdown = () => {
     if (pausedRef.current || !visible) return;
@@ -166,9 +167,11 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction, bl
   };
 
   const sizing = useMemo(() => {
-    // Symmetric vertical padding so the card is truly centered, even on notched devices
-    const verticalPad = Math.max(insets.top, insets.bottom) + 20;
-    const maxCardHeight = height - verticalPad * 2;
+    // Center in the actual safe viewing area. Using equal padding here shifts the
+    // card upward on devices with a large home indicator or bottom inset.
+    const topPad = insets.top + 18;
+    const bottomPad = insets.bottom + 18;
+    const maxCardHeight = Math.max(1, height - topPad - bottomPad);
 
     let cardWidth = Math.min(width * CARD_WIDTH_RATIO, CARD_MAX_WIDTH);
     let cardHeight = cardWidth / CARD_ASPECT;
@@ -178,7 +181,7 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction, bl
       cardHeight = maxCardHeight;
       cardWidth = cardHeight * CARD_ASPECT;
     }
-    return { cardWidth, cardHeight, verticalPad };
+    return { cardWidth, cardHeight, topPad, bottomPad };
   }, [width, height, insets.top, insets.bottom]);
 
   if (!promo) return null;
@@ -225,7 +228,7 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction, bl
   const titleSize = clamp(promo.titleSize, 16, 26, 20);
   const descSize = clamp(promo.descriptionSize, 12, 16, 13);
 
-  const dimColor = isDark ? 'rgba(0, 0, 0, 0.55)' : 'rgba(10, 12, 20, 0.45)';
+  const dimColor = isDark ? 'rgba(0, 0, 0, 0.58)' : 'rgba(10, 12, 20, 0.4)';
 
   const countdownWidth = countdownAnim.interpolate({
     inputRange: [0, 1],
@@ -236,16 +239,19 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction, bl
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose} statusBarTranslucent>
-      {/* Blurred + dimmed backdrop */}
+      {/* The root layout provides a BlurTargetView, keeping the backdrop tied to
+          the active screen rather than rendering a flat overlay on Android. */}
       <Animated.View style={[StyleSheet.absoluteFill, { opacity: progress }]}>
-        {Platform.OS === 'ios' ? (
+        {blurTarget ? (
           <BlurView
-            intensity={40}
-            tint="dark"
+            blurTarget={blurTarget}
+            intensity={Platform.OS === 'ios' ? 42 : 28}
+            tint={isDark ? 'dark' : 'systemMaterialDark'}
+            blurMethod={Platform.OS === 'android' ? 'dimezisBlurViewSdk31Plus' : undefined}
             style={StyleSheet.absoluteFill}
           />
         ) : (
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(7, 11, 20, 0.88)' }]} />
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(7, 11, 20, 0.78)' }]} />
         )}
         <View style={[StyleSheet.absoluteFill, { backgroundColor: dimColor }]} />
         <Pressable
@@ -256,12 +262,12 @@ export default function PromoSpotlight({ promo, visible, onDismiss, onAction, bl
         />
       </Animated.View>
 
-      {/* Perfectly centered stage */}
+      {/* Centered inside the safe content area, never under the status/navigation bars. */}
       <View
         pointerEvents="box-none"
         style={[
           styles.centerWrap,
-          { paddingVertical: sizing.verticalPad, paddingHorizontal: SIDE_MARGIN },
+          { paddingTop: sizing.topPad, paddingBottom: sizing.bottomPad, paddingHorizontal: SIDE_MARGIN },
         ]}
       >
         <Pressable
@@ -440,8 +446,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   card: {
-    borderRadius: 24,
+    borderRadius: 28,
     overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
   },
   fallback: {
     flex: 1,
@@ -458,21 +466,21 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 90,
+    height: 118,
   },
   bottomScrim: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    height: '62%',
+    height: '68%',
   },
   countdownTrack: {
     position: 'absolute',
-    top: 10,
-    left: 14,
-    right: 14,
-    height: 3,
+    top: 12,
+    left: 16,
+    right: 16,
+    height: 4,
     borderRadius: 999,
     backgroundColor: 'rgba(255, 255, 255, 0.3)',
     overflow: 'hidden',
@@ -483,9 +491,9 @@ const styles = StyleSheet.create({
   },
   topRow: {
     position: 'absolute',
-    top: 22,
-    left: 14,
-    right: 14,
+    top: 28,
+    left: 16,
+    right: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -499,9 +507,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(15, 23, 42, 0.72)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 6,
     borderRadius: 999,
   },
   badgeDot: {
@@ -517,48 +527,56 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   closeButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(15, 23, 42, 0.72)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
   },
   content: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: 18,
-    paddingBottom: 18,
-    gap: 5,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    gap: 6,
   },
   advertiser: {
-    color: 'rgba(255, 255, 255, 0.75)',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.3,
+    color: 'rgba(255, 255, 255, 0.82)',
+    fontSize: 11.5,
+    fontWeight: '800',
+    letterSpacing: 0.35,
   },
   title: {
     fontWeight: '800',
+    letterSpacing: -0.35,
   },
   description: {
-    opacity: 0.85,
+    opacity: 0.9,
   },
   actions: {
-    marginTop: 12,
+    marginTop: 14,
   },
   actionButton: {
-    height: 46,
-    borderRadius: 14,
+    height: 50,
+    borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.16,
+    shadowRadius: 5,
+    elevation: 2,
   },
   actionText: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 14.5,
+    fontWeight: '800',
   },
 });
