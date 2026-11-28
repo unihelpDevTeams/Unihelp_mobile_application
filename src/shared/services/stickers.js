@@ -1,4 +1,4 @@
-import { getJson, postJson, patchJson, deleteJson, uploadStickerMedia as uploadStickerAsset } from './backend';
+import { getJson, postJson, patchJson, deleteJson, uploadStickerMedia as uploadStickerAsset, shareLocalStickerMedia } from './backend';
 
 export const fetchStickerPacks = async () => (await getJson('/api/stickers/packs')).data || [];
 export const fetchStickers = async (options = {}) => {
@@ -14,6 +14,7 @@ export const favoriteSticker = async (stickerId, favorite = true) => (await post
 export const deleteSticker = async (stickerId) => (await deleteJson(`/api/stickers/${encodeURIComponent(stickerId)}`)).data;
 export const updateSticker = async (stickerId, payload) => (await patchJson(`/api/stickers/${encodeURIComponent(stickerId)}`, payload)).data;
 export const uploadStickerMedia = async (file, onProgress, options = {}) => uploadStickerAsset(file, { onProgress, ...options });
+export const shareLocalSticker = async (sticker) => shareLocalStickerMedia(sticker);
 export const createSticker = async (payload) => (await postJson('/api/stickers', payload)).data;
 export const createStickerPack = async (payload) => (await postJson('/api/stickers/packs', payload)).data;
 export const seedDefaultFreeStickers = async () => (await postJson('/api/stickers/admin/seed-defaults', {})).data;

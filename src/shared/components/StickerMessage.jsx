@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Modal, Pressable, Text, View } from 'react-native';
 import { useEvent } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../../context/AuthContext';
 import { favoriteSticker, fetchFavoriteStickers } from '../services/stickers';
+import { cacheReceivedSticker, saveLocalSticker } from '../services/localStickers';
 import { useTheme } from '../theme/ThemeContext';
 
 export default function StickerMessage({ message, isMine, onLongPress }) {
@@ -16,10 +17,12 @@ export default function StickerMessage({ message, isMine, onLongPress }) {
   const [actionsOpen, setActionsOpen] = useState(false);
   const [favorite, setFavorite] = useState(false);
   const [updatingFavorite, setUpdatingFavorite] = useState(false);
+  const [savingSticker, setSavingSticker] = useState(false);
   const favoriteSyncVersionRef = useRef(0);
-  const sticker = message?.sticker || {};
+  const sticker = useMemo(() => message?.sticker || {}, [message?.sticker]);
   const editor = sticker.editor || {};
-  const uri = sticker.assetUrl || sticker.thumbnailUrl;
+  const [cachedUri, setCachedUri] = useState('');
+  const uri = cachedUri || sticker.assetUrl || sticker.thumbnailUrl;
   const isAnimated = sticker.type === 'animated';
   const mine = Boolean((user?.uid || user?.id) && message?.senderId === (user?.uid || user?.id));
   const player = useVideoPlayer(isAnimated && uri ? { uri } : null, (videoPlayer) => {
@@ -45,6 +48,16 @@ export default function StickerMessage({ message, isMine, onLongPress }) {
     return () => { cancelled = true; };
   }, [actionsOpen, sticker.id]);
 
+  useEffect(() => {
+    let active = true;
+    // Download once, verify its content hash, then render from the LRU cache
+    // on subsequent opens. Saved stickers live in a different directory.
+    cacheReceivedSticker(sticker)
+      .then((cached) => { if (active && cached?.uri) setCachedUri(cached.uri); })
+      .catch((error) => console.warn('[StickerMessage] Could not cache sticker:', error));
+    return () => { active = false; };
+  }, [sticker]);
+
   const toggleFavorite = async () => {
     if (!sticker.id || updatingFavorite) return;
     const next = !favorite;
@@ -60,6 +73,17 @@ export default function StickerMessage({ message, isMine, onLongPress }) {
     } finally {
       setUpdatingFavorite(false);
     }
+  };
+  const saveSticker = async () => {
+    if (savingSticker) return;
+    setSavingSticker(true);
+    try {
+      const source = cachedUri || sticker.assetUrl;
+      if (!source?.startsWith('file:')) throw new Error('Sticker is still downloading. Try again in a moment.');
+      const saved = await saveLocalSticker({ media: { uri: source, mimeType: sticker.mimeType || 'image/webp', width: sticker.width, height: sticker.height }, name: sticker.name, editor });
+      Alert.alert(saved.alreadySaved ? 'Already saved' : 'Sticker saved', saved.alreadySaved ? 'This sticker is already in your personal collection.' : 'It is now in your personal sticker collection.');
+      setActionsOpen(false);
+    } catch (error) { Alert.alert('Could not save sticker', error?.message || 'Please try again.'); } finally { setSavingSticker(false); }
   };
 
   if (!uri) return <Text style={{ color: colors.textSecondary }}>Sticker unavailable</Text>;
@@ -106,7 +130,8 @@ export default function StickerMessage({ message, isMine, onLongPress }) {
             {uri ? <Image source={{ uri }} style={{ width: 104, height: 104 }} resizeMode="contain" /> : null}
             <Text style={{ color: colors.textPrimary, fontWeight: '800', marginTop: 6 }}>{sticker.name || 'Sticker'}</Text>
           </View>
-          <StickerAction icon={favorite ? 'heart-dislike-outline' : 'heart-outline'} label={favorite ? 'Remove from favorites' : 'Add to favorites'} color={colors.textPrimary} disabled={updatingFavorite} onPress={toggleFavorite} />
+          {!sticker.contentHash ? <StickerAction icon={favorite ? 'heart-dislike-outline' : 'heart-outline'} label={favorite ? 'Remove from favorites' : 'Add to favorites'} color={colors.textPrimary} disabled={updatingFavorite} onPress={toggleFavorite} /> : null}
+          <StickerAction icon="download-outline" label={savingSticker ? 'Saving sticker…' : 'Save to my stickers'} color={colors.textPrimary} disabled={savingSticker} onPress={saveSticker} />
           {mine ? <StickerAction icon="create-outline" label="Edit sticker" color={colors.textPrimary} onPress={() => { setActionsOpen(false); router.navigate({ pathname: '/stickers/create', params: { stickerId: sticker.id } }); }} /> : null}
           <StickerAction icon="close-outline" label="Cancel" color={colors.textSecondary} onPress={() => setActionsOpen(false)} />
         </View>

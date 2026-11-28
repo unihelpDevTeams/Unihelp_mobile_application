@@ -67,6 +67,7 @@ import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
 import { getSocket } from '../../src/shared/services/socket';
 import { getJson, uploadChatAttachment } from '../../src/shared/services/backend';
+import { shareLocalSticker } from '../../src/shared/services/stickers';
 import { DOCUMENT_MIME_TYPES, humanSize, prepareChatAttachment } from '../../src/shared/services/chatAttachments';
 import { submitReport } from '../../src/shared/services/support';
 import { clearConversationAppearance, getConversationAppearance, saveConversationAppearance } from '../../src/shared/services/chatAppearance';
@@ -2571,13 +2572,24 @@ function ConversationScreen({ conversationId }) {
     if (!sticker || !conversation || !user || !canChat) return;
     const clientId = createMessageClientId();
     const reply = buildReplyPayload(replyTo);
-    const stickerFields = { id: sticker.id, type: sticker.type, assetUrl: sticker.assetUrl, thumbnailUrl: sticker.thumbnailUrl, name: sticker.name, editor: sticker.editor || null };
+    let share = sticker;
+    if (sticker.local) {
+      try {
+        // The bubble renders immediately from the device file; upload only starts
+        // because the user chose to send, never when they create a sticker.
+        share = await shareLocalSticker(sticker);
+      } catch (error) {
+        showToast(error?.message || 'Could not prepare sticker for sharing.');
+        return;
+      }
+    }
+    const stickerFields = { id: share.id, contentHash: share.contentHash || null, mimeType: share.mimeType || null, type: share.type, assetUrl: share.assetUrl, thumbnailUrl: share.thumbnailUrl, name: share.name || sticker.name, editor: share.editor || sticker.editor || null };
     const optimistic = { ...baseOptimistic(clientId), type: 'sticker', stickerId: sticker.id, sticker: stickerFields, replyTo: reply };
 
     setMessages((prev) => reconcileIncomingMessage(prev, optimistic));
     setReplyTo(null);
     scrollToBottom();
-    await deliver(clientId, { type: 'sticker', stickerId: sticker.id, replyTo: reply }, { ...optimistic, status: 'sent' });
+    await deliver(clientId, { type: 'sticker', stickerId: share.id, replyTo: reply }, { ...optimistic, status: 'sent' });
   };
 
   const retrySendMessage = async (message) => {

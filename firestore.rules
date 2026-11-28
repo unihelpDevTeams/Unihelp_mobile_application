@@ -882,6 +882,14 @@ service cloud.firestore {
           (
             (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']) &&
               request.resource.data.senderId == resource.data.senderId) ||
+            (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy']) &&
+              (
+                (!resource.data.keys().hasAny(['readBy']) &&
+                  request.resource.data.readBy.keys().hasOnly([request.auth.uid])) ||
+                (resource.data.keys().hasAny(['readBy']) &&
+                  request.resource.data.readBy.diff(resource.data.readBy).affectedKeys().hasOnly([request.auth.uid]))
+              ) &&
+              request.resource.data.readBy[request.auth.uid] == request.time) ||
             (resource.data.type == 'poll' &&
               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['poll', 'updatedAt'])) ||
             (resource.data.senderId == request.auth.uid &&

@@ -749,7 +749,7 @@ export default function PremiumPage() {
           </View>
           <Text style={styles.heroTitle}>Unlock Student Premium</Text>
           <Text style={styles.heroText}>
-            Study offline, save CBT papers, get 10 AI requests daily, and publish up to {COMMERCE_UPLOAD_LIMITS.premium} hostels and {COMMERCE_UPLOAD_LIMITS.premium} products.
+            Study offline, save CBT papers, earn a verified badge, get 10 AI requests daily, and publish up to {COMMERCE_UPLOAD_LIMITS.premium} hostels and {COMMERCE_UPLOAD_LIMITS.premium} products.
           </Text>
         </View>
       )}

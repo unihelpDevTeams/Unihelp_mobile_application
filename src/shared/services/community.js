@@ -4,6 +4,7 @@ import {
   arrayUnion,
   collection,
   doc,
+  FieldPath,
   getDoc,
   getDocs,
   increment,
@@ -364,6 +365,34 @@ export const loadOlderGroupMessages = async (groupId, cursor) => {
     hasMore: snap.docs.length === MESSAGE_PAGE_SIZE,
   };
 };
+
+// Stores only the current member's timestamp. This lets a sender inspect who
+// has read a group message without allowing anyone to forge another member's receipt.
+export const recordGroupMessageReads = async (groupId, messages, uid = auth.currentUser?.uid) => {
+  if (!groupId || !uid || !Array.isArray(messages)) return;
+  const unread = messages.filter((message) => (
+    message?.id &&
+    !message.localStatus &&
+    !message.deleted &&
+    message.senderId !== uid &&
+    !message.readBy?.[uid]
+  ));
+  if (!unread.length) return;
+
+  // Firestore permits at most 500 writes in one batch.
+  for (let index = 0; index < unread.length; index += 450) {
+    const batch = writeBatch(db);
+    unread.slice(index, index + 450).forEach((message) => {
+      batch.update(
+        doc(db, 'groups', groupId, 'messages', message.id),
+        new FieldPath('readBy', uid),
+        serverTimestamp()
+      );
+    });
+    await batch.commit();
+  }
+};
+
 export async function toggleMessageReaction(groupId, messageId, emoji, uid) {
   if (!groupId || !messageId || !emoji || !uid) {
     throw new Error('Missing information for this reaction.');

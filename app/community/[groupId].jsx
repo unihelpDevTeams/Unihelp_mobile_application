@@ -65,6 +65,7 @@ import {
   toggleMessageReaction,
   reactToGroupPost,
   recordGroupPostView,
+  recordGroupMessageReads,
   removeGroupMember,
   updateGroup,
   updateGroupPost,
@@ -1283,6 +1284,7 @@ function GroupDetailScreen({ groupId }) {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [activeMessage, setActiveMessage] = useState(null);
   const [reactionViewer, setReactionViewer] = useState(null);
+  const [readReceiptViewer, setReadReceiptViewer] = useState(null);
   const [groupOptionsVisible, setGroupOptionsVisible] = useState(false);
   const [groupShareVisible, setGroupShareVisible] = useState(false);
   const [bubbleCustomizerVisible, setBubbleCustomizerVisible] = useState(false);
@@ -1321,6 +1323,7 @@ function GroupDetailScreen({ groupId }) {
   const olderTimer = useRef(null);
   const handleScrollRef = useRef(null);
   const viewedPostsRef = useRef(new Set());
+  const readReceiptAttemptIdsRef = useRef(new Set());
   const toastOpacity = useMemo(() => new Animated.Value(0), []);
   const sendScale = useMemo(() => new Animated.Value(1), []);
   const scrollY = useMemo(() => new Animated.Value(0), []);
@@ -1442,6 +1445,25 @@ function GroupDetailScreen({ groupId }) {
     return out;
   }, [displayMessages, isMember, uid]);
 
+  // A message is marked read only after it has reached this member's loaded
+  // conversation view. The write is idempotent and never alters other users' receipts.
+  useEffect(() => {
+    if (!groupId || !uid || !isMember || !messages.length) return;
+    const unread = messages.filter((message) => (
+      message?.id &&
+      !message.localStatus &&
+      !message.deleted &&
+      message.senderId !== uid &&
+      !message.readBy?.[uid] &&
+      !readReceiptAttemptIdsRef.current.has(message.id)
+    ));
+    if (!unread.length) return;
+    unread.forEach((message) => readReceiptAttemptIdsRef.current.add(message.id));
+    recordGroupMessageReads(groupId, unread, uid).catch(() => {
+      unread.forEach((message) => readReceiptAttemptIdsRef.current.delete(message.id));
+    });
+  }, [groupId, isMember, messages, uid]);
+
   const reactionPeople = useMemo(() => {
     if (!reactionViewer) return [];
     const people = new Map();
@@ -1465,6 +1487,21 @@ function GroupDetailScreen({ groupId }) {
       return { ...(people.get(String(id)) || { id: String(id), name: 'Group member', avatar: '' }), emojis };
     });
   }, [reactionViewer, uid, profile, user, members, messages, posts]);
+
+  const readReceiptPeople = useMemo(() => {
+    if (!readReceiptViewer) return [];
+    const directory = new Map(members.map((member) => [String(member.uid || member.id), member]));
+    return readReceiptViewer.readerIds.map((readerId) => {
+      const member = directory.get(String(readerId)) || {};
+      const readAt = readReceiptViewer.readBy?.[readerId];
+      return {
+        id: String(readerId),
+        name: String(readerId) === uid ? 'You' : member.name || member.displayName || member.username || 'Group member',
+        avatar: member.avatar || member.avatarUrl || member.photoURL || '',
+        readAt: formatShortTime(readAt),
+      };
+    });
+  }, [readReceiptViewer, members, uid]);
 
   const pollVoterPeople = useMemo(() => {
     if (!pollVoterViewer) return [];
@@ -2086,6 +2123,21 @@ function GroupDetailScreen({ groupId }) {
       }
     }
   }, [groupId, members.length]);
+
+  const openReadReceiptViewer = useCallback(async (message) => {
+    if (!message || message.senderId !== uid || message.localStatus) return;
+    const readBy = message.readBy && typeof message.readBy === 'object' ? message.readBy : {};
+    const readerIds = Object.keys(readBy).filter((readerId) => readerId && readerId !== uid);
+    setActiveMessage(null);
+    setReadReceiptViewer({ readerIds, readBy });
+    if (!members.length) {
+      try {
+        setMembers(await listGroupMembers(groupId));
+      } catch {
+        // The receipt list can still render safely while member details load later.
+      }
+    }
+  }, [groupId, members.length, uid]);
 
   const startEditingMessage = (message) => {
     if (!message || message.senderId !== uid || message.type === 'sticker' || !withinEditWindow(message)) return;
@@ -2968,6 +3020,39 @@ function GroupDetailScreen({ groupId }) {
         </Pressable>
       </Modal>
 
+      {/* Only the message sender can open this. Readers are derived from each member's own receipt. */}
+      <Modal visible={Boolean(readReceiptViewer)} transparent animationType="fade" onRequestClose={() => setReadReceiptViewer(null)}>
+        <Pressable style={styles.actionSheetBackdrop} onPress={() => setReadReceiptViewer(null)}>
+          <Pressable style={styles.reactionViewerCard} onPress={(event) => event.stopPropagation()}>
+            <View style={styles.actionSheetHandleWrap}>
+              <View style={styles.actionSheetHandle} />
+            </View>
+            <Text style={styles.reactionViewerTitle}>Read by · {readReceiptPeople.length}</Text>
+            {readReceiptPeople.length ? (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {readReceiptPeople.map((person) => (
+                  <Pressable key={person.id} style={styles.reactorRow} onPress={() => { setReadReceiptViewer(null); openProfile(person.id); }} accessibilityRole="button" accessibilityLabel={`Open ${person.name}'s profile`}>
+                    <View style={styles.reactorAvatar}>
+                      {person.avatar ? <Image source={{ uri: person.avatar }} style={styles.reactorAvatarImage} /> : <Text style={styles.reactorAvatarText}>{initialsForName(person.name)}</Text>}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.reactorName} numberOfLines={1}>{person.name}</Text>
+                      {person.readAt ? <Text style={styles.pollMeta}>Read {person.readAt}</Text> : null}
+                    </View>
+                    <Ionicons name="checkmark-done" size={20} color={colors.brand} />
+                  </Pressable>
+                ))}
+              </ScrollView>
+            ) : (
+              <View style={{ alignItems: 'center', paddingVertical: 22, gap: 8 }}>
+                <Ionicons name="time-outline" size={28} color={colors.textTertiary} />
+                <Text style={[styles.pollMeta, { textAlign: 'center' }]}>No one has read this message yet.</Text>
+              </View>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       <Modal visible={Boolean(pollVoterViewer)} transparent animationType="fade" onRequestClose={() => setPollVoterViewer(null)}>
         <Pressable style={styles.actionSheetBackdrop} onPress={() => setPollVoterViewer(null)}>
           <Pressable style={styles.reactionViewerCard} onPress={(event) => event.stopPropagation()}>
@@ -3054,6 +3139,14 @@ function GroupDetailScreen({ groupId }) {
                 ) : null}
                 {am.senderId && !activeMine ? (
                   <SheetRow {...sheetOpt} icon="chatbubble-ellipses-outline" label="Message privately" onPress={() => { const m = am; setActiveMessage(null); openDm(m); }} />
+                ) : null}
+                {activeMine ? (
+                  <SheetRow
+                    {...sheetOpt}
+                    icon="eye-outline"
+                    label={`Read by ${Object.keys(am.readBy || {}).filter((readerId) => readerId !== uid).length}`}
+                    onPress={() => openReadReceiptViewer(am)}
+                  />
                 ) : null}
                 {activeCanModify && am.type !== 'sticker' ? (
                   <SheetRow {...sheetOpt} icon="create-outline" label="Edit message" onPress={() => startEditingMessage(am)} />

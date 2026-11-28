@@ -406,6 +406,14 @@ export async function uploadStickerMedia(file, { onProgress, rotation = 0 } = {}
   return data.data || data;
 }
 
+export async function shareLocalStickerMedia(sticker) {
+  if (!sticker?.uri) throw new Error('The local sticker file is unavailable.');
+  const declaredMimeType = String(sticker.mimeType || '');
+  const mimeType = declaredMimeType.includes('/') ? declaredMimeType : (sticker.isAnimated ? 'video/mp4' : 'image/webp');
+  const data = await uploadLocalFileMultipart('/api/stickers/shared', sticker.uri, 'file', mimeType, { name: sticker.name || 'Sticker' });
+  return data.data || data;
+}
+
 export async function sendAppNotification({
   userIds,
   title,

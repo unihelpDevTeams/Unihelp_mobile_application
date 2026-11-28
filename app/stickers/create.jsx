@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import ScreenShell from '../../src/shared/components/ScreenShell';
 import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useThemeStyles } from '../../src/shared/theme/createStyles';
-import { createSticker, fetchOwnedSticker, removeStickerBackground, updateSticker, uploadStickerMedia } from '../../src/shared/services/stickers';
+import { saveLocalSticker } from '../../src/shared/services/localStickers';
 
 const EMOJIS = ['😂', '😭', '🔥', '❤️', '💀', '🙏', '😎', '🥹', '😤', '🤯', '👀', '💯'];
 const IMAGE_MEDIA_TYPE = 'images';
@@ -35,12 +35,6 @@ const TABS = [
 const OUTLINE_OFFSETS = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
 
 const isVideoAsset = (asset) => String(asset?.type || '').startsWith('video');
-const hashString = (str) => {
-  let h = 5381;
-  for (let i = 0; i < str.length; i += 1) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
-  return (h >>> 0).toString(36);
-};
-
 // Caption with a real outline (8 offset copies underneath) so the preview matches a stroked sticker.
 function CaptionText({ text, color, size, outline }) {
   const offset = Math.max(1, Math.round(size / 14));
@@ -83,8 +77,6 @@ export default function CreateStickerScreen() {
 
   const savingRef = useRef(false);
   const savedRef = useRef(false);
-  const uploadRef = useRef(null);
-  const originalMediaUriRef = useRef('');
   const dirtyRef = useRef(false);
 
   useEffect(() => {
@@ -92,17 +84,20 @@ export default function CreateStickerScreen() {
       return undefined;
     }
     let active = true;
-    fetchOwnedSticker(editingId)
-      .then((sticker) => {
+    // Custom stickers are device-local. Older server stickers are intentionally
+    // not editable here because creating a new local copy avoids server storage.
+    import('../../src/shared/services/localStickers').then(({ listLocalStickers }) => listLocalStickers())
+      .then((stickers) => {
         if (!active) return;
+        const sticker = (stickers || []).find((item) => item.id === editingId);
+        if (!sticker) throw new Error('This local sticker is no longer available.');
         setMedia({
-          uri: sticker.originalAssetUrl || sticker.assetUrl,
+          uri: sticker.uri || sticker.assetUrl,
           type: sticker.isAnimated ? 'video' : 'image',
           width: sticker.width || 1,
           height: sticker.height || 1,
           duration: Number(sticker.duration || 0) * 1000,
         });
-        originalMediaUriRef.current = sticker.originalAssetUrl || sticker.assetUrl || '';
         setName(sticker.name || '');
         setOverlayText(sticker.editor?.text || '');
         setEmoji(sticker.editor?.emoji || '');
@@ -210,9 +205,7 @@ export default function CreateStickerScreen() {
         Alert.alert('Video too long', 'Pick a video that is 10 seconds or shorter.');
         return;
       }
-      uploadRef.current = null;
     setMedia(asset);
-    if (!editingId) originalMediaUriRef.current = '';
       setRotation(0);
       if (!isImage) setRemoveBackground(false);
     } catch (_error) {
@@ -222,7 +215,6 @@ export default function CreateStickerScreen() {
 
   const clearMedia = () => {
     if (savingRef.current) return;
-    uploadRef.current = null;
     setMedia(null);
     setRotation(0);
     setRemoveBackground(false);
@@ -230,7 +222,6 @@ export default function CreateStickerScreen() {
 
   const reset = () => {
     savedRef.current = false;
-    uploadRef.current = null;
     setMedia(null);
     setName('');
     setOverlayText('');
@@ -262,35 +253,7 @@ export default function CreateStickerScreen() {
 
     let sticker;
     try {
-      // Reuse a finished upload when retrying after a failed create, so we never upload twice.
-      if (editingId) {
-        const replacement = media.uri !== originalMediaUriRef.current;
-        let uploadId;
-        if (replacement) {
-          const uploadKey = `${media.uri}|${rotation}`;
-          if (uploadRef.current?.key !== uploadKey) {
-            const uploaded = await uploadStickerMedia(media, (value) => setProgress(Number(value) || 0), { rotation });
-            uploadRef.current = { key: uploadKey, uploaded };
-          }
-          uploadId = uploadRef.current.uploaded.uploadId;
-        }
-        sticker = await updateSticker(editingId, { name: finalName, editor, ...(uploadId ? { uploadId } : {}) });
-      } else {
-        // Reuse a finished upload when retrying after a failed create, so we never upload twice.
-        const uploadKey = `${media.uri}|${rotation}`;
-        if (uploadRef.current?.key !== uploadKey) {
-          const uploaded = await uploadStickerMedia(media, (value) => setProgress(Number(value) || 0), { rotation });
-          uploadRef.current = { key: uploadKey, uploaded };
-        }
-        const { uploaded } = uploadRef.current;
-        // Same content => same key (retries never duplicate). Edited content => new key.
-        sticker = await createSticker({
-          uploadId: uploaded.uploadId,
-          name: finalName,
-          idempotencyKey: `create-${uploaded.uploadId}-${hashString(JSON.stringify({ finalName, editor }))}`,
-          editor,
-        });
-      }
+      sticker = await saveLocalSticker({ media, name: finalName, editor, existingId: editingId || undefined });
     } catch (error) {
       Alert.alert(editingId ? 'Could not update sticker' : 'Could not create sticker', error?.message || 'Please try again.');
       savingRef.current = false;
@@ -299,24 +262,13 @@ export default function CreateStickerScreen() {
       return;
     }
 
-    let backgroundFailed = false;
-    if (removeBackground && !video) {
-      try {
-        await removeStickerBackground(sticker.id);
-      } catch (_error) {
-        backgroundFailed = true;
-      }
-    }
-
     savedRef.current = true;
     savingRef.current = false;
     setSaving(false);
     setProgress(0);
     Alert.alert(
       editingId ? 'Sticker updated' : 'Sticker saved',
-      backgroundFailed
-        ? 'Your sticker is saved, but the background could not be removed. Try Cut out again from your sticker library.'
-        : editingId ? 'Your sticker changes are saved.' : 'Your sticker is ready to send.',
+      removeBackground ? 'Your sticker is saved locally. Background removal needs an on-device editor and was not applied.' : editingId ? 'Your sticker changes are saved locally.' : 'Your sticker is ready to send.',
       editingId
         ? [{ text: 'Done', onPress: () => router.back() }]
         : [

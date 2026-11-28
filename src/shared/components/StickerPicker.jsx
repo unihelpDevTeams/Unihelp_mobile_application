@@ -15,7 +15,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../../context/AuthContext';
-import { isPremiumActive } from '../services/premium';
 import {
   fetchFavoriteStickers,
   fetchRecentStickers,
@@ -25,6 +24,7 @@ import {
   deleteSticker,
   recordStickerUse,
 } from '../services/stickers';
+import { deleteLocalSticker, listLocalStickers, markLocalStickerUsed } from '../services/localStickers';
 import { useTheme } from '../theme/ThemeContext';
 import { useThemeStyles } from '../theme/createStyles';
 
@@ -97,7 +97,7 @@ const StickerCell = memo(function StickerCell({
 /* -------------------------------------------------------------------------- */
 
 export default function StickerPicker({ visible, onClose, onSelect }) {
-  const { profile, user } = useAuth();
+  const { user } = useAuth();
   const { colors } = useTheme();
   const styles = useThemeStyles(createStyles);
   const router = useRouter();
@@ -123,7 +123,6 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
   const favoriteBusyRef = useRef(new Set());
 
   const uid = user?.uid || user?.id;
-  const premium = isPremiumActive(profile);
   const activeTab = tab === 'pack' ? 'packs' : tab;
   const sheetHeight = Math.round(windowHeight * 0.72);
   const cellSize = gridWidth > 0
@@ -189,13 +188,13 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
     setError('');
     setStickers([]); // never show the previous tab's stickers under a new tab
 
-    const request = tab === 'recent'
+    const request = tab === 'mine'
+      ? listLocalStickers()
+      : tab === 'recent'
       ? fetchRecentStickers()
       : tab === 'favorites'
         ? fetchFavoriteStickers()
-        : tab === 'mine'
-          ? fetchStickers({ owner: 'me' })
-          : fetchStickers(selectedPackId ? { packId: selectedPackId } : {});
+        : fetchStickers(selectedPackId ? { packId: selectedPackId } : {});
 
     request
       .then((data) => { if (!cancelled) setStickers(data || []); })
@@ -219,12 +218,17 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
     // Send immediately; usage tracking must never delay or block the message.
     onSelect?.(sticker);
     onClose?.();
+    if (sticker.local) {
+      markLocalStickerUsed(sticker.id).catch(() => {});
+      return;
+    }
     recordStickerUse(sticker.id).catch((recordError) => {
       console.error('[StickerPicker] Failed to record sticker use:', recordError);
     });
   }, [onSelect, onClose]);
 
   const toggleFavorite = useCallback(async (sticker) => {
+    if (sticker.local) return;
     if (favoriteBusyRef.current.has(sticker.id)) return;
     favoriteBusyRef.current.add(sticker.id);
 
@@ -270,7 +274,8 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
     if (!target || deleting) return;
     setDeleting(true);
     try {
-      await deleteSticker(target.id);
+      if (target.local) await deleteLocalSticker(target.id);
+      else await deleteSticker(target.id);
       setStickers((current) => current.filter((item) => item.id !== target.id));
       showToast('Sticker deleted');
     } catch (deleteError) {
@@ -290,7 +295,7 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
 
   const goCreate = () => {
     onClose?.();
-    router.navigate(premium ? '/stickers/create' : '/premium');
+    router.navigate('/stickers/create');
   };
 
   const goEdit = (sticker) => {
@@ -417,7 +422,7 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
   const renderPanel = () => {
     if (!panel) return null;
     const sticker = panel.sticker;
-    const isOwner = Boolean(uid && sticker.ownerId === uid);
+    const isOwner = Boolean(sticker.local || (uid && sticker.ownerId === uid));
     const favorite = isFavorite(sticker);
     const uri = getImageUri(sticker);
 
@@ -445,13 +450,15 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
                 color={colors.textPrimary}
                 onPress={() => { setPanel(null); handleSelect(sticker); }}
               />
-              <PanelRow
-                styles={styles}
-                icon={favorite ? 'heart-dislike-outline' : 'heart-outline'}
-                label={favorite ? 'Remove from favorites' : 'Add to favorites'}
-                color={colors.textPrimary}
-                onPress={() => { setPanel(null); toggleFavorite(sticker); }}
-              />
+              {!sticker.local ? (
+                <PanelRow
+                  styles={styles}
+                  icon={favorite ? 'heart-dislike-outline' : 'heart-outline'}
+                  label={favorite ? 'Remove from favorites' : 'Add to favorites'}
+                  color={colors.textPrimary}
+                  onPress={() => { setPanel(null); toggleFavorite(sticker); }}
+                />
+              ) : null}
               {isOwner ? (
                 <>
                   <PanelRow
@@ -578,8 +585,8 @@ export default function StickerPicker({ visible, onClose, onSelect }) {
             onPress={goCreate}
             accessibilityRole="button"
           >
-            <Ionicons name={premium ? 'add-circle-outline' : 'lock-closed-outline'} size={18} color={colors.gold} />
-            <Text style={styles.createText}>{premium ? 'Create sticker' : 'Create stickers with Premium'}</Text>
+            <Ionicons name="add-circle-outline" size={18} color={colors.gold} />
+            <Text style={styles.createText}>Create sticker</Text>
           </Pressable>
 
           {toast ? (
