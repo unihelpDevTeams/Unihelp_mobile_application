@@ -329,7 +329,7 @@ function SkeletonCards({ count = 4, styles }) {
 }
 
 const ProductCard = React.memo(function ProductCard({
-  item, onPress, onNotify, onToggleSave, isSaved, variant = 'row', styles, colors,
+  item, onPress, onNotify, onToggleSave, onManageListing, viewerId, isSaved, variant = 'row', styles, colors,
 }) {
   const isCompact = variant !== 'row';
   const title = item?.title || item?.name || 'Untitled item';
@@ -339,6 +339,8 @@ const ProductCard = React.memo(function ProductCard({
   const rating = getRating(item);
   const sellerName = item?.sellerName || item?.ownerName || item?.postedBy || '';
   const phone = item?.phone;
+  const ownerId = item?.ownerId || item?.sellerId || item?.userId || item?.uploadedBy || item?.createdBy;
+  const isOwner = Boolean(viewerId && ownerId && String(viewerId) === String(ownerId));
   const createdMs = getCreatedMs(item);
   const isNew = createdMs > 0 && Date.now() - createdMs < NEW_LISTING_WINDOW_MS;
   const posted = timeAgo(createdMs);
@@ -468,7 +470,14 @@ const ProductCard = React.memo(function ProductCard({
             </View>
           </View>
 
-          {phone && !isCompact ? (
+          {isOwner ? (
+            <View style={styles.contactRow}>
+              <Pressable onPress={(event) => { event.stopPropagation(); onManageListing?.(); }} style={styles.manageListingButton} accessibilityRole="button" accessibilityLabel={`Manage ${title}`}>
+                <Ionicons name="settings-outline" size={14} color={colors.brandText} />
+                <Text style={styles.manageListingText}>Manage listing</Text>
+              </Pressable>
+            </View>
+          ) : phone && !isCompact ? (
             <View style={styles.contactRow}>
               <Pressable onPress={(event) => { event.stopPropagation(); messageSeller(); }} style={styles.whatsappButton} accessibilityRole="button" accessibilityLabel="Message seller on WhatsApp">
                 <Ionicons name="logo-whatsapp" size={14} color="#fff" />
@@ -485,9 +494,9 @@ const ProductCard = React.memo(function ProductCard({
   );
 });
 
-function MarketplaceSection({ section, styles, colors, onPressItem, onNotify, onViewAll, saved, onToggleSave }) {
+function MarketplaceSection({ section, styles, colors, onPressItem, onNotify, onViewAll, saved, onToggleSave, viewerId, onManageListing }) {
   const isGrid = section.layout === 'grid';
-  const cardProps = { onPress: onPressItem, onNotify, onToggleSave, styles, colors };
+  const cardProps = { onPress: onPressItem, onNotify, onToggleSave, onManageListing, viewerId, styles, colors };
   return (
     <View style={styles.storefrontSection}>
       <View style={styles.storefrontSectionHeader}>
@@ -550,7 +559,7 @@ const StyleFill = { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }
 function MarketplaceHome({
   greeting, name, total, heroItems, categories, sections, styles, colors, saved,
   onPressItem, onNotify, onToggleSave, onSell, onSelectCategory, onOpenFilters,
-  onViewAll, onBrowseAll, onLoadMore, canLoadMore, loadingMore,
+  onViewAll, onBrowseAll, onLoadMore, canLoadMore, loadingMore, viewerId, onManageListing,
 }) {
   const [heroFailed, setHeroFailed] = useState(false);
   return (
@@ -624,6 +633,8 @@ function MarketplaceHome({
           onNotify={onNotify}
           onToggleSave={onToggleSave}
           onViewAll={onViewAll}
+          viewerId={viewerId}
+          onManageListing={onManageListing}
         />
       ))}
 
@@ -677,7 +688,7 @@ function EmptyListings({ kind, onReset, onRetry, onSell, styles, colors }) {
 
 export default function StudentMarketplacePage() {
   const router = useRouter();
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const { colors } = useTheme();
 
   const [items, setItems] = useState([]);
@@ -891,6 +902,8 @@ export default function StudentMarketplacePage() {
       contactRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
       whatsappButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#1FA855', borderRadius: r.full, height: 36 },
       callButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', backgroundColor: c.brandLight, borderRadius: 18, borderWidth: 1, borderColor: c.brandBorder },
+      manageListingButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 36, borderRadius: r.full, backgroundColor: c.brandLight, borderWidth: 1, borderColor: c.brandBorder },
+      manageListingText: { color: c.brandText, fontSize: 12, fontWeight: '800' },
       callText: { color: '#fff', fontSize: 12, fontWeight: '800' },
 
       skeletonCard: { flexDirection: 'row', gap: s.md, padding: s.md, backgroundColor: c.card, borderRadius: r['2xl'], borderWidth: 1, borderColor: c.borderDefault },
@@ -1178,6 +1191,7 @@ export default function StudentMarketplacePage() {
   );
 
   const goToSell = useCallback(() => router.navigate('/upload?type=marketplace'), [router]);
+  const goToManageListings = useCallback(() => router.navigate('/manage/listings'), [router]);
 
   const clearFilters = useCallback(() => {
     setSearch('');
@@ -1413,6 +1427,8 @@ export default function StudentMarketplacePage() {
           onNotify={showToast}
           onToggleSave={toggleSave}
           onSell={goToSell}
+          viewerId={profile?.uid || user?.uid}
+          onManageListing={goToManageListings}
           onSelectCategory={(next) => { setCategory(next); setBrowseAll(true); }}
           onOpenFilters={openFilters}
           onViewAll={handleViewAll}
@@ -1432,6 +1448,8 @@ export default function StudentMarketplacePage() {
       onPress={goToListing}
       onNotify={showToast}
       onToggleSave={toggleSave}
+      viewerId={profile?.uid || user?.uid}
+      onManageListing={goToManageListings}
       isSaved={!!saved[item.id]}
       styles={styles}
       colors={colors}

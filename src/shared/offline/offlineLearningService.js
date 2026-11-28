@@ -406,6 +406,50 @@ export async function saveResourceForOffline({ resourceType, resourceId, resourc
   }
 }
 
+export async function saveCbtPaperForOffline(course = {}) {
+  const uid = getCurrentUid();
+  const id = String(course.id || '');
+  if (!uid) throw new Error('Please sign in to save a CBT paper offline.');
+  if (!id) throw new Error('This CBT paper is missing an identifier.');
+
+  const existing = await getDownloadRecord('cbt', id);
+  if (existing?.status === 'downloaded') return existing;
+
+  await setDownloadState('cbt', id, {
+    userId: uid,
+    status: 'saving',
+    title: course.title || course.code || 'CBT paper',
+    contentKind: 'structured',
+  });
+
+  try {
+    const result = await getJson(`/api/cbt/offline/${encodeURIComponent(id)}`);
+    const paper = result?.paper;
+    if (!result?.success || !Array.isArray(paper?.questions) || !paper.questions.length) {
+      throw new Error('This CBT paper could not be prepared for offline study.');
+    }
+    const size = JSON.stringify(paper).length;
+    if (size > MAX_PAYLOAD_BYTES) {
+      throw new Error('This CBT paper is too large for offline storage.');
+    }
+    return setDownloadState('cbt', id, {
+      userId: uid,
+      status: 'downloaded',
+      title: paper.title || course.title || 'CBT paper',
+      contentKind: 'structured',
+      contentVersion: String(paper.contentVersion || '1'),
+      downloadedVersion: String(paper.contentVersion || '1'),
+      downloadedAt: new Date().toISOString(),
+      size,
+      payload: paper,
+      meta: { title: paper.title || course.title || 'CBT paper', resourceType: 'cbt', questionCount: paper.questions.length },
+    });
+  } catch (error) {
+    await setDownloadState('cbt', id, { userId: uid, status: 'failed', reason: error?.message || 'Save failed' });
+    throw error;
+  }
+}
+
 export async function removeDownload(type, id) {
   const normalizedType = normalizeType(type);
   const uid = getCurrentUid();

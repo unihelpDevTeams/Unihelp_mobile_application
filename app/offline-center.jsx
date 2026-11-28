@@ -22,6 +22,7 @@ import { listResourceBookmarks } from '../src/shared/services/resourceBookmarks'
 const DOWNLOADABLE_TYPES = [
   { key: 'pastQuestions', label: 'Past Questions', icon: 'clipboard-outline' },
   { key: 'notes', label: 'Notes & Study Materials', icon: 'document-text-outline' },
+  { key: 'cbt', label: 'CBT Papers', icon: 'desktop-outline' },
 ];
 
 const formatSize = (bytes = 0) => {
@@ -719,12 +720,9 @@ export default function OfflineCenterScreen() {
                         isLast ? { borderBottomWidth: 0 } : null,
                       ]}
                       disabled={isDisabled}
-                      onPress={() =>
-                        router.navigate({
-                          pathname: '/offline-resource/[type]/[id]',
-                          params: { type: item.type, id: item.id },
-                        })
-                      }
+                      onPress={() => item.type === 'cbt'
+                        ? router.navigate({ pathname: '/cbt', params: { courseId: item.id } })
+                        : router.navigate({ pathname: '/offline-resource/[type]/[id]', params: { type: item.type, id: item.id } })}
                     >
                       <View style={styles.resourceLeft}>
                         <View

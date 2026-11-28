@@ -46,7 +46,7 @@ const ALL_TOOLS = [
       { id: 'tasks', title: 'Task Planner', sub: 'Track assignments and deadlines', icon: 'checkbox', color: '#2563EB', route: '/tasks' },
       { id: 'pomodoro', title: 'Focus Timer', sub: 'Set a focused study session', icon: 'timer', color: '#C2410C', route: '/pomodoroScreen' },
       { id: 'saved', title: 'Saved Resources', sub: 'Return to bookmarked study items', icon: 'bookmark', color: '#0F766E', route: '/saved' },
-      { id: 'downloads', title: 'Offline Library', sub: 'Open resources saved for offline study', icon: 'download', color: '#475569', route: '/downloads' },
+      { id: 'downloads', title: 'Offline Library', sub: 'Open resources saved for offline study', icon: 'download', color: '#475569', route: '/offline-center' },
     ],
   },
 ];

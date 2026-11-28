@@ -24,6 +24,8 @@ import { useTheme } from '../../src/shared/theme/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { listResourceBookmarks, toggleResourceBookmark } from '../../src/shared/services/resourceBookmarks';
 import { getApiUrl } from '../../src/shared/services/backend';
+import { getDownloadRecord, getDownloadRecords, saveCbtPaperForOffline } from '../../src/shared/offline/offlineLearningService';
+import { isPremiumActive } from '../../src/shared/services/premium';
 
 /* -------------------------------------------------------------------------- */
 /*                                  Constants                                 */
@@ -540,7 +542,7 @@ function ChoiceChip({ label, active, onPress, s }) {
   );
 }
 
-const CourseCard = React.memo(function CourseCard({ course, best, onPress, onToggleSaved, saved, saving, s, T }) {
+const CourseCard = React.memo(function CourseCard({ course, best, onPress, onToggleSaved, onDownload, saved, downloaded, saving, savingOffline, s, T }) {
   const good = best != null && best >= PASS_MARK;
   return (
     <TouchableOpacity
@@ -552,17 +554,25 @@ const CourseCard = React.memo(function CourseCard({ course, best, onPress, onTog
     >
       <Pressable
         onPress={(event) => { event.stopPropagation?.(); onToggleSaved(course); }}
-        style={{ position: 'absolute', right: 10, top: 10, width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: saved ? T.indigoTint : T.chip }}
+        style={{ position: 'absolute', right: 50, top: 10, width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: saved ? T.indigoTint : T.chip }}
         accessibilityRole="button"
         accessibilityLabel={saved ? `Remove ${course.title} from saved CBT papers` : `Save ${course.title} for later`}
       >
         <Ionicons name={saving ? 'hourglass-outline' : saved ? 'bookmark' : 'bookmark-outline'} size={17} color={saved ? T.indigo : T.textSecondary} />
       </Pressable>
+      <Pressable
+        onPress={(event) => { event.stopPropagation?.(); onDownload(course); }}
+        style={{ position: 'absolute', right: 10, top: 10, width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: downloaded ? T.greenTint : T.chip }}
+        accessibilityRole="button"
+        accessibilityLabel={downloaded ? `${course.title} is available offline` : `Save ${course.title} for offline use`}
+      >
+        <Ionicons name={savingOffline ? 'hourglass-outline' : downloaded ? 'cloud-done-outline' : 'cloud-download-outline'} size={17} color={downloaded ? T.green : T.textSecondary} />
+      </Pressable>
       <View style={s.courseTop}>
         <View style={s.courseIcon}>
           <MaterialCommunityIcons name="file-document-edit-outline" size={24} color={T.indigo} />
         </View>
-        <View style={{ flex: 1, paddingRight: 28 }}>
+        <View style={{ flex: 1, paddingRight: 64 }}>
           <Text style={s.courseCode}>{course.code}</Text>
           <Text style={s.courseTitle} numberOfLines={2}>{course.title}</Text>
           <Text style={s.courseMeta} numberOfLines={1}>{course.department}</Text>
@@ -591,7 +601,7 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
   const router = useRouter();
   const { courseId: rawCourseId } = useLocalSearchParams();
   const courseId = Array.isArray(rawCourseId) ? rawCourseId[0] : rawCourseId;
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
   const T = useCbtTheme(colors, isDark);
@@ -613,6 +623,8 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
   const [resumable, setResumable] = useState(null);
   const [savedCourseIds, setSavedCourseIds] = useState(new Set());
   const [savingCourseId, setSavingCourseId] = useState(null);
+  const [savingOfflineCourseId, setSavingOfflineCourseId] = useState(null);
+  const [downloadedCourseIds, setDownloadedCourseIds] = useState(new Set());
 
   // Setup
   const [setupCourse, setSetupCourse] = useState(null);
@@ -725,6 +737,15 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
       .catch(() => { if (!cancelled) setSavedCourseIds(new Set()); });
     return () => { cancelled = true; };
   }, [user?.uid]);
+
+  const refreshOfflinePapers = useCallback(async () => {
+    const downloads = await getDownloadRecords();
+    setDownloadedCourseIds(new Set(downloads.filter((item) => item.type === 'cbt' && item.status === 'downloaded').map((item) => String(item.id))));
+  }, []);
+
+  useEffect(() => {
+    refreshOfflinePapers().catch(() => {});
+  }, [refreshOfflinePapers]);
 
   /* ------------------------------ Derived data ----------------------------- */
 
@@ -887,6 +908,26 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
     }
   };
 
+  const downloadCourse = async (course) => {
+    const id = String(course.id);
+    if (savingOfflineCourseId || downloadedCourseIds.has(id)) return;
+    if (!isPremiumActive(profile)) {
+      setDialog({ icon: 'star-outline', iconColor: T.amber, title: 'Premium required', message: 'Offline CBT papers are available with UniHelp Premium.', actions: [{ key: 'close', label: 'Close', onPress: closeDialog }] });
+      return;
+    }
+    setSavingOfflineCourseId(id);
+    try {
+      await saveCbtPaperForOffline(course);
+      await refreshOfflinePapers();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      setDialog({ icon: 'cloud-done-outline', iconColor: T.green, title: 'Paper saved offline', message: 'You can now start and submit this CBT paper without an internet connection.', actions: [{ key: 'ok', label: 'OK', variant: 'primary', onPress: closeDialog }] });
+    } catch (error) {
+      setDialog({ icon: 'alert-circle-outline', iconColor: T.rose, title: 'Could not save paper', message: error?.message || 'Please try again.', actions: [{ key: 'close', label: 'Close', onPress: closeDialog }] });
+    } finally {
+      setSavingOfflineCourseId(null);
+    }
+  };
+
   const changeQuantity = (value) => {
     const clean = digitsOnly(value);
     setNumQuestions(clean);
@@ -937,7 +978,15 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
       setShowCalc(false);
       setShowPalette(false);
       try {
-        const result = await cbtRequest('/api/cbt/submit', {
+        const isOfflinePaper = Boolean(snap.activeCourse?.offlineSaved);
+        const result = isOfflinePaper ? (() => {
+          const results = snap.questions.map((question, index) => {
+            const selectedIndex = snap.answers[index] ?? null;
+            const correctIndex = question._offlineCorrectIndex;
+            return { questionId: question.id, selectedIndex, correctIndex, isCorrect: selectedIndex !== null && selectedIndex === correctIndex, isSkipped: selectedIndex === null, explanation: question._offlineExplanation || '' };
+          });
+          return { success: true, score: results.filter((item) => item.isCorrect).length, total: results.length, results };
+        })() : await cbtRequest('/api/cbt/submit', {
           method: 'POST',
           body: {
             answers: snap.questions.map((question, index) => ({
@@ -1017,9 +1066,13 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
     };
 
     try {
+      const offlineRecord = await getDownloadRecord('cbt', course.id);
+      const offlinePaper = offlineRecord?.status === 'downloaded' ? offlineRecord.payload : null;
+      const isOfflinePaper = Array.isArray(offlinePaper?.questions) && offlinePaper.questions.length > 0;
       const params = new URLSearchParams({ school: course.school, level: course.level, department: course.department, course: course.code, limit: String(qty), shuffle: 'true', ...(difficulty ? { difficulty } : {}) });
-      const data = await cbtRequest(`/api/cbt?${params.toString()}`, { signal: controller.signal });
-      const bank = data?.questions || [];
+      const data = isOfflinePaper ? null : await cbtRequest(`/api/cbt?${params.toString()}`, { signal: controller.signal });
+      const localBank = isOfflinePaper && difficulty ? offlinePaper.questions.filter((question) => question.difficulty === difficulty) : offlinePaper?.questions || [];
+      const bank = isOfflinePaper ? [...localBank].sort(() => Math.random() - 0.5).slice(0, qty) : data?.questions || [];
       if (token !== loadTokenRef.current) return;
 
       const picked = bank.map((question) => ({
@@ -1030,6 +1083,8 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
         containsMath: Boolean(question.containsMath),
         answerContainsMath: Array.isArray(question.answerContainsMath) ? question.answerContainsMath : [],
         math: question.math || {},
+        _offlineCorrectIndex: isOfflinePaper ? question.correctIndex : undefined,
+        _offlineExplanation: isOfflinePaper ? question.explanation : undefined,
       }));
       if (!picked.length) {
         failWith('close-circle', 'No usable questions', 'This paper has no valid questions right now. Please try another paper.');
@@ -1037,6 +1092,7 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
       }
 
       const allocated = mins * 60;
+      if (isOfflinePaper) setActiveCourse({ ...course, offlineSaved: true });
       setQuestions(picked);
       setVisited({ 0: true });
       setTotalTimeAllocated(allocated);
@@ -1517,8 +1573,11 @@ export default function CBTPracticeScreen({ customTopNode, isEmbedded }) {
                 best={bestByCourse[item.id] ?? bestByCourse[item.title]}
                 onPress={beginSetup}
                 onToggleSaved={toggleSavedCourse}
+                onDownload={downloadCourse}
                 saved={savedCourseIds.has(String(item.id))}
+                downloaded={downloadedCourseIds.has(String(item.id))}
                 saving={savingCourseId === String(item.id)}
+                savingOffline={savingOfflineCourseId === String(item.id)}
                 s={s}
                 T={T}
               />

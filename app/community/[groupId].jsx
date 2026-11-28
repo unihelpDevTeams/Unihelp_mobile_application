@@ -65,6 +65,7 @@ import {
   toggleMessageReaction,
   reactToGroupPost,
   recordGroupPostView,
+  removeGroupMember,
   updateGroup,
   updateGroupPost,
 } from '../../src/shared/services/community';
@@ -535,6 +536,8 @@ const createStyles = (c) => ({
   memberAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: c.brandLight, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   memberName: { color: c.textPrimary, fontSize: 14, fontWeight: '800' },
   memberRole: { color: c.textSecondary, fontSize: 12, marginTop: 2 },
+  memberCopy: { flex: 1, minWidth: 0 },
+  removeMemberButton: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: c.dangerLight, borderWidth: 1, borderColor: c.redBorder },
   aboutCard: { backgroundColor: c.surface, borderRadius: 18, borderWidth: 1, borderColor: c.borderDefault, padding: 14, gap: 10 },
   aboutTitle: { color: c.textPrimary, fontSize: 15, fontWeight: '800' },
   aboutText: { color: c.textSecondary, fontSize: 13.5, lineHeight: 20 },
@@ -702,6 +705,8 @@ const createStyles = (c) => ({
   inviteLinkRow: { flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: c.borderDefault, borderRadius: 12, backgroundColor: c.inputBackground, paddingHorizontal: 11, paddingVertical: 11 },
   inviteLink: { flex: 1, color: c.textSecondary, fontSize: 12 },
   groupShareActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  groupShareScroll: { flexShrink: 1 },
+  groupShareScrollContent: { paddingBottom: 6 },
   copyInviteButton: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 7, paddingVertical: 12, borderRadius: 12, backgroundColor: c.brandLight },
   copyInviteText: { color: c.brandText, fontSize: 13, fontWeight: '900' },
   shareInviteButton: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 7, paddingVertical: 12, borderRadius: 12, backgroundColor: c.brand },
@@ -760,7 +765,9 @@ const createStyles = (c) => ({
 
   sheetBackdrop: { flex: 1, backgroundColor: c.overlay },
   sheetWrap: { justifyContent: 'flex-end' },
-  sheet: { backgroundColor: c.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 18, paddingTop: 6, paddingBottom: 28, maxHeight: '88%' },
+  sheet: { backgroundColor: c.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 18, paddingTop: 6, paddingBottom: 28, maxHeight: '88%', flexShrink: 1 },
+  sheetScroll: { flexShrink: 1 },
+  sheetScrollContent: { paddingBottom: 8 },
   sheetHandleWrap: { paddingVertical: 8, alignItems: 'center' },
   sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: c.borderDefault },
   sheetTitle: { fontSize: 17, fontWeight: '800', color: c.textPrimary, marginBottom: 16, textAlign: 'center' },
@@ -2412,6 +2419,35 @@ function GroupDetailScreen({ groupId }) {
     ]);
   };
 
+  const confirmRemoveMember = (member) => {
+    const memberId = member?.uid || member?.id;
+    if (!isOwnerOrAdmin || !memberId || memberId === group?.ownerId || memberId === uid) return;
+    Alert.alert(
+      'Remove member',
+      `Remove ${member.name || 'this member'} from ${group?.name || 'the group'}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            try {
+              await removeGroupMember(group, memberId);
+              setMembers((current) => current.filter((item) => (item.uid || item.id) !== memberId));
+              setGroup((current) => current ? { ...current, memberCount: Math.max(0, Number(current.memberCount || 1) - 1) } : current);
+              showToast(`${member.name || 'Member'} was removed`);
+            } catch (error) {
+              Alert.alert('Could not remove member', error?.message || 'Please try again.');
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   /* -------------------------------- Rendering ----------------------------- */
 
   const renderItem = useCallback(
@@ -2526,10 +2562,21 @@ function GroupDetailScreen({ groupId }) {
             <View style={styles.memberAvatar}>
               {member.avatar ? <Image source={{ uri: member.avatar }} style={styles.postAvatarImage} /> : <Text style={styles.postAvatarText}>{initialsForName(member.name)}</Text>}
             </View>
-            <View>
+            <View style={styles.memberCopy}>
               <Text style={styles.memberName}>{member.uid === uid ? `${member.name || 'Student'} (You)` : member.name || 'Student'}</Text>
               <Text style={styles.memberRole}>{member.role === 'owner' ? 'Group owner' : member.role === 'admin' ? 'Admin' : member.role === 'moderator' ? 'Moderator' : 'Member'}</Text>
             </View>
+            {isOwnerOrAdmin && member.uid !== uid && member.uid !== group?.ownerId ? (
+              <Pressable
+                onPress={(event) => { event.stopPropagation?.(); confirmRemoveMember(member); }}
+                style={styles.removeMemberButton}
+                disabled={busy}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove ${member.name || 'member'}`}
+              >
+                {busy ? <ActivityIndicator size="small" color={colors.red} /> : <Ionicons name="person-remove-outline" size={17} color={colors.red} />}
+              </Pressable>
+            ) : null}
           </Pressable>
         )) : <EmptyState title={memberSearch ? 'No matching members' : 'No members found'} description={memberSearch ? 'Try a different name or email.' : 'Members will appear here.'} />}
       </ScrollView>
@@ -3021,7 +3068,7 @@ function GroupDetailScreen({ groupId }) {
       </Modal>
 
       {/* Group options */}
-      <Modal visible={groupOptionsVisible} transparent animationType="slide" onRequestClose={() => setGroupOptionsVisible(false)}>
+      <Modal visible={groupOptionsVisible} transparent animationType="slide" statusBarTranslucent onRequestClose={() => setGroupOptionsVisible(false)}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setGroupOptionsVisible(false)} />
         <View style={styles.sheetWrap}>
           <Animated.View style={[styles.sheet, { transform: [{ translateY: groupOptionsSheet.translateY }] }]}>
@@ -3061,30 +3108,32 @@ function GroupDetailScreen({ groupId }) {
       {/* Group invite: native share for destinations, clipboard for quick reuse,
           and a scannable code for in-person sharing. Private groups still keep
           their approval rule; the code never bypasses group settings. */}
-      <Modal visible={groupShareVisible} transparent animationType="slide" onRequestClose={() => setGroupShareVisible(false)}>
+      <Modal visible={groupShareVisible} transparent animationType="slide" statusBarTranslucent onRequestClose={() => setGroupShareVisible(false)}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setGroupShareVisible(false)} />
         <View style={styles.sheetWrap}>
           <View style={styles.sheet}>
-            <View style={styles.sheetHandleWrap}><View style={styles.sheetHandle} /></View>
-            <View style={styles.groupShareHeading}>
-              <View style={styles.groupShareIcon}><Ionicons name="people-outline" size={21} color={colors.brand} /></View>
-              <View style={{ flex: 1 }}><Text style={styles.groupShareTitle}>Invite to {group?.name || 'group'}</Text><Text style={styles.groupShareHint}>{groupJoinDescription}</Text></View>
-            </View>
-            {qrCodeUrl ? <View style={styles.qrWrap}><Image source={{ uri: qrCodeUrl }} style={styles.qrCode} accessibilityLabel="QR code for this group invite" /><Text style={styles.qrCaption}>Scan to open this group in UniHelp</Text></View> : null}
-            <View style={styles.inviteLinkRow}>
-              <Ionicons name="link-outline" size={18} color={colors.textSecondary} />
-              <Text style={styles.inviteLink} numberOfLines={1}>{groupShareUrl}</Text>
-              <Pressable onPress={copyGroupLink} hitSlop={8} accessibilityRole="button" accessibilityLabel="Copy group link"><Ionicons name="copy-outline" size={19} color={colors.brand} /></Pressable>
-            </View>
-            <View style={styles.groupShareActions}>
-              <Pressable style={styles.copyInviteButton} onPress={copyGroupLink} accessibilityRole="button"><Ionicons name="copy-outline" size={17} color={colors.brandText} /><Text style={styles.copyInviteText}>Copy link</Text></Pressable>
-              <Pressable style={styles.shareInviteButton} onPress={shareGroupLink} accessibilityRole="button"><Ionicons name="share-social-outline" size={17} color="#FFFFFF" /><Text style={styles.shareInviteText}>Share invite</Text></Pressable>
-            </View>
+            <ScrollView style={styles.groupShareScroll} contentContainerStyle={styles.groupShareScrollContent} showsVerticalScrollIndicator={false}>
+              <View style={styles.sheetHandleWrap}><View style={styles.sheetHandle} /></View>
+              <View style={styles.groupShareHeading}>
+                <View style={styles.groupShareIcon}><Ionicons name="people-outline" size={21} color={colors.brand} /></View>
+                <View style={{ flex: 1 }}><Text style={styles.groupShareTitle}>Invite to {group?.name || 'group'}</Text><Text style={styles.groupShareHint}>{groupJoinDescription}</Text></View>
+              </View>
+              {qrCodeUrl ? <View style={styles.qrWrap}><Image source={{ uri: qrCodeUrl }} style={styles.qrCode} accessibilityLabel="QR code for this group invite" /><Text style={styles.qrCaption}>Scan to open this group in UniHelp</Text></View> : null}
+              <View style={styles.inviteLinkRow}>
+                <Ionicons name="link-outline" size={18} color={colors.textSecondary} />
+                <Text style={styles.inviteLink} numberOfLines={1}>{groupShareUrl}</Text>
+                <Pressable onPress={copyGroupLink} hitSlop={8} accessibilityRole="button" accessibilityLabel="Copy group link"><Ionicons name="copy-outline" size={19} color={colors.brand} /></Pressable>
+              </View>
+              <View style={styles.groupShareActions}>
+                <Pressable style={styles.copyInviteButton} onPress={copyGroupLink} accessibilityRole="button"><Ionicons name="copy-outline" size={17} color={colors.brandText} /><Text style={styles.copyInviteText}>Copy link</Text></Pressable>
+                <Pressable style={styles.shareInviteButton} onPress={shareGroupLink} accessibilityRole="button"><Ionicons name="share-social-outline" size={17} color="#FFFFFF" /><Text style={styles.shareInviteText}>Share invite</Text></Pressable>
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
 
-      <Modal visible={bubbleCustomizerVisible} transparent animationType="slide" onRequestClose={() => setBubbleCustomizerVisible(false)}>
+      <Modal visible={bubbleCustomizerVisible} transparent animationType="slide" statusBarTranslucent onRequestClose={() => setBubbleCustomizerVisible(false)}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setBubbleCustomizerVisible(false)} />
         <View style={styles.sheetWrap}>
           <View style={styles.sheet}>
@@ -3106,7 +3155,7 @@ function GroupDetailScreen({ groupId }) {
                 {appearanceSaving ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="checkmark" size={20} color="#FFFFFF" />}
               </Pressable>
             </View>
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <View style={styles.appearanceSection}>
                 <Text style={styles.appearanceSectionTitle}>Bubble color</Text>
                 <View style={styles.appearanceChoices}>
@@ -3248,7 +3297,7 @@ function GroupDetailScreen({ groupId }) {
       </Modal>
 
       {/* Admin: manage group */}
-      <Modal visible={editVisible} transparent animationType="slide" onRequestClose={() => setEditVisible(false)}>
+      <Modal visible={editVisible} transparent animationType="slide" statusBarTranslucent onRequestClose={() => setEditVisible(false)}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setEditVisible(false)} />
         <KeyboardAvoidingView behavior="padding" style={styles.sheetWrap}>
           <Animated.View style={[styles.sheet, { transform: [{ translateY: editSheet.translateY }] }]}>
@@ -3257,7 +3306,7 @@ function GroupDetailScreen({ groupId }) {
             </View>
             <Text style={styles.sheetTitle}>Manage group</Text>
 
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetScrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <Pressable style={styles.photoPicker} onPress={pickPhoto}>
                 <View style={styles.photoCircle}>
                   {editPhotoUri ? (
